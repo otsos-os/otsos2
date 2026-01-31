@@ -28,6 +28,8 @@ Basic functions for manipulating strings and raw memory blocks.
 Low-level wrappers for CPU I/O instructions.
 - `outb`, `inb`, `outw`, `inw`: Standard I/O port operations.
 - `insw`, `outsw`: Stream I/O for transferring blocks of data (used in disk drivers).
+- `void cinfo(char *buf)`: Retrieves CPU Brand/Vendor string.
+- `u64 rinfo(u64 mb_ptr)`: Returns total RAM size in KB (from Multiboot info).
 
 ## Characteristics
 - **No Dependencies**: The library is self-contained and does not rely on any external environment.

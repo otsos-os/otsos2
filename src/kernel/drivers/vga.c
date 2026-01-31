@@ -65,9 +65,85 @@ void scroll_scr() {
 
 extern int is_framebuffer_enabled();
 
+static u32 vga_palette[16] = {0x000000, 0x0000AA, 0x00AA00, 0x00AAAA,
+                              0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA,
+                              0x555555, 0x5555FF, 0x55FF55, 0x55FFFF,
+                              0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF};
+static u32 current_fb_color = 0xFFFFFF;
+
+void vga_set_color(u8 color) {
+  terminal_color = color;
+  current_fb_color = vga_palette[color & 0x0F];
+}
+
+static int ansi_state = 0; 
+static int ansi_val = 0;
+
+void vga_apply_ansi(int code) {
+  u8 color_idx = 0x07; 
+  switch (code) {
+  case 0:
+    color_idx = 0x07;
+    break; 
+  case 30:
+    color_idx = 0x00;
+    break; //black
+  case 31:
+    color_idx = 0x04;
+    break; //red
+  case 32:
+    color_idx = 0x02;
+    break; //green
+  case 33:
+    color_idx = 0x0E;
+    break; //yellow
+  case 34:
+    color_idx = 0x01;
+    break; //blue
+  case 35:
+    color_idx = 0x05;
+    break; //magenta
+  case 36:
+    color_idx = 0x03;
+    break; //cyan
+  case 37:
+    color_idx = 0x0F;
+    break; //white
+  default:
+    return; 
+  }
+  vga_set_color(color_idx);
+}
+
 void vga_putc(char c) {
   if (is_framebuffer_enabled() != vga_using_fb)
     update_vga_dims();
+
+  if (ansi_state == 0) {
+    if (c == 0x1B) {
+      ansi_state = 1;
+      return;
+    }
+  } else if (ansi_state == 1) {
+    if (c == '[') {
+      ansi_state = 2;
+      ansi_val = 0;
+      return;
+    } else {
+      ansi_state = 0; 
+    }
+  } else if (ansi_state == 2) {
+    if (c >= '0' && c <= '9') {
+      ansi_val = ansi_val * 10 + (c - '0');
+      return;
+    } else if (c == 'm') {
+      vga_apply_ansi(ansi_val);
+      ansi_state = 0;
+      return;
+    } else {
+      ansi_state = 0; 
+    }
+  }
 
   if (c == '\n') {
     cursor_x = 0;
@@ -77,7 +153,7 @@ void vga_putc(char c) {
   } else {
     if (is_framebuffer_enabled()) {
       if (c != ' ') {
-        fb_put_char(cursor_x * 8, cursor_y * 16, c, 0xFFFFFF);
+        fb_put_char(cursor_x * 8, cursor_y * 16, c, current_fb_color);
       }
     } else {
       vga_buffer[cursor_y * 80 + cursor_x] = (u16)terminal_color << 8 | c;
@@ -157,7 +233,7 @@ void printf(const char *fmt, ...) {
       }
       case 'x': {
         u64 x = va_arg(args, u64);
-        vga_write_hex(x, 8); // Default to 8 hex digits for 32-bit-ish display
+        vga_write_hex(x, 8); 
         break;
       }
       case 'p': {
@@ -187,5 +263,3 @@ void printf(const char *fmt, ...) {
 
   va_end(args);
 }
-
-void vga_set_color(u8 color) { terminal_color = color; }

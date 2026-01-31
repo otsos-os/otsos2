@@ -17,18 +17,25 @@ The default file system for OTSOS.
 Used primarily for kernel debugging and logging.
 - **Port**: `0x3F8`.
 
-## 4. VGA Driver (`src/kernel/drivers/vga.c`)
-Basic text mode driver for visual output (0xB8000).
-- **Mode**: 80x25 Text Mode.
+## 4. VGA & Framebuffer Driver (`src/kernel/drivers/vga.c`, `src/kernel/drivers/video/fb.c`)
+Unified driver handling both legacy text mode and high-resolution VBE framebuffer.
+- **Modes**: 
+    - Legacy: 80x25 Text Mode (0xB8000).
+    - Graphical: High-resolution (e.g., 1024x768x32) linear framebuffer.
 - **Features**:
-    - Text output with color support.
-    - Automatic scrolling.
-    - Standard `printf` implementation.
+    - **Dynamic Mode Switching**: Automatically uses framebuffer if initialized.
+    - **Font Rendering**: Uses embedded Spleen font (8x16) for text on graphics.
+    - **Text Output**: Standard `printf` works in both modes.
+    - **ANSI Parsing**: Supports ANSI escape codes for colored text (e.g., `\033[31m`).
+        - Colors: 30-37 (Black, Red, Green, Yellow, Blue, Magenta, Cyan, White).
+    - **Scrolling**: Hardware-accelerated scrolling in both text and graphics modes.
 - **API**:
-    - `void printf(const char *fmt, ...)`: Formatted output to the screen.
-    - `void clear_scr()`: Clear the terminal.
-    - `void scroll_scr()`: Scroll the screen one line up.
-    - `void vga_set_color(u8 color)`: Set current text attributes.
+    - `void printf(const char *fmt, ...)`: Universal formatted output.
+    - `void clear_scr()`: Clears screen (black).
+    - `void fb_init(multiboot_info_t *mb_info)`: Initializes VBE framebuffer.
+    - `void fb_put_pixel(int x, int y, u32 color)`: Draw single pixel.
+    - `void fb_put_char(int x, int y, char c, u32 color)`: Draw character glyph.
+    - `void vga_set_color(u8 color)`: Set text color (works in Text & FB modes).
 
 ## 5. Keyboard Manager (`src/kernel/drivers/keyboard/keyboard.c`)
 Global keyboard abstraction layer for managing input drivers.
@@ -47,3 +54,4 @@ Driver for standard PS/2 keyboards.
     - Scancode Set 1 decoding (US Layout).
     - Modifier key support (Shift, Caps Lock).
     - Circular input buffer.
+

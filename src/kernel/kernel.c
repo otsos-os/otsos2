@@ -67,7 +67,7 @@ void kmain(u64 addr) {
   while (1) {
     char c = keyboard_getchar();
     if (c) {
-      printf("%c", c);
+      printf("\033[31m %c \033[0m", c);
     }
   }
 }
