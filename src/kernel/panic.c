@@ -69,8 +69,8 @@ void print_stack_trace(unsigned long long rbp) {
         (unsigned long long)frame > 0x800000)
       break;
     unsigned long long rip = frame[1];
-    com1_printf("  [%d] %p\n\r", i, rip);
-    printf("  [%d] %p\n", i, rip);
+    com1_printf("  [%d] %p\n\r", i, (void *)rip);
+    printf("  [%d] %p\n", i, (void *)rip);
     frame = (unsigned long long *)frame[0];
   }
 }
@@ -78,23 +78,33 @@ void print_stack_trace(unsigned long long rbp) {
 void kernel_panic(registers_t *regs) {
   __asm__ volatile("cli");
 
-  vga_set_color(0x1F); 
+  vga_set_color(0x1F);
   clear_scr();
 
   const char *msg = (regs->int_no < 32) ? exception_messages[regs->int_no]
                                         : "Unexpected Interrupt";
 
-  printf(":::::::::::::::::::::::: KERNEL PANIC: %s ::::::::::::::::::::::::\n",
-         msg);
-  com1_printf("\n\r!!!!!!!!!!!!!!!! KERNEL PANIC: %s !!!!!!!!!!!!!!!!\n\r",
-              msg);
+  com1_printf(
+      "\n\r:::::::::::::::::::::::: KERNEL PANIC ::::::::::::::::::::::::\n\r");
+  printf(":::::::::::::::::::::::: KERNEL PANIC ::::::::::::::::::::::::\n");
 
-  printf("RIP: %p  CS: %x  RFLAGS: %p  ERR: %x\n", regs->rip, (int)regs->cs,
-         regs->rflags, (int)regs->err_code);
-  printf("RAX: %p RBX: %p RCX: %p RDX: %p\n", regs->rax, regs->rbx, regs->rcx,
-         regs->rdx);
-  printf("RSI: %p RDI: %p RBP: %p RSP: %p\n", regs->rsi, regs->rdi, regs->rbp,
-         regs->rsp);
+  com1_printf("Exception: %s\n\r", msg);
+  printf("Exception: %s\n", msg);
+
+  com1_printf("RIP: %p  CS: %x  RFLAGS: %p  ERR: %x\n\r", (void *)regs->rip,
+              (int)regs->cs, (void *)regs->rflags, (int)regs->err_code);
+  printf("RIP: %p  CS: %x  RFLAGS: %p  ERR: %x\n", (void *)regs->rip,
+         (int)regs->cs, (void *)regs->rflags, (int)regs->err_code);
+
+  com1_printf("RAX: %p RBX: %p RCX: %p RDX: %p\n\r", (void *)regs->rax,
+              (void *)regs->rbx, (void *)regs->rcx, (void *)regs->rdx);
+  printf("RAX: %p RBX: %p RCX: %p RDX: %p\n", (void *)regs->rax,
+         (void *)regs->rbx, (void *)regs->rcx, (void *)regs->rdx);
+
+  com1_printf("RSI: %p RDI: %p RBP: %p RSP: %p\n\r", (void *)regs->rsi,
+              (void *)regs->rdi, (void *)regs->rbp, (void *)regs->rsp);
+  printf("RSI: %p RDI: %p RBP: %p RSP: %p\n", (void *)regs->rsi,
+         (void *)regs->rdi, (void *)regs->rbp, (void *)regs->rsp);
 
   unsigned long long cr0, cr2, cr3, cr4;
   __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
@@ -102,10 +112,23 @@ void kernel_panic(registers_t *regs) {
   __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
   __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
 
-  printf("CR0: %p  CR2: %p (PF Address)\n", cr0, cr2);
-  printf("CR3: %p (PML4)  CR4: %p\n", cr3, cr4);
+  com1_printf("CR0: %p  CR2: %p  CR3: %p  CR4: %p\n\r", (void *)cr0,
+              (void *)cr2, (void *)cr3, (void *)cr4);
+  printf("CR0: %p  CR2: %p  CR3: %p  CR4: %p\n", (void *)cr0, (void *)cr2,
+         (void *)cr3, (void *)cr4);
 
   if (regs->int_no == 14) {
+    com1_printf("PF Details: ");
+    if (!(regs->err_code & 1))
+      com1_printf("Not-Present ");
+    else
+      com1_printf("Protection-Violation ");
+    if (regs->err_code & 2)
+      com1_printf("Write ");
+    if (regs->err_code & 16)
+      com1_printf("Instruction-Fetch ");
+    com1_printf("\n\r");
+
     printf("PF Details: ");
     if (!(regs->err_code & 1))
       printf("Not-Present ");
@@ -113,10 +136,6 @@ void kernel_panic(registers_t *regs) {
       printf("Protection-Violation ");
     if (regs->err_code & 2)
       printf("Write ");
-    else
-      printf("Read ");
-    if (regs->err_code & 4)
-      printf("User ");
     if (regs->err_code & 16)
       printf("Instruction-Fetch ");
     printf("\n");
@@ -128,12 +147,16 @@ void kernel_panic(registers_t *regs) {
   } __attribute__((packed)) gdtr, idtr;
   __asm__ volatile("sgdt %0" : "=m"(gdtr));
   __asm__ volatile("sidt %0" : "=m"(idtr));
-  printf("GDTR: %p (Limit: %x)  IDTR: %p (Limit: %x)\n", gdtr.base, gdtr.limit,
-         idtr.base, idtr.limit);
+  com1_printf("GDTR: %p (Limit: %x)  IDTR: %p (Limit: %x)\n\r",
+              (void *)gdtr.base, gdtr.limit, (void *)idtr.base, idtr.limit);
+  printf("GDTR: %p (Limit: %x)  IDTR: %p (Limit: %x)\n", (void *)gdtr.base,
+         gdtr.limit, (void *)idtr.base, idtr.limit);
 
+  com1_printf("\n\rCode dump at RIP:\n\r");
   printf("\nCode dump at RIP:\n");
   dump_memory(regs->rip, 16);
 
+  com1_printf("\n\rStack dump at RSP:\n\r");
   printf("\nStack dump at RSP:\n");
   dump_memory(regs->rsp, 32);
 

@@ -58,6 +58,29 @@ void vga_puts(const char *str) {
   }
 }
 
+void vga_write_dec(u64 value) {
+  if (value == 0) {
+    vga_putc('0');
+    return;
+  }
+  char buffer[32];
+  int i = 0;
+  while (value > 0) {
+    buffer[i++] = '0' + (value % 10);
+    value /= 10;
+  }
+  while (i > 0) {
+    vga_putc(buffer[--i]);
+  }
+}
+
+void vga_write_hex(u64 value, int width) {
+  const char hex[] = "0123456789ABCDEF";
+  for (int i = (width - 1) * 4; i >= 0; i -= 4) {
+    vga_putc(hex[(value >> i) & 0xF]);
+  }
+}
+
 void printf(const char *fmt, ...) {
   va_list args;
   va_start(args, fmt);
@@ -68,21 +91,35 @@ void printf(const char *fmt, ...) {
       switch (fmt[i]) {
       case 's': {
         const char *s = va_arg(args, const char *);
+        if (!s)
+          s = "(null)";
         vga_puts(s);
         break;
       }
       case 'd': {
         int d = va_arg(args, int);
-        char buf[32];
-        itoa(d, buf, 10);
-        vga_puts(buf);
+        if (d < 0) {
+          vga_putc('-');
+          vga_write_dec((u64)-d);
+        } else {
+          vga_write_dec((u64)d);
+        }
+        break;
+      }
+      case 'u': {
+        u64 u = va_arg(args, u64);
+        vga_write_dec(u);
         break;
       }
       case 'x': {
-        int x = va_arg(args, int);
-        char buf[32];
-        itoa(x, buf, 16);
-        vga_puts(buf);
+        u64 x = va_arg(args, u64);
+        vga_write_hex(x, 8); // Default to 8 hex digits for 32-bit-ish display
+        break;
+      }
+      case 'p': {
+        void *p = va_arg(args, void *);
+        vga_puts("0x");
+        vga_write_hex((u64)p, 16);
         break;
       }
       case 'c': {
