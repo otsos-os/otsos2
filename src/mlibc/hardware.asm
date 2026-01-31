@@ -112,3 +112,78 @@ outsw:
     pop ebp
     ret
 %endif
+
+
+
+section .text
+
+global cinfo
+cinfo:
+    push rbx
+    push rdi 
+
+    mov eax, 0x80000000
+    cpuid
+    cmp eax, 0x80000004
+    jl .vendor
+
+    ; Get Brand
+    mov eax, 0x80000002
+    cpuid
+    mov [rdi], eax
+    mov [rdi+4], ebx
+    mov [rdi+8], ecx
+    mov [rdi+12], edx
+
+    mov eax, 0x80000003
+    cpuid
+    mov [rdi+16], eax
+    mov [rdi+20], ebx
+    mov [rdi+24], ecx
+    mov [rdi+28], edx
+
+    mov eax, 0x80000004
+    cpuid
+    mov [rdi+32], eax
+    mov [rdi+36], ebx
+    mov [rdi+40], ecx
+    mov [rdi+44], edx
+    mov byte [rdi+48], 0
+    
+    jmp .done
+
+.vendor:
+    xor eax, eax
+    cpuid
+    mov [rdi], ebx
+    mov [rdi+4], edx
+    mov [rdi+8], ecx
+    mov byte [rdi+12], 0
+
+.done:
+    pop rdi
+    pop rbx
+    ret
+
+global rinfo
+rinfo:
+    
+    
+    mov rax, 0
+    
+    test rdi, rdi 
+    jz .end
+    
+    mov ecx, [rdi] 
+    test ecx, 1
+    jz .end
+
+    mov ecx, [rdi+4] 
+    mov edx, [rdi+8] 
+    
+    mov eax, ecx
+    add eax, edx
+    add eax, 1024
+    
+.end:
+    ret
