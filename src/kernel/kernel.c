@@ -1,9 +1,10 @@
 #include <kernel/drivers/disk/pata/pata.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/drivers/keyboard/keyboard.h>
+#include <kernel/drivers/vga.h>
 #include <kernel/interrupts/idt.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
-#include <kernel/drivers/vga.h>
 
 // Точка входа(если что-то сломалось то здесь)
 void kmain() {
@@ -11,7 +12,7 @@ void kmain() {
   init_heap();
   pata_identify(NULL);
   clear_scr();
-  char* msg = "OTSOS started!";
+  char *msg = "OTSOS started!";
   printf("%s", msg);
 
   com1_init();
@@ -20,14 +21,15 @@ void kmain() {
   com1_write_hex_qword((u64)kmain);
   com1_newline();
 
-
   char dir[256] =
       "/"; // Потом когда добавим файловую систему нужнл будет немного изменить
 
+  keyboard_manager_init();
 
   while (1) {
-    int res = 2 / 0;
-    printf("%d", res);
-   
+    char c = keyboard_getchar();
+    if (c) {
+      printf("%c", c);
+    }
   }
 }

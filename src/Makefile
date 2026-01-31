@@ -26,9 +26,11 @@ MEMORY_O = ../bin/memory.o
 PATA_O = ../bin/pata.o
 CHAINFS_O = ../bin/chainfs.o
 VGA_O = ../bin/vga.o
+PS2_O = ../bin/ps2.o
+KEYBOARD_O = ../bin/keyboard.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O) $(VGA_O)
+      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O) $(VGA_O) $(PS2_O) $(KEYBOARD_O)
 
 all: $(ISO_IMAGE)
 
@@ -72,6 +74,12 @@ $(CHAINFS_O): kernel/drivers/fs/chainFS/chainfs.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(VGA_O): kernel/drivers/vga.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(PS2_O): kernel/drivers/keyboard/ps2.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(KEYBOARD_O): kernel/drivers/keyboard/keyboard.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 
