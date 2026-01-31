@@ -11,6 +11,12 @@ typedef unsigned short u16;
 typedef unsigned int u32;
 typedef unsigned long long u64;
 
+static void (*mirror_callback)(char) = 0;
+
+void com1_set_mirror_callback(void (*callback)(char)) {
+  mirror_callback = callback;
+}
+
 static inline void outb(u16 port, u8 value) {
   __asm__ volatile("outb %0, %1" : : "a"(value), "Nd"(port));
 }
@@ -35,6 +41,9 @@ void com1_write_byte(u8 byte) {
   while ((inb(COM1_LINE_STATUS) & 0x20) == 0)
     ;
   outb(COM1_DATA, byte);
+  if (mirror_callback) {
+    mirror_callback((char)byte);
+  }
 }
 
 void com1_write_string(const char *str) {

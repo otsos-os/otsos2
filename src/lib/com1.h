@@ -23,4 +23,5 @@ u8 com1_read_byte(void);
 int com1_has_data(void);
 void com1_write_dec(u64 value);
 void com1_printf(const char *format, ...);
+void com1_set_mirror_callback(void (*callback)(char));
 #endif

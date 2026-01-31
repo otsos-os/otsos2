@@ -26,6 +26,20 @@ void kmain() {
 
   keyboard_manager_init();
 
+  printf("\nDo you want to enable debug mode (dont use for default use it make "
+         "you screen dirty)? [y/n]\n");
+  while (1) {
+    char c = keyboard_getchar();
+    if (c == 'y') {
+      com1_set_mirror_callback(vga_putc);
+      clear_scr();
+      com1_write_string("test debug mod\n");
+      break;
+    } else if (c == 'n') {
+      break;
+    }
+  }
+
   while (1) {
     char c = keyboard_getchar();
     if (c) {
