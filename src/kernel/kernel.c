@@ -3,17 +3,16 @@
 #include <kernel/interrupts/idt.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
+#include <kernel/drivers/vga.h>
 
 // Точка входа(если что-то сломалось то здесь)
 void kmain() {
   init_idt();
   init_heap();
   pata_identify(NULL);
-  char* VGA_MEM = (char*)0xB8000;
+  clear_scr();
   char* msg = "OTSOS started!";
-  for (int i = 0; i < strlen(msg); i++) {
-    VGA_MEM[i * 2] = msg[i];
-  }
+  printf("%s", msg);
 
   com1_init();
 

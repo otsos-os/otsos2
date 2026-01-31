@@ -1,0 +1,8 @@
+bin/
+isodir/
+*.o
+*.bin
+*.iso
+*.img
+*.map
+.DS_Store

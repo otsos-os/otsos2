@@ -25,9 +25,10 @@ PANIC_O = ../bin/panic.o
 MEMORY_O = ../bin/memory.o
 PATA_O = ../bin/pata.o
 CHAINFS_O = ../bin/chainfs.o
+VGA_O = ../bin/vga.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O)
+      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O) $(VGA_O)
 
 all: $(ISO_IMAGE)
 
@@ -68,6 +69,9 @@ $(PATA_O): kernel/drivers/disk/pata/pata.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(CHAINFS_O): kernel/drivers/fs/chainFS/chainfs.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(VGA_O): kernel/drivers/vga.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 
