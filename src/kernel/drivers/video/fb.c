@@ -1,0 +1,127 @@
+#include <kernel/drivers/video/fb.h>
+#include <lib/com1.h>
+
+static u32 *framebuffer = 0;
+static u32 pitch = 0;
+static u32 width = 0;
+static u32 height = 0;
+static u8 bpp = 0;
+
+void fb_init(multiboot_info_t *mb_info) {
+  if ((mb_info->flags & (1 << 12)) == 0) {
+    com1_write_string("[FB] Framebuffer flag not set in multiboot header!\n");
+    return;
+  }
+
+  framebuffer = (u32 *)(u64)mb_info->framebuffer_addr;
+  pitch = mb_info->framebuffer_pitch;
+  width = mb_info->framebuffer_width;
+  height = mb_info->framebuffer_height;
+  bpp = mb_info->framebuffer_bpp;
+
+  com1_write_string("[FB] Initialized:\n");
+  com1_write_string("  Addr: 0x");
+  com1_write_hex_qword((u64)framebuffer);
+  com1_newline();
+  com1_write_string("  Res: ");
+  com1_write_dec(width);
+  com1_write_string("x");
+  com1_write_dec(height);
+  com1_newline();
+  com1_write_string("  BPP: ");
+  com1_write_dec(bpp);
+  com1_newline();
+
+  fb_clear(0x0000FF);
+}
+
+void fb_put_pixel(int x, int y, u32 color) {
+  if (!framebuffer)
+    return;
+  if (x < 0 || x >= (int)width || y < 0 || y >= (int)height)
+    return;
+
+  u64 offset = y * pitch + x * (bpp / 8);
+  *(volatile u32 *)((u8 *)framebuffer + offset) = color;
+}
+
+void fb_clear(u32 color) {
+  if (!framebuffer)
+    return;
+  for (int y = 0; y < (int)height; y++) {
+    for (int x = 0; x < (int)width; x++) {
+      fb_put_pixel(x, y, color);
+    }
+  }
+}
+
+extern const u8 glyph_32_data[];
+
+extern const u8 *get_font_data(char c);
+
+void fb_put_char(int x, int y, char c, u32 color) {
+  const u8 *data = get_font_data(c);
+  if (!data)
+    return;
+
+  for (int row = 0; row < 16; row++) {
+    u8 bitmap_row = data[row];
+    for (int col = 0; col < 8; col++) {
+      if (bitmap_row & (1 << (7 - col))) {
+        fb_put_pixel(x + col, y + row, color);
+      }
+    }
+  }
+}
+
+void fb_write_string(int x, int y, const char *str, u32 color) {
+  int cur_x = x;
+  int cur_y = y;
+  while (*str) {
+    if (*str == '\n') {
+      cur_x = x;
+      cur_y += 16;
+    } else {
+      fb_put_char(cur_x, cur_y, *str, color);
+      cur_x += 8;
+    }
+    str++;
+  }
+}
+
+int is_framebuffer_enabled() { return framebuffer != 0; }
+
+u32 fb_get_width() { return width; }
+u32 fb_get_height() { return height; }
+
+void fb_scroll(int lines) {
+  if (!framebuffer)
+    return;
+
+ 
+  u32 line_height = 16;
+  u32 lines_to_scroll = lines * line_height;
+  u32 bytes_per_line = pitch;
+  u32 total_lines = height;
+
+  if (lines_to_scroll >= total_lines) {
+    fb_clear(0x000000); 
+    return;
+  }
+
+  u32 bytes_to_copy = bytes_per_line * (total_lines - lines_to_scroll);
+  u32 *dst = framebuffer;
+  u32 *src = (u32 *)((u8 *)framebuffer + (bytes_per_line * lines_to_scroll));
+
+  u8 *fb_bytes = (u8 *)framebuffer;
+  u64 i;
+  for (i = 0; i < bytes_to_copy; i++) {
+    fb_bytes[i] = fb_bytes[i + (bytes_per_line * lines_to_scroll)];
+  }
+
+  u32 bytes_to_clear = bytes_per_line * lines_to_scroll;
+  u8 *bottom_start = fb_bytes + bytes_to_copy;
+  for (i = 0; i < bytes_to_clear; i++) {
+    bottom_start[i] = 0;
+  }
+}

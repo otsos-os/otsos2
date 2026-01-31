@@ -3,7 +3,8 @@
 /* Multiboot 1 Header */
 .set ALIGN,    1<<0             /* align loaded modules on page boundaries */
 .set MEMINFO,  1<<1             /* provide memory map */
-.set FLAGS,    ALIGN | MEMINFO  /* this is the Multiboot 'flag' field */
+.set GFX,      1<<2             
+.set FLAGS,    ALIGN | MEMINFO | GFX
 .set MAGIC,    0x1BADB002       /* 'magic number' lets bootloader find the header */
 .set CHECKSUM, -(MAGIC + FLAGS) /* checksum of above, to prove we are multiboot */
 
@@ -13,6 +14,12 @@
 .long FLAGS
 .long CHECKSUM
 
+.long 0, 0, 0, 0, 0 
+.long 0    
+.long 1024 
+.long 768  
+.long 32   
+
 .section .bss
 .align 4096
 p4_table:
@@ -21,9 +28,21 @@ p3_table:
     .skip 4096
 p2_table:
     .skip 4096
+p2_table_1:
+    .skip 4096
+p2_table_2:
+    .skip 4096
+p2_table_3:
+    .skip 4096
 stack_bottom:
     .skip 65536
 stack_top:
+
+/* Save Multiboot Info pointer */
+.section .data
+.align 8
+multiboot_info_ptr:
+    .quad 0
 
 .section .rodata
 gdt64:
@@ -37,28 +56,53 @@ pointer64:
 .code32
 .global start
 start:
+    /* ebx contains multiboot info structure address */
     mov esp, offset stack_top
+
+    push eax
+    push ebx /* Save multiboot info on stack just to be safe */
 
     cmp eax, 0x2BADB002
     jne .Lno_multiboot
+
+    /* Save ebx to a fixed location so we can retrieve it in 64-bit mode easily 
+       (or just ensure it survives the transition) */
+    mov [multiboot_info_ptr], ebx
 
     mov eax, offset p3_table
     or eax, 0b11
     mov [p4_table], eax
 
+    mov eax, offset p3_table
+    or eax, 0b11
+    mov [p4_table], eax
+
+    
     mov eax, offset p2_table
     or eax, 0b11
-    mov [p3_table], eax
+    mov [p3_table + 0], eax
 
+    mov eax, offset p2_table_1
+    or eax, 0b11
+    mov [p3_table + 8], eax
+
+    mov eax, offset p2_table_2
+    or eax, 0b11
+    mov [p3_table + 16], eax
+
+    mov eax, offset p2_table_3
+    or eax, 0b11
+    mov [p3_table + 24], eax
     mov ecx, 0
 .Lmap_p2_table:
     mov eax, 0x200000
     mul ecx
     or eax, 0b10000011
+    
     mov [p2_table + ecx * 8], eax
 
     inc ecx
-    cmp ecx, 512
+    cmp ecx, 2048
     jne .Lmap_p2_table
 
     mov eax, cr4
@@ -96,6 +140,9 @@ start64:
     mov es, ax
     mov fs, ax
     mov gs, ax
+
+    /* Pass multiboot ptr as first argument (rdi) */
+    mov rdi, [multiboot_info_ptr]
 
     .extern kmain
     call kmain

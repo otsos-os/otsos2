@@ -1,4 +1,5 @@
 #include <kernel/drivers/vga.h>
+#include <kernel/drivers/video/fb.h>
 #include <mlibc/mlibc.h>
 #include <stdarg.h>
 
@@ -7,10 +8,34 @@ static int cursor_x = 0;
 static int cursor_y = 0;
 static u8 terminal_color = 0x07;
 
+static int vga_width = 80;
+static int vga_height = 25;
+static int vga_using_fb = -1;
+
+void update_vga_dims() {
+  int fb_enabled = is_framebuffer_enabled();
+
+  if (fb_enabled) {
+    vga_width = fb_get_width() / 8;
+    vga_height = fb_get_height() / 16;
+  } else {
+    vga_width = 80;
+    vga_height = 25;
+  }
+  vga_using_fb = fb_enabled;
+}
+
 void clear_scr() {
-  for (int y = 0; y < 25; y++) {
-    for (int x = 0; x < 80; x++) {
-      vga_buffer[y * 80 + x] = (u16)terminal_color << 8 | ' ';
+  if (is_framebuffer_enabled() != vga_using_fb)
+    update_vga_dims();
+
+  if (is_framebuffer_enabled()) {
+    fb_clear(0x000000);
+  } else {
+    for (int y = 0; y < 25; y++) {
+      for (int x = 0; x < 80; x++) {
+        vga_buffer[y * 80 + x] = (u16)terminal_color << 8 | ' ';
+      }
     }
   }
   cursor_x = 0;
@@ -18,37 +43,56 @@ void clear_scr() {
 }
 
 void scroll_scr() {
-  for (int y = 0; y < 24; y++) {
-    for (int x = 0; x < 80; x++) {
-      vga_buffer[y * 80 + x] = vga_buffer[(y + 1) * 80 + x];
+  if (is_framebuffer_enabled() != vga_using_fb)
+    update_vga_dims();
+
+  if (is_framebuffer_enabled()) {
+    fb_scroll(1);
+
+  } else {
+    for (int y = 0; y < 24; y++) {
+      for (int x = 0; x < 80; x++) {
+        vga_buffer[y * 80 + x] = vga_buffer[(y + 1) * 80 + x];
+      }
     }
-  }
-  for (int x = 0; x < 80; x++) {
-    vga_buffer[24 * 80 + x] = (u16)terminal_color << 8 | ' ';
+    for (int x = 0; x < 80; x++) {
+      vga_buffer[24 * 80 + x] = (u16)terminal_color << 8 | ' ';
+    }
   }
   if (cursor_y > 0)
     cursor_y--;
 }
 
+extern int is_framebuffer_enabled();
+
 void vga_putc(char c) {
+  if (is_framebuffer_enabled() != vga_using_fb)
+    update_vga_dims();
+
   if (c == '\n') {
     cursor_x = 0;
     cursor_y++;
   } else if (c == '\r') {
     cursor_x = 0;
   } else {
-    vga_buffer[cursor_y * 80 + cursor_x] = (u16)terminal_color << 8 | c;
+    if (is_framebuffer_enabled()) {
+      if (c != ' ') {
+        fb_put_char(cursor_x * 8, cursor_y * 16, c, 0xFFFFFF);
+      }
+    } else {
+      vga_buffer[cursor_y * 80 + cursor_x] = (u16)terminal_color << 8 | c;
+    }
     cursor_x++;
   }
 
-  if (cursor_x >= 80) {
+  if (cursor_x >= vga_width) {
     cursor_x = 0;
     cursor_y++;
   }
 
-  if (cursor_y >= 25) {
+  if (cursor_y >= vga_height) {
     scroll_scr();
-    cursor_y = 24;
+    cursor_y = vga_height - 1;
   }
 }
 
