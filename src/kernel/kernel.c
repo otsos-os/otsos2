@@ -26,7 +26,8 @@ void kmain() {
 
 
   while (1) {
-
+    int res = 2 / 0;
+    printf("%d", res);
    
   }
 }

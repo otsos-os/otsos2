@@ -8,5 +8,6 @@ void scroll_scr();
 void printf(const char *fmt, ...);
 void vga_putc(char c);
 void vga_puts(const char *str);
+void vga_set_color(u8 color);
 
 #endif

@@ -5,7 +5,7 @@
 static u16 *vga_buffer = (u16 *)0xB8000;
 static int cursor_x = 0;
 static int cursor_y = 0;
-static u8 terminal_color = 0x07; 
+static u8 terminal_color = 0x07;
 
 void clear_scr() {
   for (int y = 0; y < 25; y++) {
@@ -106,3 +106,5 @@ void printf(const char *fmt, ...) {
 
   va_end(args);
 }
+
+void vga_set_color(u8 color) { terminal_color = color; }
