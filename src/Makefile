@@ -37,88 +37,114 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_
 all: $(ISO_IMAGE)
 
 $(ISO_IMAGE): $(KERNEL_BIN)
-	mkdir -p $(ISODIR)/boot/grub
-	cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
-	cp $(ISODIR)/boot/grub/grub.cfg $(ISODIR)/boot/grub/grub.cfg || echo 'menuentry "OTSOS" { multiboot /boot/kernel.bin }' > $(ISODIR)/boot/grub/grub.cfg
-	grub-mkrescue -o $(ISO_IMAGE) $(ISODIR)
+	@mkdir -p $(ISODIR)/boot/grub
+	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
+	@cp $(ISODIR)/boot/grub/grub.cfg $(ISODIR)/boot/grub/grub.cfg || echo 'menuentry "OTSOS" { multiboot /boot/kernel.bin }' > $(ISODIR)/boot/grub/grub.cfg
+	@echo "  ISO     $(ISO_IMAGE)"
+	@grub-mkrescue -o $(ISO_IMAGE) $(ISODIR) >/dev/null 2>&1
 
 $(KERNEL_BIN): $(OBJ)
-	$(LD) $(LDFLAGS) $(OBJ) -o $@
+	@echo "  LD      $@"
+	@$(LD) $(LDFLAGS) $(OBJ) -o $@
 
 $(BOOT_O): boot/boot.s
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  AS      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(IDT_ASM_O): kernel/interrupts/idt.asm
-	$(AS) -f elf64 -g -F dwarf $< -o $@
+	@echo "  AS      $<"
+	@$(AS) -f elf64 -g -F dwarf $< -o $@
 
 $(KERNEL_O): kernel/kernel.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(IDT_C_O): kernel/interrupts/idt.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(PIC_O): kernel/interrupts/pic.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(HANDLERS_O): kernel/interrupts/handlers.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(PANIC_O): kernel/panic.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(MEMORY_O): mlibc/memory.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(PATA_O): kernel/drivers/disk/pata/pata.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(CHAINFS_O): kernel/drivers/fs/chainFS/chainfs.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(VGA_O): kernel/drivers/vga.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(PS2_O): kernel/drivers/keyboard/ps2.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(KEYBOARD_O): kernel/drivers/keyboard/keyboard.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(FB_O): kernel/drivers/video/fb.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(FONT_O): kernel/drivers/video/font.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 
 $(STRING_O): mlibc/string.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(ITOA_O): mlibc/itoa.s
-	$(CC) -c $< -o $@
+	@echo "  AS      $<"
+	@$(CC) -c $< -o $@
 
 $(HARDWARE_O): mlibc/hardware.asm
-	$(AS) -f elf64 -g -F dwarf $< -o $@ -D__x86_64__
+	@echo "  AS      $<"
+	@$(AS) -f elf64 -g -F dwarf $< -o $@ -D__x86_64__
 
 
 
 
 $(DISK_O): kernel/bin/disk.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 
 $(COM1_O): lib/com1.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(DISK_IMG):
-	dd if=/dev/zero of=$(DISK_IMG) bs=1M count=10
+	@echo "  IMG     $(DISK_IMG)"
+	@dd if=/dev/zero of=$(DISK_IMG) bs=1M count=10 2>/dev/null
 
 run: $(ISO_IMAGE) $(DISK_IMG)
-	$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio
+	@echo "  RUN     QEMU"
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio
 
 debug: $(ISO_IMAGE) $(DISK_IMG)
-	$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -d int,cpu_reset -no-reboot
+	@echo "  DEBUG   QEMU"
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -d int,cpu_reset -no-reboot
 
 clean:
-	rm -f ../bin/*.o ../bin/kernel.bin ../bin/kernel.map $(ISO_IMAGE) $(DISK_IMG)
-	rm -rf $(ISODIR)/boot/kernel.bin
+	@echo "  CLEAN"
+	@rm -f ../bin/*.o ../bin/kernel.bin ../bin/kernel.map $(ISO_IMAGE) $(DISK_IMG)
+	@rm -rf $(ISODIR)/boot/kernel.bin
