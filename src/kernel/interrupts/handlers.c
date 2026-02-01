@@ -34,11 +34,33 @@ extern void pic_send_eoi(unsigned char irq);
 
 #include <kernel/syscall.h>
 
+#include <kernel/process.h>
+#include <lib/com1.h>
+
 void isr_handler(registers_t *regs) {
   if (regs->int_no == 128) {
     syscall_handler(regs);
   } else {
-    kernel_panic(regs);
+    if ((regs->cs & 3) == 3) {
+      process_t *proc = process_current();
+      com1_printf("\n[KERNEL] Exception %d detected in userspace process %d "
+                  "(%s) at RIP=%p\n",
+                  regs->int_no, proc ? (int)proc->pid : -1,
+                  proc ? proc->name : "???", (void *)regs->rip);
+
+      
+      if (regs->int_no == 13) {
+        com1_printf("[KERNEL] General Protection Fault\n");
+      } else if (regs->int_no == 14) {
+        com1_printf("[KERNEL] Segmentation Fault\n");
+      } else if (regs->int_no == 6) {
+        com1_printf("[KERNEL] Invalid Opcode\n");
+      }
+
+      process_exit(-1);
+    } else {
+      kernel_panic(regs);
+    }
   }
 }
 

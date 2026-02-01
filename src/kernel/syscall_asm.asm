@@ -3,36 +3,38 @@
 section .text
 
 extern syscall_handler
-extern tss_get_rsp0
+extern tss 
 
 %define USER_DS 0x1B
 %define USER_CS 0x23
+; Offset of rsp0 in struct tss_t (u32 reserved0; u64 rsp0)
+; u32 is 4 bytes. Packed/Aligned behavior needs verification.
+; The C define has __attribute__((packed)).
+; So offset is 4.
+%define TSS_RSP0_OFFSET 4 
 
 global syscall_entry
 syscall_entry:
-    ; syscall saves RIP to RCX and RFLAGS to R11
-    ; It does NOT switch stack automatically!
-    
-    ; 1. Save user RSP
+    ; 1. Save User RSP to a temporary location
+    ; (Note: In a multi-core/preemptive OS, this should be per-cpu)
     mov [rel user_rsp_save], rsp
     
-    ; 2. Switch to kernel stack
-    call tss_get_rsp0
-    mov rsp, rax
+    ; 2. Switch to Kernel Stack
+    ; We read directly from the TSS structure to avoid function calls clobbering regs
+    mov rsp, [rel tss + TSS_RSP0_OFFSET]
     
-    ; 3. Construct registers_t structure on stack
-    ; Layout (from top to bottom):
-    ; ss, rsp, rflags, cs, rip, err_code, int_no, rax, rbx, rcx, rdx, rsi, rdi, rbp, r8, r9, r10, r11, r12, r13, r14, r15
+    ; 3. Build interrupt stack frame (registers_t)
+    ; Stack grows down. We push in reverse order of the struct.
     
-    push qword USER_DS      ; ss
-    push qword [rel user_rsp_save] ; rsp
-    push r11                ; rflags
-    push qword USER_CS      ; cs
-    push rcx                ; rip
-    push qword 0            ; err_code
-    push qword 0            ; int_no
+    push qword USER_DS              ; ss
+    push qword [rel user_rsp_save]  ; rsp (saved user stack)
+    push r11                        ; rflags (saved by syscall)
+    push qword USER_CS              ; cs
+    push rcx                        ; rip (saved by syscall)
+    push qword 0                    ; err_code
+    push qword 0                    ; int_no
     
-    push rax
+    push rax                        ; syscall_number
     push rbx
     push rcx
     push rdx
@@ -48,11 +50,11 @@ syscall_entry:
     push r14
     push r15
     
-    ; 4. Call C handler
-    mov rdi, rsp ; Pass pointer to registers_t
+    ; 4. Call Handler
+    mov rdi, rsp
     call syscall_handler
     
-    ; 5. Restore registers
+    ; 5. Restore state
     pop r15
     pop r14
     pop r13
@@ -67,20 +69,17 @@ syscall_entry:
     pop rdx
     pop rcx
     pop rbx
-    pop rax
+    pop rax ; Return value from syscall
     
-    ; Skip int_no and err_code
-    add rsp, 16
+    add rsp, 16 ; Skip int_no, err_code
     
-    ; 6. Prepare for sysretq
+    ; 6. Return to User Mode
     pop rcx ; RIP
     add rsp, 8 ; Skip CS
     pop r11 ; RFLAGS
     pop rsp ; User RSP
-    ; SS is implicitly set by sysretq based on STAR MSR
     
-    sysretq
+    o64 sysret
 
 section .bss
-user_rsp_save:
-    resq 1
+user_rsp_save: resq 1

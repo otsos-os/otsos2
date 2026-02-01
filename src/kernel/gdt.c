@@ -26,6 +26,7 @@
 
 #include <kernel/gdt.h>
 #include <lib/com1.h>
+#include <mlibc/mlibc.h>
 
 /*
  * GDT Entry structure for x86_64
@@ -62,7 +63,7 @@ typedef struct {
  * Total: 7 slots worth of space
  */
 static gdt_entry_t gdt[7] __attribute__((aligned(16)));
-static tss_t tss __attribute__((aligned(16)));
+tss_t tss __attribute__((aligned(16)));
 static gdt_ptr_t gdt_ptr;
 
 /* Kernel stack for TSS (16KB aligned) */
