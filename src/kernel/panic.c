@@ -101,6 +101,7 @@ void print_stack_trace(unsigned long long rbp) {
 }
 
 void kernel_panic(registers_t *regs) {
+  com1_off_mirror_callback();
   __asm__ volatile("cli");
 
   vga_set_color(0x1F);

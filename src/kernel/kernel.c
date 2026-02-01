@@ -224,6 +224,7 @@ void kmain(u64 magic, u64 addr) {
     char c = keyboard_getchar();
     if (c) {
       printf("\033[31m %c \033[0m", c);
+      u64 res = 0 / 0;
     }
   }
 }
