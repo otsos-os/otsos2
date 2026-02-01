@@ -1,4 +1,8 @@
-/*
+#!/bin/bash
+
+TEMP_FILE=$(mktemp)
+
+COPYRIGHT_TEXT="/*
  * Copyright (c) 2026, otsos team
  *
  * Redistribution and use in source and binary forms, with or without
@@ -11,7 +15,7 @@
  *    this list of conditions and the following disclaimer in the documentation
  *    and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
  * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
@@ -22,18 +26,26 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+"
 
-#ifndef MEMORY_H
-#define MEMORY_H
+process_file() {
+    local file="$1"
+    
+    if grep -q "Copyright (c) 2026, otsos team" "$file"; then
+        return
+    fi
+    
+    
+    echo "$COPYRIGHT_TEXT" > "$TEMP_FILE"
+    cat "$file" >> "$TEMP_FILE"
+    
+    cp "$TEMP_FILE" "$file"
+}
 
-void *kmalloc(unsigned long size);
-void kfree(void *ptr);
-void *kcalloc(unsigned long nmemb, unsigned long size);
-void *krealloc(void *ptr, unsigned long size);
-void *kmalloc_aligned(unsigned long size, unsigned long align);
-unsigned long kmalloc_usable_size(void *ptr);
-unsigned long kget_free_memory();
-void kheap_dump();
-void init_heap();
+find . -type f \( -name "*.c" -o -name "*.h" \) | while read -r file; do
+    process_file "$file"
+done
 
-#endif
+rm "$TEMP_FILE"
+
+echo "Готово!"
