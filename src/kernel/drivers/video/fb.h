@@ -1,8 +1,11 @@
 #ifndef FRAMEBUFFER_H
 #define FRAMEBUFFER_H
 
+#include <kernel/multiboot2.h>
 #include <mlibc/mlibc.h>
 
+/* Legacy Multiboot1 structure - kept for reference, but not used with
+ * Multiboot2 */
 typedef struct {
   u32 flags;
   u32 mem_lower;
@@ -36,7 +39,10 @@ typedef struct {
   u8 color_info[6];
 } __attribute__((packed)) multiboot_info_t;
 
+void fb_init_mb2(multiboot2_info_t *mb_info);
+
 void fb_init(multiboot_info_t *mb_info);
+
 void fb_put_pixel(int x, int y, u32 color);
 void fb_clear(u32 color);
 int is_framebuffer_enabled();

@@ -7,6 +7,42 @@ static u32 width = 0;
 static u32 height = 0;
 static u8 bpp = 0;
 
+void fb_init_mb2(multiboot2_info_t *mb_info) {
+  multiboot2_tag_framebuffer_t *fb_tag =
+      (multiboot2_tag_framebuffer_t *)multiboot2_find_tag(
+          mb_info, MULTIBOOT2_TAG_TYPE_FRAMEBUFFER);
+
+  if (!fb_tag) {
+    com1_write_string("[FB] Framebuffer tag not found in Multiboot2 info!\n");
+    return;
+  }
+
+  framebuffer = (u32 *)(u64)fb_tag->framebuffer_addr;
+  pitch = fb_tag->framebuffer_pitch;
+  width = fb_tag->framebuffer_width;
+  height = fb_tag->framebuffer_height;
+  bpp = fb_tag->framebuffer_bpp;
+
+  com1_write_string("[FB] Multiboot2 Initialized:\n");
+  com1_write_string("  Addr: 0x");
+  com1_write_hex_qword((u64)framebuffer);
+  com1_newline();
+  com1_write_string("  Res: ");
+  com1_write_dec(width);
+  com1_write_string("x");
+  com1_write_dec(height);
+  com1_newline();
+  com1_write_string("  BPP: ");
+  com1_write_dec(bpp);
+  com1_newline();
+  com1_write_string("  Type: ");
+  com1_write_dec(fb_tag->framebuffer_type);
+  com1_newline();
+
+  fb_clear(0x0000FF);
+}
+
+/* Legacy Multiboot1 init - kept for compatibility */
 void fb_init(multiboot_info_t *mb_info) {
   if ((mb_info->flags & (1 << 12)) == 0) {
     com1_write_string("[FB] Framebuffer flag not set in multiboot header!\n");
@@ -98,14 +134,13 @@ void fb_scroll(int lines) {
   if (!framebuffer)
     return;
 
- 
   u32 line_height = 16;
   u32 lines_to_scroll = lines * line_height;
   u32 bytes_per_line = pitch;
   u32 total_lines = height;
 
   if (lines_to_scroll >= total_lines) {
-    fb_clear(0x000000); 
+    fb_clear(0x000000);
     return;
   }
 

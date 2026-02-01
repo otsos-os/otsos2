@@ -4,6 +4,7 @@
 #include <kernel/drivers/vga.h>
 #include <kernel/drivers/video/fb.h>
 #include <kernel/interrupts/idt.h>
+#include <kernel/multiboot2.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
@@ -11,19 +12,78 @@ extern void cpuid_get(u32 code, u32 *res);
 
 extern void cinfo(char *buf);
 extern u64 rinfo(u64 mb_ptr);
-// Точка входа(если что-то сломалось то здесь)
+// Debug: print all Multiboot2 tags
+static void debug_multiboot2_tags(multiboot2_info_t *mb_info) {
+  com1_init();
+  com1_write_string("\n=== Multiboot2 Tags Debug ===\n");
 
+  multiboot2_tag_t *tag = (multiboot2_tag_t *)((u8 *)mb_info + 8);
+
+  while (tag->type != MULTIBOOT2_TAG_TYPE_END) {
+    com1_write_string("Tag type: ");
+    com1_write_dec(tag->type);
+    com1_write_string(", size: ");
+    com1_write_dec(tag->size);
+
+    switch (tag->type) {
+    case MULTIBOOT2_TAG_TYPE_CMDLINE:
+      com1_write_string(" (CMDLINE)");
+      break;
+    case MULTIBOOT2_TAG_TYPE_BOOT_LOADER_NAME:
+      com1_write_string(" (BOOT_LOADER_NAME)");
+      break;
+    case MULTIBOOT2_TAG_TYPE_BASIC_MEMINFO:
+      com1_write_string(" (BASIC_MEMINFO)");
+      break;
+    case MULTIBOOT2_TAG_TYPE_MMAP:
+      com1_write_string(" (MMAP)");
+      break;
+    case MULTIBOOT2_TAG_TYPE_FRAMEBUFFER:
+      com1_write_string(" (FRAMEBUFFER)");
+      break;
+    case MULTIBOOT2_TAG_TYPE_ELF_SECTIONS:
+      com1_write_string(" (ELF_SECTIONS)");
+      break;
+    case MULTIBOOT2_TAG_TYPE_ACPI_OLD:
+      com1_write_string(" (ACPI_OLD)");
+      break;
+    case MULTIBOOT2_TAG_TYPE_ACPI_NEW:
+      com1_write_string(" (ACPI_NEW)");
+      break;
+    default:
+      com1_write_string(" (other)");
+      break;
+    }
+    com1_newline();
+
+    /* Move to next tag (8-byte aligned) */
+    u64 next_addr = (u64)tag + tag->size;
+    next_addr = (next_addr + 7) & ~7;
+    tag = (multiboot2_tag_t *)next_addr;
+  }
+  com1_write_string("=== End Tags ===\n\n");
+}
+
+// Multiboot2 entry point
 void kmain(u64 addr) {
-  multiboot_info_t *mboot_ptr = (multiboot_info_t *)addr;
+  multiboot2_info_t *mboot_ptr = (multiboot2_info_t *)addr;
   init_idt();
 
-  fb_init(mboot_ptr);
+  /* Debug: print all tags first */
+  debug_multiboot2_tags(mboot_ptr);
+
+  /* Initialize framebuffer using Multiboot2 */
+  fb_init_mb2(mboot_ptr);
 
   clear_scr();
 
   com1_init();
-  com1_write_string("OTSOS started at address 0x");
+  com1_write_string("OTSOS started (Multiboot2) at address 0x");
   com1_write_hex_qword(addr);
+  com1_newline();
+
+  com1_write_string("Multiboot2 info total_size: ");
+  com1_write_dec(mboot_ptr->total_size);
   com1_newline();
 
   char cpu_buf[64];
@@ -33,7 +93,7 @@ void kmain(u64 addr) {
   while (*p == ' ')
     p++;
 
-  u64 ram_kb = rinfo(addr);
+  u64 ram_kb = multiboot2_get_ram_kb(mboot_ptr);
 
   com1_printf("CPU: %s\n", p);
   com1_printf("RAM: %u MB (%u KB)\n", ram_kb / 1024, ram_kb);
@@ -44,7 +104,7 @@ void kmain(u64 addr) {
   }
 
   char dir[256] =
-      "/"; // Потом когда добавим файловую систему нужнл будет немного изменить
+      "/"; // Потом когда добавим файловую систему нужно будет немного изменить
 
   keyboard_manager_init();
 

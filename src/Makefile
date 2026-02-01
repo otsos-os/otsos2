@@ -39,7 +39,6 @@ all: $(ISO_IMAGE)
 $(ISO_IMAGE): $(KERNEL_BIN)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
-	@cp $(ISODIR)/boot/grub/grub.cfg $(ISODIR)/boot/grub/grub.cfg || echo 'menuentry "OTSOS" { multiboot /boot/kernel.bin }' > $(ISODIR)/boot/grub/grub.cfg
 	@echo "  ISO     $(ISO_IMAGE)"
 	@grub-mkrescue -o $(ISO_IMAGE) $(ISODIR) >/dev/null 2>&1
 
