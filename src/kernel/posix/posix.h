@@ -24,30 +24,26 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/keyboard/keyboard.h>
-#include <kernel/drivers/timer.h>
-#include <kernel/interrupts/idt.h>
+#ifndef POSIX_H
+#define POSIX_H
+
 #include <mlibc/mlibc.h>
 
-extern void kernel_panic(registers_t *regs);
-extern void pic_send_eoi(unsigned char irq);
+#define MAX_FDS 32
 
-#include <kernel/syscall.h>
+typedef struct {
+  int used;
+  char path[256];
+  u32 offset;
+  int flags;
+} file_descriptor_t;
 
-void isr_handler(registers_t *regs) {
-  if (regs->int_no == 128) {
-    syscall_handler(regs);
-  } else {
-    kernel_panic(regs);
-  }
-}
+#define STDIN_FILENO 0
+#define STDOUT_FILENO 1
+#define STDERR_FILENO 2
 
-void irq_handler(registers_t *regs) {
-  if (regs->int_no == 32) {
-    timer_handler();
-  } else if (regs->int_no == 33) {
-    keyboard_common_handler();
-  }
+extern file_descriptor_t fd_table[MAX_FDS];
 
-  pic_send_eoi(regs->int_no - 32);
-}
+int write(int fd, const void *buf, u32 count);
+
+#endif

@@ -24,30 +24,50 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/keyboard/keyboard.h>
-#include <kernel/drivers/timer.h>
-#include <kernel/interrupts/idt.h>
-#include <mlibc/mlibc.h>
+#include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/drivers/vga.h>
+#include <kernel/posix/posix.h>
+#include <lib/com1.h>
 
-extern void kernel_panic(registers_t *regs);
-extern void pic_send_eoi(unsigned char irq);
+file_descriptor_t fd_table[MAX_FDS];
 
-#include <kernel/syscall.h>
-
-void isr_handler(registers_t *regs) {
-  if (regs->int_no == 128) {
-    syscall_handler(regs);
-  } else {
-    kernel_panic(regs);
-  }
+void posix_init() {
+  fd_table[STDIN_FILENO].used = 1;
+  fd_table[STDOUT_FILENO].used = 1;
+  fd_table[STDERR_FILENO].used = 1;
 }
 
-void irq_handler(registers_t *regs) {
-  if (regs->int_no == 32) {
-    timer_handler();
-  } else if (regs->int_no == 33) {
-    keyboard_common_handler();
+int sys_write(int fd, const void *buf, u32 count) {
+  if (fd < 0 || fd >= MAX_FDS) {
+    return -1;
   }
 
-  pic_send_eoi(regs->int_no - 32);
+  if (!fd_table[fd].used) {
+    return -1;
+  }
+
+  const char *data = (const char *)buf;
+
+  if (fd == STDOUT_FILENO || fd == STDERR_FILENO) {
+    for (u32 i = 0; i < count; i++) {
+      vga_putc(data[i]);
+      com1_write_byte(data[i]);
+    }
+    return count;
+  }
+
+  if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+    com1_printf("POSIX WRITE: ChainFS not initialized or corrupted magic: %x\n",
+                g_chainfs.superblock.magic);
+    return -1;
+  }
+
+  int result = chainfs_write_file(fd_table[fd].path, (const u8 *)buf, count);
+
+  if (result == 0) {
+    fd_table[fd].offset += count;
+    return count;
+  }
+
+  return -1;
 }

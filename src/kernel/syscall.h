@@ -24,30 +24,15 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/keyboard/keyboard.h>
-#include <kernel/drivers/timer.h>
+#ifndef SYSCALL_H
+#define SYSCALL_H
+
 #include <kernel/interrupts/idt.h>
 #include <mlibc/mlibc.h>
 
-extern void kernel_panic(registers_t *regs);
-extern void pic_send_eoi(unsigned char irq);
+#define SYS_WRITE 1
+#define SYS_EXIT 60
 
-#include <kernel/syscall.h>
+void syscall_handler(registers_t *regs);
 
-void isr_handler(registers_t *regs) {
-  if (regs->int_no == 128) {
-    syscall_handler(regs);
-  } else {
-    kernel_panic(regs);
-  }
-}
-
-void irq_handler(registers_t *regs) {
-  if (regs->int_no == 32) {
-    timer_handler();
-  } else if (regs->int_no == 33) {
-    keyboard_common_handler();
-  }
-
-  pic_send_eoi(regs->int_no - 32);
-}
+#endif

@@ -24,30 +24,33 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/keyboard/keyboard.h>
-#include <kernel/drivers/timer.h>
 #include <kernel/interrupts/idt.h>
-#include <mlibc/mlibc.h>
-
-extern void kernel_panic(registers_t *regs);
-extern void pic_send_eoi(unsigned char irq);
-
+#include <kernel/posix/posix.h>
 #include <kernel/syscall.h>
+#include <lib/com1.h>
 
-void isr_handler(registers_t *regs) {
-  if (regs->int_no == 128) {
-    syscall_handler(regs);
-  } else {
-    kernel_panic(regs);
+void syscall_handler(registers_t *regs) {
+  u64 syscall_number = regs->rax;
+  u64 arg1 = regs->rdi;
+  u64 arg2 = regs->rsi;
+  u64 arg3 = regs->rdx;
+
+  // com1_printf("SYSCALL: #%d, args: %p, %p, %p\n", syscall_number, arg1, arg2,
+  // arg3);
+
+  switch (syscall_number) {
+  case SYS_WRITE:
+    regs->rax = (u64)write((int)arg1, (const void *)arg2, (u32)arg3);
+    break;
+  case SYS_EXIT:
+    com1_printf("Process exited with code %d\n", arg1);
+    // TODO: SCHEDULER
+    while (1)
+      __asm__ volatile("hlt");
+    break;
+  default:
+    com1_printf("Unknown syscall: %d\n", syscall_number);
+    regs->rax = -1;
+    break;
   }
-}
-
-void irq_handler(registers_t *regs) {
-  if (regs->int_no == 32) {
-    timer_handler();
-  } else if (regs->int_no == 33) {
-    keyboard_common_handler();
-  }
-
-  pic_send_eoi(regs->int_no - 32);
 }

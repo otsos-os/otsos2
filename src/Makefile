@@ -33,9 +33,11 @@ FONT_O = ../bin/font.o
 TIMER_O = ../bin/timer.o
 STDLIB_O = ../bin/stdlib.o
 MMU_O = ../bin/mmu.o
+WRITE_O = ../bin/write.o
+SYSCALL_O = ../bin/syscall.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O) $(VGA_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O)
+      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O) $(VGA_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(SYSCALL_O)
 
 all: $(ISO_IMAGE)
 
@@ -118,6 +120,14 @@ $(STDLIB_O): mlibc/stdlib.c
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(MMU_O): kernel/mmu.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(WRITE_O): kernel/posix/write.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(SYSCALL_O): kernel/syscall.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

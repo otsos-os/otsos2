@@ -17,6 +17,12 @@ isr_stub_%1:
     jmp isr_common
 %endmacro
 
+global isr_stub_128
+isr_stub_128:
+    push qword 0
+    push qword 128
+    jmp isr_common
+
 %macro irq_stub 1
 global irq_stub_%1
 irq_stub_%1:
