@@ -207,6 +207,7 @@ void kmain(u64 magic, u64 addr) {
 
   keyboard_manager_init();
 
+  
   printf("\nDo you want to enable debug mode (dont use for default use it make "
          "you screen dirty)? [y/n]\n");
   while (1) {
@@ -220,6 +221,7 @@ void kmain(u64 magic, u64 addr) {
       break;
     }
   }
+  
 
   init_heap();
   pata_identify(NULL);
