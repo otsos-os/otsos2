@@ -135,15 +135,15 @@ void gdt_init(void) {
   /* Granularity: 0000 0000 = 0x00 (no special flags for data in long mode) */
   gdt_set_entry(2, 0, 0xFFFFF, 0x92, 0x00);
 
-  /* User Code: base=0, limit=0xFFFFF, DPL=3, executable, readable, long mode */
-  /* Access: 1111 1010 = 0xFA (Present, Ring 3, Code, Executable, Readable) */
-  /* Granularity: 0010 0000 = 0x20 (Long mode bit set) */
-  gdt_set_entry(3, 0, 0xFFFFF, 0xFA, 0x20);
-
   /* User Data: base=0, limit=0xFFFFF, DPL=3, writable */
   /* Access: 1111 0010 = 0xF2 (Present, Ring 3, Data, Writable) */
   /* Granularity: 0000 0000 = 0x00 */
-  gdt_set_entry(4, 0, 0xFFFFF, 0xF2, 0x00);
+  gdt_set_entry(3, 0, 0xFFFFF, 0xF2, 0x00);
+
+  /* User Code: base=0, limit=0xFFFFF, DPL=3, executable, readable, long mode */
+  /* Access: 1111 1010 = 0xFA (Present, Ring 3, Code, Executable, Readable) */
+  /* Granularity: 0010 0000 = 0x20 (Long mode bit set) */
+  gdt_set_entry(4, 0, 0xFFFFF, 0xFA, 0x20);
 
   /* TSS descriptor (occupies slots 5 and 6) */
   gdt_set_tss(5, (u64)&tss, sizeof(tss_t) - 1);

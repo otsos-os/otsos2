@@ -24,10 +24,53 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <kernel/gdt.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/posix/posix.h>
 #include <kernel/syscall.h>
 #include <lib/com1.h>
+
+#define MSR_EFER 0xC0000080
+#define MSR_STAR 0xC0000081
+#define MSR_LSTAR 0xC0000082
+#define MSR_SFMASK 0xC0000084
+
+extern void syscall_entry(void);
+
+static inline void wrmsr(u32 msr, u64 value) {
+  u32 low = value & 0xFFFFFFFF;
+  u32 high = value >> 32;
+  __asm__ volatile("wrmsr" : : "c"(msr), "a"(low), "d"(high));
+}
+
+static inline u64 rdmsr(u32 msr) {
+  u32 low, high;
+  __asm__ volatile("rdmsr" : "=a"(low), "=d"(high) : "c"(msr));
+  return ((u64)high << 32) | low;
+}
+
+void syscall_init(void) {
+  /* 1. Enable SCE (System Call Extensions) in EFER */
+  u64 efer = rdmsr(MSR_EFER);
+  wrmsr(MSR_EFER, efer | 1);
+
+  /* 2. Configure STAR register
+   * STAR[47:32] = Kernel CS/SS base  (0x08 -> KCODE=0x08, KDATA=0x10)
+   * STAR[63:48] = User CS/SS base    (0x10 -> UDATA=0x18, UCODE=0x20)
+   */
+  u64 star = ((u64)GDT_KERNEL_CODE << 32) | ((u64)GDT_KERNEL_DATA << 48);
+  wrmsr(MSR_STAR, star);
+
+  /* 3. Set LSTAR to our entry point */
+  wrmsr(MSR_LSTAR, (u64)syscall_entry);
+
+  /* 4. Configure SFMASK (RFLAGS mask)
+   * Mask IF (interrupts), TF (trap), etc.
+   */
+  wrmsr(MSR_SFMASK, 0x200); /* Mask interrupts (IF) */
+
+  com1_printf("[SYSCALL] syscall/sysret initialized\n");
+}
 
 void syscall_handler(registers_t *regs) {
   u64 syscall_number = regs->rax;
@@ -35,8 +78,8 @@ void syscall_handler(registers_t *regs) {
   u64 arg2 = regs->rsi;
   u64 arg3 = regs->rdx;
 
-  // com1_printf("SYSCALL: #%d, args: %p, %p, %p\n", syscall_number, arg1, arg2,
-  // arg3);
+  /* Actually, syscall uses r10 instead of rcx for 4th argument in x64 */
+  /* But for first 3 args it's same as int 0x80 */
 
   switch (syscall_number) {
   case SYS_WRITE:
@@ -44,7 +87,6 @@ void syscall_handler(registers_t *regs) {
     break;
   case SYS_EXIT:
     com1_printf("Process exited with code %d\n", arg1);
-    // TODO: SCHEDULER
     while (1)
       __asm__ volatile("hlt");
     break;

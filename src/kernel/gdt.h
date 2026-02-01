@@ -33,28 +33,26 @@
  * 0x00 - Null descriptor
  * 0x08 - Kernel Code (Ring 0, 64-bit)
  * 0x10 - Kernel Data (Ring 0)
- * 0x18 - User Code (Ring 3, 64-bit)
- * 0x20 - User Data (Ring 3)
+ * 0x18 - User Data (Ring 3)
+ * 0x20 - User Code (Ring 3, 64-bit)
  * 0x28 - TSS (16 bytes, spans 0x28-0x30)
  *
  *   Kernel CS = 0x08, Kernel DS = 0x10
- *   User CS = 0x1B (0x18 | 3), User DS = 0x23 (0x20 | 3)
+ *   User CS = 0x23 (0x20 | 3), User DS = 0x1B (0x18 | 3)
  */
 
 #define GDT_NULL_SEG 0x00
 #define GDT_KERNEL_CODE 0x08
 #define GDT_KERNEL_DATA 0x10
-#define GDT_USER_CODE 0x18
-#define GDT_USER_DATA 0x20
+#define GDT_USER_DATA 0x18
+#define GDT_USER_CODE 0x20
 #define GDT_TSS 0x28
 
-/* Selectors with RPL (Ring Privilege Level) */
 #define KERNEL_CS (GDT_KERNEL_CODE)
 #define KERNEL_DS (GDT_KERNEL_DATA)
-#define USER_CS (GDT_USER_CODE | 3) /* 0x1B */
-#define USER_DS (GDT_USER_DATA | 3) /* 0x23 */
+#define USER_CS (GDT_USER_CODE | 3)
+#define USER_DS (GDT_USER_DATA | 3)
 
-/* Task State Segment (TSS) for x86_64 */
 typedef struct {
   u32 reserved0;
   u64 rsp0; /* Stack pointer for Ring 0 */

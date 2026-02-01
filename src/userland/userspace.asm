@@ -1,8 +1,8 @@
 [bits 64]
 
 ; Segment selectors for Ring 3
-%define USER_CS 0x1B    ; GDT_USER_CODE | 3
-%define USER_DS 0x23    ; GDT_USER_DATA | 3
+%define USER_DS 0x1B    ; GDT_USER_DATA | 3
+%define USER_CS 0x23    ; GDT_USER_CODE | 3
 
 section .text
 

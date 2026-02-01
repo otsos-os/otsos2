@@ -35,11 +35,11 @@
 #include <kernel/multiboot.h>
 #include <kernel/multiboot2.h>
 #include <kernel/panic.h>
+#include <kernel/posix/posix.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdlib.h>
 #include <userland/userspace.h>
-#include <kernel/posix/posix.h>
 
 extern void cpuid_get(u32 code, u32 *res);
 extern void cinfo(char *buf);
@@ -224,6 +224,8 @@ void kmain(u64 magic, u64 addr) {
   init_heap();
   pata_identify(NULL);
   posix_init();
+  extern void syscall_init(void);
+  syscall_init();
 
   userspace_init();
 
