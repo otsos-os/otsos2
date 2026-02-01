@@ -32,9 +32,10 @@ FB_O = ../bin/fb.o
 FONT_O = ../bin/font.o
 TIMER_O = ../bin/timer.o
 STDLIB_O = ../bin/stdlib.o
+MMU_O = ../bin/mmu.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O) $(VGA_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O)
+      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O) $(VGA_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O)
 
 all: $(ISO_IMAGE)
 
@@ -113,6 +114,10 @@ $(TIMER_O): kernel/drivers/timer.c
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(STDLIB_O): mlibc/stdlib.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(MMU_O): kernel/mmu.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

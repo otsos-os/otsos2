@@ -31,6 +31,7 @@
 #include <kernel/drivers/vga.h>
 #include <kernel/drivers/video/fb.h>
 #include <kernel/interrupts/idt.h>
+#include <kernel/mmu.h>
 #include <kernel/multiboot.h>
 #include <kernel/multiboot2.h>
 #include <kernel/panic.h>
@@ -133,6 +134,7 @@ void kmain(u64 magic, u64 addr) {
   com1_set_mirror_callback(vga_putc);
   init_idt();
   timer_init(1000);
+  mmu_init();
 
   boot_magic = (u32)magic;
 
@@ -224,7 +226,6 @@ void kmain(u64 magic, u64 addr) {
     char c = keyboard_getchar();
     if (c) {
       printf("\033[31m %c \033[0m", c);
-      u64 res = 0 / 0;
     }
   }
 }
