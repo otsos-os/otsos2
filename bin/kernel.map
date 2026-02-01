@@ -17,1122 +17,1135 @@
 
                 0x0000000000100000                . = 0x100000
 
-.text           0x0000000000100000     0x6b34
+.text           0x0000000000100000     0x6c3d
  *(.multiboot)
  .multiboot     0x0000000000100000       0x30 ../bin/boot.o
  *(.text)
  .text          0x0000000000100030      0x10b ../bin/boot.o
                 0x0000000000100030                start
- .text          0x000000000010013b      0x7ba ../bin/kernel.o
+ .text          0x000000000010013b      0x7d3 ../bin/kernel.o
                 0x00000000001005a0                kmain
- .text          0x00000000001008f5      0x27c ../bin/string.o
-                0x00000000001008f5                strcmp
-                0x0000000000100948                atoi
-                0x00000000001009bf                strlen
-                0x00000000001009f1                strcpy
-                0x0000000000100a34                strcat
-                0x0000000000100a89                strchr
-                0x0000000000100ad2                memset
-                0x0000000000100b17                memcpy
- *fill*         0x0000000000100b71        0xf 
- .text          0x0000000000100b80       0x87 ../bin/itoa.o
-                0x0000000000100b80                itoa
- *fill*         0x0000000000100c07        0x9 
- .text          0x0000000000100c10       0xc0 ../bin/hardware.o
-                0x0000000000100c10                inb
-                0x0000000000100c17                outb
-                0x0000000000100c1f                inw
-                0x0000000000100c27                outw
-                0x0000000000100c30                insw
-                0x0000000000100c40                outsw
-                0x0000000000100c4b                cinfo
-                0x0000000000100cac                rinfo
- .text          0x0000000000100cd0      0x6ce ../bin/com1.o
-                0x0000000000100cd0                com1_set_mirror_callback
-                0x0000000000100cea                com1_off_mirror_callback
-                0x0000000000100d39                com1_init
-                0x0000000000100da9                com1_write_byte
-                0x0000000000100dfc                com1_write_string
-                0x0000000000100e32                com1_write_hex_byte
-                0x0000000000100e98                com1_write_hex_word
-                0x0000000000100ec9                com1_write_hex_dword
-                0x0000000000100ef4                com1_write_hex_qword
-                0x0000000000100f1d                com1_newline
-                0x0000000000100f38                com1_read_byte
-                0x0000000000100f5d                com1_has_data
-                0x0000000000100f73                com1_write_dec
-                0x0000000000101024                com1_printf
- *fill*         0x000000000010139e        0x2 
- .text          0x00000000001013a0      0x217 ../bin/idt_asm.o
-                0x0000000000101418                isr_stub_0
-                0x000000000010141e                isr_stub_1
-                0x0000000000101427                isr_stub_2
-                0x0000000000101430                isr_stub_3
-                0x0000000000101439                isr_stub_4
-                0x0000000000101442                isr_stub_5
-                0x000000000010144b                isr_stub_6
-                0x0000000000101454                isr_stub_7
-                0x000000000010145d                isr_stub_8
-                0x0000000000101464                isr_stub_9
-                0x000000000010146d                isr_stub_10
-                0x0000000000101474                isr_stub_11
-                0x000000000010147b                isr_stub_12
-                0x0000000000101482                isr_stub_13
-                0x0000000000101489                isr_stub_14
-                0x0000000000101490                isr_stub_15
-                0x0000000000101499                isr_stub_16
-                0x00000000001014a2                isr_stub_17
-                0x00000000001014a9                isr_stub_18
-                0x00000000001014b2                isr_stub_19
-                0x00000000001014bb                isr_stub_20
-                0x00000000001014c4                isr_stub_21
-                0x00000000001014cb                isr_stub_22
-                0x00000000001014d4                isr_stub_23
-                0x00000000001014dd                isr_stub_24
-                0x00000000001014e6                isr_stub_25
-                0x00000000001014ef                isr_stub_26
-                0x00000000001014f8                isr_stub_27
-                0x0000000000101501                isr_stub_28
-                0x000000000010150a                isr_stub_29
-                0x0000000000101513                isr_stub_30
-                0x000000000010151a                isr_stub_31
-                0x0000000000101523                irq_stub_0
-                0x000000000010152c                irq_stub_1
-                0x0000000000101535                irq_stub_2
-                0x000000000010153e                irq_stub_3
-                0x0000000000101547                irq_stub_4
-                0x0000000000101550                irq_stub_5
-                0x0000000000101559                irq_stub_6
-                0x0000000000101562                irq_stub_7
-                0x000000000010156b                irq_stub_8
-                0x0000000000101574                irq_stub_9
-                0x000000000010157d                irq_stub_10
-                0x0000000000101586                irq_stub_11
-                0x000000000010158f                irq_stub_12
-                0x0000000000101598                irq_stub_13
-                0x00000000001015a1                irq_stub_14
-                0x00000000001015aa                irq_stub_15
-                0x00000000001015b3                load_idt
- .text          0x00000000001015b7      0x4a8 ../bin/idt_c.o
-                0x00000000001015b7                idt_set_gate
-                0x0000000000101665                init_idt
- .text          0x0000000000101a5f       0xfd ../bin/pic_c.o
-                0x0000000000101a5f                pic_remap
-                0x0000000000101b28                pic_send_eoi
- .text          0x0000000000101b5c       0x57 ../bin/handlers_c.o
-                0x0000000000101b5c                isr_handler
-                0x0000000000101b77                irq_handler
- .text          0x0000000000101bb3      0xc60 ../bin/panic.o
-                0x0000000000101bb3                dump_memory
-                0x0000000000101cc9                print_stack_trace
-                0x0000000000101d7f                kernel_panic
-                0x0000000000102290                panic
- .text          0x0000000000102813      0x9c7 ../bin/memory.o
-                0x0000000000102a0b                init_heap
-                0x0000000000102adb                kmalloc
-                0x0000000000102bd3                kfree
-                0x0000000000102cb5                kcalloc
-                0x0000000000102d25                krealloc
-                0x0000000000102ea2                kget_free_memory
-                0x0000000000102eef                kheap_dump
-                0x0000000000102fb2                kmalloc_aligned
-                0x0000000000103196                kmalloc_usable_size
- .text          0x00000000001031da      0x2d0 ../bin/pata.o
-                0x000000000010320e                pata_identify
-                0x00000000001032fd                pata_read_sector
-                0x00000000001033c7                pata_write_sector
- .text          0x00000000001034aa     0x1e58 ../bin/chainfs.o
-                0x00000000001034aa                chainfs_init
-                0x00000000001035e5                chainfs_format
-                0x000000000010389b                chainfs_find_file
-                0x0000000000103905                chainfs_find_free_file_entry
-                0x00000000001039be                chainfs_read_block_map_entry
-                0x0000000000103a4d                chainfs_write_block_map_entry
-                0x0000000000103ae9                chainfs_find_free_blocks
-                0x0000000000103b85                chainfs_free_block_chain
-                0x0000000000103bce                chainfs_read_file
-                0x0000000000103d3f                chainfs_write_file
-                0x000000000010434b                chainfs_delete_file
-                0x0000000000104405                chainfs_get_file_list
-                0x0000000000104637                chainfs_find_in_directory
-                0x00000000001047b1                chainfs_resolve_path
-                0x00000000001049e5                chainfs_mkdir
-                0x0000000000104d71                chainfs_chdir
-                0x0000000000104e16                chainfs_list_dir
-                0x000000000010501f                chainfs_get_current_path
-                0x0000000000105196                chainfs_rmdir
- .text          0x0000000000105302      0xa58 ../bin/vga.o
-                0x0000000000105302                update_vga_dims
-                0x0000000000105365                clear_scr
-                0x000000000010541e                scroll_scr
-                0x0000000000105538                vga_set_color
-                0x0000000000105568                vga_apply_ansi
-                0x00000000001055cf                vga_putc
-                0x00000000001057e0                vga_puts
-                0x000000000010582b                vga_write_dec
-                0x00000000001058dc                vga_write_hex
-                0x0000000000105948                printf
- .text          0x0000000000105d5a      0x267 ../bin/ps2.o
-                0x0000000000105d5a                ps2_keyboard_init
-                0x0000000000105dda                ps2_keyboard_getchar
-                0x0000000000105e31                ps2_keyboard_handler
- .text          0x0000000000105fc1      0x120 ../bin/keyboard.o
-                0x0000000000105fc1                keyboard_manager_init
-                0x0000000000106071                keyboard_getchar
-                0x00000000001060ac                keyboard_common_handler
- .text          0x00000000001060e1      0x5d9 ../bin/fb.o
-                0x000000000010614c                fb_init_mb2
-                0x0000000000106285                fb_init
-                0x000000000010638d                fb_put_pixel
-                0x000000000010640c                fb_clear
-                0x000000000010646a                fb_put_char
-                0x000000000010650b                fb_write_string
-                0x0000000000106577                is_framebuffer_enabled
-                0x000000000010658d                fb_get_width
-                0x0000000000106599                fb_get_height
-                0x00000000001065a5                fb_scroll
- .text          0x00000000001066ba      0x47a ../bin/font.o
-                0x00000000001066ba                get_font_data
+ .text          0x000000000010090e      0x27c ../bin/string.o
+                0x000000000010090e                strcmp
+                0x0000000000100961                atoi
+                0x00000000001009d8                strlen
+                0x0000000000100a0a                strcpy
+                0x0000000000100a4d                strcat
+                0x0000000000100aa2                strchr
+                0x0000000000100aeb                memset
+                0x0000000000100b30                memcpy
+ *fill*         0x0000000000100b8a        0x6 
+ .text          0x0000000000100b90       0x87 ../bin/itoa.o
+                0x0000000000100b90                itoa
+ *fill*         0x0000000000100c17        0x9 
+ .text          0x0000000000100c20       0xc0 ../bin/hardware.o
+                0x0000000000100c20                inb
+                0x0000000000100c27                outb
+                0x0000000000100c2f                inw
+                0x0000000000100c37                outw
+                0x0000000000100c40                insw
+                0x0000000000100c50                outsw
+                0x0000000000100c5b                cinfo
+                0x0000000000100cbc                rinfo
+ .text          0x0000000000100ce0      0x6ce ../bin/com1.o
+                0x0000000000100ce0                com1_set_mirror_callback
+                0x0000000000100cfa                com1_off_mirror_callback
+                0x0000000000100d49                com1_init
+                0x0000000000100db9                com1_write_byte
+                0x0000000000100e0c                com1_write_string
+                0x0000000000100e42                com1_write_hex_byte
+                0x0000000000100ea8                com1_write_hex_word
+                0x0000000000100ed9                com1_write_hex_dword
+                0x0000000000100f04                com1_write_hex_qword
+                0x0000000000100f2d                com1_newline
+                0x0000000000100f48                com1_read_byte
+                0x0000000000100f6d                com1_has_data
+                0x0000000000100f83                com1_write_dec
+                0x0000000000101034                com1_printf
+ *fill*         0x00000000001013ae        0x2 
+ .text          0x00000000001013b0      0x217 ../bin/idt_asm.o
+                0x0000000000101428                isr_stub_0
+                0x000000000010142e                isr_stub_1
+                0x0000000000101437                isr_stub_2
+                0x0000000000101440                isr_stub_3
+                0x0000000000101449                isr_stub_4
+                0x0000000000101452                isr_stub_5
+                0x000000000010145b                isr_stub_6
+                0x0000000000101464                isr_stub_7
+                0x000000000010146d                isr_stub_8
+                0x0000000000101474                isr_stub_9
+                0x000000000010147d                isr_stub_10
+                0x0000000000101484                isr_stub_11
+                0x000000000010148b                isr_stub_12
+                0x0000000000101492                isr_stub_13
+                0x0000000000101499                isr_stub_14
+                0x00000000001014a0                isr_stub_15
+                0x00000000001014a9                isr_stub_16
+                0x00000000001014b2                isr_stub_17
+                0x00000000001014b9                isr_stub_18
+                0x00000000001014c2                isr_stub_19
+                0x00000000001014cb                isr_stub_20
+                0x00000000001014d4                isr_stub_21
+                0x00000000001014db                isr_stub_22
+                0x00000000001014e4                isr_stub_23
+                0x00000000001014ed                isr_stub_24
+                0x00000000001014f6                isr_stub_25
+                0x00000000001014ff                isr_stub_26
+                0x0000000000101508                isr_stub_27
+                0x0000000000101511                isr_stub_28
+                0x000000000010151a                isr_stub_29
+                0x0000000000101523                isr_stub_30
+                0x000000000010152a                isr_stub_31
+                0x0000000000101533                irq_stub_0
+                0x000000000010153c                irq_stub_1
+                0x0000000000101545                irq_stub_2
+                0x000000000010154e                irq_stub_3
+                0x0000000000101557                irq_stub_4
+                0x0000000000101560                irq_stub_5
+                0x0000000000101569                irq_stub_6
+                0x0000000000101572                irq_stub_7
+                0x000000000010157b                irq_stub_8
+                0x0000000000101584                irq_stub_9
+                0x000000000010158d                irq_stub_10
+                0x0000000000101596                irq_stub_11
+                0x000000000010159f                irq_stub_12
+                0x00000000001015a8                irq_stub_13
+                0x00000000001015b1                irq_stub_14
+                0x00000000001015ba                irq_stub_15
+                0x00000000001015c3                load_idt
+ .text          0x00000000001015c7      0x4a8 ../bin/idt_c.o
+                0x00000000001015c7                idt_set_gate
+                0x0000000000101675                init_idt
+ .text          0x0000000000101a6f       0xfd ../bin/pic_c.o
+                0x0000000000101a6f                pic_remap
+                0x0000000000101b38                pic_send_eoi
+ .text          0x0000000000101b6c       0x71 ../bin/handlers_c.o
+                0x0000000000101b6c                isr_handler
+                0x0000000000101b87                irq_handler
+ .text          0x0000000000101bdd      0xc60 ../bin/panic.o
+                0x0000000000101bdd                dump_memory
+                0x0000000000101cf3                print_stack_trace
+                0x0000000000101da9                kernel_panic
+                0x00000000001022ba                panic
+ .text          0x000000000010283d      0x9c7 ../bin/memory.o
+                0x0000000000102a35                init_heap
+                0x0000000000102b05                kmalloc
+                0x0000000000102bfd                kfree
+                0x0000000000102cdf                kcalloc
+                0x0000000000102d4f                krealloc
+                0x0000000000102ecc                kget_free_memory
+                0x0000000000102f19                kheap_dump
+                0x0000000000102fdc                kmalloc_aligned
+                0x00000000001031c0                kmalloc_usable_size
+ .text          0x0000000000103204      0x2d0 ../bin/pata.o
+                0x0000000000103238                pata_identify
+                0x0000000000103327                pata_read_sector
+                0x00000000001033f1                pata_write_sector
+ .text          0x00000000001034d4     0x1e58 ../bin/chainfs.o
+                0x00000000001034d4                chainfs_init
+                0x000000000010360f                chainfs_format
+                0x00000000001038c5                chainfs_find_file
+                0x000000000010392f                chainfs_find_free_file_entry
+                0x00000000001039e8                chainfs_read_block_map_entry
+                0x0000000000103a77                chainfs_write_block_map_entry
+                0x0000000000103b13                chainfs_find_free_blocks
+                0x0000000000103baf                chainfs_free_block_chain
+                0x0000000000103bf8                chainfs_read_file
+                0x0000000000103d69                chainfs_write_file
+                0x0000000000104375                chainfs_delete_file
+                0x000000000010442f                chainfs_get_file_list
+                0x0000000000104661                chainfs_find_in_directory
+                0x00000000001047db                chainfs_resolve_path
+                0x0000000000104a0f                chainfs_mkdir
+                0x0000000000104d9b                chainfs_chdir
+                0x0000000000104e40                chainfs_list_dir
+                0x0000000000105049                chainfs_get_current_path
+                0x00000000001051c0                chainfs_rmdir
+ .text          0x000000000010532c      0xa58 ../bin/vga.o
+                0x000000000010532c                update_vga_dims
+                0x000000000010538f                clear_scr
+                0x0000000000105448                scroll_scr
+                0x0000000000105562                vga_set_color
+                0x0000000000105592                vga_apply_ansi
+                0x00000000001055f9                vga_putc
+                0x000000000010580a                vga_puts
+                0x0000000000105855                vga_write_dec
+                0x0000000000105906                vga_write_hex
+                0x0000000000105972                printf
+ .text          0x0000000000105d84      0x267 ../bin/ps2.o
+                0x0000000000105d84                ps2_keyboard_init
+                0x0000000000105e04                ps2_keyboard_getchar
+                0x0000000000105e5b                ps2_keyboard_handler
+ .text          0x0000000000105feb      0x120 ../bin/keyboard.o
+                0x0000000000105feb                keyboard_manager_init
+                0x000000000010609b                keyboard_getchar
+                0x00000000001060d6                keyboard_common_handler
+ .text          0x000000000010610b      0x5d9 ../bin/fb.o
+                0x0000000000106176                fb_init_mb2
+                0x00000000001062af                fb_init
+                0x00000000001063b7                fb_put_pixel
+                0x0000000000106436                fb_clear
+                0x0000000000106494                fb_put_char
+                0x0000000000106535                fb_write_string
+                0x00000000001065a1                is_framebuffer_enabled
+                0x00000000001065b7                fb_get_width
+                0x00000000001065c3                fb_get_height
+                0x00000000001065cf                fb_scroll
+ .text          0x00000000001066e4      0x47a ../bin/font.o
+                0x00000000001066e4                get_font_data
+ .text          0x0000000000106b5e       0xa5 ../bin/timer.o
+                0x0000000000106b5e                timer_handler
+                0x0000000000106b77                timer_init
+                0x0000000000106bf6                timer_get_ticks
+ .text          0x0000000000106c03       0x3a ../bin/stdlib.o
+                0x0000000000106c03                sleep
 
-.iplt           0x0000000000106b34        0x0
- .iplt          0x0000000000106b34        0x0 ../bin/boot.o
+.iplt           0x0000000000106c3d        0x0
+ .iplt          0x0000000000106c3d        0x0 ../bin/boot.o
 
-.rodata         0x0000000000106b40     0x9898
+.rodata         0x0000000000106c40     0x98b2
  *(.rodata)
- .rodata        0x0000000000106b40       0x1a ../bin/boot.o
- *fill*         0x0000000000106b5a        0x6 
- .rodata        0x0000000000106b60      0x284 ../bin/kernel.o
- *fill*         0x0000000000106de4        0x4 
- .rodata        0x0000000000106de8       0xb8 ../bin/com1.o
- .rodata        0x0000000000106ea0      0x4f0 ../bin/panic.o
- .rodata        0x0000000000107390      0x18d ../bin/memory.o
- *fill*         0x000000000010751d        0x3 
- .rodata        0x0000000000107520       0x5e ../bin/pata.o
- *fill*         0x000000000010757e        0x2 
- .rodata        0x0000000000107580      0x448 ../bin/chainfs.o
- .rodata        0x00000000001079c8      0x1f0 ../bin/vga.o
- *fill*         0x0000000000107bb8        0x8 
- .rodata        0x0000000000107bc0      0x100 ../bin/ps2.o
-                0x0000000000107bc0                kbd_us
-                0x0000000000107c40                kbd_us_caps
- .rodata        0x0000000000107cc0       0x72 ../bin/keyboard.o
- *fill*         0x0000000000107d32        0x6 
- .rodata        0x0000000000107d38       0xbf ../bin/fb.o
- *fill*         0x0000000000107df7        0x9 
- .rodata        0x0000000000107e00     0x85d8 ../bin/font.o
-                0x0000000000107e00                glyph_32_data
-                0x0000000000107e10                glyph_33_data
-                0x0000000000107e20                glyph_34_data
-                0x0000000000107e30                glyph_35_data
-                0x0000000000107e40                glyph_36_data
-                0x0000000000107e50                glyph_37_data
-                0x0000000000107e60                glyph_38_data
-                0x0000000000107e70                glyph_39_data
-                0x0000000000107e80                glyph_40_data
-                0x0000000000107e90                glyph_41_data
-                0x0000000000107ea0                glyph_42_data
-                0x0000000000107eb0                glyph_43_data
-                0x0000000000107ec0                glyph_44_data
-                0x0000000000107ed0                glyph_45_data
-                0x0000000000107ee0                glyph_46_data
-                0x0000000000107ef0                glyph_47_data
-                0x0000000000107f00                glyph_48_data
-                0x0000000000107f10                glyph_49_data
-                0x0000000000107f20                glyph_50_data
-                0x0000000000107f30                glyph_51_data
-                0x0000000000107f40                glyph_52_data
-                0x0000000000107f50                glyph_53_data
-                0x0000000000107f60                glyph_54_data
-                0x0000000000107f70                glyph_55_data
-                0x0000000000107f80                glyph_56_data
-                0x0000000000107f90                glyph_57_data
-                0x0000000000107fa0                glyph_58_data
-                0x0000000000107fb0                glyph_59_data
-                0x0000000000107fc0                glyph_60_data
-                0x0000000000107fd0                glyph_61_data
-                0x0000000000107fe0                glyph_62_data
-                0x0000000000107ff0                glyph_63_data
-                0x0000000000108000                glyph_64_data
-                0x0000000000108010                glyph_65_data
-                0x0000000000108020                glyph_66_data
-                0x0000000000108030                glyph_67_data
-                0x0000000000108040                glyph_68_data
-                0x0000000000108050                glyph_69_data
-                0x0000000000108060                glyph_70_data
-                0x0000000000108070                glyph_71_data
-                0x0000000000108080                glyph_72_data
-                0x0000000000108090                glyph_73_data
-                0x00000000001080a0                glyph_74_data
-                0x00000000001080b0                glyph_75_data
-                0x00000000001080c0                glyph_76_data
-                0x00000000001080d0                glyph_77_data
-                0x00000000001080e0                glyph_78_data
-                0x00000000001080f0                glyph_79_data
-                0x0000000000108100                glyph_80_data
-                0x0000000000108110                glyph_81_data
-                0x0000000000108120                glyph_82_data
-                0x0000000000108130                glyph_83_data
-                0x0000000000108140                glyph_84_data
-                0x0000000000108150                glyph_85_data
-                0x0000000000108160                glyph_86_data
-                0x0000000000108170                glyph_87_data
-                0x0000000000108180                glyph_88_data
-                0x0000000000108190                glyph_89_data
-                0x00000000001081a0                glyph_90_data
-                0x00000000001081b0                glyph_91_data
-                0x00000000001081c0                glyph_92_data
-                0x00000000001081d0                glyph_93_data
-                0x00000000001081e0                glyph_94_data
-                0x00000000001081f0                glyph_95_data
-                0x0000000000108200                glyph_96_data
-                0x0000000000108210                glyph_97_data
-                0x0000000000108220                glyph_98_data
-                0x0000000000108230                glyph_99_data
-                0x0000000000108240                glyph_100_data
-                0x0000000000108250                glyph_101_data
-                0x0000000000108260                glyph_102_data
-                0x0000000000108270                glyph_103_data
-                0x0000000000108280                glyph_104_data
-                0x0000000000108290                glyph_105_data
-                0x00000000001082a0                glyph_106_data
-                0x00000000001082b0                glyph_107_data
-                0x00000000001082c0                glyph_108_data
-                0x00000000001082d0                glyph_109_data
-                0x00000000001082e0                glyph_110_data
-                0x00000000001082f0                glyph_111_data
-                0x0000000000108300                glyph_112_data
-                0x0000000000108310                glyph_113_data
-                0x0000000000108320                glyph_114_data
-                0x0000000000108330                glyph_115_data
-                0x0000000000108340                glyph_116_data
-                0x0000000000108350                glyph_117_data
-                0x0000000000108360                glyph_118_data
-                0x0000000000108370                glyph_119_data
-                0x0000000000108380                glyph_120_data
-                0x0000000000108390                glyph_121_data
-                0x00000000001083a0                glyph_122_data
-                0x00000000001083b0                glyph_123_data
-                0x00000000001083c0                glyph_124_data
-                0x00000000001083d0                glyph_125_data
-                0x00000000001083e0                glyph_126_data
-                0x00000000001083f0                glyph_127_data
-                0x0000000000108400                glyph_160_data
-                0x0000000000108410                glyph_161_data
-                0x0000000000108420                glyph_162_data
-                0x0000000000108430                glyph_163_data
-                0x0000000000108440                glyph_164_data
-                0x0000000000108450                glyph_165_data
-                0x0000000000108460                glyph_166_data
-                0x0000000000108470                glyph_167_data
-                0x0000000000108480                glyph_168_data
-                0x0000000000108490                glyph_169_data
-                0x00000000001084a0                glyph_170_data
-                0x00000000001084b0                glyph_171_data
-                0x00000000001084c0                glyph_172_data
-                0x00000000001084d0                glyph_173_data
-                0x00000000001084e0                glyph_174_data
-                0x00000000001084f0                glyph_175_data
-                0x0000000000108500                glyph_176_data
-                0x0000000000108510                glyph_177_data
-                0x0000000000108520                glyph_178_data
-                0x0000000000108530                glyph_179_data
-                0x0000000000108540                glyph_180_data
-                0x0000000000108550                glyph_181_data
-                0x0000000000108560                glyph_182_data
-                0x0000000000108570                glyph_183_data
-                0x0000000000108580                glyph_184_data
-                0x0000000000108590                glyph_185_data
-                0x00000000001085a0                glyph_186_data
-                0x00000000001085b0                glyph_187_data
-                0x00000000001085c0                glyph_188_data
-                0x00000000001085d0                glyph_189_data
-                0x00000000001085e0                glyph_190_data
-                0x00000000001085f0                glyph_191_data
-                0x0000000000108600                glyph_192_data
-                0x0000000000108610                glyph_193_data
-                0x0000000000108620                glyph_194_data
-                0x0000000000108630                glyph_195_data
-                0x0000000000108640                glyph_196_data
-                0x0000000000108650                glyph_197_data
-                0x0000000000108660                glyph_198_data
-                0x0000000000108670                glyph_199_data
-                0x0000000000108680                glyph_200_data
-                0x0000000000108690                glyph_201_data
-                0x00000000001086a0                glyph_202_data
-                0x00000000001086b0                glyph_203_data
-                0x00000000001086c0                glyph_204_data
-                0x00000000001086d0                glyph_205_data
-                0x00000000001086e0                glyph_206_data
-                0x00000000001086f0                glyph_207_data
-                0x0000000000108700                glyph_208_data
-                0x0000000000108710                glyph_209_data
-                0x0000000000108720                glyph_210_data
-                0x0000000000108730                glyph_211_data
-                0x0000000000108740                glyph_212_data
-                0x0000000000108750                glyph_213_data
-                0x0000000000108760                glyph_214_data
-                0x0000000000108770                glyph_215_data
-                0x0000000000108780                glyph_216_data
-                0x0000000000108790                glyph_217_data
-                0x00000000001087a0                glyph_218_data
-                0x00000000001087b0                glyph_219_data
-                0x00000000001087c0                glyph_220_data
-                0x00000000001087d0                glyph_221_data
-                0x00000000001087e0                glyph_222_data
-                0x00000000001087f0                glyph_223_data
-                0x0000000000108800                glyph_224_data
-                0x0000000000108810                glyph_225_data
-                0x0000000000108820                glyph_226_data
-                0x0000000000108830                glyph_227_data
-                0x0000000000108840                glyph_228_data
-                0x0000000000108850                glyph_229_data
-                0x0000000000108860                glyph_230_data
-                0x0000000000108870                glyph_231_data
-                0x0000000000108880                glyph_232_data
-                0x0000000000108890                glyph_233_data
-                0x00000000001088a0                glyph_234_data
-                0x00000000001088b0                glyph_235_data
-                0x00000000001088c0                glyph_236_data
-                0x00000000001088d0                glyph_237_data
-                0x00000000001088e0                glyph_238_data
-                0x00000000001088f0                glyph_239_data
-                0x0000000000108900                glyph_240_data
-                0x0000000000108910                glyph_241_data
-                0x0000000000108920                glyph_242_data
-                0x0000000000108930                glyph_243_data
-                0x0000000000108940                glyph_244_data
-                0x0000000000108950                glyph_245_data
-                0x0000000000108960                glyph_246_data
-                0x0000000000108970                glyph_247_data
-                0x0000000000108980                glyph_248_data
-                0x0000000000108990                glyph_249_data
-                0x00000000001089a0                glyph_250_data
-                0x00000000001089b0                glyph_251_data
-                0x00000000001089c0                glyph_252_data
-                0x00000000001089d0                glyph_253_data
-                0x00000000001089e0                glyph_254_data
-                0x00000000001089f0                glyph_255_data
-                0x0000000000108a00                glyph_256_data
-                0x0000000000108a10                glyph_257_data
-                0x0000000000108a20                glyph_258_data
-                0x0000000000108a30                glyph_259_data
-                0x0000000000108a40                glyph_260_data
-                0x0000000000108a50                glyph_261_data
-                0x0000000000108a60                glyph_262_data
-                0x0000000000108a70                glyph_263_data
-                0x0000000000108a80                glyph_264_data
-                0x0000000000108a90                glyph_265_data
-                0x0000000000108aa0                glyph_266_data
-                0x0000000000108ab0                glyph_267_data
-                0x0000000000108ac0                glyph_268_data
-                0x0000000000108ad0                glyph_269_data
-                0x0000000000108ae0                glyph_270_data
-                0x0000000000108af0                glyph_271_data
-                0x0000000000108b00                glyph_272_data
-                0x0000000000108b10                glyph_273_data
-                0x0000000000108b20                glyph_274_data
-                0x0000000000108b30                glyph_275_data
-                0x0000000000108b40                glyph_276_data
-                0x0000000000108b50                glyph_277_data
-                0x0000000000108b60                glyph_278_data
-                0x0000000000108b70                glyph_279_data
-                0x0000000000108b80                glyph_280_data
-                0x0000000000108b90                glyph_281_data
-                0x0000000000108ba0                glyph_282_data
-                0x0000000000108bb0                glyph_283_data
-                0x0000000000108bc0                glyph_284_data
-                0x0000000000108bd0                glyph_285_data
-                0x0000000000108be0                glyph_286_data
-                0x0000000000108bf0                glyph_287_data
-                0x0000000000108c00                glyph_288_data
-                0x0000000000108c10                glyph_289_data
-                0x0000000000108c20                glyph_290_data
-                0x0000000000108c30                glyph_291_data
-                0x0000000000108c40                glyph_292_data
-                0x0000000000108c50                glyph_293_data
-                0x0000000000108c60                glyph_294_data
-                0x0000000000108c70                glyph_295_data
-                0x0000000000108c80                glyph_296_data
-                0x0000000000108c90                glyph_297_data
-                0x0000000000108ca0                glyph_298_data
-                0x0000000000108cb0                glyph_299_data
-                0x0000000000108cc0                glyph_300_data
-                0x0000000000108cd0                glyph_301_data
-                0x0000000000108ce0                glyph_302_data
-                0x0000000000108cf0                glyph_303_data
-                0x0000000000108d00                glyph_304_data
-                0x0000000000108d10                glyph_305_data
-                0x0000000000108d20                glyph_306_data
-                0x0000000000108d30                glyph_307_data
-                0x0000000000108d40                glyph_308_data
-                0x0000000000108d50                glyph_309_data
-                0x0000000000108d60                glyph_310_data
-                0x0000000000108d70                glyph_311_data
-                0x0000000000108d80                glyph_312_data
-                0x0000000000108d90                glyph_313_data
-                0x0000000000108da0                glyph_314_data
-                0x0000000000108db0                glyph_315_data
-                0x0000000000108dc0                glyph_316_data
-                0x0000000000108dd0                glyph_317_data
-                0x0000000000108de0                glyph_318_data
-                0x0000000000108df0                glyph_319_data
-                0x0000000000108e00                glyph_320_data
-                0x0000000000108e10                glyph_321_data
-                0x0000000000108e20                glyph_322_data
-                0x0000000000108e30                glyph_323_data
-                0x0000000000108e40                glyph_324_data
-                0x0000000000108e50                glyph_325_data
-                0x0000000000108e60                glyph_326_data
-                0x0000000000108e70                glyph_327_data
-                0x0000000000108e80                glyph_328_data
-                0x0000000000108e90                glyph_329_data
-                0x0000000000108ea0                glyph_330_data
-                0x0000000000108eb0                glyph_331_data
-                0x0000000000108ec0                glyph_332_data
-                0x0000000000108ed0                glyph_333_data
-                0x0000000000108ee0                glyph_334_data
-                0x0000000000108ef0                glyph_335_data
-                0x0000000000108f00                glyph_336_data
-                0x0000000000108f10                glyph_337_data
-                0x0000000000108f20                glyph_338_data
-                0x0000000000108f30                glyph_339_data
-                0x0000000000108f40                glyph_340_data
-                0x0000000000108f50                glyph_341_data
-                0x0000000000108f60                glyph_342_data
-                0x0000000000108f70                glyph_343_data
-                0x0000000000108f80                glyph_344_data
-                0x0000000000108f90                glyph_345_data
-                0x0000000000108fa0                glyph_346_data
-                0x0000000000108fb0                glyph_347_data
-                0x0000000000108fc0                glyph_348_data
-                0x0000000000108fd0                glyph_349_data
-                0x0000000000108fe0                glyph_350_data
-                0x0000000000108ff0                glyph_351_data
-                0x0000000000109000                glyph_352_data
-                0x0000000000109010                glyph_353_data
-                0x0000000000109020                glyph_354_data
-                0x0000000000109030                glyph_355_data
-                0x0000000000109040                glyph_356_data
-                0x0000000000109050                glyph_357_data
-                0x0000000000109060                glyph_358_data
-                0x0000000000109070                glyph_359_data
-                0x0000000000109080                glyph_360_data
-                0x0000000000109090                glyph_361_data
-                0x00000000001090a0                glyph_362_data
-                0x00000000001090b0                glyph_363_data
-                0x00000000001090c0                glyph_364_data
-                0x00000000001090d0                glyph_365_data
-                0x00000000001090e0                glyph_366_data
-                0x00000000001090f0                glyph_367_data
-                0x0000000000109100                glyph_368_data
-                0x0000000000109110                glyph_369_data
-                0x0000000000109120                glyph_370_data
-                0x0000000000109130                glyph_371_data
-                0x0000000000109140                glyph_372_data
-                0x0000000000109150                glyph_373_data
-                0x0000000000109160                glyph_374_data
-                0x0000000000109170                glyph_375_data
-                0x0000000000109180                glyph_376_data
-                0x0000000000109190                glyph_377_data
-                0x00000000001091a0                glyph_378_data
-                0x00000000001091b0                glyph_379_data
-                0x00000000001091c0                glyph_380_data
-                0x00000000001091d0                glyph_381_data
-                0x00000000001091e0                glyph_382_data
-                0x00000000001091f0                glyph_383_data
-                0x0000000000109200                glyph_461_data
-                0x0000000000109210                glyph_462_data
-                0x0000000000109220                glyph_463_data
-                0x0000000000109230                glyph_464_data
-                0x0000000000109240                glyph_465_data
-                0x0000000000109250                glyph_466_data
-                0x0000000000109260                glyph_467_data
-                0x0000000000109270                glyph_468_data
-                0x0000000000109280                glyph_482_data
-                0x0000000000109290                glyph_483_data
-                0x00000000001092a0                glyph_486_data
-                0x00000000001092b0                glyph_487_data
-                0x00000000001092c0                glyph_488_data
-                0x00000000001092d0                glyph_489_data
-                0x00000000001092e0                glyph_490_data
-                0x00000000001092f0                glyph_491_data
-                0x0000000000109300                glyph_492_data
-                0x0000000000109310                glyph_493_data
-                0x0000000000109320                glyph_496_data
-                0x0000000000109330                glyph_500_data
-                0x0000000000109340                glyph_501_data
-                0x0000000000109350                glyph_508_data
-                0x0000000000109360                glyph_509_data
-                0x0000000000109370                glyph_510_data
-                0x0000000000109380                glyph_511_data
-                0x0000000000109390                glyph_512_data
-                0x00000000001093a0                glyph_513_data
-                0x00000000001093b0                glyph_514_data
-                0x00000000001093c0                glyph_515_data
-                0x00000000001093d0                glyph_516_data
-                0x00000000001093e0                glyph_517_data
-                0x00000000001093f0                glyph_518_data
-                0x0000000000109400                glyph_519_data
-                0x0000000000109410                glyph_520_data
-                0x0000000000109420                glyph_521_data
-                0x0000000000109430                glyph_522_data
-                0x0000000000109440                glyph_523_data
-                0x0000000000109450                glyph_524_data
-                0x0000000000109460                glyph_525_data
-                0x0000000000109470                glyph_526_data
-                0x0000000000109480                glyph_527_data
-                0x0000000000109490                glyph_528_data
-                0x00000000001094a0                glyph_529_data
-                0x00000000001094b0                glyph_530_data
-                0x00000000001094c0                glyph_531_data
-                0x00000000001094d0                glyph_532_data
-                0x00000000001094e0                glyph_533_data
-                0x00000000001094f0                glyph_534_data
-                0x0000000000109500                glyph_535_data
-                0x0000000000109510                glyph_542_data
-                0x0000000000109520                glyph_543_data
-                0x0000000000109530                glyph_550_data
-                0x0000000000109540                glyph_551_data
-                0x0000000000109550                glyph_552_data
-                0x0000000000109560                glyph_553_data
-                0x0000000000109570                glyph_558_data
-                0x0000000000109580                glyph_559_data
-                0x0000000000109590                glyph_728_data
-                0x00000000001095a0                glyph_729_data
-                0x00000000001095b0                glyph_731_data
-                0x00000000001095c0                glyph_732_data
-                0x00000000001095d0                glyph_733_data
-                0x00000000001095e0                glyph_8214_data
-                0x00000000001095f0                glyph_8216_data
-                0x0000000000109600                glyph_8217_data
-                0x0000000000109610                glyph_8220_data
-                0x0000000000109620                glyph_8221_data
-                0x0000000000109630                glyph_8226_data
-                0x0000000000109640                glyph_8230_data
-                0x0000000000109650                glyph_8249_data
-                0x0000000000109660                glyph_8250_data
-                0x0000000000109670                glyph_8252_data
-                0x0000000000109680                glyph_8364_data
-                0x0000000000109690                glyph_8776_data
-                0x00000000001096a0                glyph_9472_data
-                0x00000000001096b0                glyph_9473_data
-                0x00000000001096c0                glyph_9474_data
-                0x00000000001096d0                glyph_9475_data
-                0x00000000001096e0                glyph_9476_data
-                0x00000000001096f0                glyph_9477_data
-                0x0000000000109700                glyph_9478_data
-                0x0000000000109710                glyph_9479_data
-                0x0000000000109720                glyph_9480_data
-                0x0000000000109730                glyph_9481_data
-                0x0000000000109740                glyph_9482_data
-                0x0000000000109750                glyph_9483_data
-                0x0000000000109760                glyph_9484_data
-                0x0000000000109770                glyph_9485_data
-                0x0000000000109780                glyph_9486_data
-                0x0000000000109790                glyph_9487_data
-                0x00000000001097a0                glyph_9488_data
-                0x00000000001097b0                glyph_9489_data
-                0x00000000001097c0                glyph_9490_data
-                0x00000000001097d0                glyph_9491_data
-                0x00000000001097e0                glyph_9492_data
-                0x00000000001097f0                glyph_9493_data
-                0x0000000000109800                glyph_9494_data
-                0x0000000000109810                glyph_9495_data
-                0x0000000000109820                glyph_9496_data
-                0x0000000000109830                glyph_9497_data
-                0x0000000000109840                glyph_9498_data
-                0x0000000000109850                glyph_9499_data
-                0x0000000000109860                glyph_9500_data
-                0x0000000000109870                glyph_9501_data
-                0x0000000000109880                glyph_9502_data
-                0x0000000000109890                glyph_9503_data
-                0x00000000001098a0                glyph_9504_data
-                0x00000000001098b0                glyph_9505_data
-                0x00000000001098c0                glyph_9506_data
-                0x00000000001098d0                glyph_9507_data
-                0x00000000001098e0                glyph_9508_data
-                0x00000000001098f0                glyph_9509_data
-                0x0000000000109900                glyph_9510_data
-                0x0000000000109910                glyph_9511_data
-                0x0000000000109920                glyph_9512_data
-                0x0000000000109930                glyph_9513_data
-                0x0000000000109940                glyph_9514_data
-                0x0000000000109950                glyph_9515_data
-                0x0000000000109960                glyph_9516_data
-                0x0000000000109970                glyph_9517_data
-                0x0000000000109980                glyph_9518_data
-                0x0000000000109990                glyph_9519_data
-                0x00000000001099a0                glyph_9520_data
-                0x00000000001099b0                glyph_9521_data
-                0x00000000001099c0                glyph_9522_data
-                0x00000000001099d0                glyph_9523_data
-                0x00000000001099e0                glyph_9524_data
-                0x00000000001099f0                glyph_9525_data
-                0x0000000000109a00                glyph_9526_data
-                0x0000000000109a10                glyph_9527_data
-                0x0000000000109a20                glyph_9528_data
-                0x0000000000109a30                glyph_9529_data
-                0x0000000000109a40                glyph_9530_data
-                0x0000000000109a50                glyph_9531_data
-                0x0000000000109a60                glyph_9532_data
-                0x0000000000109a70                glyph_9533_data
-                0x0000000000109a80                glyph_9534_data
-                0x0000000000109a90                glyph_9535_data
-                0x0000000000109aa0                glyph_9536_data
-                0x0000000000109ab0                glyph_9537_data
-                0x0000000000109ac0                glyph_9538_data
-                0x0000000000109ad0                glyph_9539_data
-                0x0000000000109ae0                glyph_9540_data
-                0x0000000000109af0                glyph_9541_data
-                0x0000000000109b00                glyph_9542_data
-                0x0000000000109b10                glyph_9543_data
-                0x0000000000109b20                glyph_9544_data
-                0x0000000000109b30                glyph_9545_data
-                0x0000000000109b40                glyph_9546_data
-                0x0000000000109b50                glyph_9547_data
-                0x0000000000109b60                glyph_9548_data
-                0x0000000000109b70                glyph_9549_data
-                0x0000000000109b80                glyph_9550_data
-                0x0000000000109b90                glyph_9551_data
-                0x0000000000109ba0                glyph_9552_data
-                0x0000000000109bb0                glyph_9553_data
-                0x0000000000109bc0                glyph_9554_data
-                0x0000000000109bd0                glyph_9555_data
-                0x0000000000109be0                glyph_9556_data
-                0x0000000000109bf0                glyph_9557_data
-                0x0000000000109c00                glyph_9558_data
-                0x0000000000109c10                glyph_9559_data
-                0x0000000000109c20                glyph_9560_data
-                0x0000000000109c30                glyph_9561_data
-                0x0000000000109c40                glyph_9562_data
-                0x0000000000109c50                glyph_9563_data
-                0x0000000000109c60                glyph_9564_data
-                0x0000000000109c70                glyph_9565_data
-                0x0000000000109c80                glyph_9566_data
-                0x0000000000109c90                glyph_9567_data
-                0x0000000000109ca0                glyph_9568_data
-                0x0000000000109cb0                glyph_9569_data
-                0x0000000000109cc0                glyph_9570_data
-                0x0000000000109cd0                glyph_9571_data
-                0x0000000000109ce0                glyph_9572_data
-                0x0000000000109cf0                glyph_9573_data
-                0x0000000000109d00                glyph_9574_data
-                0x0000000000109d10                glyph_9575_data
-                0x0000000000109d20                glyph_9576_data
-                0x0000000000109d30                glyph_9577_data
-                0x0000000000109d40                glyph_9578_data
-                0x0000000000109d50                glyph_9579_data
-                0x0000000000109d60                glyph_9580_data
-                0x0000000000109d70                glyph_9581_data
-                0x0000000000109d80                glyph_9582_data
-                0x0000000000109d90                glyph_9583_data
-                0x0000000000109da0                glyph_9584_data
-                0x0000000000109db0                glyph_9585_data
-                0x0000000000109dc0                glyph_9586_data
-                0x0000000000109dd0                glyph_9587_data
-                0x0000000000109de0                glyph_9588_data
-                0x0000000000109df0                glyph_9589_data
-                0x0000000000109e00                glyph_9590_data
-                0x0000000000109e10                glyph_9591_data
-                0x0000000000109e20                glyph_9592_data
-                0x0000000000109e30                glyph_9593_data
-                0x0000000000109e40                glyph_9594_data
-                0x0000000000109e50                glyph_9595_data
-                0x0000000000109e60                glyph_9596_data
-                0x0000000000109e70                glyph_9597_data
-                0x0000000000109e80                glyph_9598_data
-                0x0000000000109e90                glyph_9599_data
-                0x0000000000109ea0                glyph_9600_data
-                0x0000000000109eb0                glyph_9601_data
-                0x0000000000109ec0                glyph_9602_data
-                0x0000000000109ed0                glyph_9603_data
-                0x0000000000109ee0                glyph_9604_data
-                0x0000000000109ef0                glyph_9605_data
-                0x0000000000109f00                glyph_9606_data
-                0x0000000000109f10                glyph_9607_data
-                0x0000000000109f20                glyph_9608_data
-                0x0000000000109f30                glyph_9609_data
-                0x0000000000109f40                glyph_9610_data
-                0x0000000000109f50                glyph_9611_data
-                0x0000000000109f60                glyph_9612_data
-                0x0000000000109f70                glyph_9613_data
-                0x0000000000109f80                glyph_9614_data
-                0x0000000000109f90                glyph_9615_data
-                0x0000000000109fa0                glyph_9616_data
-                0x0000000000109fb0                glyph_9617_data
-                0x0000000000109fc0                glyph_9618_data
-                0x0000000000109fd0                glyph_9619_data
-                0x0000000000109fe0                glyph_9620_data
-                0x0000000000109ff0                glyph_9621_data
-                0x000000000010a000                glyph_9622_data
-                0x000000000010a010                glyph_9623_data
-                0x000000000010a020                glyph_9624_data
-                0x000000000010a030                glyph_9625_data
-                0x000000000010a040                glyph_9626_data
-                0x000000000010a050                glyph_9627_data
-                0x000000000010a060                glyph_9628_data
-                0x000000000010a070                glyph_9629_data
-                0x000000000010a080                glyph_9630_data
-                0x000000000010a090                glyph_9631_data
-                0x000000000010a0a0                glyph_9670_data
-                0x000000000010a0b0                glyph_9674_data
-                0x000000000010a0c0                glyph_9675_data
-                0x000000000010a0d0                glyph_9679_data
-                0x000000000010a0e0                glyph_9688_data
-                0x000000000010a0f0                glyph_9689_data
-                0x000000000010a100                glyph_9698_data
-                0x000000000010a110                glyph_9699_data
-                0x000000000010a120                glyph_9700_data
-                0x000000000010a130                glyph_9701_data
-                0x000000000010a140                glyph_9776_data
-                0x000000000010a150                glyph_9777_data
-                0x000000000010a160                glyph_9778_data
-                0x000000000010a170                glyph_9779_data
-                0x000000000010a180                glyph_9780_data
-                0x000000000010a190                glyph_9781_data
-                0x000000000010a1a0                glyph_9782_data
-                0x000000000010a1b0                glyph_9783_data
-                0x000000000010a1c0                glyph_9829_data
-                0x000000000010a1d0                glyph_9830_data
-                0x000000000010a1e0                glyph_10240_data
-                0x000000000010a1f0                glyph_10241_data
-                0x000000000010a200                glyph_10242_data
-                0x000000000010a210                glyph_10243_data
-                0x000000000010a220                glyph_10244_data
-                0x000000000010a230                glyph_10245_data
-                0x000000000010a240                glyph_10246_data
-                0x000000000010a250                glyph_10247_data
-                0x000000000010a260                glyph_10248_data
-                0x000000000010a270                glyph_10249_data
-                0x000000000010a280                glyph_10250_data
-                0x000000000010a290                glyph_10251_data
-                0x000000000010a2a0                glyph_10252_data
-                0x000000000010a2b0                glyph_10253_data
-                0x000000000010a2c0                glyph_10254_data
-                0x000000000010a2d0                glyph_10255_data
-                0x000000000010a2e0                glyph_10256_data
-                0x000000000010a2f0                glyph_10257_data
-                0x000000000010a300                glyph_10258_data
-                0x000000000010a310                glyph_10259_data
-                0x000000000010a320                glyph_10260_data
-                0x000000000010a330                glyph_10261_data
-                0x000000000010a340                glyph_10262_data
-                0x000000000010a350                glyph_10263_data
-                0x000000000010a360                glyph_10264_data
-                0x000000000010a370                glyph_10265_data
-                0x000000000010a380                glyph_10266_data
-                0x000000000010a390                glyph_10267_data
-                0x000000000010a3a0                glyph_10268_data
-                0x000000000010a3b0                glyph_10269_data
-                0x000000000010a3c0                glyph_10270_data
-                0x000000000010a3d0                glyph_10271_data
-                0x000000000010a3e0                glyph_10272_data
-                0x000000000010a3f0                glyph_10273_data
-                0x000000000010a400                glyph_10274_data
-                0x000000000010a410                glyph_10275_data
-                0x000000000010a420                glyph_10276_data
-                0x000000000010a430                glyph_10277_data
-                0x000000000010a440                glyph_10278_data
-                0x000000000010a450                glyph_10279_data
-                0x000000000010a460                glyph_10280_data
-                0x000000000010a470                glyph_10281_data
-                0x000000000010a480                glyph_10282_data
-                0x000000000010a490                glyph_10283_data
-                0x000000000010a4a0                glyph_10284_data
-                0x000000000010a4b0                glyph_10285_data
-                0x000000000010a4c0                glyph_10286_data
-                0x000000000010a4d0                glyph_10287_data
-                0x000000000010a4e0                glyph_10288_data
-                0x000000000010a4f0                glyph_10289_data
-                0x000000000010a500                glyph_10290_data
-                0x000000000010a510                glyph_10291_data
-                0x000000000010a520                glyph_10292_data
-                0x000000000010a530                glyph_10293_data
-                0x000000000010a540                glyph_10294_data
-                0x000000000010a550                glyph_10295_data
-                0x000000000010a560                glyph_10296_data
-                0x000000000010a570                glyph_10297_data
-                0x000000000010a580                glyph_10298_data
-                0x000000000010a590                glyph_10299_data
-                0x000000000010a5a0                glyph_10300_data
-                0x000000000010a5b0                glyph_10301_data
-                0x000000000010a5c0                glyph_10302_data
-                0x000000000010a5d0                glyph_10303_data
-                0x000000000010a5e0                glyph_10304_data
-                0x000000000010a5f0                glyph_10305_data
-                0x000000000010a600                glyph_10306_data
-                0x000000000010a610                glyph_10307_data
-                0x000000000010a620                glyph_10308_data
-                0x000000000010a630                glyph_10309_data
-                0x000000000010a640                glyph_10310_data
-                0x000000000010a650                glyph_10311_data
-                0x000000000010a660                glyph_10312_data
-                0x000000000010a670                glyph_10313_data
-                0x000000000010a680                glyph_10314_data
-                0x000000000010a690                glyph_10315_data
-                0x000000000010a6a0                glyph_10316_data
-                0x000000000010a6b0                glyph_10317_data
-                0x000000000010a6c0                glyph_10318_data
-                0x000000000010a6d0                glyph_10319_data
-                0x000000000010a6e0                glyph_10320_data
-                0x000000000010a6f0                glyph_10321_data
-                0x000000000010a700                glyph_10322_data
-                0x000000000010a710                glyph_10323_data
-                0x000000000010a720                glyph_10324_data
-                0x000000000010a730                glyph_10325_data
-                0x000000000010a740                glyph_10326_data
-                0x000000000010a750                glyph_10327_data
-                0x000000000010a760                glyph_10328_data
-                0x000000000010a770                glyph_10329_data
-                0x000000000010a780                glyph_10330_data
-                0x000000000010a790                glyph_10331_data
-                0x000000000010a7a0                glyph_10332_data
-                0x000000000010a7b0                glyph_10333_data
-                0x000000000010a7c0                glyph_10334_data
-                0x000000000010a7d0                glyph_10335_data
-                0x000000000010a7e0                glyph_10336_data
-                0x000000000010a7f0                glyph_10337_data
-                0x000000000010a800                glyph_10338_data
-                0x000000000010a810                glyph_10339_data
-                0x000000000010a820                glyph_10340_data
-                0x000000000010a830                glyph_10341_data
-                0x000000000010a840                glyph_10342_data
-                0x000000000010a850                glyph_10343_data
-                0x000000000010a860                glyph_10344_data
-                0x000000000010a870                glyph_10345_data
-                0x000000000010a880                glyph_10346_data
-                0x000000000010a890                glyph_10347_data
-                0x000000000010a8a0                glyph_10348_data
-                0x000000000010a8b0                glyph_10349_data
-                0x000000000010a8c0                glyph_10350_data
-                0x000000000010a8d0                glyph_10351_data
-                0x000000000010a8e0                glyph_10352_data
-                0x000000000010a8f0                glyph_10353_data
-                0x000000000010a900                glyph_10354_data
-                0x000000000010a910                glyph_10355_data
-                0x000000000010a920                glyph_10356_data
-                0x000000000010a930                glyph_10357_data
-                0x000000000010a940                glyph_10358_data
-                0x000000000010a950                glyph_10359_data
-                0x000000000010a960                glyph_10360_data
-                0x000000000010a970                glyph_10361_data
-                0x000000000010a980                glyph_10362_data
-                0x000000000010a990                glyph_10363_data
-                0x000000000010a9a0                glyph_10364_data
-                0x000000000010a9b0                glyph_10365_data
-                0x000000000010a9c0                glyph_10366_data
-                0x000000000010a9d0                glyph_10367_data
-                0x000000000010a9e0                glyph_10368_data
-                0x000000000010a9f0                glyph_10369_data
-                0x000000000010aa00                glyph_10370_data
-                0x000000000010aa10                glyph_10371_data
-                0x000000000010aa20                glyph_10372_data
-                0x000000000010aa30                glyph_10373_data
-                0x000000000010aa40                glyph_10374_data
-                0x000000000010aa50                glyph_10375_data
-                0x000000000010aa60                glyph_10376_data
-                0x000000000010aa70                glyph_10377_data
-                0x000000000010aa80                glyph_10378_data
-                0x000000000010aa90                glyph_10379_data
-                0x000000000010aaa0                glyph_10380_data
-                0x000000000010aab0                glyph_10381_data
-                0x000000000010aac0                glyph_10382_data
-                0x000000000010aad0                glyph_10383_data
-                0x000000000010aae0                glyph_10384_data
-                0x000000000010aaf0                glyph_10385_data
-                0x000000000010ab00                glyph_10386_data
-                0x000000000010ab10                glyph_10387_data
-                0x000000000010ab20                glyph_10388_data
-                0x000000000010ab30                glyph_10389_data
-                0x000000000010ab40                glyph_10390_data
-                0x000000000010ab50                glyph_10391_data
-                0x000000000010ab60                glyph_10392_data
-                0x000000000010ab70                glyph_10393_data
-                0x000000000010ab80                glyph_10394_data
-                0x000000000010ab90                glyph_10395_data
-                0x000000000010aba0                glyph_10396_data
-                0x000000000010abb0                glyph_10397_data
-                0x000000000010abc0                glyph_10398_data
-                0x000000000010abd0                glyph_10399_data
-                0x000000000010abe0                glyph_10400_data
-                0x000000000010abf0                glyph_10401_data
-                0x000000000010ac00                glyph_10402_data
-                0x000000000010ac10                glyph_10403_data
-                0x000000000010ac20                glyph_10404_data
-                0x000000000010ac30                glyph_10405_data
-                0x000000000010ac40                glyph_10406_data
-                0x000000000010ac50                glyph_10407_data
-                0x000000000010ac60                glyph_10408_data
-                0x000000000010ac70                glyph_10409_data
-                0x000000000010ac80                glyph_10410_data
-                0x000000000010ac90                glyph_10411_data
-                0x000000000010aca0                glyph_10412_data
-                0x000000000010acb0                glyph_10413_data
-                0x000000000010acc0                glyph_10414_data
-                0x000000000010acd0                glyph_10415_data
-                0x000000000010ace0                glyph_10416_data
-                0x000000000010acf0                glyph_10417_data
-                0x000000000010ad00                glyph_10418_data
-                0x000000000010ad10                glyph_10419_data
-                0x000000000010ad20                glyph_10420_data
-                0x000000000010ad30                glyph_10421_data
-                0x000000000010ad40                glyph_10422_data
-                0x000000000010ad50                glyph_10423_data
-                0x000000000010ad60                glyph_10424_data
-                0x000000000010ad70                glyph_10425_data
-                0x000000000010ad80                glyph_10426_data
-                0x000000000010ad90                glyph_10427_data
-                0x000000000010ada0                glyph_10428_data
-                0x000000000010adb0                glyph_10429_data
-                0x000000000010adc0                glyph_10430_data
-                0x000000000010add0                glyph_10431_data
-                0x000000000010ade0                glyph_10432_data
-                0x000000000010adf0                glyph_10433_data
-                0x000000000010ae00                glyph_10434_data
-                0x000000000010ae10                glyph_10435_data
-                0x000000000010ae20                glyph_10436_data
-                0x000000000010ae30                glyph_10437_data
-                0x000000000010ae40                glyph_10438_data
-                0x000000000010ae50                glyph_10439_data
-                0x000000000010ae60                glyph_10440_data
-                0x000000000010ae70                glyph_10441_data
-                0x000000000010ae80                glyph_10442_data
-                0x000000000010ae90                glyph_10443_data
-                0x000000000010aea0                glyph_10444_data
-                0x000000000010aeb0                glyph_10445_data
-                0x000000000010aec0                glyph_10446_data
-                0x000000000010aed0                glyph_10447_data
-                0x000000000010aee0                glyph_10448_data
-                0x000000000010aef0                glyph_10449_data
-                0x000000000010af00                glyph_10450_data
-                0x000000000010af10                glyph_10451_data
-                0x000000000010af20                glyph_10452_data
-                0x000000000010af30                glyph_10453_data
-                0x000000000010af40                glyph_10454_data
-                0x000000000010af50                glyph_10455_data
-                0x000000000010af60                glyph_10456_data
-                0x000000000010af70                glyph_10457_data
-                0x000000000010af80                glyph_10458_data
-                0x000000000010af90                glyph_10459_data
-                0x000000000010afa0                glyph_10460_data
-                0x000000000010afb0                glyph_10461_data
-                0x000000000010afc0                glyph_10462_data
-                0x000000000010afd0                glyph_10463_data
-                0x000000000010afe0                glyph_10464_data
-                0x000000000010aff0                glyph_10465_data
-                0x000000000010b000                glyph_10466_data
-                0x000000000010b010                glyph_10467_data
-                0x000000000010b020                glyph_10468_data
-                0x000000000010b030                glyph_10469_data
-                0x000000000010b040                glyph_10470_data
-                0x000000000010b050                glyph_10471_data
-                0x000000000010b060                glyph_10472_data
-                0x000000000010b070                glyph_10473_data
-                0x000000000010b080                glyph_10474_data
-                0x000000000010b090                glyph_10475_data
-                0x000000000010b0a0                glyph_10476_data
-                0x000000000010b0b0                glyph_10477_data
-                0x000000000010b0c0                glyph_10478_data
-                0x000000000010b0d0                glyph_10479_data
-                0x000000000010b0e0                glyph_10480_data
-                0x000000000010b0f0                glyph_10481_data
-                0x000000000010b100                glyph_10482_data
-                0x000000000010b110                glyph_10483_data
-                0x000000000010b120                glyph_10484_data
-                0x000000000010b130                glyph_10485_data
-                0x000000000010b140                glyph_10486_data
-                0x000000000010b150                glyph_10487_data
-                0x000000000010b160                glyph_10488_data
-                0x000000000010b170                glyph_10489_data
-                0x000000000010b180                glyph_10490_data
-                0x000000000010b190                glyph_10491_data
-                0x000000000010b1a0                glyph_10492_data
-                0x000000000010b1b0                glyph_10493_data
-                0x000000000010b1c0                glyph_10494_data
-                0x000000000010b1d0                glyph_10495_data
-                0x000000000010b1e0                glyph_57504_data
-                0x000000000010b1f0                glyph_57505_data
-                0x000000000010b200                glyph_57506_data
-                0x000000000010b210                glyph_57520_data
-                0x000000000010b220                glyph_57521_data
-                0x000000000010b230                glyph_57522_data
-                0x000000000010b240                glyph_57523_data
-                0x000000000010b260                _misc_spleen_medium_r_normal__16_160_72_72_c_80_iso10646_1_map
-                0x00000000001100d8                _misc_spleen_medium_r_normal__16_160_72_72_c_80_iso10646_1_count
+ .rodata        0x0000000000106c40       0x1a ../bin/boot.o
+ *fill*         0x0000000000106c5a        0x6 
+ .rodata        0x0000000000106c60      0x284 ../bin/kernel.o
+ *fill*         0x0000000000106ee4        0x4 
+ .rodata        0x0000000000106ee8       0xb8 ../bin/com1.o
+ .rodata        0x0000000000106fa0      0x4f0 ../bin/panic.o
+ .rodata        0x0000000000107490      0x18d ../bin/memory.o
+ *fill*         0x000000000010761d        0x3 
+ .rodata        0x0000000000107620       0x5e ../bin/pata.o
+ *fill*         0x000000000010767e        0x2 
+ .rodata        0x0000000000107680      0x448 ../bin/chainfs.o
+ .rodata        0x0000000000107ac8      0x1f0 ../bin/vga.o
+ *fill*         0x0000000000107cb8        0x8 
+ .rodata        0x0000000000107cc0      0x100 ../bin/ps2.o
+                0x0000000000107cc0                kbd_us
+                0x0000000000107d40                kbd_us_caps
+ .rodata        0x0000000000107dc0       0x72 ../bin/keyboard.o
+ *fill*         0x0000000000107e32        0x6 
+ .rodata        0x0000000000107e38       0xbf ../bin/fb.o
+ *fill*         0x0000000000107ef7        0x9 
+ .rodata        0x0000000000107f00     0x85d8 ../bin/font.o
+                0x0000000000107f00                glyph_32_data
+                0x0000000000107f10                glyph_33_data
+                0x0000000000107f20                glyph_34_data
+                0x0000000000107f30                glyph_35_data
+                0x0000000000107f40                glyph_36_data
+                0x0000000000107f50                glyph_37_data
+                0x0000000000107f60                glyph_38_data
+                0x0000000000107f70                glyph_39_data
+                0x0000000000107f80                glyph_40_data
+                0x0000000000107f90                glyph_41_data
+                0x0000000000107fa0                glyph_42_data
+                0x0000000000107fb0                glyph_43_data
+                0x0000000000107fc0                glyph_44_data
+                0x0000000000107fd0                glyph_45_data
+                0x0000000000107fe0                glyph_46_data
+                0x0000000000107ff0                glyph_47_data
+                0x0000000000108000                glyph_48_data
+                0x0000000000108010                glyph_49_data
+                0x0000000000108020                glyph_50_data
+                0x0000000000108030                glyph_51_data
+                0x0000000000108040                glyph_52_data
+                0x0000000000108050                glyph_53_data
+                0x0000000000108060                glyph_54_data
+                0x0000000000108070                glyph_55_data
+                0x0000000000108080                glyph_56_data
+                0x0000000000108090                glyph_57_data
+                0x00000000001080a0                glyph_58_data
+                0x00000000001080b0                glyph_59_data
+                0x00000000001080c0                glyph_60_data
+                0x00000000001080d0                glyph_61_data
+                0x00000000001080e0                glyph_62_data
+                0x00000000001080f0                glyph_63_data
+                0x0000000000108100                glyph_64_data
+                0x0000000000108110                glyph_65_data
+                0x0000000000108120                glyph_66_data
+                0x0000000000108130                glyph_67_data
+                0x0000000000108140                glyph_68_data
+                0x0000000000108150                glyph_69_data
+                0x0000000000108160                glyph_70_data
+                0x0000000000108170                glyph_71_data
+                0x0000000000108180                glyph_72_data
+                0x0000000000108190                glyph_73_data
+                0x00000000001081a0                glyph_74_data
+                0x00000000001081b0                glyph_75_data
+                0x00000000001081c0                glyph_76_data
+                0x00000000001081d0                glyph_77_data
+                0x00000000001081e0                glyph_78_data
+                0x00000000001081f0                glyph_79_data
+                0x0000000000108200                glyph_80_data
+                0x0000000000108210                glyph_81_data
+                0x0000000000108220                glyph_82_data
+                0x0000000000108230                glyph_83_data
+                0x0000000000108240                glyph_84_data
+                0x0000000000108250                glyph_85_data
+                0x0000000000108260                glyph_86_data
+                0x0000000000108270                glyph_87_data
+                0x0000000000108280                glyph_88_data
+                0x0000000000108290                glyph_89_data
+                0x00000000001082a0                glyph_90_data
+                0x00000000001082b0                glyph_91_data
+                0x00000000001082c0                glyph_92_data
+                0x00000000001082d0                glyph_93_data
+                0x00000000001082e0                glyph_94_data
+                0x00000000001082f0                glyph_95_data
+                0x0000000000108300                glyph_96_data
+                0x0000000000108310                glyph_97_data
+                0x0000000000108320                glyph_98_data
+                0x0000000000108330                glyph_99_data
+                0x0000000000108340                glyph_100_data
+                0x0000000000108350                glyph_101_data
+                0x0000000000108360                glyph_102_data
+                0x0000000000108370                glyph_103_data
+                0x0000000000108380                glyph_104_data
+                0x0000000000108390                glyph_105_data
+                0x00000000001083a0                glyph_106_data
+                0x00000000001083b0                glyph_107_data
+                0x00000000001083c0                glyph_108_data
+                0x00000000001083d0                glyph_109_data
+                0x00000000001083e0                glyph_110_data
+                0x00000000001083f0                glyph_111_data
+                0x0000000000108400                glyph_112_data
+                0x0000000000108410                glyph_113_data
+                0x0000000000108420                glyph_114_data
+                0x0000000000108430                glyph_115_data
+                0x0000000000108440                glyph_116_data
+                0x0000000000108450                glyph_117_data
+                0x0000000000108460                glyph_118_data
+                0x0000000000108470                glyph_119_data
+                0x0000000000108480                glyph_120_data
+                0x0000000000108490                glyph_121_data
+                0x00000000001084a0                glyph_122_data
+                0x00000000001084b0                glyph_123_data
+                0x00000000001084c0                glyph_124_data
+                0x00000000001084d0                glyph_125_data
+                0x00000000001084e0                glyph_126_data
+                0x00000000001084f0                glyph_127_data
+                0x0000000000108500                glyph_160_data
+                0x0000000000108510                glyph_161_data
+                0x0000000000108520                glyph_162_data
+                0x0000000000108530                glyph_163_data
+                0x0000000000108540                glyph_164_data
+                0x0000000000108550                glyph_165_data
+                0x0000000000108560                glyph_166_data
+                0x0000000000108570                glyph_167_data
+                0x0000000000108580                glyph_168_data
+                0x0000000000108590                glyph_169_data
+                0x00000000001085a0                glyph_170_data
+                0x00000000001085b0                glyph_171_data
+                0x00000000001085c0                glyph_172_data
+                0x00000000001085d0                glyph_173_data
+                0x00000000001085e0                glyph_174_data
+                0x00000000001085f0                glyph_175_data
+                0x0000000000108600                glyph_176_data
+                0x0000000000108610                glyph_177_data
+                0x0000000000108620                glyph_178_data
+                0x0000000000108630                glyph_179_data
+                0x0000000000108640                glyph_180_data
+                0x0000000000108650                glyph_181_data
+                0x0000000000108660                glyph_182_data
+                0x0000000000108670                glyph_183_data
+                0x0000000000108680                glyph_184_data
+                0x0000000000108690                glyph_185_data
+                0x00000000001086a0                glyph_186_data
+                0x00000000001086b0                glyph_187_data
+                0x00000000001086c0                glyph_188_data
+                0x00000000001086d0                glyph_189_data
+                0x00000000001086e0                glyph_190_data
+                0x00000000001086f0                glyph_191_data
+                0x0000000000108700                glyph_192_data
+                0x0000000000108710                glyph_193_data
+                0x0000000000108720                glyph_194_data
+                0x0000000000108730                glyph_195_data
+                0x0000000000108740                glyph_196_data
+                0x0000000000108750                glyph_197_data
+                0x0000000000108760                glyph_198_data
+                0x0000000000108770                glyph_199_data
+                0x0000000000108780                glyph_200_data
+                0x0000000000108790                glyph_201_data
+                0x00000000001087a0                glyph_202_data
+                0x00000000001087b0                glyph_203_data
+                0x00000000001087c0                glyph_204_data
+                0x00000000001087d0                glyph_205_data
+                0x00000000001087e0                glyph_206_data
+                0x00000000001087f0                glyph_207_data
+                0x0000000000108800                glyph_208_data
+                0x0000000000108810                glyph_209_data
+                0x0000000000108820                glyph_210_data
+                0x0000000000108830                glyph_211_data
+                0x0000000000108840                glyph_212_data
+                0x0000000000108850                glyph_213_data
+                0x0000000000108860                glyph_214_data
+                0x0000000000108870                glyph_215_data
+                0x0000000000108880                glyph_216_data
+                0x0000000000108890                glyph_217_data
+                0x00000000001088a0                glyph_218_data
+                0x00000000001088b0                glyph_219_data
+                0x00000000001088c0                glyph_220_data
+                0x00000000001088d0                glyph_221_data
+                0x00000000001088e0                glyph_222_data
+                0x00000000001088f0                glyph_223_data
+                0x0000000000108900                glyph_224_data
+                0x0000000000108910                glyph_225_data
+                0x0000000000108920                glyph_226_data
+                0x0000000000108930                glyph_227_data
+                0x0000000000108940                glyph_228_data
+                0x0000000000108950                glyph_229_data
+                0x0000000000108960                glyph_230_data
+                0x0000000000108970                glyph_231_data
+                0x0000000000108980                glyph_232_data
+                0x0000000000108990                glyph_233_data
+                0x00000000001089a0                glyph_234_data
+                0x00000000001089b0                glyph_235_data
+                0x00000000001089c0                glyph_236_data
+                0x00000000001089d0                glyph_237_data
+                0x00000000001089e0                glyph_238_data
+                0x00000000001089f0                glyph_239_data
+                0x0000000000108a00                glyph_240_data
+                0x0000000000108a10                glyph_241_data
+                0x0000000000108a20                glyph_242_data
+                0x0000000000108a30                glyph_243_data
+                0x0000000000108a40                glyph_244_data
+                0x0000000000108a50                glyph_245_data
+                0x0000000000108a60                glyph_246_data
+                0x0000000000108a70                glyph_247_data
+                0x0000000000108a80                glyph_248_data
+                0x0000000000108a90                glyph_249_data
+                0x0000000000108aa0                glyph_250_data
+                0x0000000000108ab0                glyph_251_data
+                0x0000000000108ac0                glyph_252_data
+                0x0000000000108ad0                glyph_253_data
+                0x0000000000108ae0                glyph_254_data
+                0x0000000000108af0                glyph_255_data
+                0x0000000000108b00                glyph_256_data
+                0x0000000000108b10                glyph_257_data
+                0x0000000000108b20                glyph_258_data
+                0x0000000000108b30                glyph_259_data
+                0x0000000000108b40                glyph_260_data
+                0x0000000000108b50                glyph_261_data
+                0x0000000000108b60                glyph_262_data
+                0x0000000000108b70                glyph_263_data
+                0x0000000000108b80                glyph_264_data
+                0x0000000000108b90                glyph_265_data
+                0x0000000000108ba0                glyph_266_data
+                0x0000000000108bb0                glyph_267_data
+                0x0000000000108bc0                glyph_268_data
+                0x0000000000108bd0                glyph_269_data
+                0x0000000000108be0                glyph_270_data
+                0x0000000000108bf0                glyph_271_data
+                0x0000000000108c00                glyph_272_data
+                0x0000000000108c10                glyph_273_data
+                0x0000000000108c20                glyph_274_data
+                0x0000000000108c30                glyph_275_data
+                0x0000000000108c40                glyph_276_data
+                0x0000000000108c50                glyph_277_data
+                0x0000000000108c60                glyph_278_data
+                0x0000000000108c70                glyph_279_data
+                0x0000000000108c80                glyph_280_data
+                0x0000000000108c90                glyph_281_data
+                0x0000000000108ca0                glyph_282_data
+                0x0000000000108cb0                glyph_283_data
+                0x0000000000108cc0                glyph_284_data
+                0x0000000000108cd0                glyph_285_data
+                0x0000000000108ce0                glyph_286_data
+                0x0000000000108cf0                glyph_287_data
+                0x0000000000108d00                glyph_288_data
+                0x0000000000108d10                glyph_289_data
+                0x0000000000108d20                glyph_290_data
+                0x0000000000108d30                glyph_291_data
+                0x0000000000108d40                glyph_292_data
+                0x0000000000108d50                glyph_293_data
+                0x0000000000108d60                glyph_294_data
+                0x0000000000108d70                glyph_295_data
+                0x0000000000108d80                glyph_296_data
+                0x0000000000108d90                glyph_297_data
+                0x0000000000108da0                glyph_298_data
+                0x0000000000108db0                glyph_299_data
+                0x0000000000108dc0                glyph_300_data
+                0x0000000000108dd0                glyph_301_data
+                0x0000000000108de0                glyph_302_data
+                0x0000000000108df0                glyph_303_data
+                0x0000000000108e00                glyph_304_data
+                0x0000000000108e10                glyph_305_data
+                0x0000000000108e20                glyph_306_data
+                0x0000000000108e30                glyph_307_data
+                0x0000000000108e40                glyph_308_data
+                0x0000000000108e50                glyph_309_data
+                0x0000000000108e60                glyph_310_data
+                0x0000000000108e70                glyph_311_data
+                0x0000000000108e80                glyph_312_data
+                0x0000000000108e90                glyph_313_data
+                0x0000000000108ea0                glyph_314_data
+                0x0000000000108eb0                glyph_315_data
+                0x0000000000108ec0                glyph_316_data
+                0x0000000000108ed0                glyph_317_data
+                0x0000000000108ee0                glyph_318_data
+                0x0000000000108ef0                glyph_319_data
+                0x0000000000108f00                glyph_320_data
+                0x0000000000108f10                glyph_321_data
+                0x0000000000108f20                glyph_322_data
+                0x0000000000108f30                glyph_323_data
+                0x0000000000108f40                glyph_324_data
+                0x0000000000108f50                glyph_325_data
+                0x0000000000108f60                glyph_326_data
+                0x0000000000108f70                glyph_327_data
+                0x0000000000108f80                glyph_328_data
+                0x0000000000108f90                glyph_329_data
+                0x0000000000108fa0                glyph_330_data
+                0x0000000000108fb0                glyph_331_data
+                0x0000000000108fc0                glyph_332_data
+                0x0000000000108fd0                glyph_333_data
+                0x0000000000108fe0                glyph_334_data
+                0x0000000000108ff0                glyph_335_data
+                0x0000000000109000                glyph_336_data
+                0x0000000000109010                glyph_337_data
+                0x0000000000109020                glyph_338_data
+                0x0000000000109030                glyph_339_data
+                0x0000000000109040                glyph_340_data
+                0x0000000000109050                glyph_341_data
+                0x0000000000109060                glyph_342_data
+                0x0000000000109070                glyph_343_data
+                0x0000000000109080                glyph_344_data
+                0x0000000000109090                glyph_345_data
+                0x00000000001090a0                glyph_346_data
+                0x00000000001090b0                glyph_347_data
+                0x00000000001090c0                glyph_348_data
+                0x00000000001090d0                glyph_349_data
+                0x00000000001090e0                glyph_350_data
+                0x00000000001090f0                glyph_351_data
+                0x0000000000109100                glyph_352_data
+                0x0000000000109110                glyph_353_data
+                0x0000000000109120                glyph_354_data
+                0x0000000000109130                glyph_355_data
+                0x0000000000109140                glyph_356_data
+                0x0000000000109150                glyph_357_data
+                0x0000000000109160                glyph_358_data
+                0x0000000000109170                glyph_359_data
+                0x0000000000109180                glyph_360_data
+                0x0000000000109190                glyph_361_data
+                0x00000000001091a0                glyph_362_data
+                0x00000000001091b0                glyph_363_data
+                0x00000000001091c0                glyph_364_data
+                0x00000000001091d0                glyph_365_data
+                0x00000000001091e0                glyph_366_data
+                0x00000000001091f0                glyph_367_data
+                0x0000000000109200                glyph_368_data
+                0x0000000000109210                glyph_369_data
+                0x0000000000109220                glyph_370_data
+                0x0000000000109230                glyph_371_data
+                0x0000000000109240                glyph_372_data
+                0x0000000000109250                glyph_373_data
+                0x0000000000109260                glyph_374_data
+                0x0000000000109270                glyph_375_data
+                0x0000000000109280                glyph_376_data
+                0x0000000000109290                glyph_377_data
+                0x00000000001092a0                glyph_378_data
+                0x00000000001092b0                glyph_379_data
+                0x00000000001092c0                glyph_380_data
+                0x00000000001092d0                glyph_381_data
+                0x00000000001092e0                glyph_382_data
+                0x00000000001092f0                glyph_383_data
+                0x0000000000109300                glyph_461_data
+                0x0000000000109310                glyph_462_data
+                0x0000000000109320                glyph_463_data
+                0x0000000000109330                glyph_464_data
+                0x0000000000109340                glyph_465_data
+                0x0000000000109350                glyph_466_data
+                0x0000000000109360                glyph_467_data
+                0x0000000000109370                glyph_468_data
+                0x0000000000109380                glyph_482_data
+                0x0000000000109390                glyph_483_data
+                0x00000000001093a0                glyph_486_data
+                0x00000000001093b0                glyph_487_data
+                0x00000000001093c0                glyph_488_data
+                0x00000000001093d0                glyph_489_data
+                0x00000000001093e0                glyph_490_data
+                0x00000000001093f0                glyph_491_data
+                0x0000000000109400                glyph_492_data
+                0x0000000000109410                glyph_493_data
+                0x0000000000109420                glyph_496_data
+                0x0000000000109430                glyph_500_data
+                0x0000000000109440                glyph_501_data
+                0x0000000000109450                glyph_508_data
+                0x0000000000109460                glyph_509_data
+                0x0000000000109470                glyph_510_data
+                0x0000000000109480                glyph_511_data
+                0x0000000000109490                glyph_512_data
+                0x00000000001094a0                glyph_513_data
+                0x00000000001094b0                glyph_514_data
+                0x00000000001094c0                glyph_515_data
+                0x00000000001094d0                glyph_516_data
+                0x00000000001094e0                glyph_517_data
+                0x00000000001094f0                glyph_518_data
+                0x0000000000109500                glyph_519_data
+                0x0000000000109510                glyph_520_data
+                0x0000000000109520                glyph_521_data
+                0x0000000000109530                glyph_522_data
+                0x0000000000109540                glyph_523_data
+                0x0000000000109550                glyph_524_data
+                0x0000000000109560                glyph_525_data
+                0x0000000000109570                glyph_526_data
+                0x0000000000109580                glyph_527_data
+                0x0000000000109590                glyph_528_data
+                0x00000000001095a0                glyph_529_data
+                0x00000000001095b0                glyph_530_data
+                0x00000000001095c0                glyph_531_data
+                0x00000000001095d0                glyph_532_data
+                0x00000000001095e0                glyph_533_data
+                0x00000000001095f0                glyph_534_data
+                0x0000000000109600                glyph_535_data
+                0x0000000000109610                glyph_542_data
+                0x0000000000109620                glyph_543_data
+                0x0000000000109630                glyph_550_data
+                0x0000000000109640                glyph_551_data
+                0x0000000000109650                glyph_552_data
+                0x0000000000109660                glyph_553_data
+                0x0000000000109670                glyph_558_data
+                0x0000000000109680                glyph_559_data
+                0x0000000000109690                glyph_728_data
+                0x00000000001096a0                glyph_729_data
+                0x00000000001096b0                glyph_731_data
+                0x00000000001096c0                glyph_732_data
+                0x00000000001096d0                glyph_733_data
+                0x00000000001096e0                glyph_8214_data
+                0x00000000001096f0                glyph_8216_data
+                0x0000000000109700                glyph_8217_data
+                0x0000000000109710                glyph_8220_data
+                0x0000000000109720                glyph_8221_data
+                0x0000000000109730                glyph_8226_data
+                0x0000000000109740                glyph_8230_data
+                0x0000000000109750                glyph_8249_data
+                0x0000000000109760                glyph_8250_data
+                0x0000000000109770                glyph_8252_data
+                0x0000000000109780                glyph_8364_data
+                0x0000000000109790                glyph_8776_data
+                0x00000000001097a0                glyph_9472_data
+                0x00000000001097b0                glyph_9473_data
+                0x00000000001097c0                glyph_9474_data
+                0x00000000001097d0                glyph_9475_data
+                0x00000000001097e0                glyph_9476_data
+                0x00000000001097f0                glyph_9477_data
+                0x0000000000109800                glyph_9478_data
+                0x0000000000109810                glyph_9479_data
+                0x0000000000109820                glyph_9480_data
+                0x0000000000109830                glyph_9481_data
+                0x0000000000109840                glyph_9482_data
+                0x0000000000109850                glyph_9483_data
+                0x0000000000109860                glyph_9484_data
+                0x0000000000109870                glyph_9485_data
+                0x0000000000109880                glyph_9486_data
+                0x0000000000109890                glyph_9487_data
+                0x00000000001098a0                glyph_9488_data
+                0x00000000001098b0                glyph_9489_data
+                0x00000000001098c0                glyph_9490_data
+                0x00000000001098d0                glyph_9491_data
+                0x00000000001098e0                glyph_9492_data
+                0x00000000001098f0                glyph_9493_data
+                0x0000000000109900                glyph_9494_data
+                0x0000000000109910                glyph_9495_data
+                0x0000000000109920                glyph_9496_data
+                0x0000000000109930                glyph_9497_data
+                0x0000000000109940                glyph_9498_data
+                0x0000000000109950                glyph_9499_data
+                0x0000000000109960                glyph_9500_data
+                0x0000000000109970                glyph_9501_data
+                0x0000000000109980                glyph_9502_data
+                0x0000000000109990                glyph_9503_data
+                0x00000000001099a0                glyph_9504_data
+                0x00000000001099b0                glyph_9505_data
+                0x00000000001099c0                glyph_9506_data
+                0x00000000001099d0                glyph_9507_data
+                0x00000000001099e0                glyph_9508_data
+                0x00000000001099f0                glyph_9509_data
+                0x0000000000109a00                glyph_9510_data
+                0x0000000000109a10                glyph_9511_data
+                0x0000000000109a20                glyph_9512_data
+                0x0000000000109a30                glyph_9513_data
+                0x0000000000109a40                glyph_9514_data
+                0x0000000000109a50                glyph_9515_data
+                0x0000000000109a60                glyph_9516_data
+                0x0000000000109a70                glyph_9517_data
+                0x0000000000109a80                glyph_9518_data
+                0x0000000000109a90                glyph_9519_data
+                0x0000000000109aa0                glyph_9520_data
+                0x0000000000109ab0                glyph_9521_data
+                0x0000000000109ac0                glyph_9522_data
+                0x0000000000109ad0                glyph_9523_data
+                0x0000000000109ae0                glyph_9524_data
+                0x0000000000109af0                glyph_9525_data
+                0x0000000000109b00                glyph_9526_data
+                0x0000000000109b10                glyph_9527_data
+                0x0000000000109b20                glyph_9528_data
+                0x0000000000109b30                glyph_9529_data
+                0x0000000000109b40                glyph_9530_data
+                0x0000000000109b50                glyph_9531_data
+                0x0000000000109b60                glyph_9532_data
+                0x0000000000109b70                glyph_9533_data
+                0x0000000000109b80                glyph_9534_data
+                0x0000000000109b90                glyph_9535_data
+                0x0000000000109ba0                glyph_9536_data
+                0x0000000000109bb0                glyph_9537_data
+                0x0000000000109bc0                glyph_9538_data
+                0x0000000000109bd0                glyph_9539_data
+                0x0000000000109be0                glyph_9540_data
+                0x0000000000109bf0                glyph_9541_data
+                0x0000000000109c00                glyph_9542_data
+                0x0000000000109c10                glyph_9543_data
+                0x0000000000109c20                glyph_9544_data
+                0x0000000000109c30                glyph_9545_data
+                0x0000000000109c40                glyph_9546_data
+                0x0000000000109c50                glyph_9547_data
+                0x0000000000109c60                glyph_9548_data
+                0x0000000000109c70                glyph_9549_data
+                0x0000000000109c80                glyph_9550_data
+                0x0000000000109c90                glyph_9551_data
+                0x0000000000109ca0                glyph_9552_data
+                0x0000000000109cb0                glyph_9553_data
+                0x0000000000109cc0                glyph_9554_data
+                0x0000000000109cd0                glyph_9555_data
+                0x0000000000109ce0                glyph_9556_data
+                0x0000000000109cf0                glyph_9557_data
+                0x0000000000109d00                glyph_9558_data
+                0x0000000000109d10                glyph_9559_data
+                0x0000000000109d20                glyph_9560_data
+                0x0000000000109d30                glyph_9561_data
+                0x0000000000109d40                glyph_9562_data
+                0x0000000000109d50                glyph_9563_data
+                0x0000000000109d60                glyph_9564_data
+                0x0000000000109d70                glyph_9565_data
+                0x0000000000109d80                glyph_9566_data
+                0x0000000000109d90                glyph_9567_data
+                0x0000000000109da0                glyph_9568_data
+                0x0000000000109db0                glyph_9569_data
+                0x0000000000109dc0                glyph_9570_data
+                0x0000000000109dd0                glyph_9571_data
+                0x0000000000109de0                glyph_9572_data
+                0x0000000000109df0                glyph_9573_data
+                0x0000000000109e00                glyph_9574_data
+                0x0000000000109e10                glyph_9575_data
+                0x0000000000109e20                glyph_9576_data
+                0x0000000000109e30                glyph_9577_data
+                0x0000000000109e40                glyph_9578_data
+                0x0000000000109e50                glyph_9579_data
+                0x0000000000109e60                glyph_9580_data
+                0x0000000000109e70                glyph_9581_data
+                0x0000000000109e80                glyph_9582_data
+                0x0000000000109e90                glyph_9583_data
+                0x0000000000109ea0                glyph_9584_data
+                0x0000000000109eb0                glyph_9585_data
+                0x0000000000109ec0                glyph_9586_data
+                0x0000000000109ed0                glyph_9587_data
+                0x0000000000109ee0                glyph_9588_data
+                0x0000000000109ef0                glyph_9589_data
+                0x0000000000109f00                glyph_9590_data
+                0x0000000000109f10                glyph_9591_data
+                0x0000000000109f20                glyph_9592_data
+                0x0000000000109f30                glyph_9593_data
+                0x0000000000109f40                glyph_9594_data
+                0x0000000000109f50                glyph_9595_data
+                0x0000000000109f60                glyph_9596_data
+                0x0000000000109f70                glyph_9597_data
+                0x0000000000109f80                glyph_9598_data
+                0x0000000000109f90                glyph_9599_data
+                0x0000000000109fa0                glyph_9600_data
+                0x0000000000109fb0                glyph_9601_data
+                0x0000000000109fc0                glyph_9602_data
+                0x0000000000109fd0                glyph_9603_data
+                0x0000000000109fe0                glyph_9604_data
+                0x0000000000109ff0                glyph_9605_data
+                0x000000000010a000                glyph_9606_data
+                0x000000000010a010                glyph_9607_data
+                0x000000000010a020                glyph_9608_data
+                0x000000000010a030                glyph_9609_data
+                0x000000000010a040                glyph_9610_data
+                0x000000000010a050                glyph_9611_data
+                0x000000000010a060                glyph_9612_data
+                0x000000000010a070                glyph_9613_data
+                0x000000000010a080                glyph_9614_data
+                0x000000000010a090                glyph_9615_data
+                0x000000000010a0a0                glyph_9616_data
+                0x000000000010a0b0                glyph_9617_data
+                0x000000000010a0c0                glyph_9618_data
+                0x000000000010a0d0                glyph_9619_data
+                0x000000000010a0e0                glyph_9620_data
+                0x000000000010a0f0                glyph_9621_data
+                0x000000000010a100                glyph_9622_data
+                0x000000000010a110                glyph_9623_data
+                0x000000000010a120                glyph_9624_data
+                0x000000000010a130                glyph_9625_data
+                0x000000000010a140                glyph_9626_data
+                0x000000000010a150                glyph_9627_data
+                0x000000000010a160                glyph_9628_data
+                0x000000000010a170                glyph_9629_data
+                0x000000000010a180                glyph_9630_data
+                0x000000000010a190                glyph_9631_data
+                0x000000000010a1a0                glyph_9670_data
+                0x000000000010a1b0                glyph_9674_data
+                0x000000000010a1c0                glyph_9675_data
+                0x000000000010a1d0                glyph_9679_data
+                0x000000000010a1e0                glyph_9688_data
+                0x000000000010a1f0                glyph_9689_data
+                0x000000000010a200                glyph_9698_data
+                0x000000000010a210                glyph_9699_data
+                0x000000000010a220                glyph_9700_data
+                0x000000000010a230                glyph_9701_data
+                0x000000000010a240                glyph_9776_data
+                0x000000000010a250                glyph_9777_data
+                0x000000000010a260                glyph_9778_data
+                0x000000000010a270                glyph_9779_data
+                0x000000000010a280                glyph_9780_data
+                0x000000000010a290                glyph_9781_data
+                0x000000000010a2a0                glyph_9782_data
+                0x000000000010a2b0                glyph_9783_data
+                0x000000000010a2c0                glyph_9829_data
+                0x000000000010a2d0                glyph_9830_data
+                0x000000000010a2e0                glyph_10240_data
+                0x000000000010a2f0                glyph_10241_data
+                0x000000000010a300                glyph_10242_data
+                0x000000000010a310                glyph_10243_data
+                0x000000000010a320                glyph_10244_data
+                0x000000000010a330                glyph_10245_data
+                0x000000000010a340                glyph_10246_data
+                0x000000000010a350                glyph_10247_data
+                0x000000000010a360                glyph_10248_data
+                0x000000000010a370                glyph_10249_data
+                0x000000000010a380                glyph_10250_data
+                0x000000000010a390                glyph_10251_data
+                0x000000000010a3a0                glyph_10252_data
+                0x000000000010a3b0                glyph_10253_data
+                0x000000000010a3c0                glyph_10254_data
+                0x000000000010a3d0                glyph_10255_data
+                0x000000000010a3e0                glyph_10256_data
+                0x000000000010a3f0                glyph_10257_data
+                0x000000000010a400                glyph_10258_data
+                0x000000000010a410                glyph_10259_data
+                0x000000000010a420                glyph_10260_data
+                0x000000000010a430                glyph_10261_data
+                0x000000000010a440                glyph_10262_data
+                0x000000000010a450                glyph_10263_data
+                0x000000000010a460                glyph_10264_data
+                0x000000000010a470                glyph_10265_data
+                0x000000000010a480                glyph_10266_data
+                0x000000000010a490                glyph_10267_data
+                0x000000000010a4a0                glyph_10268_data
+                0x000000000010a4b0                glyph_10269_data
+                0x000000000010a4c0                glyph_10270_data
+                0x000000000010a4d0                glyph_10271_data
+                0x000000000010a4e0                glyph_10272_data
+                0x000000000010a4f0                glyph_10273_data
+                0x000000000010a500                glyph_10274_data
+                0x000000000010a510                glyph_10275_data
+                0x000000000010a520                glyph_10276_data
+                0x000000000010a530                glyph_10277_data
+                0x000000000010a540                glyph_10278_data
+                0x000000000010a550                glyph_10279_data
+                0x000000000010a560                glyph_10280_data
+                0x000000000010a570                glyph_10281_data
+                0x000000000010a580                glyph_10282_data
+                0x000000000010a590                glyph_10283_data
+                0x000000000010a5a0                glyph_10284_data
+                0x000000000010a5b0                glyph_10285_data
+                0x000000000010a5c0                glyph_10286_data
+                0x000000000010a5d0                glyph_10287_data
+                0x000000000010a5e0                glyph_10288_data
+                0x000000000010a5f0                glyph_10289_data
+                0x000000000010a600                glyph_10290_data
+                0x000000000010a610                glyph_10291_data
+                0x000000000010a620                glyph_10292_data
+                0x000000000010a630                glyph_10293_data
+                0x000000000010a640                glyph_10294_data
+                0x000000000010a650                glyph_10295_data
+                0x000000000010a660                glyph_10296_data
+                0x000000000010a670                glyph_10297_data
+                0x000000000010a680                glyph_10298_data
+                0x000000000010a690                glyph_10299_data
+                0x000000000010a6a0                glyph_10300_data
+                0x000000000010a6b0                glyph_10301_data
+                0x000000000010a6c0                glyph_10302_data
+                0x000000000010a6d0                glyph_10303_data
+                0x000000000010a6e0                glyph_10304_data
+                0x000000000010a6f0                glyph_10305_data
+                0x000000000010a700                glyph_10306_data
+                0x000000000010a710                glyph_10307_data
+                0x000000000010a720                glyph_10308_data
+                0x000000000010a730                glyph_10309_data
+                0x000000000010a740                glyph_10310_data
+                0x000000000010a750                glyph_10311_data
+                0x000000000010a760                glyph_10312_data
+                0x000000000010a770                glyph_10313_data
+                0x000000000010a780                glyph_10314_data
+                0x000000000010a790                glyph_10315_data
+                0x000000000010a7a0                glyph_10316_data
+                0x000000000010a7b0                glyph_10317_data
+                0x000000000010a7c0                glyph_10318_data
+                0x000000000010a7d0                glyph_10319_data
+                0x000000000010a7e0                glyph_10320_data
+                0x000000000010a7f0                glyph_10321_data
+                0x000000000010a800                glyph_10322_data
+                0x000000000010a810                glyph_10323_data
+                0x000000000010a820                glyph_10324_data
+                0x000000000010a830                glyph_10325_data
+                0x000000000010a840                glyph_10326_data
+                0x000000000010a850                glyph_10327_data
+                0x000000000010a860                glyph_10328_data
+                0x000000000010a870                glyph_10329_data
+                0x000000000010a880                glyph_10330_data
+                0x000000000010a890                glyph_10331_data
+                0x000000000010a8a0                glyph_10332_data
+                0x000000000010a8b0                glyph_10333_data
+                0x000000000010a8c0                glyph_10334_data
+                0x000000000010a8d0                glyph_10335_data
+                0x000000000010a8e0                glyph_10336_data
+                0x000000000010a8f0                glyph_10337_data
+                0x000000000010a900                glyph_10338_data
+                0x000000000010a910                glyph_10339_data
+                0x000000000010a920                glyph_10340_data
+                0x000000000010a930                glyph_10341_data
+                0x000000000010a940                glyph_10342_data
+                0x000000000010a950                glyph_10343_data
+                0x000000000010a960                glyph_10344_data
+                0x000000000010a970                glyph_10345_data
+                0x000000000010a980                glyph_10346_data
+                0x000000000010a990                glyph_10347_data
+                0x000000000010a9a0                glyph_10348_data
+                0x000000000010a9b0                glyph_10349_data
+                0x000000000010a9c0                glyph_10350_data
+                0x000000000010a9d0                glyph_10351_data
+                0x000000000010a9e0                glyph_10352_data
+                0x000000000010a9f0                glyph_10353_data
+                0x000000000010aa00                glyph_10354_data
+                0x000000000010aa10                glyph_10355_data
+                0x000000000010aa20                glyph_10356_data
+                0x000000000010aa30                glyph_10357_data
+                0x000000000010aa40                glyph_10358_data
+                0x000000000010aa50                glyph_10359_data
+                0x000000000010aa60                glyph_10360_data
+                0x000000000010aa70                glyph_10361_data
+                0x000000000010aa80                glyph_10362_data
+                0x000000000010aa90                glyph_10363_data
+                0x000000000010aaa0                glyph_10364_data
+                0x000000000010aab0                glyph_10365_data
+                0x000000000010aac0                glyph_10366_data
+                0x000000000010aad0                glyph_10367_data
+                0x000000000010aae0                glyph_10368_data
+                0x000000000010aaf0                glyph_10369_data
+                0x000000000010ab00                glyph_10370_data
+                0x000000000010ab10                glyph_10371_data
+                0x000000000010ab20                glyph_10372_data
+                0x000000000010ab30                glyph_10373_data
+                0x000000000010ab40                glyph_10374_data
+                0x000000000010ab50                glyph_10375_data
+                0x000000000010ab60                glyph_10376_data
+                0x000000000010ab70                glyph_10377_data
+                0x000000000010ab80                glyph_10378_data
+                0x000000000010ab90                glyph_10379_data
+                0x000000000010aba0                glyph_10380_data
+                0x000000000010abb0                glyph_10381_data
+                0x000000000010abc0                glyph_10382_data
+                0x000000000010abd0                glyph_10383_data
+                0x000000000010abe0                glyph_10384_data
+                0x000000000010abf0                glyph_10385_data
+                0x000000000010ac00                glyph_10386_data
+                0x000000000010ac10                glyph_10387_data
+                0x000000000010ac20                glyph_10388_data
+                0x000000000010ac30                glyph_10389_data
+                0x000000000010ac40                glyph_10390_data
+                0x000000000010ac50                glyph_10391_data
+                0x000000000010ac60                glyph_10392_data
+                0x000000000010ac70                glyph_10393_data
+                0x000000000010ac80                glyph_10394_data
+                0x000000000010ac90                glyph_10395_data
+                0x000000000010aca0                glyph_10396_data
+                0x000000000010acb0                glyph_10397_data
+                0x000000000010acc0                glyph_10398_data
+                0x000000000010acd0                glyph_10399_data
+                0x000000000010ace0                glyph_10400_data
+                0x000000000010acf0                glyph_10401_data
+                0x000000000010ad00                glyph_10402_data
+                0x000000000010ad10                glyph_10403_data
+                0x000000000010ad20                glyph_10404_data
+                0x000000000010ad30                glyph_10405_data
+                0x000000000010ad40                glyph_10406_data
+                0x000000000010ad50                glyph_10407_data
+                0x000000000010ad60                glyph_10408_data
+                0x000000000010ad70                glyph_10409_data
+                0x000000000010ad80                glyph_10410_data
+                0x000000000010ad90                glyph_10411_data
+                0x000000000010ada0                glyph_10412_data
+                0x000000000010adb0                glyph_10413_data
+                0x000000000010adc0                glyph_10414_data
+                0x000000000010add0                glyph_10415_data
+                0x000000000010ade0                glyph_10416_data
+                0x000000000010adf0                glyph_10417_data
+                0x000000000010ae00                glyph_10418_data
+                0x000000000010ae10                glyph_10419_data
+                0x000000000010ae20                glyph_10420_data
+                0x000000000010ae30                glyph_10421_data
+                0x000000000010ae40                glyph_10422_data
+                0x000000000010ae50                glyph_10423_data
+                0x000000000010ae60                glyph_10424_data
+                0x000000000010ae70                glyph_10425_data
+                0x000000000010ae80                glyph_10426_data
+                0x000000000010ae90                glyph_10427_data
+                0x000000000010aea0                glyph_10428_data
+                0x000000000010aeb0                glyph_10429_data
+                0x000000000010aec0                glyph_10430_data
+                0x000000000010aed0                glyph_10431_data
+                0x000000000010aee0                glyph_10432_data
+                0x000000000010aef0                glyph_10433_data
+                0x000000000010af00                glyph_10434_data
+                0x000000000010af10                glyph_10435_data
+                0x000000000010af20                glyph_10436_data
+                0x000000000010af30                glyph_10437_data
+                0x000000000010af40                glyph_10438_data
+                0x000000000010af50                glyph_10439_data
+                0x000000000010af60                glyph_10440_data
+                0x000000000010af70                glyph_10441_data
+                0x000000000010af80                glyph_10442_data
+                0x000000000010af90                glyph_10443_data
+                0x000000000010afa0                glyph_10444_data
+                0x000000000010afb0                glyph_10445_data
+                0x000000000010afc0                glyph_10446_data
+                0x000000000010afd0                glyph_10447_data
+                0x000000000010afe0                glyph_10448_data
+                0x000000000010aff0                glyph_10449_data
+                0x000000000010b000                glyph_10450_data
+                0x000000000010b010                glyph_10451_data
+                0x000000000010b020                glyph_10452_data
+                0x000000000010b030                glyph_10453_data
+                0x000000000010b040                glyph_10454_data
+                0x000000000010b050                glyph_10455_data
+                0x000000000010b060                glyph_10456_data
+                0x000000000010b070                glyph_10457_data
+                0x000000000010b080                glyph_10458_data
+                0x000000000010b090                glyph_10459_data
+                0x000000000010b0a0                glyph_10460_data
+                0x000000000010b0b0                glyph_10461_data
+                0x000000000010b0c0                glyph_10462_data
+                0x000000000010b0d0                glyph_10463_data
+                0x000000000010b0e0                glyph_10464_data
+                0x000000000010b0f0                glyph_10465_data
+                0x000000000010b100                glyph_10466_data
+                0x000000000010b110                glyph_10467_data
+                0x000000000010b120                glyph_10468_data
+                0x000000000010b130                glyph_10469_data
+                0x000000000010b140                glyph_10470_data
+                0x000000000010b150                glyph_10471_data
+                0x000000000010b160                glyph_10472_data
+                0x000000000010b170                glyph_10473_data
+                0x000000000010b180                glyph_10474_data
+                0x000000000010b190                glyph_10475_data
+                0x000000000010b1a0                glyph_10476_data
+                0x000000000010b1b0                glyph_10477_data
+                0x000000000010b1c0                glyph_10478_data
+                0x000000000010b1d0                glyph_10479_data
+                0x000000000010b1e0                glyph_10480_data
+                0x000000000010b1f0                glyph_10481_data
+                0x000000000010b200                glyph_10482_data
+                0x000000000010b210                glyph_10483_data
+                0x000000000010b220                glyph_10484_data
+                0x000000000010b230                glyph_10485_data
+                0x000000000010b240                glyph_10486_data
+                0x000000000010b250                glyph_10487_data
+                0x000000000010b260                glyph_10488_data
+                0x000000000010b270                glyph_10489_data
+                0x000000000010b280                glyph_10490_data
+                0x000000000010b290                glyph_10491_data
+                0x000000000010b2a0                glyph_10492_data
+                0x000000000010b2b0                glyph_10493_data
+                0x000000000010b2c0                glyph_10494_data
+                0x000000000010b2d0                glyph_10495_data
+                0x000000000010b2e0                glyph_57504_data
+                0x000000000010b2f0                glyph_57505_data
+                0x000000000010b300                glyph_57506_data
+                0x000000000010b310                glyph_57520_data
+                0x000000000010b320                glyph_57521_data
+                0x000000000010b330                glyph_57522_data
+                0x000000000010b340                glyph_57523_data
+                0x000000000010b360                _misc_spleen_medium_r_normal__16_160_72_72_c_80_iso10646_1_map
+                0x00000000001101d8                _misc_spleen_medium_r_normal__16_160_72_72_c_80_iso10646_1_count
+ .rodata        0x00000000001104d8       0x1a ../bin/timer.o
 
-.eh_frame       0x00000000001103d8      0xd80
- .eh_frame      0x00000000001103d8       0xd8 ../bin/kernel.o
- .eh_frame      0x00000000001104b0      0x100 ../bin/string.o
+.eh_frame       0x00000000001104f8      0xe00
+ .eh_frame      0x00000000001104f8       0xd8 ../bin/kernel.o
+ .eh_frame      0x00000000001105d0      0x100 ../bin/string.o
                                         0x118 (размер перед ослаблением)
- .eh_frame      0x00000000001105b0      0x200 ../bin/com1.o
+ .eh_frame      0x00000000001106d0      0x200 ../bin/com1.o
                                         0x218 (размер перед ослаблением)
- .eh_frame      0x00000000001107b0       0x40 ../bin/idt_c.o
+ .eh_frame      0x00000000001108d0       0x40 ../bin/idt_c.o
                                          0x58 (размер перед ослаблением)
- .eh_frame      0x00000000001107f0       0x40 ../bin/pic_c.o
+ .eh_frame      0x0000000000110910       0x40 ../bin/pic_c.o
                                          0x58 (размер перед ослаблением)
- .eh_frame      0x0000000000110830       0x40 ../bin/handlers_c.o
+ .eh_frame      0x0000000000110950       0x40 ../bin/handlers_c.o
                                          0x58 (размер перед ослаблением)
- .eh_frame      0x0000000000110870       0x78 ../bin/panic.o
+ .eh_frame      0x0000000000110990       0x78 ../bin/panic.o
                                          0x90 (размер перед ослаблением)
- .eh_frame      0x00000000001108e8      0x180 ../bin/memory.o
+ .eh_frame      0x0000000000110a08      0x180 ../bin/memory.o
                                         0x198 (размер перед ослаблением)
- .eh_frame      0x0000000000110a68       0xa0 ../bin/pata.o
+ .eh_frame      0x0000000000110b88       0xa0 ../bin/pata.o
                                          0xb8 (размер перед ослаблением)
- .eh_frame      0x0000000000110b08      0x2b0 ../bin/chainfs.o
+ .eh_frame      0x0000000000110c28      0x2b0 ../bin/chainfs.o
                                         0x2c8 (размер перед ослаблением)
- .eh_frame      0x0000000000110db8      0x140 ../bin/vga.o
+ .eh_frame      0x0000000000110ed8      0x140 ../bin/vga.o
                                         0x158 (размер перед ослаблением)
- .eh_frame      0x0000000000110ef8       0x80 ../bin/ps2.o
+ .eh_frame      0x0000000000111018       0x80 ../bin/ps2.o
                                          0x98 (размер перед ослаблением)
- .eh_frame      0x0000000000110f78       0x60 ../bin/keyboard.o
+ .eh_frame      0x0000000000111098       0x60 ../bin/keyboard.o
                                          0x78 (размер перед ослаблением)
- .eh_frame      0x0000000000110fd8      0x160 ../bin/fb.o
+ .eh_frame      0x00000000001110f8      0x160 ../bin/fb.o
                                         0x178 (размер перед ослаблением)
- .eh_frame      0x0000000000111138       0x20 ../bin/font.o
+ .eh_frame      0x0000000000111258       0x20 ../bin/font.o
+                                         0x38 (размер перед ослаблением)
+ .eh_frame      0x0000000000111278       0x60 ../bin/timer.o
+                                         0x78 (размер перед ослаблением)
+ .eh_frame      0x00000000001112d8       0x20 ../bin/stdlib.o
                                          0x38 (размер перед ослаблением)
 
-.rodata.str1.8  0x0000000000111158       0x48
+.rodata.str1.8  0x00000000001112f8       0x48
  .rodata.str1.8
-                0x0000000000111158       0x48 ../bin/itoa.o
+                0x00000000001112f8       0x48 ../bin/itoa.o
 
-.rela.dyn       0x00000000001111a0        0x0
- .rela.got      0x00000000001111a0        0x0 ../bin/boot.o
- .rela.iplt     0x00000000001111a0        0x0 ../bin/boot.o
- .rela.text     0x00000000001111a0        0x0 ../bin/boot.o
+.rela.dyn       0x0000000000111340        0x0
+ .rela.got      0x0000000000111340        0x0 ../bin/boot.o
+ .rela.iplt     0x0000000000111340        0x0 ../bin/boot.o
+ .rela.text     0x0000000000111340        0x0 ../bin/boot.o
 
-.data           0x00000000001111a0      0x1e0
+.data           0x0000000000111340      0x1e0
  *(.data)
- .data          0x00000000001111a0       0x10 ../bin/boot.o
- .data          0x00000000001111b0        0x0 ../bin/kernel.o
- .data          0x00000000001111b0        0x0 ../bin/string.o
- .data          0x00000000001111b0        0x0 ../bin/itoa.o
- .data          0x00000000001111b0        0x0 ../bin/com1.o
- .data          0x00000000001111b0        0x0 ../bin/idt_c.o
- .data          0x00000000001111b0        0x0 ../bin/pic_c.o
- .data          0x00000000001111b0        0x0 ../bin/handlers_c.o
- *fill*         0x00000000001111b0       0x10 
- .data          0x00000000001111c0      0x108 ../bin/panic.o
- .data          0x00000000001112c8        0x0 ../bin/memory.o
- .data          0x00000000001112c8        0x0 ../bin/pata.o
- .data          0x00000000001112c8        0x0 ../bin/chainfs.o
- *fill*         0x00000000001112c8       0x18 
- .data          0x00000000001112e0       0x64 ../bin/vga.o
- .data          0x0000000000111344        0x0 ../bin/ps2.o
- *fill*         0x0000000000111344       0x1c 
- .data          0x0000000000111360       0x20 ../bin/keyboard.o
- .data          0x0000000000111380        0x0 ../bin/fb.o
- .data          0x0000000000111380        0x0 ../bin/font.o
+ .data          0x0000000000111340       0x10 ../bin/boot.o
+ .data          0x0000000000111350        0x0 ../bin/kernel.o
+ .data          0x0000000000111350        0x0 ../bin/string.o
+ .data          0x0000000000111350        0x0 ../bin/itoa.o
+ .data          0x0000000000111350        0x0 ../bin/com1.o
+ .data          0x0000000000111350        0x0 ../bin/idt_c.o
+ .data          0x0000000000111350        0x0 ../bin/pic_c.o
+ .data          0x0000000000111350        0x0 ../bin/handlers_c.o
+ *fill*         0x0000000000111350       0x10 
+ .data          0x0000000000111360      0x108 ../bin/panic.o
+ .data          0x0000000000111468        0x0 ../bin/memory.o
+ .data          0x0000000000111468        0x0 ../bin/pata.o
+ .data          0x0000000000111468        0x0 ../bin/chainfs.o
+ *fill*         0x0000000000111468       0x18 
+ .data          0x0000000000111480       0x64 ../bin/vga.o
+ .data          0x00000000001114e4        0x0 ../bin/ps2.o
+ *fill*         0x00000000001114e4       0x1c 
+ .data          0x0000000000111500       0x20 ../bin/keyboard.o
+ .data          0x0000000000111520        0x0 ../bin/fb.o
+ .data          0x0000000000111520        0x0 ../bin/font.o
+ .data          0x0000000000111520        0x0 ../bin/timer.o
+ .data          0x0000000000111520        0x0 ../bin/stdlib.o
 
-.got            0x0000000000111380        0x0
- .got           0x0000000000111380        0x0 ../bin/boot.o
+.got            0x0000000000111520        0x0
+ .got           0x0000000000111520        0x0 ../bin/boot.o
 
-.got.plt        0x0000000000111380        0x0
- .got.plt       0x0000000000111380        0x0 ../bin/boot.o
+.got.plt        0x0000000000111520        0x0
+ .got.plt       0x0000000000111520        0x0 ../bin/boot.o
 
-.igot.plt       0x0000000000111380        0x0
- .igot.plt      0x0000000000111380        0x0 ../bin/boot.o
+.igot.plt       0x0000000000111520        0x0
+ .igot.plt      0x0000000000111520        0x0 ../bin/boot.o
 
-.bss            0x0000000000112000    0x177ad
+.bss            0x0000000000112000    0x177b8
  *(.bss*)
  .bss           0x0000000000112000    0x16000 ../bin/boot.o
  .bss           0x0000000000128000        0x8 ../bin/kernel.o
@@ -1158,6 +1171,9 @@
  .bss           0x0000000000129790        0x8 ../bin/keyboard.o
  .bss           0x0000000000129798       0x15 ../bin/fb.o
  .bss           0x00000000001297ad        0x0 ../bin/font.o
+ *fill*         0x00000000001297ad        0x3 
+ .bss           0x00000000001297b0        0x8 ../bin/timer.o
+ .bss           0x00000000001297b8        0x0 ../bin/stdlib.o
  *(COMMON)
                 0x0000000000130000                . = ALIGN (0x10000)
                 0x0000000000130000                kernel_end = .
@@ -1180,85 +1196,95 @@ LOAD ../bin/ps2.o
 LOAD ../bin/keyboard.o
 LOAD ../bin/fb.o
 LOAD ../bin/font.o
+LOAD ../bin/timer.o
+LOAD ../bin/stdlib.o
 OUTPUT(../bin/kernel.bin elf64-x86-64)
 
-.debug_line     0x0000000000000000     0x28d5
+.debug_line     0x0000000000000000     0x2a03
  .debug_line    0x0000000000000000       0x8b ../bin/boot.o
- .debug_line    0x000000000000008b      0x315 ../bin/kernel.o
- .debug_line    0x00000000000003a0      0x1af ../bin/string.o
- .debug_line    0x000000000000054f       0xa7 ../bin/hardware.o
- .debug_line    0x00000000000005f6      0x1fa ../bin/com1.o
- .debug_line    0x00000000000007f0      0x13b ../bin/idt_asm.o
- .debug_line    0x000000000000092b       0xe7 ../bin/idt_c.o
- .debug_line    0x0000000000000a12       0x7c ../bin/pic_c.o
- .debug_line    0x0000000000000a8e       0x7d ../bin/handlers_c.o
- .debug_line    0x0000000000000b0b      0x3e5 ../bin/panic.o
- .debug_line    0x0000000000000ef0      0x3fa ../bin/memory.o
- .debug_line    0x00000000000012ea      0x113 ../bin/pata.o
- .debug_line    0x00000000000013fd      0xac0 ../bin/chainfs.o
- .debug_line    0x0000000000001ebd      0x3f9 ../bin/vga.o
- .debug_line    0x00000000000022b6      0x197 ../bin/ps2.o
- .debug_line    0x000000000000244d       0xe6 ../bin/keyboard.o
- .debug_line    0x0000000000002533      0x2e0 ../bin/fb.o
- .debug_line    0x0000000000002813       0xc2 ../bin/font.o
+ .debug_line    0x000000000000008b      0x322 ../bin/kernel.o
+ .debug_line    0x00000000000003ad      0x1b1 ../bin/string.o
+ .debug_line    0x000000000000055e       0xa7 ../bin/hardware.o
+ .debug_line    0x0000000000000605      0x1fa ../bin/com1.o
+ .debug_line    0x00000000000007ff      0x13b ../bin/idt_asm.o
+ .debug_line    0x000000000000093a       0xe7 ../bin/idt_c.o
+ .debug_line    0x0000000000000a21       0x7c ../bin/pic_c.o
+ .debug_line    0x0000000000000a9d       0x91 ../bin/handlers_c.o
+ .debug_line    0x0000000000000b2e      0x3e6 ../bin/panic.o
+ .debug_line    0x0000000000000f14      0x3fa ../bin/memory.o
+ .debug_line    0x000000000000130e      0x115 ../bin/pata.o
+ .debug_line    0x0000000000001423      0xac2 ../bin/chainfs.o
+ .debug_line    0x0000000000001ee5      0x3f9 ../bin/vga.o
+ .debug_line    0x00000000000022de      0x198 ../bin/ps2.o
+ .debug_line    0x0000000000002476       0xe6 ../bin/keyboard.o
+ .debug_line    0x000000000000255c      0x2da ../bin/fb.o
+ .debug_line    0x0000000000002836       0xc2 ../bin/font.o
+ .debug_line    0x00000000000028f8       0x8d ../bin/timer.o
+ .debug_line    0x0000000000002985       0x7e ../bin/stdlib.o
 
 .debug_line_str
-                0x0000000000000000      0x2e9
+                0x0000000000000000      0x320
  .debug_line_str
-                0x0000000000000000      0x2e9 ../bin/boot.o
+                0x0000000000000000      0x320 ../bin/boot.o
                                          0x2a (размер перед ослаблением)
  .debug_line_str
-                0x00000000000002e9      0x149 ../bin/kernel.o
+                0x0000000000000320      0x15a ../bin/kernel.o
  .debug_line_str
-                0x00000000000002e9       0x63 ../bin/string.o
+                0x0000000000000320       0x63 ../bin/string.o
  .debug_line_str
-                0x00000000000002e9       0x64 ../bin/com1.o
+                0x0000000000000320       0x64 ../bin/com1.o
  .debug_line_str
-                0x00000000000002e9       0x72 ../bin/idt_c.o
+                0x0000000000000320       0x72 ../bin/idt_c.o
  .debug_line_str
-                0x00000000000002e9       0x82 ../bin/pic_c.o
+                0x0000000000000320       0x82 ../bin/pic_c.o
  .debug_line_str
-                0x00000000000002e9       0xc0 ../bin/handlers_c.o
+                0x0000000000000320       0xd9 ../bin/handlers_c.o
  .debug_line_str
-                0x00000000000002e9       0xbb ../bin/panic.o
+                0x0000000000000320       0xbb ../bin/panic.o
  .debug_line_str
-                0x00000000000002e9       0x80 ../bin/memory.o
+                0x0000000000000320       0x80 ../bin/memory.o
  .debug_line_str
-                0x00000000000002e9       0xa0 ../bin/pata.o
+                0x0000000000000320       0xa0 ../bin/pata.o
  .debug_line_str
-                0x00000000000002e9       0xfc ../bin/chainfs.o
+                0x0000000000000320       0xfc ../bin/chainfs.o
  .debug_line_str
-                0x00000000000002e9       0xd5 ../bin/vga.o
+                0x0000000000000320       0xd5 ../bin/vga.o
  .debug_line_str
-                0x00000000000002e9       0x8e ../bin/ps2.o
+                0x0000000000000320       0x8e ../bin/ps2.o
  .debug_line_str
-                0x00000000000002e9       0xd5 ../bin/keyboard.o
+                0x0000000000000320       0xd5 ../bin/keyboard.o
  .debug_line_str
-                0x00000000000002e9       0xc4 ../bin/fb.o
+                0x0000000000000320       0xb4 ../bin/fb.o
  .debug_line_str
-                0x00000000000002e9       0xb1 ../bin/font.o
+                0x0000000000000320       0xb1 ../bin/font.o
+ .debug_line_str
+                0x0000000000000320       0x8f ../bin/timer.o
+ .debug_line_str
+                0x0000000000000320       0x8c ../bin/stdlib.o
 
-.debug_info     0x0000000000000000     0x93e6
+.debug_info     0x0000000000000000     0x964f
  .debug_info    0x0000000000000000       0x29 ../bin/boot.o
- .debug_info    0x0000000000000029      0x883 ../bin/kernel.o
- .debug_info    0x00000000000008ac      0x2e1 ../bin/string.o
- .debug_info    0x0000000000000b8d       0x79 ../bin/hardware.o
- .debug_info    0x0000000000000c06      0x4bc ../bin/com1.o
- .debug_info    0x00000000000010c2       0x8c ../bin/idt_asm.o
- .debug_info    0x000000000000114e      0x3e2 ../bin/idt_c.o
- .debug_info    0x0000000000001530      0x108 ../bin/pic_c.o
- .debug_info    0x0000000000001638      0x209 ../bin/handlers_c.o
- .debug_info    0x0000000000001841      0x582 ../bin/panic.o
- .debug_info    0x0000000000001dc3      0x50b ../bin/memory.o
- .debug_info    0x00000000000022ce      0x1f8 ../bin/pata.o
- .debug_info    0x00000000000024c6     0x13ee ../bin/chainfs.o
- .debug_info    0x00000000000038b4      0x643 ../bin/vga.o
- .debug_info    0x0000000000003ef7      0x21e ../bin/ps2.o
- .debug_info    0x0000000000004115      0x1e5 ../bin/keyboard.o
- .debug_info    0x00000000000042fa      0x801 ../bin/fb.o
- .debug_info    0x0000000000004afb     0x48eb ../bin/font.o
+ .debug_info    0x0000000000000029      0x8a7 ../bin/kernel.o
+ .debug_info    0x00000000000008d0      0x2e1 ../bin/string.o
+ .debug_info    0x0000000000000bb1       0x79 ../bin/hardware.o
+ .debug_info    0x0000000000000c2a      0x4bc ../bin/com1.o
+ .debug_info    0x00000000000010e6       0x8c ../bin/idt_asm.o
+ .debug_info    0x0000000000001172      0x3e2 ../bin/idt_c.o
+ .debug_info    0x0000000000001554      0x108 ../bin/pic_c.o
+ .debug_info    0x000000000000165c      0x215 ../bin/handlers_c.o
+ .debug_info    0x0000000000001871      0x582 ../bin/panic.o
+ .debug_info    0x0000000000001df3      0x50e ../bin/memory.o
+ .debug_info    0x0000000000002301      0x1f8 ../bin/pata.o
+ .debug_info    0x00000000000024f9     0x13f3 ../bin/chainfs.o
+ .debug_info    0x00000000000038ec      0x646 ../bin/vga.o
+ .debug_info    0x0000000000003f32      0x21e ../bin/ps2.o
+ .debug_info    0x0000000000004150      0x1e5 ../bin/keyboard.o
+ .debug_info    0x0000000000004335      0x801 ../bin/fb.o
+ .debug_info    0x0000000000004b36     0x48f5 ../bin/font.o
+ .debug_info    0x000000000000942b      0x164 ../bin/timer.o
+ .debug_info    0x000000000000958f       0xc0 ../bin/stdlib.o
 
-.debug_abbrev   0x0000000000000000     0x14de
+.debug_abbrev   0x0000000000000000     0x1662
  .debug_abbrev  0x0000000000000000       0x14 ../bin/boot.o
  .debug_abbrev  0x0000000000000014      0x1b2 ../bin/kernel.o
  .debug_abbrev  0x00000000000001c6       0xc8 ../bin/string.o
@@ -1267,18 +1293,20 @@ OUTPUT(../bin/kernel.bin elf64-x86-64)
  .debug_abbrev  0x0000000000000462       0x1d ../bin/idt_asm.o
  .debug_abbrev  0x000000000000047f      0x13a ../bin/idt_c.o
  .debug_abbrev  0x00000000000005b9       0xc8 ../bin/pic_c.o
- .debug_abbrev  0x0000000000000681       0xf2 ../bin/handlers_c.o
- .debug_abbrev  0x0000000000000773      0x1a7 ../bin/panic.o
- .debug_abbrev  0x000000000000091a      0x228 ../bin/memory.o
- .debug_abbrev  0x0000000000000b42       0xf7 ../bin/pata.o
- .debug_abbrev  0x0000000000000c39      0x218 ../bin/chainfs.o
- .debug_abbrev  0x0000000000000e51      0x19b ../bin/vga.o
- .debug_abbrev  0x0000000000000fec      0x12e ../bin/ps2.o
- .debug_abbrev  0x000000000000111a      0x146 ../bin/keyboard.o
- .debug_abbrev  0x0000000000001260      0x192 ../bin/fb.o
- .debug_abbrev  0x00000000000013f2       0xec ../bin/font.o
+ .debug_abbrev  0x0000000000000681       0xf3 ../bin/handlers_c.o
+ .debug_abbrev  0x0000000000000774      0x1a7 ../bin/panic.o
+ .debug_abbrev  0x000000000000091b      0x229 ../bin/memory.o
+ .debug_abbrev  0x0000000000000b44       0xf7 ../bin/pata.o
+ .debug_abbrev  0x0000000000000c3b      0x218 ../bin/chainfs.o
+ .debug_abbrev  0x0000000000000e53      0x1ad ../bin/vga.o
+ .debug_abbrev  0x0000000000001000      0x12e ../bin/ps2.o
+ .debug_abbrev  0x000000000000112e      0x146 ../bin/keyboard.o
+ .debug_abbrev  0x0000000000001274      0x192 ../bin/fb.o
+ .debug_abbrev  0x0000000000001406       0xec ../bin/font.o
+ .debug_abbrev  0x00000000000014f2       0xe1 ../bin/timer.o
+ .debug_abbrev  0x00000000000015d3       0x8f ../bin/stdlib.o
 
-.debug_aranges  0x0000000000000000      0x360
+.debug_aranges  0x0000000000000000      0x3c0
  .debug_aranges
                 0x0000000000000000       0x30 ../bin/boot.o
  .debug_aranges
@@ -1315,25 +1343,31 @@ OUTPUT(../bin/kernel.bin elf64-x86-64)
                 0x0000000000000300       0x30 ../bin/fb.o
  .debug_aranges
                 0x0000000000000330       0x30 ../bin/font.o
+ .debug_aranges
+                0x0000000000000360       0x30 ../bin/timer.o
+ .debug_aranges
+                0x0000000000000390       0x30 ../bin/stdlib.o
 
-.debug_str      0x0000000000000000     0x4782
- .debug_str     0x0000000000000000     0x4782 ../bin/boot.o
+.debug_str      0x0000000000000000     0x47db
+ .debug_str     0x0000000000000000     0x47db ../bin/boot.o
                                          0x36 (размер перед ослаблением)
- .debug_str     0x0000000000004782      0x55e ../bin/kernel.o
- .debug_str     0x0000000000004782      0x171 ../bin/string.o
- .debug_str     0x0000000000004782      0x286 ../bin/com1.o
- .debug_str     0x0000000000004782      0x3bb ../bin/idt_c.o
- .debug_str     0x0000000000004782      0x127 ../bin/pic_c.o
- .debug_str     0x0000000000004782      0x172 ../bin/handlers_c.o
- .debug_str     0x0000000000004782      0x23b ../bin/panic.o
- .debug_str     0x0000000000004782      0x272 ../bin/memory.o
- .debug_str     0x0000000000004782      0x1a6 ../bin/pata.o
- .debug_str     0x0000000000004782      0x733 ../bin/chainfs.o
- .debug_str     0x0000000000004782      0x2fc ../bin/vga.o
- .debug_str     0x0000000000004782      0x1ae ../bin/ps2.o
- .debug_str     0x0000000000004782      0x213 ../bin/keyboard.o
- .debug_str     0x0000000000004782      0x4ab ../bin/fb.o
- .debug_str     0x0000000000004782     0x355a ../bin/font.o
+ .debug_str     0x00000000000047db      0x56f ../bin/kernel.o
+ .debug_str     0x00000000000047db      0x171 ../bin/string.o
+ .debug_str     0x00000000000047db      0x286 ../bin/com1.o
+ .debug_str     0x00000000000047db      0x3bb ../bin/idt_c.o
+ .debug_str     0x00000000000047db      0x127 ../bin/pic_c.o
+ .debug_str     0x00000000000047db      0x180 ../bin/handlers_c.o
+ .debug_str     0x00000000000047db      0x23b ../bin/panic.o
+ .debug_str     0x00000000000047db      0x272 ../bin/memory.o
+ .debug_str     0x00000000000047db      0x1a6 ../bin/pata.o
+ .debug_str     0x00000000000047db      0x733 ../bin/chainfs.o
+ .debug_str     0x00000000000047db      0x2fc ../bin/vga.o
+ .debug_str     0x00000000000047db      0x1ae ../bin/ps2.o
+ .debug_str     0x00000000000047db      0x213 ../bin/keyboard.o
+ .debug_str     0x00000000000047db      0x4ab ../bin/fb.o
+ .debug_str     0x00000000000047db     0x355a ../bin/font.o
+ .debug_str     0x00000000000047db      0x16d ../bin/timer.o
+ .debug_str     0x00000000000047db      0x11d ../bin/stdlib.o
 
 .debug_rnglists
                 0x0000000000000000       0x9d
@@ -1364,6 +1398,8 @@ OUTPUT(../bin/kernel.bin elf64-x86-64)
  .comment       0x000000000000004a       0x20 ../bin/keyboard.o
  .comment       0x000000000000004a       0x20 ../bin/fb.o
  .comment       0x000000000000004a       0x20 ../bin/font.o
+ .comment       0x000000000000004a       0x20 ../bin/timer.o
+ .comment       0x000000000000004a       0x20 ../bin/stdlib.o
 
 .note.GNU-stack
                 0x0000000000000000        0x0
@@ -1399,6 +1435,10 @@ OUTPUT(../bin/kernel.bin elf64-x86-64)
                 0x0000000000000000        0x0 ../bin/fb.o
  .note.GNU-stack
                 0x0000000000000000        0x0 ../bin/font.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../bin/timer.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 ../bin/stdlib.o
 
 .debug_pubnames
                 0x0000000000000000        0x0

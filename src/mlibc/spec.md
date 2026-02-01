@@ -31,6 +31,9 @@ Low-level wrappers for CPU I/O instructions.
 - `void cinfo(char *buf)`: Retrieves CPU Brand/Vendor string.
 - `u64 rinfo(u64 mb_ptr)`: Returns total RAM size in KB (from Multiboot info).
 
+### 5. Standard Library (`stdlib.h` / `stdlib.c`)
+- `void sleep(u32 ms)`: Suspends execution for a specified number of milliseconds (busy-wait).
+
 ## Characteristics
 - **No Dependencies**: The library is self-contained and does not rely on any external environment.
 - **Kernel-Mode**: All functions are designed for execution in Ring 0.

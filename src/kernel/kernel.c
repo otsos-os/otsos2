@@ -4,8 +4,8 @@
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
- * 1. Redistributions of source code must retain the above copyright notice, this
- *    list of conditions and the following disclaimer.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ * this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
@@ -13,27 +13,30 @@
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <kernel/drivers/disk/pata/pata.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/keyboard/keyboard.h>
+#include <kernel/drivers/timer.h>
 #include <kernel/drivers/vga.h>
 #include <kernel/drivers/video/fb.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/multiboot.h>
 #include <kernel/multiboot2.h>
+#include <kernel/panic.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
-#include <kernel/panic.h>
+#include <mlibc/stdlib.h>
 extern void cpuid_get(u32 code, u32 *res);
 
 extern void cinfo(char *buf);
@@ -129,6 +132,7 @@ void kmain(u64 magic, u64 addr) {
   com1_init();
   com1_set_mirror_callback(vga_putc);
   init_idt();
+  timer_init(1000);
 
   boot_magic = (u32)magic;
 
@@ -169,9 +173,8 @@ void kmain(u64 magic, u64 addr) {
     multiboot_info_t *mboot_ptr = (multiboot_info_t *)addr;
     debug_multiboot_info(mboot_ptr);
     com1_off_mirror_callback();
-    fb_init(mboot_ptr);
 
-    clear_scr();
+    fb_init(mboot_ptr);
 
     char cpu_buf[64];
     cinfo(cpu_buf);
@@ -190,8 +193,14 @@ void kmain(u64 magic, u64 addr) {
     }
 
   } else {
-    panic("ERROR: Unknown bootloader magic: 0x%x\nExpected MB1: 0x%x or MB2: 0x%x\n", boot_magic, MULTIBOOT_BOOTLOADER_MAGIC, MULTIBOOT2_BOOTLOADER_MAGIC);
+    panic("ERROR: Unknown bootloader magic: 0x%x\nExpected MB1: 0x%x or MB2: "
+          "0x%x\n",
+          boot_magic, MULTIBOOT_BOOTLOADER_MAGIC, MULTIBOOT2_BOOTLOADER_MAGIC);
   }
+
+  sleep(430);
+  com1_off_mirror_callback();
+  clear_scr();
 
   keyboard_manager_init();
 

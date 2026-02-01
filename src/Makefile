@@ -30,9 +30,11 @@ PS2_O = ../bin/ps2.o
 KEYBOARD_O = ../bin/keyboard.o
 FB_O = ../bin/fb.o
 FONT_O = ../bin/font.o
+TIMER_O = ../bin/timer.o
+STDLIB_O = ../bin/stdlib.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O) $(VGA_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O)
+      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O) $(VGA_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O)
 
 all: $(ISO_IMAGE)
 
@@ -103,6 +105,14 @@ $(FB_O): kernel/drivers/video/fb.c
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(FONT_O): kernel/drivers/video/font.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(TIMER_O): kernel/drivers/timer.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(STDLIB_O): mlibc/stdlib.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

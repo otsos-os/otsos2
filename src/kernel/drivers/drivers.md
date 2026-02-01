@@ -55,3 +55,12 @@ Driver for standard PS/2 keyboards.
     - Modifier key support (Shift, Caps Lock).
     - Circular input buffer.
 
+## 7. PIT Timer Driver (`src/kernel/drivers/timer.c`)
+Standard Programmable Interval Timer (PIT) for handling system ticks.
+- **Port**: `0x40` (Data), `0x43` (Command).
+- **Features**:
+    - Configurable frequency (initialized at 1000Hz for 1ms precision).
+    - Global tick counter (`u64`).
+- **API**:
+    - `void timer_init(u32 frequency)`: Sets the PIT frequency.
+    - `u64 timer_get_ticks()`: Returns number of ticks since boot.
