@@ -135,6 +135,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   com1_set_mirror_callback(vga_putc);
   init_idt();
   timer_init(1000);
+  keyboard_manager_init();  
   mmu_init();
 
   boot_magic = (u32)magic;
@@ -204,8 +205,6 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   sleep(430);
   com1_off_mirror_callback();
   clear_scr();
-
-  keyboard_manager_init();
 
   printf("\nDo you want to enable debug mode (dont use for default use it make "
          "you screen dirty)? [y/n]\n");
