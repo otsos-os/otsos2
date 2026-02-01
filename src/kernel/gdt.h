@@ -24,27 +24,62 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef POSIX_H
-#define POSIX_H
+#ifndef GDT_H
+#define GDT_H
 
 #include <mlibc/mlibc.h>
 
-#define MAX_FDS 32
+/*
+ * 0x00 - Null descriptor
+ * 0x08 - Kernel Code (Ring 0, 64-bit)
+ * 0x10 - Kernel Data (Ring 0)
+ * 0x18 - User Code (Ring 3, 64-bit)
+ * 0x20 - User Data (Ring 3)
+ * 0x28 - TSS (16 bytes, spans 0x28-0x30)
+ *
+ *   Kernel CS = 0x08, Kernel DS = 0x10
+ *   User CS = 0x1B (0x18 | 3), User DS = 0x23 (0x20 | 3)
+ */
 
+#define GDT_NULL_SEG 0x00
+#define GDT_KERNEL_CODE 0x08
+#define GDT_KERNEL_DATA 0x10
+#define GDT_USER_CODE 0x18
+#define GDT_USER_DATA 0x20
+#define GDT_TSS 0x28
+
+/* Selectors with RPL (Ring Privilege Level) */
+#define KERNEL_CS (GDT_KERNEL_CODE)
+#define KERNEL_DS (GDT_KERNEL_DATA)
+#define USER_CS (GDT_USER_CODE | 3) /* 0x1B */
+#define USER_DS (GDT_USER_DATA | 3) /* 0x23 */
+
+/* Task State Segment (TSS) for x86_64 */
 typedef struct {
-  int used;
-  char path[256];
-  u32 offset;
-  int flags;
-} file_descriptor_t;
+  u32 reserved0;
+  u64 rsp0; /* Stack pointer for Ring 0 */
+  u64 rsp1; /* Stack pointer for Ring 1 (unused) */
+  u64 rsp2; /* Stack pointer for Ring 2 (unused) */
+  u64 reserved1;
+  u64 ist1; /* Interrupt Stack Table 1 */
+  u64 ist2;
+  u64 ist3;
+  u64 ist4;
+  u64 ist5;
+  u64 ist6;
+  u64 ist7;
+  u64 reserved2;
+  u16 reserved3;
+  u16 iomap_base; /* I/O Map Base Address */
+} __attribute__((packed)) tss_t;
 
-#define STDIN_FILENO 0
-#define STDOUT_FILENO 1
-#define STDERR_FILENO 2
+/* Initialize GDT with Ring 0/3 segments and TSS */
+void gdt_init(void);
 
-extern file_descriptor_t fd_table[MAX_FDS];
+/* Set the kernel stack in TSS (called on context switch) */
+void tss_set_rsp0(u64 stack);
 
-int sys_write(int fd, const void *buf, u32 count);
-void posix_init(void);
+/* Get current TSS RSP0 */
+u64 tss_get_rsp0(void);
 
 #endif

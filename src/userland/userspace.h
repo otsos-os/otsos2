@@ -24,27 +24,30 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef POSIX_H
-#define POSIX_H
+#ifndef USERSPACE_H
+#define USERSPACE_H
 
+#include <kernel/process.h>
 #include <mlibc/mlibc.h>
 
-#define MAX_FDS 32
+/* Default user stack virtual address */
+#define USER_STACK_BASE 0x00007FFFFFFFFFFF
+#define USER_STACK_TOP (USER_STACK_BASE - USER_STACK_SIZE + 1)
 
-typedef struct {
-  int used;
-  char path[256];
-  u32 offset;
-  int flags;
-} file_descriptor_t;
+/* Initialize userspace subsystem */
+void userspace_init(void);
 
-#define STDIN_FILENO 0
-#define STDOUT_FILENO 1
-#define STDERR_FILENO 2
+/* Load init process from multiboot module */
+void userspace_load_init(void *module_start, u64 module_size);
 
-extern file_descriptor_t fd_table[MAX_FDS];
+/* Load ELF and create userspace process */
+process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size);
 
-int sys_write(int fd, const void *buf, u32 count);
-void posix_init(void);
+/* Jump to userspace (starts executing the process) */
+void userspace_jump(process_t *proc);
+
+/* Assembly function to switch to Ring 3 */
+extern void userspace_enter(u64 entry, u64 user_stack, u64 user_cs,
+                            u64 user_ds);
 
 #endif

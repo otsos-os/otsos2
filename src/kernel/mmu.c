@@ -33,11 +33,16 @@ void mmu_init() {
   com1_printf("[MMU] Initialized. Current CR3: %p\n", (void *)cr3);
 }
 
-static u64 *get_next_level(u64 *current_table, u16 index, int alloc) {
+static u64 *get_next_level(u64 *current_table, u16 index, int alloc,
+                           u64 flags) {
   u64 entry = current_table[index];
 
   if (entry & PTE_PRESENT) {
-
+    /* If we are mapping a user page, ensure the directory entry also has the
+     * USER bit */
+    if (flags & PTE_USER) {
+      current_table[index] |= PTE_USER;
+    }
     return (u64 *)(entry & PTE_ADDR_MASK);
   }
 
@@ -53,7 +58,10 @@ static u64 *get_next_level(u64 *current_table, u16 index, int alloc) {
 
   memset(new_table, 0, PAGE_SIZE);
 
-  u64 new_entry = (u64)new_table | PTE_PRESENT | PTE_RW | PTE_USER;
+  u64 new_entry = (u64)new_table | PTE_PRESENT | PTE_RW;
+  if (flags & PTE_USER) {
+    new_entry |= PTE_USER;
+  }
 
   current_table[index] = new_entry;
   return new_table;
@@ -67,15 +75,15 @@ void mmu_map_page(u64 vaddr, u64 paddr, u64 flags) {
 
   u64 *pml4 = (u64 *)(mmu_read_cr3() & PTE_ADDR_MASK);
 
-  u64 *pdpt = get_next_level(pml4, pml4_index, 1);
+  u64 *pdpt = get_next_level(pml4, pml4_index, 1, flags);
   if (!pdpt)
     return;
 
-  u64 *pd = get_next_level(pdpt, pdpt_index, 1);
+  u64 *pd = get_next_level(pdpt, pdpt_index, 1, flags);
   if (!pd)
     return;
 
-  u64 *pt = get_next_level(pd, pd_index, 1);
+  u64 *pt = get_next_level(pd, pd_index, 1, flags);
   if (!pt)
     return;
 
@@ -93,15 +101,15 @@ void mmu_unmap_page(u64 vaddr) {
 
   u64 *pml4 = (u64 *)(mmu_read_cr3() & PTE_ADDR_MASK);
 
-  u64 *pdpt = get_next_level(pml4, pml4_index, 0);
+  u64 *pdpt = get_next_level(pml4, pml4_index, 0, 0);
   if (!pdpt)
     return;
 
-  u64 *pd = get_next_level(pdpt, pdpt_index, 0);
+  u64 *pd = get_next_level(pdpt, pdpt_index, 0, 0);
   if (!pd)
     return;
 
-  u64 *pt = get_next_level(pd, pd_index, 0);
+  u64 *pt = get_next_level(pd, pd_index, 0, 0);
   if (!pt)
     return;
 
@@ -117,11 +125,11 @@ u64 mmu_virt_to_phys(u64 vaddr) {
 
   u64 *pml4 = (u64 *)(mmu_read_cr3() & PTE_ADDR_MASK);
 
-  u64 *pdpt = get_next_level(pml4, pml4_index, 0);
+  u64 *pdpt = get_next_level(pml4, pml4_index, 0, 0);
   if (!pdpt)
     return 0;
 
-  u64 *pd = get_next_level(pdpt, pdpt_index, 0);
+  u64 *pd = get_next_level(pdpt, pdpt_index, 0, 0);
   if (!pd)
     return 0;
 

@@ -35,15 +35,37 @@ STDLIB_O = ../bin/stdlib.o
 MMU_O = ../bin/mmu.o
 WRITE_O = ../bin/write.o
 SYSCALL_O = ../bin/syscall.o
+GDT_O = ../bin/gdt.o
+GDT_ASM_O = ../bin/gdt_asm.o
+PROCESS_O = ../bin/process.o
+ELF_O = ../bin/elf.o
+USERSPACE_O = ../bin/userspace.o
+USERSPACE_ASM_O = ../bin/userspace_asm.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O) $(VGA_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(SYSCALL_O)
+      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O) $(VGA_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(SYSCALL_O) \
+      $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O)
 
 all: $(ISO_IMAGE)
 
-$(ISO_IMAGE): $(KERNEL_BIN)
+INIT_BIN = ../init/init
+
+$(INIT_BIN):
+	@echo "  MAKE    init"
+	@$(MAKE) -C ../init
+
+$(ISO_IMAGE): $(KERNEL_BIN) $(INIT_BIN)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
+	@cp $(INIT_BIN) $(ISODIR)/boot/init
+	@echo 'set timeout=0' > $(ISODIR)/boot/grub/grub.cfg
+	@echo 'set default=0' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo 'menuentry "OTSOS" {' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '    multiboot2 /boot/kernel.bin' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '    module2 /boot/init' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '    boot' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '}' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo "  ISO     $(ISO_IMAGE)"
 	@grub-mkrescue -o $(ISO_IMAGE) $(ISODIR) >/dev/null 2>&1
 
@@ -130,6 +152,30 @@ $(WRITE_O): kernel/posix/write.c
 $(SYSCALL_O): kernel/syscall.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(GDT_O): kernel/gdt.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(GDT_ASM_O): kernel/gdt.asm
+	@echo "  AS      $<"
+	@$(AS) -f elf64 -g -F dwarf $< -o $@
+
+$(PROCESS_O): kernel/process.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(ELF_O): userland/elf.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(USERSPACE_O): userland/userspace.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(USERSPACE_ASM_O): userland/userspace.asm
+	@echo "  AS      $<"
+	@$(AS) -f elf64 -g -F dwarf $< -o $@
 
 
 $(STRING_O): mlibc/string.c

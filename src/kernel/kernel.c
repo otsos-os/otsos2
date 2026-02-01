@@ -38,8 +38,10 @@
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdlib.h>
-extern void cpuid_get(u32 code, u32 *res);
+#include <userland/userspace.h>
+#include <kernel/posix/posix.h>
 
+extern void cpuid_get(u32 code, u32 *res);
 extern void cinfo(char *buf);
 extern u64 rinfo(u64 mb_ptr);
 
@@ -83,7 +85,6 @@ static void debug_multiboot_info(multiboot_info_t *mb_info) {
 }
 
 static void debug_multiboot2_tags(multiboot2_info_t *mb_info) {
-
   multiboot2_tag_t *tag = (multiboot2_tag_t *)((u8 *)mb_info + 8);
 
   while (tag->type != MULTIBOOT2_TAG_TYPE_END) {
@@ -222,10 +223,37 @@ void kmain(u64 magic, u64 addr) {
 
   init_heap();
   pata_identify(NULL);
-  while (1) {
-    char c = keyboard_getchar();
-    if (c) {
-      printf("\033[31m %c \033[0m", c);
+  posix_init();
+
+  userspace_init();
+
+  void *init_module_start = NULL;
+  u32 init_module_size = 0;
+
+  if (boot_magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
+    multiboot2_info_t *mboot_ptr = (multiboot2_info_t *)addr;
+    multiboot2_tag_module_t *mod =
+        (multiboot2_tag_module_t *)multiboot2_find_tag(
+            mboot_ptr, MULTIBOOT2_TAG_TYPE_MODULE);
+
+    if (mod) {
+      init_module_start = (void *)(u64)mod->mod_start;
+      init_module_size = mod->mod_end - mod->mod_start;
+    }
+  }
+
+  if (init_module_start && init_module_size > 0) {
+    com1_printf("[KERNEL] Found init module at %p, size %d. Starting init...\n",
+                init_module_start, init_module_size);
+    userspace_load_init(init_module_start, (u64)init_module_size);
+  } else {
+    com1_printf(
+        "[KERNEL] Init module not found! Falling back to kernel loop...\n");
+    while (1) {
+      char c = keyboard_getchar();
+      if (c) {
+        printf("\033[31m %c \033[0m", c);
+      }
     }
   }
 }

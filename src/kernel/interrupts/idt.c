@@ -25,6 +25,7 @@
  */
 
 #include <kernel/interrupts/idt.h>
+#include <mlibc/mlibc.h>
 
 typedef struct {
   unsigned short low_offset;
