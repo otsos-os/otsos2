@@ -61,6 +61,7 @@ $(ISO_IMAGE): $(KERNEL_BIN) $(INIT_BIN)
 	@cp $(INIT_BIN) $(ISODIR)/boot/init
 	@echo 'set timeout=0' > $(ISODIR)/boot/grub/grub.cfg
 	@echo 'set default=0' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo 'insmod all_video' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo 'menuentry "OTSOS" {' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    multiboot2 /boot/kernel.bin' >> $(ISODIR)/boot/grub/grub.cfg
@@ -211,9 +212,15 @@ $(DISK_IMG):
 	@echo "  IMG     $(DISK_IMG)"
 	@dd if=/dev/zero of=$(DISK_IMG) bs=1M count=10 2>/dev/null
 
+OVMF = /usr/share/ovmf/OVMF.fd
+
 run: $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio
+
+run_uefi: $(ISO_IMAGE) $(DISK_IMG)
+	@echo "  RUN     QEMU (UEFI)"
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF)
 
 debug: $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  DEBUG   QEMU"
