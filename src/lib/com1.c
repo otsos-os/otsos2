@@ -17,6 +17,8 @@ void com1_set_mirror_callback(void (*callback)(char)) {
   mirror_callback = callback;
 }
 
+void com1_off_mirror_callback(void) { mirror_callback = 0; }
+
 static inline void outb(u16 port, u8 value) {
   __asm__ volatile("outb %0, %1" : : "a"(value), "Nd"(port));
 }

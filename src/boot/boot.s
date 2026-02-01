@@ -6,6 +6,9 @@
 .set MB2_HEADER_LEN,   multiboot2_header_end - multiboot2_header
 .set MB2_CHECKSUM,     -(MB2_MAGIC + MB2_ARCH + MB2_HEADER_LEN)
 
+.set MB1_BOOTLOADER_MAGIC, 0x2BADB002
+.set MB2_BOOTLOADER_MAGIC, 0x36D76289
+
 .section .multiboot
 .align 8
 multiboot2_header:
@@ -52,7 +55,9 @@ stack_top:
 
 .section .data
 .align 8
-multiboot2_info_ptr:
+multiboot_info_ptr:
+    .quad 0
+multiboot_magic_val:
     .quad 0
 
 .section .rodata
@@ -69,14 +74,16 @@ pointer64:
 start:
     mov esp, offset stack_top
 
-    push eax
-    push ebx
+    mov [multiboot_magic_val], eax
+    mov [multiboot_info_ptr], ebx
 
-    cmp eax, 0x36D76289
-    jne .Lno_multiboot
+    cmp eax, MB2_BOOTLOADER_MAGIC
+    je .Lvalid_multiboot
+    cmp eax, MB1_BOOTLOADER_MAGIC
+    je .Lvalid_multiboot
+    jmp .Lno_multiboot
 
-    mov [multiboot2_info_ptr], ebx
-
+.Lvalid_multiboot:
     mov eax, offset p3_table
     or eax, 0b11
     mov [p4_table], eax
@@ -133,8 +140,8 @@ start:
 
 .Lno_multiboot:
     mov dword ptr [0xb8000], 0x4f424f4d    /* "MB" */
-    mov dword ptr [0xb8004], 0x4f204f32    /* "2 " */
-    mov dword ptr [0xb8008], 0x4f524f45    /* "ER" */
+    mov dword ptr [0xb8004], 0x4f524f45    /* "ER" */
+    mov dword ptr [0xb8008], 0x4f4f4f52    /* "RO" */
     mov dword ptr [0xb800c], 0x4f214f52    /* "R!" */
     hlt
 
@@ -147,9 +154,11 @@ start64:
     mov fs, ax
     mov gs, ax
 
-    mov rdi, [multiboot2_info_ptr]
+    mov rdi, [multiboot_magic_val]
+    mov rsi, [multiboot_info_ptr]
 
     .extern kmain
     call kmain
 
     hlt
+

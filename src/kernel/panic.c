@@ -169,3 +169,91 @@ void kernel_panic(registers_t *regs) {
     __asm__ volatile("hlt");
   }
 }
+
+void panic(const char *format, ...) {
+  __asm__ volatile("cli");
+
+  vga_set_color(0x1F);
+  clear_scr();
+
+  com1_printf(
+      "\n\r:::::::::::::::::::::::: KERNEL PANIC ::::::::::::::::::::::::\n\r");
+  printf(":::::::::::::::::::::::: KERNEL PANIC ::::::::::::::::::::::::\n");
+
+  com1_printf("Message: ");
+  printf("Message: ");
+
+  __builtin_va_list args;
+  __builtin_va_start(args, format);
+
+  char buffer[512];
+  int i = 0;
+  const char *p = format;
+
+  while (*p && i < 511) {
+    if (*p == '%') {
+      p++;
+      switch (*p) {
+      case 's': {
+        const char *str = __builtin_va_arg(args, const char *);
+        while (*str && i < 511)
+          buffer[i++] = *str++;
+        break;
+      }
+      case 'd': {
+        int val = __builtin_va_arg(args, int);
+        if (val < 0) {
+          buffer[i++] = '-';
+          val = -val;
+        }
+        char tmp[16];
+        int j = 0;
+        do {
+          tmp[j++] = '0' + (val % 10);
+          val /= 10;
+        } while (val && j < 16);
+        while (j > 0 && i < 511)
+          buffer[i++] = tmp[--j];
+        break;
+      }
+      case 'x': {
+        unsigned int val = __builtin_va_arg(args, unsigned int);
+        const char hex[] = "0123456789ABCDEF";
+        char tmp[16];
+        int j = 0;
+        do {
+          tmp[j++] = hex[val % 16];
+          val /= 16;
+        } while (val && j < 16);
+        while (j > 0 && i < 511)
+          buffer[i++] = tmp[--j];
+        break;
+      }
+      case '%':
+        buffer[i++] = '%';
+        break;
+      default:
+        buffer[i++] = '%';
+        if (i < 511)
+          buffer[i++] = *p;
+        break;
+      }
+    } else {
+      buffer[i++] = *p;
+    }
+    p++;
+  }
+  buffer[i] = '\0';
+
+  __builtin_va_end(args);
+
+  com1_printf("%s\n\r", buffer);
+  printf("%s\n", buffer);
+
+  com1_printf("\n\rSystem Halted.\n\r");
+  printf("\nSystem Halted.");
+
+  while (1) {
+    __asm__ volatile("hlt");
+  }
+}
