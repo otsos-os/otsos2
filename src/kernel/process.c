@@ -26,11 +26,11 @@
 
 #include <kernel/gdt.h>
 #include <kernel/mmu.h>
+#include <kernel/panic.h>
 #include <kernel/process.h>
 #include <lib/com1.h>
 #include <mlibc/memory.h>
 
-/* Process table */
 process_t process_table[MAX_PROCESSES];
 u32 next_pid = 1;
 static process_t *current_process = NULL;
@@ -45,7 +45,6 @@ void process_init(void) {
   com1_printf("[PROC] Process table initialized (%d slots)\n", MAX_PROCESSES);
 }
 
-/* Find a free slot in process table */
 process_t *alloc_process(void) {
   for (int i = 0; i < MAX_PROCESSES; i++) {
     if (process_table[i].state == PROC_STATE_UNUSED) {
@@ -62,7 +61,6 @@ process_t *process_create_kernel(const char *name, void (*entry)(void)) {
     return NULL;
   }
 
-  /* Allocate kernel stack for this process */
   u8 *kstack = (u8 *)kmalloc_aligned(KERNEL_STACK_SIZE, 16);
   if (!kstack) {
     com1_printf("[PROC] Error: Failed to allocate kernel stack\n");
@@ -70,31 +68,28 @@ process_t *process_create_kernel(const char *name, void (*entry)(void)) {
   }
   memset(kstack, 0, KERNEL_STACK_SIZE);
 
-  /* Initialize PCB */
+  
   proc->pid = next_pid++;
-  proc->ppid = 0; /* Kernel is parent */
+  proc->ppid = 0; 
   proc->state = PROC_STATE_EMBRYO;
 
-  /* Copy name */
   int i;
   for (i = 0; i < PROCESS_NAME_LEN - 1 && name[i]; i++) {
     proc->name[i] = name[i];
   }
   proc->name[i] = '\0';
 
-  /* Memory - use current kernel page tables for now */
   proc->cr3 = mmu_read_cr3();
   proc->entry_point = (u64)entry;
 
-  /* Stacks */
+  
   proc->kernel_stack = (u64)(kstack + KERNEL_STACK_SIZE);
-  proc->user_stack = 0; /* Kernel processes don't use user stack */
+  proc->user_stack = 0; 
 
-  /* Initialize context for kernel mode execution */
   memset(&proc->context, 0, sizeof(cpu_context_t));
   proc->context.rip = (u64)entry;
   proc->context.cs = KERNEL_CS;
-  proc->context.rflags = 0x202; /* IF=1 (interrupts enabled) */
+  proc->context.rflags = 0x202; 
   proc->context.rsp = proc->kernel_stack;
   proc->context.ss = KERNEL_DS;
 
@@ -125,7 +120,6 @@ void process_set_current(process_t *proc) {
   current_process = proc;
   if (proc) {
     proc->state = PROC_STATE_RUNNING;
-    /* Update TSS with this process's kernel stack */
     tss_set_rsp0(proc->kernel_stack);
   }
 }
@@ -139,13 +133,14 @@ void process_exit(int code) {
   com1_printf("[PROC] Process '%s' (PID %d) exited with code %d\n",
               current_process->name, current_process->pid, code);
 
+  if (current_process->pid == 1) {
+    panic("Init process terminated! (PID 1 exited with code %d)", code);
+  }
+
   current_process->exit_code = code;
   current_process->state = PROC_STATE_ZOMBIE;
 
-  /* TODO: Wake up parent if waiting */
-  /* TODO: Schedule next process */
 
-  /* For now, halt */
   while (1) {
     __asm__ volatile("hlt");
   }
@@ -173,10 +168,35 @@ void process_dump(process_t *proc) {
   com1_printf("====================\n");
 }
 
-/* Create process from ELF - will be implemented in userspace.c/elf.c */
 process_t *process_create(const char *name, void *elf_data, u64 elf_size) {
-  /* Forward declaration - implemented with ELF loader */
   extern process_t *userspace_load_elf(const char *name, void *elf_data,
                                        u64 elf_size);
   return userspace_load_elf(name, elf_data, elf_size);
+}
+
+int process_kill(u32 pid) {
+  if (pid == 1) {
+    return -1; 
+  }
+
+  process_t *proc = process_get(pid);
+  if (!proc) {
+    return -1;
+  }
+
+  if (proc == current_process) {
+    process_exit(-1);
+    return 0;
+  }
+
+
+  if (proc->kernel_stack) {
+    void *kstack_base = (void *)(proc->kernel_stack - KERNEL_STACK_SIZE);
+    kfree(kstack_base);
+  }
+
+  memset(proc, 0, sizeof(process_t));
+  proc->state = PROC_STATE_UNUSED;
+
+  return 0;
 }

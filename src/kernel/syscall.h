@@ -32,6 +32,7 @@
 
 #define SYS_WRITE 1
 #define SYS_EXIT 60
+#define SYS_KILL 62
 
 void syscall_handler(registers_t *regs);
 

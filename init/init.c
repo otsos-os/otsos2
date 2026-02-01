@@ -51,5 +51,7 @@ void _start(void) {
   print("\n");
   print("Hello from PID 1 via SYSCALL instruction!\n");
 
-  exit(0);
+  while (1) {
+    __asm__ volatile("hlt");
+  }
 }

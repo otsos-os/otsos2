@@ -27,6 +27,7 @@
 #include <kernel/gdt.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/posix/posix.h>
+#include <kernel/process.h>
 #include <kernel/syscall.h>
 #include <lib/com1.h>
 
@@ -78,17 +79,17 @@ void syscall_handler(registers_t *regs) {
   u64 arg2 = regs->rsi;
   u64 arg3 = regs->rdx;
 
-  /* Actually, syscall uses r10 instead of rcx for 4th argument in x64 */
-  /* But for first 3 args it's same as int 0x80 */
+
 
   switch (syscall_number) {
   case SYS_WRITE:
     regs->rax = (u64)sys_write((int)arg1, (const void *)arg2, (u32)arg3);
     break;
   case SYS_EXIT:
-    com1_printf("Process exited with code %d\n", arg1);
-    while (1)
-      __asm__ volatile("hlt");
+    process_exit((int)arg1);
+    break;
+  case SYS_KILL:
+    regs->rax = process_kill((u32)arg1);
     break;
   default:
     com1_printf("Unknown syscall: %d\n", syscall_number);
