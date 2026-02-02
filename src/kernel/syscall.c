@@ -80,6 +80,9 @@ void syscall_handler(registers_t *regs) {
   u64 arg3 = regs->rdx;
 
   switch (syscall_number) {
+  case SYS_READ:
+    regs->rax = (u64)sys_read((int)arg1, (void *)arg2, (u32)arg3);
+    break;
   case SYS_WRITE:
     regs->rax = (u64)sys_write((int)arg1, (const void *)arg2, (u32)arg3);
     break;

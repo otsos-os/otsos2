@@ -44,6 +44,7 @@ typedef struct {
 
 extern file_descriptor_t fd_table[MAX_FDS];
 
+int sys_read(int fd, void *buf, u32 count);
 int sys_write(int fd, const void *buf, u32 count);
 void posix_init(void);
 

@@ -4,8 +4,8 @@
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
- * 1. Redistributions of source code must retain the above copyright notice, this
- *    list of conditions and the following disclaimer.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ * this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
@@ -13,14 +13,15 @@
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <kernel/drivers/keyboard/ps2.h>
@@ -131,4 +132,132 @@ void ps2_keyboard_handler() {
       }
     }
   }
+}
+
+static char ps2_read_char_blocking() {
+  char c = 0;
+  while ((c = ps2_keyboard_getchar()) == 0) {
+    __asm__ volatile("nop");
+  }
+  return c;
+}
+
+int ps2Scanf(const char *format, ...) {
+  __builtin_va_list args;
+  __builtin_va_start(args, format);
+
+  int count = 0;
+
+  while (*format) {
+    if (*format == '%') {
+      format++;
+      if (*format == 'd') {
+        int *val = __builtin_va_arg(args, int *);
+        char buf[32];
+        int i = 0;
+        char c;
+        while ((c = ps2_read_char_blocking()) == ' ' || c == '\n' ||
+               c == '\t') {
+        }
+
+        int sign = 1;
+        if (c == '-') {
+          ps2_read_char_blocking();
+        }
+
+        int num = 0;
+        int started = 0;
+
+        int is_neg = 0;
+        while (1) {
+          c = ps2_read_char_blocking();
+
+          if (c != '\b') {
+          }
+
+          if (c == ' ' || c == '\n' || c == '\t') {
+            if (started)
+              break;
+            continue;
+          }
+
+          if (c == '-' && !started) {
+            is_neg = 1;
+            started = 1;
+            continue;
+          }
+
+          if (c >= '0' && c <= '9') {
+            num = num * 10 + (c - '0');
+            started = 1;
+          } else {
+            break;
+          }
+        }
+
+        if (is_neg)
+          num = -num;
+        *val = num;
+        count++;
+
+      } else if (*format == 's') {
+        char *str = __builtin_va_arg(args, char *);
+        char c;
+        int started = 0;
+        while (1) {
+          c = ps2_read_char_blocking();
+          if (c == ' ' || c == '\n' || c == '\t') {
+            if (started) {
+              *str = 0;
+              break;
+            }
+            continue;
+          }
+          *str++ = c;
+          started = 1;
+        }
+        count++;
+      } else if (*format == 'c') {
+        char *ch = __builtin_va_arg(args, char *);
+        *ch = ps2_read_char_blocking();
+        count++;
+      } else if (*format == 'x') {
+        // Hex implementation
+        int *val = __builtin_va_arg(args, int *);
+        int num = 0;
+        int started = 0;
+        char c;
+        while (1) {
+          c = ps2_read_char_blocking();
+          if (c == ' ' || c == '\n' || c == '\t') {
+            if (started)
+              break;
+            continue;
+          }
+
+          int digit = -1;
+          if (c >= '0' && c <= '9')
+            digit = c - '0';
+          else if (c >= 'a' && c <= 'f')
+            digit = c - 'a' + 10;
+          else if (c >= 'A' && c <= 'F')
+            digit = c - 'A' + 10;
+
+          if (digit != -1) {
+            num = num * 16 + digit;
+            started = 1;
+          } else {
+            break;
+          }
+        }
+        *val = num;
+        count++;
+      }
+    } else {
+    }
+    format++;
+  }
+
+  __builtin_va_end(args);
+  return count;
 }

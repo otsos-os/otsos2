@@ -24,17 +24,55 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SYSCALL_H
-#define SYSCALL_H
-
-#include <kernel/interrupts/idt.h>
+#include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/drivers/keyboard/keyboard.h>
+#include <kernel/drivers/vga.h>
+#include <kernel/posix/posix.h>
+#include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
-#define SYS_READ 0
-#define SYS_WRITE 1
-#define SYS_EXIT 60
-#define SYS_KILL 62
+int sys_read(int fd, void *buf, u32 count) {
+  if (fd < 0 || fd >= MAX_FDS) {
+    return -1;
+  }
 
-void syscall_handler(registers_t *regs);
+  if (!fd_table[fd].used) {
+    return -1;
+  }
 
-#endif
+  char *data = (char *)buf;
+
+  if (fd == STDIN_FILENO) {
+    __asm__ volatile("sti");
+    u32 i = 0;
+    while (i < count) {
+      char c;
+      scanf("%c", &c);
+
+      data[i] = c;
+
+      vga_putc(c);
+      com1_write_byte(c);
+
+      i++;
+      if (c == '\n') {
+        break;
+      }
+    }
+    return i;
+  }
+
+  if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+    return -1;
+  }
+
+  u32 bytes_read = 0;
+  int res = chainfs_read_file(fd_table[fd].path, (u8 *)buf, count, &bytes_read);
+
+  if (res == 0) {
+    fd_table[fd].offset += bytes_read;
+    return bytes_read;
+  }
+
+  return -1;
+}

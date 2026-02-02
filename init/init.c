@@ -28,8 +28,10 @@
  * init - First userspace process (PID 1)
  */
 
+#define SYS_READ 0
 #define SYS_WRITE 1
 #define SYS_EXIT 60
+#define STDIN 0
 #define STDOUT 1
 
 static long syscall1(long num, long arg1) {
@@ -54,6 +56,10 @@ static long write(int fd, const void *buf, unsigned long count) {
   return syscall3(SYS_WRITE, fd, (long)buf, count);
 }
 
+static long read(int fd, void *buf, unsigned long count) {
+  return syscall3(SYS_READ, fd, (long)buf, count);
+}
+
 static void exit(int code) {
   syscall1(SYS_EXIT, code);
   while (1) {
@@ -70,14 +76,18 @@ static unsigned long strlen(const char *s) {
 static void print(const char *s) { write(STDOUT, s, strlen(s)); }
 
 void _start(void) {
-  print("================================\n");
-  print("  OTSOS Init Process (SYSCALL)\n");
-  print("  Running in Ring 3 (native x64)\n");
-  print("================================\n");
   print("\n");
-  print("Hello from PID 1 via SYSCALL instruction!\n");
+  print("Hello init\n");
+
+  char buffer[100];
+  print("vedi chototo ");
+  long bytes = read(STDIN, buffer, 100);
+
+  if (bytes > 0) {
+    buffer[bytes] = 0;
+    print("ti vvel ");
+    print(buffer);
+  }
+
   exit(0);
-  // while (1) {
-  //   __asm__ volatile("pause");
-  // }
 }
