@@ -73,8 +73,7 @@ void fb_init_mb2(multiboot2_info_t *mb_info) {
   extern void mmu_map_page(u64 vaddr, u64 paddr, u64 flags);
 
   for (u64 i = 0; i < fb_pages; i++) {
-    mmu_map_page(fb_addr + i * PAGE_SIZE, fb_addr + i * PAGE_SIZE,
-                 0x3); 
+    mmu_map_page(fb_addr + i * PAGE_SIZE, fb_addr + i * PAGE_SIZE, 0x3);
   }
 
   fb_clear(0x0000FF);
@@ -138,11 +137,15 @@ void fb_put_char(int x, int y, char c, u32 color) {
   if (!data)
     return;
 
+  u32 bg_color = 0x000000; // Assuming black background for now
+
   for (int row = 0; row < 16; row++) {
     u8 bitmap_row = data[row];
     for (int col = 0; col < 8; col++) {
       if (bitmap_row & (1 << (7 - col))) {
         fb_put_pixel(x + col, y + row, color);
+      } else {
+        fb_put_pixel(x + col, y + row, bg_color);
       }
     }
   }

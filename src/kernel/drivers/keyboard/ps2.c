@@ -56,7 +56,7 @@ const char kbd_us_caps[128] = {
 
 #define KBD_DATA_PORT 0x60
 #define KBD_STATUS_PORT 0x64
-
+  
 #define KB_BUFFER_SIZE 256
 static char kb_buffer[KB_BUFFER_SIZE];
 static int kb_head = 0;

@@ -4,8 +4,8 @@
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
- * 1. Redistributions of source code must retain the above copyright notice, this
- *    list of conditions and the following disclaimer.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ * this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
@@ -13,14 +13,15 @@
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <kernel/drivers/vga.h>
@@ -101,41 +102,41 @@ void vga_set_color(u8 color) {
   current_fb_color = vga_palette[color & 0x0F];
 }
 
-static int ansi_state = 0; 
+static int ansi_state = 0;
 static int ansi_val = 0;
 
 void vga_apply_ansi(int code) {
-  u8 color_idx = 0x07; 
+  u8 color_idx = 0x07;
   switch (code) {
   case 0:
     color_idx = 0x07;
-    break; 
+    break;
   case 30:
     color_idx = 0x00;
-    break; //black
+    break; // black
   case 31:
     color_idx = 0x04;
-    break; //red
+    break; // red
   case 32:
     color_idx = 0x02;
-    break; //green
+    break; // green
   case 33:
     color_idx = 0x0E;
-    break; //yellow
+    break; // yellow
   case 34:
     color_idx = 0x01;
-    break; //blue
+    break; // blue
   case 35:
     color_idx = 0x05;
-    break; //magenta
+    break; // magenta
   case 36:
     color_idx = 0x03;
-    break; //cyan
+    break; // cyan
   case 37:
     color_idx = 0x0F;
-    break; //white
+    break; // white
   default:
-    return; 
+    return;
   }
   vga_set_color(color_idx);
 }
@@ -155,7 +156,7 @@ void vga_putc(char c) {
       ansi_val = 0;
       return;
     } else {
-      ansi_state = 0; 
+      ansi_state = 0;
     }
   } else if (ansi_state == 2) {
     if (c >= '0' && c <= '9') {
@@ -166,7 +167,7 @@ void vga_putc(char c) {
       ansi_state = 0;
       return;
     } else {
-      ansi_state = 0; 
+      ansi_state = 0;
     }
   }
 
@@ -175,11 +176,16 @@ void vga_putc(char c) {
     cursor_y++;
   } else if (c == '\r') {
     cursor_x = 0;
+  } else if (c == '\b') {
+    if (cursor_x > 0) {
+      cursor_x--;
+    } else if (cursor_y > 0) {
+      cursor_y--;
+      cursor_x = vga_width - 1;
+    }
   } else {
     if (is_framebuffer_enabled()) {
-      if (c != ' ') {
-        fb_put_char(cursor_x * 8, cursor_y * 16, c, current_fb_color);
-      }
+      fb_put_char(cursor_x * 8, cursor_y * 16, c, current_fb_color);
     } else {
       vga_buffer[cursor_y * 80 + cursor_x] = (u16)terminal_color << 8 | c;
     }
@@ -258,7 +264,7 @@ void printf(const char *fmt, ...) {
       }
       case 'x': {
         u64 x = va_arg(args, u64);
-        vga_write_hex(x, 8); 
+        vga_write_hex(x, 8);
         break;
       }
       case 'p': {

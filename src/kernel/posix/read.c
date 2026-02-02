@@ -46,18 +46,39 @@ int sys_read(int fd, void *buf, u32 count) {
     __asm__ volatile("sti");
     u32 i = 0;
     while (i < count) {
-      char c;
-      scanf("%c", &c);
+      char c = keyboard_getchar();
+      if (c == 0) {
+        __asm__ volatile("hlt");
+        continue;
+      }
+
+      if (c == '\b') {
+        if (i > 0) {
+          i--;
+          vga_putc('\b');
+          vga_putc(' ');
+          vga_putc('\b');
+          com1_write_byte('\b');
+          com1_write_byte(' ');
+          com1_write_byte('\b');
+        }
+        continue;
+      }
 
       data[i] = c;
-
       vga_putc(c);
       com1_write_byte(c);
 
-      i++;
-      if (c == '\n') {
+      if (c == '\n' || c == '\r') {
+        if (c == '\r') {
+          data[i] = '\n';
+          vga_putc('\n');
+        }
+        i++;
         break;
       }
+
+      i++;
     }
     return i;
   }
