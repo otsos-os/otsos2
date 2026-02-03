@@ -67,6 +67,7 @@ void isr_handler(registers_t *regs) {
 void irq_handler(registers_t *regs) {
   if (regs->int_no == 32) {
     timer_handler();
+    keyboard_poll();
   } else if (regs->int_no == 33) {
     keyboard_common_handler();
   }

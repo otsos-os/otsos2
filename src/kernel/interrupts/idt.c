@@ -172,6 +172,4 @@ void init_idt() {
   idt_set_gate(128, (unsigned long long)isr_stub_128, 0xEE);
 
   load_idt(&idt_ptr);
-
-  __asm__ volatile("sti");
 }

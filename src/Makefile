@@ -2,6 +2,7 @@ CC = gcc
 LD = ld
 AS = nasm
 QEMU = qemu-system-x86_64
+QEMU_GUI_OPTS = -display gtk
 
 CFLAGS = -m64 -ffreestanding -fno-pic -fno-stack-protector -g -O0 -mno-red-zone -mcmodel=kernel -I.
 LDFLAGS = -m elf_x86_64 -T linker.ld -Map=../bin/kernel.map
@@ -35,6 +36,8 @@ STDLIB_O = ../bin/stdlib.o
 MMU_O = ../bin/mmu.o
 WRITE_O = ../bin/write.o
 READ_O = ../bin/read.o
+OPEN_O = ../bin/open.o
+CLOSE_O = ../bin/close.o
 SYSCALL_O = ../bin/syscall.o
 GDT_O = ../bin/gdt.o
 GDT_ASM_O = ../bin/gdt_asm.o
@@ -45,7 +48,7 @@ USERSPACE_ASM_O = ../bin/userspace_asm.o
 SYSCALL_ASM_O = ../bin/syscall_asm.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O) $(VGA_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(SYSCALL_O) \
+      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O) $(VGA_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O)
 
 all: $(ISO_IMAGE)
@@ -152,11 +155,19 @@ $(WRITE_O): kernel/posix/write.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+$(OPEN_O): kernel/posix/open.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
 $(SYSCALL_O): kernel/syscall.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(READ_O): kernel/posix/read.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(CLOSE_O): kernel/posix/close.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -225,11 +236,11 @@ run: $(ISO_IMAGE) $(DISK_IMG)
 
 run_uefi: $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (UEFI)"
-	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF)
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS)
 
 debug: $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  DEBUG   QEMU"
-	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -d int,cpu_reset -no-reboot
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -d int,cpu_reset -no-reboot $(QEMU_GUI_OPTS)
 
 clean:
 	@echo "  CLEAN"

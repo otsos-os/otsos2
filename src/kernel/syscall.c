@@ -86,6 +86,12 @@ void syscall_handler(registers_t *regs) {
   case SYS_WRITE:
     regs->rax = (u64)sys_write((int)arg1, (const void *)arg2, (u32)arg3);
     break;
+  case SYS_OPEN:
+    regs->rax = (u64)sys_open((const char *)arg1, (int)arg2);
+    break;
+  case SYS_CLOSE:
+    regs->rax = (u64)sys_close((int)arg1);
+    break;
   case SYS_EXIT:
     process_exit((int)arg1);
     break;

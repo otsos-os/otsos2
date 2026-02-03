@@ -136,8 +136,8 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   init_heap();
   init_idt();
   timer_init(1000);
-  keyboard_manager_init();
   mmu_init();
+  __asm__ volatile("sti");
 
   posix_init();
   extern void syscall_init(void);
@@ -214,23 +214,21 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   com1_off_mirror_callback();
   clear_scr();
 
+  keyboard_manager_init();
+
   printf("\nDo you want to enable debug mode (dont use for default use it make "
          "you screen dirty)? [y/n]\n");
 
-  __asm__ volatile("sti"); 
-
   while (1) {
     char c = keyboard_getchar();
-    if (c == 'y' || c == 'Y') {
+    if (c == 'y') {
       com1_set_mirror_callback(vga_putc);
       clear_scr();
       com1_write_string("test debug mod\n");
       break;
-    } else if (c == 'n' || c == 'N') {
+    } else if (c == 'n') {
       break;
     }
-    __asm__ volatile(
-        "hlt"); 
   }
 
   if (!boot_option) {

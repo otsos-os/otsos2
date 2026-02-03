@@ -71,6 +71,8 @@ extern chainfs_t g_chainfs;
 int chainfs_init(void);
 int chainfs_format(u32 total_blocks, u32 max_files);
 int chainfs_read_file(const char* filename, u8* buffer, u32 buffer_size, u32* bytes_read);
+int chainfs_read_file_range(const char* filename, u8* buffer, u32 buffer_size,
+                            u32 offset, u32* bytes_read);
 int chainfs_write_file(const char* filename, const u8* data, u32 size);
 int chainfs_delete_file(const char* filename);
 int chainfs_get_file_list(chainfs_file_entry_t* files, u32 max_files, u32* file_count);

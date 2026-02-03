@@ -24,37 +24,22 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef POSIX_H
-#define POSIX_H
-
+#include <kernel/posix/posix.h>
 #include <mlibc/mlibc.h>
 
-#define MAX_FDS 32
+int sys_close(int fd) {
+  if (fd < 0 || fd >= MAX_FDS) {
+    return -1;
+  }
 
-typedef struct {
-  int used;
-  char path[256];
-  u32 offset;
-  int flags;
-} file_descriptor_t;
+  if (!fd_table[fd].used) {
+    return -1;
+  }
 
-#define O_RDONLY 0x0001
-#define O_WRONLY 0x0002
-#define O_RDWR (O_RDONLY | O_WRONLY)
-#define O_CREAT 0x0040
-#define O_TRUNC 0x0200
-#define O_APPEND 0x0400
+  fd_table[fd].used = 0;
+  fd_table[fd].flags = 0;
+  fd_table[fd].offset = 0;
+  memset(fd_table[fd].path, 0, sizeof(fd_table[fd].path));
 
-#define STDIN_FILENO 0
-#define STDOUT_FILENO 1
-#define STDERR_FILENO 2
-
-extern file_descriptor_t fd_table[MAX_FDS];
-
-int sys_read(int fd, void *buf, u32 count);
-int sys_write(int fd, const void *buf, u32 count);
-int sys_open(const char *path, int flags);
-int sys_close(int fd);
-void posix_init(void);
-
-#endif
+  return 0;
+}

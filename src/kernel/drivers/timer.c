@@ -30,7 +30,9 @@
 
 static u64 timer_ticks = 0;
 
-void timer_handler() { timer_ticks++; }
+void timer_handler() {
+  timer_ticks++;
+}
 
 void timer_init(u32 frequency) {
 

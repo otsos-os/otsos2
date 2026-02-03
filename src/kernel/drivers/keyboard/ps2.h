@@ -27,9 +27,10 @@
 #ifndef PS2_H
 #define PS2_H
 
-void ps2_keyboard_init();
+int ps2_keyboard_init();
 void ps2_keyboard_handler();
 char ps2_keyboard_getchar();
+void ps2_keyboard_poll();
 int ps2Scanf(const char *format, ...);
 
 #endif

@@ -288,6 +288,83 @@ int chainfs_read_file(const char *filename, u8 *buffer, u32 buffer_size,
   com1_printf("ChainFS: Read %u bytes from '%s'\n", copied, filename);
   return 0;
 }
+
+int chainfs_read_file_range(const char *filename, u8 *buffer, u32 buffer_size,
+                            u32 offset, u32 *bytes_read) {
+  if (bytes_read == NULL || buffer == NULL) {
+    return -1;
+  }
+
+  chainfs_file_entry_t entry;
+  u32 entry_block, entry_offset;
+  if (chainfs_find_file(filename, &entry, &entry_block, &entry_offset) != 0) {
+    return -1;
+  }
+
+  if (offset >= entry.size) {
+    *bytes_read = 0;
+    return 0;
+  }
+
+  u32 remaining = entry.size - offset;
+  if (remaining > buffer_size) {
+    remaining = buffer_size;
+  }
+
+  u32 block_skip = offset / CHAINFS_BLOCK_SIZE;
+  u32 intra_offset = offset % CHAINFS_BLOCK_SIZE;
+  u32 current_block = entry.start_block;
+
+  for (u32 i = 0; i < block_skip; i++) {
+    u32 next_block;
+    if (chainfs_read_block_map_entry(current_block, &next_block) != 0) {
+      return -1;
+    }
+    if (next_block == CHAINFS_EOF_MARKER) {
+      *bytes_read = 0;
+      return 0;
+    }
+    current_block = next_block;
+  }
+
+  u32 copied = 0;
+  while (remaining > 0) {
+    u32 real_sector = g_chainfs.data_area_start + current_block;
+    pata_read_sector(real_sector, g_chainfs.sector_buffer);
+
+    u32 to_copy = CHAINFS_BLOCK_SIZE - intra_offset;
+    if (to_copy > remaining) {
+      to_copy = remaining;
+    }
+
+    for (u32 i = 0; i < to_copy; i++) {
+      buffer[copied + i] = g_chainfs.sector_buffer[intra_offset + i];
+    }
+
+    copied += to_copy;
+    remaining -= to_copy;
+    intra_offset = 0;
+
+    if (remaining == 0) {
+      break;
+    }
+
+    u32 next_block;
+    if (chainfs_read_block_map_entry(current_block, &next_block) != 0) {
+      return -1;
+    }
+    if (next_block == CHAINFS_EOF_MARKER) {
+      break;
+    }
+    current_block = next_block;
+  }
+
+  *bytes_read = copied;
+  com1_printf("ChainFS: Read %u bytes from '%s' (offset %u)\n", copied,
+              filename, offset);
+  return 0;
+}
+
 int chainfs_write_file(const char *filename, const u8 *data, u32 size) {
   chainfs_file_entry_t entry;
   u32 entry_block, entry_offset;

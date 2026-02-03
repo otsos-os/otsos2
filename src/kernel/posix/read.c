@@ -40,6 +40,10 @@ int sys_read(int fd, void *buf, u32 count) {
     return -1;
   }
 
+  if (count == 0) {
+    return 0;
+  }
+
   char *data = (char *)buf;
 
   if (fd == STDIN_FILENO) {
@@ -83,12 +87,34 @@ int sys_read(int fd, void *buf, u32 count) {
     return i;
   }
 
+  if (!(fd_table[fd].flags & O_RDONLY)) {
+    return -1;
+  }
+
   if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
     return -1;
   }
 
+  chainfs_file_entry_t entry;
+  u32 entry_block, entry_offset;
+  if (chainfs_find_file(fd_table[fd].path, &entry, &entry_block,
+                        &entry_offset) != 0) {
+    return -1;
+  }
+
+  if (fd_table[fd].offset >= entry.size) {
+    return 0;
+  }
+
+  u32 to_read = count;
+  u32 remaining = entry.size - fd_table[fd].offset;
+  if (to_read > remaining) {
+    to_read = remaining;
+  }
+
   u32 bytes_read = 0;
-  int res = chainfs_read_file(fd_table[fd].path, (u8 *)buf, count, &bytes_read);
+  int res = chainfs_read_file_range(fd_table[fd].path, (u8 *)buf, to_read,
+                                    fd_table[fd].offset, &bytes_read);
 
   if (res == 0) {
     fd_table[fd].offset += bytes_read;

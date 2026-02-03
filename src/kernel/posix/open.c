@@ -25,95 +25,86 @@
  */
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
-#include <kernel/drivers/vga.h>
 #include <kernel/posix/posix.h>
 #include <lib/com1.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
-file_descriptor_t fd_table[MAX_FDS];
-
-void posix_init() {
-  memset(fd_table, 0, sizeof(fd_table));
-  fd_table[STDIN_FILENO].used = 1;
-  fd_table[STDIN_FILENO].flags = O_RDONLY;
-  fd_table[STDOUT_FILENO].used = 1;
-  fd_table[STDOUT_FILENO].flags = O_WRONLY;
-  fd_table[STDERR_FILENO].used = 1;
-  fd_table[STDERR_FILENO].flags = O_WRONLY;
+static int posix_find_free_fd(void) {
+  for (int i = 3; i < MAX_FDS; i++) {
+    if (!fd_table[i].used) {
+      return i;
+    }
+  }
+  return -1;
 }
 
-int sys_write(int fd, const void *buf, u32 count) {
-  if (fd < 0 || fd >= MAX_FDS) {
-    return -1;
-  }
-
-  if (!fd_table[fd].used) {
-    return -1;
-  }
-
-  if (count == 0) {
+static int posix_flags_valid(int flags) {
+  if ((flags & O_RDWR) == 0) {
     return 0;
   }
 
-  const char *data = (const char *)buf;
-
-  if (fd == STDOUT_FILENO || fd == STDERR_FILENO) {
-    for (u32 i = 0; i < count; i++) {
-      vga_putc(data[i]);
-      com1_write_byte(data[i]);
-    }
-    return count;
+  if ((flags & (O_CREAT | O_TRUNC | O_APPEND)) && !(flags & O_WRONLY)) {
+    return 0;
   }
 
-  if (!(fd_table[fd].flags & O_WRONLY)) {
+  return 1;
+}
+
+int sys_open(const char *path, int flags) {
+  if (path == NULL || path[0] == 0) {
+    return -1;
+  }
+
+  if (!posix_flags_valid(flags)) {
     return -1;
   }
 
   if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
-    com1_printf("POSIX WRITE: ChainFS not initialized or corrupted magic: %x\n",
+    com1_printf("POSIX OPEN: ChainFS not initialized or corrupted magic: %x\n",
                 g_chainfs.superblock.magic);
     return -1;
   }
 
   chainfs_file_entry_t entry;
   u32 entry_block, entry_offset;
-  if (chainfs_find_file(fd_table[fd].path, &entry, &entry_block,
-                        &entry_offset) != 0) {
-    return -1;
-  }
+  int exists =
+      (chainfs_find_file(path, &entry, &entry_block, &entry_offset) == 0);
 
-  if (fd_table[fd].flags & O_APPEND) {
-    fd_table[fd].offset = entry.size;
-  }
-
-  u32 offset = fd_table[fd].offset;
-  u32 end_pos = offset + count;
-  u32 new_size = (end_pos > entry.size) ? end_pos : entry.size;
-
-  u8 *new_data = (u8 *)kcalloc(new_size, 1);
-  if (!new_data) {
-    return -1;
-  }
-
-  if (entry.size > 0) {
-    u32 bytes_read = 0;
-    if (chainfs_read_file(fd_table[fd].path, new_data, entry.size,
-                          &bytes_read) != 0) {
-      kfree(new_data);
+  if (!exists) {
+    if (!(flags & O_CREAT)) {
+      return -1;
+    }
+    if (chainfs_write_file(path, (const u8 *)"", 0) != 0) {
+      return -1;
+    }
+    exists = (chainfs_find_file(path, &entry, &entry_block, &entry_offset) == 0);
+    if (!exists) {
+      return -1;
+    }
+  } else if (flags & O_TRUNC) {
+    if (chainfs_write_file(path, (const u8 *)"", 0) != 0) {
+      return -1;
+    }
+    if (chainfs_find_file(path, &entry, &entry_block, &entry_offset) != 0) {
       return -1;
     }
   }
 
-  memcpy(new_data + offset, buf, count);
-
-  int result = chainfs_write_file(fd_table[fd].path, new_data, new_size);
-  kfree(new_data);
-
-  if (result == 0) {
-    fd_table[fd].offset = offset + count;
-    return count;
+  int fd = posix_find_free_fd();
+  if (fd < 0) {
+    return -1;
   }
 
-  return -1;
+  fd_table[fd].used = 1;
+  fd_table[fd].flags = flags;
+  fd_table[fd].offset = (flags & O_APPEND) ? entry.size : 0;
+
+  memset(fd_table[fd].path, 0, sizeof(fd_table[fd].path));
+  int path_len = strlen(path);
+  if (path_len >= (int)sizeof(fd_table[fd].path)) {
+    path_len = (int)sizeof(fd_table[fd].path) - 1;
+  }
+  memcpy(fd_table[fd].path, path, path_len);
+
+  return fd;
 }

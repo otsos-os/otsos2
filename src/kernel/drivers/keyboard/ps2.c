@@ -25,6 +25,7 @@
  */
 
 #include <kernel/drivers/keyboard/ps2.h>
+#include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
 const char kbd_us[128] = {
@@ -64,12 +65,154 @@ static int kb_tail = 0;
 
 static int shift_pressed = 0;
 static int caps_lock = 0;
+static int ps2_ready = 0;
+static int scancode_extended = 0;
+static int ps2_debug = 0;
 
-void ps2_keyboard_init() {
+static void ps2_debug_status(const char *tag, u8 status, u8 data) {
+  if (!ps2_debug) {
+    return;
+  }
+  com1_printf("[PS2] %s: status=0x%x data=0x%x\n", tag, status, data);
+}
+
+
+static int ps2_wait_input_clear() {
+  for (u32 i = 0; i < 100000; i++) {
+    if ((inb(KBD_STATUS_PORT) & 0x02) == 0) {
+      return 0;
+    }
+  }
+  return -1;
+}
+
+static int ps2_wait_output_full() {
+  for (u32 i = 0; i < 100000; i++) {
+    if (inb(KBD_STATUS_PORT) & 0x01) {
+      return 0;
+    }
+  }
+  return -1;
+}
+
+static void ps2_flush_output() {
+  while (inb(KBD_STATUS_PORT) & 0x01) {
+    (void)inb(KBD_DATA_PORT);
+  }
+}
+
+static int ps2_write_cmd(u8 cmd) {
+  if (ps2_wait_input_clear() != 0) {
+    return -1;
+  }
+  outb(KBD_STATUS_PORT, cmd);
+  return 0;
+}
+
+static int ps2_write_data(u8 data) {
+  if (ps2_wait_input_clear() != 0) {
+    return -1;
+  }
+  outb(KBD_DATA_PORT, data);
+  return 0;
+}
+
+static int ps2_read_data(u8 *data) {
+  if (ps2_wait_output_full() != 0) {
+    return -1;
+  }
+  *data = inb(KBD_DATA_PORT);
+  return 0;
+}
+
+int ps2_keyboard_init() {
   kb_head = 0;
   kb_tail = 0;
   shift_pressed = 0;
   caps_lock = 0;
+  ps2_ready = 0;
+  scancode_extended = 0;
+
+  if (ps2_write_cmd(0xAD) != 0) {
+    com1_write_string("[PS2] timeout disabling port1\n");
+    return -1;
+  }
+  ps2_write_cmd(0xA7);
+  ps2_flush_output();
+
+  if (ps2_write_cmd(0x20) != 0) {
+    com1_write_string("[PS2] timeout reading config\n");
+    return -1;
+  }
+
+  u8 config = 0;
+  if (ps2_read_data(&config) != 0) {
+    com1_write_string("[PS2] timeout waiting config\n");
+    return -1;
+  }
+  if (ps2_debug) {
+    com1_printf("[PS2] config before: 0x%x\n", config);
+  }
+
+  config |= 0x01;  // IRQ1 enable
+  config &= ~0x10; // port1 clock enable
+  config |= 0x40;  // translation enable (set 1)
+
+  if (ps2_write_cmd(0x60) != 0 || ps2_write_data(config) != 0) {
+    com1_write_string("[PS2] timeout writing config\n");
+    return -1;
+  }
+
+  if (ps2_write_cmd(0x20) == 0) {
+    u8 verify = 0;
+    if (ps2_read_data(&verify) == 0 && ps2_debug) {
+      com1_printf("[PS2] config after: 0x%x\n", verify);
+    }
+  }
+
+  if (ps2_write_cmd(0xAA) == 0) {
+    u8 self_test = 0;
+    if (ps2_read_data(&self_test) == 0 && self_test != 0x55) {
+      com1_printf("[PS2] controller self-test failed: 0x%x\n", self_test);
+    }
+  }
+
+  if (ps2_write_cmd(0xAE) != 0) {
+    com1_write_string("[PS2] timeout enabling port1\n");
+    return -1;
+  }
+
+  if (ps2_write_data(0xFF) == 0) {
+    u8 resp = 0;
+    if (ps2_read_data(&resp) == 0) {
+      if (resp != 0xFA) {
+        com1_printf("[PS2] reset ack unexpected: 0x%x\n", resp);
+      }
+    } else {
+      com1_write_string("[PS2] reset ack timeout\n");
+    }
+    if (ps2_read_data(&resp) == 0) {
+      if (resp != 0xAA) {
+        com1_printf("[PS2] reset self-test failed: 0x%x\n", resp);
+      }
+    } else {
+      com1_write_string("[PS2] reset self-test timeout\n");
+    }
+  }
+
+  if (ps2_write_data(0xF4) == 0) {
+    u8 resp = 0;
+    if (ps2_read_data(&resp) == 0) {
+      if (resp != 0xFA) {
+        com1_printf("[PS2] enable scan ack unexpected: 0x%x\n", resp);
+      }
+    } else {
+      com1_write_string("[PS2] enable scan ack timeout\n");
+    }
+  }
+
+  ps2_ready = 1;
+  return 0;
 }
 
 static void buffer_write(char c) {
@@ -89,48 +232,95 @@ char ps2_keyboard_getchar() {
   return c;
 }
 
-void ps2_keyboard_handler() {
-  if (inb(KBD_STATUS_PORT) & 0x01) {
-    u8 scancode = inb(KBD_DATA_PORT);
+static void ps2_process_scancode(u8 scancode) {
+  if (scancode == 0xFA || scancode == 0xFE || scancode == 0xAA) {
+    return;
+  }
 
-    if (scancode & 0x80) {
-      scancode &= 0x7F;
-      if (scancode == 0x2A || scancode == 0x36) {
-        shift_pressed = 0;
+  if (scancode == 0xE0) {
+    scancode_extended = 1;
+    return;
+  }
+
+  if (scancode == 0xE1) {
+    scancode_extended = 2;
+    return;
+  }
+
+  if (scancode_extended) {
+    scancode_extended = 0;
+    return;
+  }
+
+  if (scancode & 0x80) {
+    scancode &= 0x7F;
+    if (scancode == 0x2A || scancode == 0x36) {
+      shift_pressed = 0;
+    }
+    return;
+  }
+
+  if (scancode == 0x2A || scancode == 0x36) {
+    shift_pressed = 1;
+    return;
+  }
+
+  if (scancode == 0x3A) {
+    caps_lock = !caps_lock;
+    return;
+  }
+
+  char c = 0;
+  if (shift_pressed || caps_lock) {
+    if (caps_lock && !shift_pressed) {
+      c = kbd_us[scancode];
+      if (c >= 'a' && c <= 'z') {
+        c -= 32;
+      }
+    } else if (shift_pressed && !caps_lock) {
+      c = kbd_us_caps[scancode];
+    } else if (shift_pressed && caps_lock) {
+      c = kbd_us_caps[scancode];
+      if (c >= 'A' && c <= 'Z') {
+        c += 32;
       }
     } else {
-      if (scancode == 0x2A || scancode == 0x36) {
-        shift_pressed = 1;
-      } else if (scancode == 0x3A) {
-        caps_lock = !caps_lock;
-      } else {
-        char c = 0;
-        if (shift_pressed || caps_lock) {
-
-          if (caps_lock && !shift_pressed) {
-            c = kbd_us[scancode];
-            if (c >= 'a' && c <= 'z') {
-              c -= 32;
-            }
-          } else if (shift_pressed && !caps_lock) {
-            c = kbd_us_caps[scancode];
-          } else if (shift_pressed && caps_lock) {
-            c = kbd_us_caps[scancode];
-            if (c >= 'A' && c <= 'Z') {
-              c += 32;
-            }
-          } else {
-            c = kbd_us[scancode];
-          }
-        } else {
-          c = kbd_us[scancode];
-        }
-
-        if (c != 0) {
-          buffer_write(c);
-        }
-      }
+      c = kbd_us[scancode];
     }
+  } else {
+    c = kbd_us[scancode];
+  }
+
+  if (c != 0) {
+    buffer_write(c);
+  }
+}
+
+static void ps2_handle_input(const char *tag) {
+  while (inb(KBD_STATUS_PORT) & 0x01) {
+    u8 status = inb(KBD_STATUS_PORT);
+    u8 scancode = inb(KBD_DATA_PORT);
+    ps2_debug_status(tag, status, scancode);
+    ps2_process_scancode(scancode);
+  }
+}
+
+void ps2_keyboard_handler() {
+  if (!ps2_ready) {
+    return;
+  }
+
+  ps2_handle_input("irq");
+}
+
+void ps2_keyboard_poll() {
+  if (!ps2_ready) {
+    return;
+  }
+
+  u8 status = inb(KBD_STATUS_PORT);
+  if (status & 0x01) {
+    ps2_handle_input("poll");
   }
 }
 

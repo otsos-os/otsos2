@@ -24,6 +24,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <lib/com1.h>
 #include <mlibc/mlibc.h>
 #define PIC1 0x20 /* IO base address for master PIC */
 #define PIC2 0xA0 /* IO base address for slave PIC */
@@ -63,11 +64,17 @@ void pic_remap(int offset1, int offset2) {
   outb(PIC1_DATA, ICW4_8086);
   outb(PIC2_DATA, ICW4_8086);
 
-  // outb(PIC1_DATA, a1); 
+  // outb(PIC1_DATA, a1);
   // outb(PIC2_DATA, a2);
 
   outb(PIC1_DATA, 0b11111000);
-  outb(PIC2_DATA, 0b11111111); 
+  outb(PIC2_DATA, 0b11111111);
+
+  outb(0x22, 0x70);
+  (void)inb(0x23);
+  outb(0x23, 0x00);
+  outb(0x22, 0x70);
+  (void)inb(0x23);
 }
 
 void pic_send_eoi(unsigned char irq) {
