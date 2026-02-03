@@ -133,10 +133,18 @@ static void debug_multiboot2_tags(multiboot2_info_t *mb_info) {
 void kmain(u64 magic, u64 addr, u64 boot_option) {
   com1_init();
   com1_set_mirror_callback(vga_putc);
+  init_heap();
   init_idt();
   timer_init(1000);
-  keyboard_manager_init();  
+  keyboard_manager_init();
   mmu_init();
+
+  posix_init();
+  extern void syscall_init(void);
+  syscall_init();
+
+  chainfs_init();
+  chainfs_format(64, 8);
 
   boot_magic = (u32)magic;
 
@@ -208,25 +216,25 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
 
   printf("\nDo you want to enable debug mode (dont use for default use it make "
          "you screen dirty)? [y/n]\n");
+
+  __asm__ volatile("sti"); 
+
   while (1) {
     char c = keyboard_getchar();
-    if (c == 'y') {
+    if (c == 'y' || c == 'Y') {
       com1_set_mirror_callback(vga_putc);
       clear_scr();
       com1_write_string("test debug mod\n");
       break;
-    } else if (c == 'n') {
+    } else if (c == 'n' || c == 'N') {
       break;
     }
+    __asm__ volatile(
+        "hlt"); 
   }
 
   if (!boot_option) {
-    init_heap();
     pata_identify(NULL);
-    posix_init();
-    extern void syscall_init(void);
-    syscall_init();
-
     userspace_init();
 
     void *init_module_start = NULL;
