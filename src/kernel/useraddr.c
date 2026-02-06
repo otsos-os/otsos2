@@ -24,42 +24,30 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef MLIBC_H
-#define MLIBC_H
+#include <kernel/useraddr.h>
 
-#ifndef NULL
-#define NULL ((void *)0)
-#endif
+#define USER_CANONICAL_MAX 0x00007FFFFFFFFFFFULL
 
-typedef unsigned char u8;
-typedef unsigned short u16;
-typedef unsigned int u32;
-typedef unsigned long long u64;
-typedef unsigned long size_t;
+int is_user_address(const void *addr, size_t size) {
+  if (!addr) {
+    return 0;
+  }
+  if (size == 0) {
+    return 1;
+  }
 
-typedef signed char s8;
-typedef signed short s16;
-typedef signed int s32;
+  u64 start = (u64)addr;
+  u64 end = start + (u64)size - 1;
+  if (end < start) {
+    return 0;
+  }
 
-int strcmp(const char *str1, const char *str2);
-int strlen(const char *str);
-int atoi(const char *str);
-char *strcpy(char *dest, const char *src);
-char *strcat(char *dest, const char *src);
-char *strchr(const char *str, int c);
-char *itoa(int value, char *str, int base);
+  if (start > USER_CANONICAL_MAX) {
+    return 0;
+  }
+  if (end > USER_CANONICAL_MAX) {
+    return 0;
+  }
 
-void *memset(void *s, int c, unsigned long n);
-void *memcpy(void *dest, const void *src, unsigned long n);
-
-void outb(unsigned short port, unsigned char data);
-unsigned char inb(unsigned short port);
-void outw(unsigned short port, unsigned short data);
-unsigned short inw(unsigned short port);
-void insw(unsigned short port, void *addr, unsigned long count);
-void outsw(unsigned short port, void *addr, unsigned long count);
-
-#include <mlibc/memory.h>
-#include <mlibc/stdlib.h>
-
-#endif
+  return 1;
+}

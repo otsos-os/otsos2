@@ -31,6 +31,9 @@
 extern char kernel_end;
 #define HEAP_SIZE (8 * 1024 * 1024)
 #define HEAP_MAGIC 0x48454150
+#define HEAP_REDZONE_SIZE 16
+#define HEAP_REDZONE_PATTERN 0xCC
+#define HEAP_POISON_PATTERN 0xAA
 
 static char *heap_start = 0;
 static char *heap_end = 0;
@@ -39,6 +42,7 @@ typedef struct header {
   unsigned int magic;
   unsigned int is_free;
   unsigned long size;
+  unsigned long payload_size;
   struct header *next;
   struct header *prev;
 } header_t;
@@ -53,6 +57,7 @@ static void split_block(header_t *current, unsigned long size) {
         (header_t *)((char *)current + sizeof(header_t) + size);
     new_block->magic = HEAP_MAGIC;
     new_block->size = current->size - size - sizeof(header_t);
+    new_block->payload_size = 0;
     new_block->is_free = 1;
     new_block->next = current->next;
     new_block->prev = current;
@@ -73,6 +78,7 @@ static header_t *coalesce(header_t *block) {
   header_t *next = block->next;
   if (next && next->is_free && next->magic == HEAP_MAGIC) {
     block->size += sizeof(header_t) + next->size;
+    block->payload_size = 0;
     block->next = next->next;
     if (block->next) {
       block->next->prev = block;
@@ -82,6 +88,7 @@ static header_t *coalesce(header_t *block) {
   header_t *prev = block->prev;
   if (prev && prev->is_free && prev->magic == HEAP_MAGIC) {
     prev->size += sizeof(header_t) + block->size;
+    prev->payload_size = 0;
     prev->next = block->next;
     if (block->next) {
       block->next->prev = prev;
@@ -100,6 +107,7 @@ void init_heap() {
   heap_head = (header_t *)heap_start;
   heap_head->magic = HEAP_MAGIC;
   heap_head->size = HEAP_SIZE - sizeof(header_t);
+  heap_head->payload_size = 0;
   heap_head->next = 0;
   heap_head->prev = 0;
   heap_head->is_free = 1;
@@ -117,6 +125,8 @@ void *kmalloc(unsigned long size) {
     return 0;
 
   size = align16(size);
+  unsigned long payload_size = size;
+  unsigned long total_size = payload_size + (2 * HEAP_REDZONE_SIZE);
 
   header_t *current = heap_head;
   while (current) {
@@ -125,10 +135,15 @@ void *kmalloc(unsigned long size) {
                   current->magic);
       return 0;
     }
-    if (current->is_free && current->size >= size) {
-      split_block(current, size);
+    if (current->is_free && current->size >= total_size) {
+      split_block(current, total_size);
       current->is_free = 0;
-      return (void *)((char *)current + sizeof(header_t));
+      current->payload_size = payload_size;
+      u8 *base = (u8 *)current + sizeof(header_t);
+      memset(base, HEAP_REDZONE_PATTERN, HEAP_REDZONE_SIZE);
+      memset(base + HEAP_REDZONE_SIZE + payload_size, HEAP_REDZONE_PATTERN,
+             HEAP_REDZONE_SIZE);
+      return (void *)(base + HEAP_REDZONE_SIZE);
     }
     current = current->next;
   }
@@ -143,7 +158,8 @@ void kfree(void *ptr) {
   if (!heap_start || !heap_end)
     return;
 
-  header_t *header = (header_t *)((char *)ptr - sizeof(header_t));
+  header_t *header =
+      (header_t *)((char *)ptr - HEAP_REDZONE_SIZE - sizeof(header_t));
 
   if ((char *)header < heap_start || (char *)header >= heap_end) {
     com1_printf("KFREE: invalid pointer %p\n", ptr);
@@ -160,6 +176,24 @@ void kfree(void *ptr) {
     return;
   }
 
+  u8 *base = (u8 *)header + sizeof(header_t);
+  u8 *payload = base + HEAP_REDZONE_SIZE;
+  for (u32 i = 0; i < HEAP_REDZONE_SIZE; i++) {
+    if (base[i] != HEAP_REDZONE_PATTERN) {
+      com1_printf("KFREE: left redzone corrupted at %p\n", ptr);
+      break;
+    }
+  }
+  for (u32 i = 0; i < HEAP_REDZONE_SIZE; i++) {
+    if (payload[header->payload_size + i] != HEAP_REDZONE_PATTERN) {
+      com1_printf("KFREE: right redzone corrupted at %p\n", ptr);
+      break;
+    }
+  }
+
+  memset(payload, HEAP_POISON_PATTERN, header->payload_size);
+
+  header->payload_size = 0;
   header->is_free = 1;
   coalesce(header);
 }
@@ -188,19 +222,21 @@ void *krealloc(void *ptr, unsigned long size) {
   if (header->magic != HEAP_MAGIC)
     return 0;
 
-  if (header->size >= size) {
+  if (header->payload_size >= size) {
     return ptr;
   }
 
   header_t *next = header->next;
   if (next && next->is_free &&
-      (header->size + sizeof(header_t) + next->size) >= size) {
+      (header->size + sizeof(header_t) + next->size) >=
+          (align16(size) + (2 * HEAP_REDZONE_SIZE))) {
     header->size += sizeof(header_t) + next->size;
     header->next = next->next;
     if (header->next) {
       header->next->prev = header;
     }
-    split_block(header, align16(size));
+    header->payload_size = align16(size);
+    split_block(header, header->payload_size + (2 * HEAP_REDZONE_SIZE));
     return ptr;
   }
 
@@ -208,7 +244,7 @@ void *krealloc(void *ptr, unsigned long size) {
   if (!new_ptr)
     return 0;
 
-  memcpy(new_ptr, ptr, header->size);
+  memcpy(new_ptr, ptr, header->payload_size);
   kfree(ptr);
   return new_ptr;
 }
@@ -251,26 +287,26 @@ void *kmalloc_aligned(unsigned long size, unsigned long align) {
   if (align <= 16)
     return kmalloc(size);
 
-  size = align16(size);
+  unsigned long payload_size = align16(size);
+  unsigned long total_size = payload_size + (2 * HEAP_REDZONE_SIZE);
   header_t *current = heap_head;
 
   while (current) {
     if (current->is_free) {
-      unsigned long data_start = (unsigned long)current + sizeof(header_t);
-      unsigned long aligned_start = (data_start + align - 1) & ~(align - 1);
-      unsigned long padding = aligned_start - data_start;
+      unsigned long data_start =
+          (unsigned long)current + sizeof(header_t) + HEAP_REDZONE_SIZE;
+      unsigned long aligned_payload = (data_start + align - 1) & ~(align - 1);
+      unsigned long aligned_header =
+          aligned_payload - HEAP_REDZONE_SIZE - sizeof(header_t);
+      unsigned long padding = aligned_header - (unsigned long)current;
 
-      if (current->size >= size + padding) {
-        // If we need padding, we might need to split the block twice:
-        // 1. One split to create a block before the aligned part (if padding is
-        // enough for a header)
-        // 2. Normal split for the tail after the requested size.
-
+      if (padding + total_size <= current->size) {
         if (padding >= sizeof(header_t) + 16) {
           header_t *aligned_block = (header_t *)((char *)current + padding);
           aligned_block->magic = HEAP_MAGIC;
           aligned_block->is_free = 1;
           aligned_block->size = current->size - padding;
+          aligned_block->payload_size = 0;
           aligned_block->next = current->next;
           aligned_block->prev = current;
 
@@ -279,15 +315,24 @@ void *kmalloc_aligned(unsigned long size, unsigned long align) {
 
           current->next = aligned_block;
           current->size = padding - sizeof(header_t);
+          current->payload_size = 0;
 
           current = aligned_block;
           padding = 0;
+        } else if (padding != 0) {
+          current = current->next;
+          continue;
         }
 
         if (padding == 0) {
-          split_block(current, size);
+          split_block(current, total_size);
           current->is_free = 0;
-          return (void *)((char *)current + sizeof(header_t));
+          current->payload_size = payload_size;
+          u8 *base = (u8 *)current + sizeof(header_t);
+          memset(base, HEAP_REDZONE_PATTERN, HEAP_REDZONE_SIZE);
+          memset(base + HEAP_REDZONE_SIZE + current->payload_size,
+                 HEAP_REDZONE_PATTERN, HEAP_REDZONE_SIZE);
+          return (void *)(base + HEAP_REDZONE_SIZE);
         }
       }
     }
@@ -302,8 +347,9 @@ void *kmalloc_aligned(unsigned long size, unsigned long align) {
 unsigned long kmalloc_usable_size(void *ptr) {
   if (!ptr)
     return 0;
-  header_t *header = (header_t *)((char *)ptr - sizeof(header_t));
+  header_t *header =
+      (header_t *)((char *)ptr - HEAP_REDZONE_SIZE - sizeof(header_t));
   if (header->magic != HEAP_MAGIC)
     return 0;
-  return header->size;
+  return header->payload_size;
 }

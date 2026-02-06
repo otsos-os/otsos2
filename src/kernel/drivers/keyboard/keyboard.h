@@ -42,6 +42,7 @@ typedef struct {
 
 void keyboard_manager_init();
 char keyboard_getchar();
+char keyboard_getchar_blocking();
 void keyboard_common_handler();
 void keyboard_poll();
 int scanf(const char *format, ...);

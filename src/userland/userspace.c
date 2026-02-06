@@ -62,7 +62,7 @@ static u64 allocate_user_stack(void) {
     memset(page, 0, PAGE_SIZE);
 
     u64 vaddr = stack_bottom + (i * PAGE_SIZE);
-    mmu_map_page(vaddr, (u64)page, PTE_PRESENT | PTE_RW | PTE_USER);
+    mmu_map_page(vaddr, (u64)page, PTE_PRESENT | PTE_RW | PTE_USER | PTE_NX);
   }
 
   /* Return top of stack (stack grows downward) */

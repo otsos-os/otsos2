@@ -25,7 +25,18 @@
  */
 
 #include <kernel/drivers/timer.h>
+#include <lib/com1.h>
 #include <mlibc/stdlib.h>
+
+u64 __stack_chk_guard = 0x595e9fbd94fda766ULL;
+
+__attribute__((noreturn)) void __stack_chk_fail(void) {
+  com1_write_string("[STACK] stack smashing detected\n");
+  __asm__ volatile("cli");
+  while (1) {
+    __asm__ volatile("hlt");
+  }
+}
 
 void sleep(u32 ms) {
   u64 start_ticks = timer_get_ticks();

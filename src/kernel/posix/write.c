@@ -27,6 +27,8 @@
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/vga.h>
 #include <kernel/posix/posix.h>
+#include <kernel/process.h>
+#include <kernel/useraddr.h>
 #include <lib/com1.h>
 #include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
@@ -56,6 +58,14 @@ int sys_write(int fd, const void *buf, u32 count) {
 
   if (count == 0) {
     return 0;
+  }
+
+  if (!is_user_address(buf, count)) {
+    process_t *proc = process_current();
+    if (proc && (proc->context.cs & 3) == 3) {
+      process_exit(-1);
+    }
+    return -1;
   }
 
   const char *data = (const char *)buf;

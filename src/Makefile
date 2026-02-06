@@ -4,7 +4,7 @@ AS = nasm
 QEMU = qemu-system-x86_64
 QEMU_GUI_OPTS = -display gtk
 
-CFLAGS = -m64 -ffreestanding -fno-pic -fno-stack-protector -g -O0 -mno-red-zone -mcmodel=kernel -mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-80387 -I.
+CFLAGS = -m64 -ffreestanding -fno-pic -fstack-protector-strong -g -O0 -mno-red-zone -mcmodel=kernel -mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-80387 -I.
 LDFLAGS = -m elf_x86_64 -T linker.ld -Map=../bin/kernel.map
 
 KERNEL_BIN = ../bin/kernel.bin
@@ -46,10 +46,12 @@ ELF_O = ../bin/elf.o
 USERSPACE_O = ../bin/userspace.o
 USERSPACE_ASM_O = ../bin/userspace_asm.o
 SYSCALL_ASM_O = ../bin/syscall_asm.o
+USERADDR_O = ../bin/useraddr.o
+SCHEDULER_O = ../bin/scheduler.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
       $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O) $(VGA_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(SYSCALL_O) \
-      $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O)
+      $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O)
 
 all: $(ISO_IMAGE)
 
@@ -181,6 +183,14 @@ $(GDT_ASM_O): kernel/gdt.asm
 	@$(AS) -f elf64 -g -F dwarf $< -o $@
 
 $(PROCESS_O): kernel/process.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(USERADDR_O): kernel/useraddr.c kernel/useraddr.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(SCHEDULER_O): kernel/scheduler.c kernel/scheduler.h kernel/process.h kernel/mmu.h kernel/gdt.h kernel/interrupts/idt.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

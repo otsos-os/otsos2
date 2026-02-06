@@ -28,7 +28,26 @@
 #include <lib/com1.h>
 #include <mlibc/memory.h>
 
+#define MSR_EFER 0xC0000080
+#define EFER_NXE (1ULL << 11)
+
+static inline void mmu_wrmsr(u32 msr, u64 value) {
+  u32 low = value & 0xFFFFFFFF;
+  u32 high = value >> 32;
+  __asm__ volatile("wrmsr" : : "c"(msr), "a"(low), "d"(high));
+}
+
+static inline u64 mmu_rdmsr(u32 msr) {
+  u32 low, high;
+  __asm__ volatile("rdmsr" : "=a"(low), "=d"(high) : "c"(msr));
+  return ((u64)high << 32) | low;
+}
+
 void mmu_init() {
+  u64 efer = mmu_rdmsr(MSR_EFER);
+  if (!(efer & EFER_NXE)) {
+    mmu_wrmsr(MSR_EFER, efer | EFER_NXE);
+  }
   u64 cr3 = mmu_read_cr3();
   com1_printf("[MMU] Initialized. Current CR3: %p\n", (void *)cr3);
 }

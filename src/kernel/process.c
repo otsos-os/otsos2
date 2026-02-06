@@ -28,6 +28,7 @@
 #include <kernel/mmu.h>
 #include <kernel/panic.h>
 #include <kernel/process.h>
+#include <kernel/signal.h>
 #include <lib/com1.h>
 #include <mlibc/memory.h>
 
@@ -124,6 +125,18 @@ void process_set_current(process_t *proc) {
   }
 }
 
+void process_switch(process_t *proc) {
+  if (!proc) {
+    return;
+  }
+  process_set_current(proc);
+  mmu_write_cr3(proc->cr3);
+}
+
+void process_yield(void) {
+  __asm__ volatile("int $32");
+}
+
 void process_exit(int code) {
   if (!current_process) {
     com1_printf("[PROC] Error: No current process to exit\n");
@@ -199,4 +212,30 @@ int process_kill(u32 pid) {
   proc->state = PROC_STATE_UNUSED;
 
   return 0;
+}
+
+int process_send_signal(u32 pid, int sig) {
+  if (sig == 0) {
+    sig = SIGKILL;
+  }
+
+  if (sig != SIGKILL && sig != SIGTERM) {
+    return -1;
+  }
+
+  process_t *proc = process_get(pid);
+  if (!proc) {
+    return -1;
+  }
+
+  if (sig == SIGTERM) {
+    proc->exit_code = 128 + sig;
+  }
+
+  if (proc == current_process) {
+    process_exit(proc->exit_code ? proc->exit_code : -1);
+    return 0;
+  }
+
+  return process_kill(pid);
 }

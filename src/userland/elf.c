@@ -160,6 +160,9 @@ u64 elf_load(void *data, u64 size) {
     if (phdr->p_flags & PF_W) {
       page_flags |= PTE_RW;
     }
+    if (!(phdr->p_flags & PF_X)) {
+      page_flags |= PTE_NX;
+    }
 
     /* Map pages for this segment */
     u64 page_start = vaddr & ~(PAGE_SIZE - 1);

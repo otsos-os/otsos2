@@ -27,6 +27,7 @@
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/interrupts/idt.h>
+#include <kernel/scheduler.h>
 #include <mlibc/mlibc.h>
 
 extern void kernel_panic(registers_t *regs);
@@ -67,6 +68,7 @@ void isr_handler(registers_t *regs) {
 void irq_handler(registers_t *regs) {
   if (regs->int_no == 32) {
     timer_handler();
+    scheduler_tick(regs);
     keyboard_poll();
   } else if (regs->int_no == 33) {
     keyboard_common_handler();

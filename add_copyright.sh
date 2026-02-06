@@ -42,7 +42,7 @@ process_file() {
     cp "$TEMP_FILE" "$file"
 }
 
-find . -type f \( -name "*.c" -o -name "*.h" \) | while read -r file; do
+find . -type f \( -name "*.c" -o -name "*.h" -o -name "*.s" \) | while read -r file; do
     process_file "$file"
 done
 

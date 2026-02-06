@@ -101,6 +101,7 @@ void process_set_current(process_t *proc);
 /* Exit current process */
 void process_exit(int code);
 int process_kill(u32 pid);
+int process_send_signal(u32 pid, int sig);
 
 /* Switch to a process (used by scheduler) */
 void process_switch(process_t *proc);

@@ -1,3 +1,4 @@
+
 [bits 64]
 
 ; GDT segment selectors

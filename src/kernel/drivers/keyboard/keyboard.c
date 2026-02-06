@@ -79,6 +79,14 @@ char keyboard_getchar() {
   return c;
 }
 
+char keyboard_getchar_blocking() {
+  char c = 0;
+  while ((c = keyboard_getchar()) == 0) {
+    __asm__ volatile("hlt");
+  }
+  return c;
+}
+
 void keyboard_common_handler() {
   if (current_driver && current_driver->handler) {
     current_driver->handler();

@@ -96,7 +96,7 @@ void syscall_handler(registers_t *regs) {
     process_exit((int)arg1);
     break;
   case SYS_KILL:
-    regs->rax = process_kill((u32)arg1);
+    regs->rax = process_send_signal((u32)arg1, (int)arg2);
     break;
   default:
     com1_printf("Unknown syscall: %d\n", syscall_number);

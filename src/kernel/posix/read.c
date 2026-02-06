@@ -28,6 +28,8 @@
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/vga.h>
 #include <kernel/posix/posix.h>
+#include <kernel/process.h>
+#include <kernel/useraddr.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
@@ -45,15 +47,24 @@ int sys_read(int fd, void *buf, u32 count) {
     return 0;
   }
 
+  if (!is_user_address(buf, count)) {
+    com1_printf("[DEBUG] sys_read: invalid user buffer %p (%d)\n", buf,
+                (int)count);
+    process_t *proc = process_current();
+    if (proc && (proc->context.cs & 3) == 3) {
+      process_exit(-1);
+    }
+    return -1;
+  }
+
   char *data = (char *)buf;
 
   if (fd == STDIN_FILENO) {
     __asm__ volatile("sti");
     u32 i = 0;
     while (i < count) {
-      char c = keyboard_getchar();
+      char c = keyboard_getchar_blocking();
       if (c == 0) {
-        __asm__ volatile("hlt");
         continue;
       }
 
