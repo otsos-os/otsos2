@@ -155,11 +155,11 @@ u64 elf_load(void *data, u64 size) {
     com1_printf("[ELF] Loading segment: vaddr=%p filesz=%d memsz=%d flags=%x\n",
                 (void *)vaddr, (int)filesz, (int)memsz, phdr->p_flags);
 
-    /* Determine page flags based on segment permissions */
-    u64 page_flags = PTE_PRESENT | PTE_USER;
-    if (phdr->p_flags & PF_W) {
-      page_flags |= PTE_RW;
-    }
+    /* Determine page flags.
+     * Always map writable while loading so CR0.WP doesn't fault on text.
+     * We'll apply final RW permissions after copying.
+     */
+    u64 page_flags = PTE_PRESENT | PTE_USER | PTE_RW;
     if (!(phdr->p_flags & PF_X)) {
       page_flags |= PTE_NX;
     }
@@ -209,6 +209,24 @@ u64 elf_load(void *data, u64 size) {
     /* Zero remaining bytes (BSS) */
     for (u64 j = filesz; j < memsz; j++) {
       dst[j] = 0;
+    }
+
+    for (u64 page = page_start; page < page_end; page += PAGE_SIZE) {
+      u64 phys = mmu_virt_to_phys(page);
+      if (phys == 0) {
+        continue;
+      }
+      u64 existing_flags = mmu_get_pte_flags(page);
+     
+      u64 combined_flags =
+          existing_flags | (page_flags & (PTE_PRESENT | PTE_USER | PTE_RW));
+      int exec = !(existing_flags & PTE_NX) || (phdr->p_flags & PF_X);
+      if (exec) {
+        combined_flags &= ~PTE_NX;
+      } else {
+        combined_flags |= PTE_NX;
+      }
+      mmu_map_page(page, phys, combined_flags);
     }
   }
 
