@@ -247,6 +247,7 @@ $(COM1_O): lib/com1.c
 
 $(DISK_IMG):
 	@echo "  IMG     $(DISK_IMG)"
+	@mkdir -p $(dir $(DISK_IMG))
 	@dd if=/dev/zero of=$(DISK_IMG) bs=1M count=10 2>/dev/null
 
 OVMF = /usr/share/ovmf/OVMF.fd
