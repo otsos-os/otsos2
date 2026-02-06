@@ -255,7 +255,6 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
     }
 
     posix_init();
-    com1_printf("[KERNEL] STDIN used after reload: %d\n", fd_table[0].used);
 
     if (init_module_start && init_module_size > 0) {
       com1_printf(

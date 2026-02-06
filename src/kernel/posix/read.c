@@ -34,6 +34,9 @@
 #include <mlibc/mlibc.h>
 
 int sys_read(int fd, void *buf, u32 count) {
+  file_descriptor_t *fd_table = posix_get_fd_table();
+  open_file_t *oft = posix_get_open_file_table();
+
   if (fd < 0 || fd >= MAX_FDS) {
     com1_printf("[DEBUG] sys_read: invalid fd %d\n", fd);
     return -1;
@@ -107,29 +110,34 @@ int sys_read(int fd, void *buf, u32 count) {
     return -1;
   }
 
+  int of_index = fd_table[fd].of_index;
+  if (of_index < 0 || of_index >= MAX_OPEN_FILES || !oft[of_index].used) {
+    return -1;
+  }
+
   chainfs_file_entry_t entry;
   u32 entry_block, entry_offset;
-  if (chainfs_find_file(fd_table[fd].path, &entry, &entry_block,
+  if (chainfs_find_file(oft[of_index].path, &entry, &entry_block,
                         &entry_offset) != 0) {
     return -1;
   }
 
-  if (fd_table[fd].offset >= entry.size) {
+  if (oft[of_index].offset >= entry.size) {
     return 0;
   }
 
   u32 to_read = count;
-  u32 remaining = entry.size - fd_table[fd].offset;
+  u32 remaining = entry.size - oft[of_index].offset;
   if (to_read > remaining) {
     to_read = remaining;
   }
 
   u32 bytes_read = 0;
-  int res = chainfs_read_file_range(fd_table[fd].path, (u8 *)buf, to_read,
-                                    fd_table[fd].offset, &bytes_read);
+  int res = chainfs_read_file_range(oft[of_index].path, (u8 *)buf, to_read,
+                                    oft[of_index].offset, &bytes_read);
 
   if (res == 0) {
-    fd_table[fd].offset += bytes_read;
+    oft[of_index].offset += bytes_read;
     return bytes_read;
   }
 

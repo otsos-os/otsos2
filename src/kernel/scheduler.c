@@ -28,29 +28,6 @@
 #include <kernel/process.h>
 #include <kernel/scheduler.h>
 
-static void save_context(process_t *proc, registers_t *regs) {
-  proc->context.r15 = regs->r15;
-  proc->context.r14 = regs->r14;
-  proc->context.r13 = regs->r13;
-  proc->context.r12 = regs->r12;
-  proc->context.r11 = regs->r11;
-  proc->context.r10 = regs->r10;
-  proc->context.r9 = regs->r9;
-  proc->context.r8 = regs->r8;
-  proc->context.rbp = regs->rbp;
-  proc->context.rdi = regs->rdi;
-  proc->context.rsi = regs->rsi;
-  proc->context.rdx = regs->rdx;
-  proc->context.rcx = regs->rcx;
-  proc->context.rbx = regs->rbx;
-  proc->context.rax = regs->rax;
-  proc->context.rip = regs->rip;
-  proc->context.cs = regs->cs;
-  proc->context.rflags = regs->rflags;
-  proc->context.rsp = regs->rsp;
-  proc->context.ss = regs->ss;
-}
-
 static void load_context(process_t *proc, registers_t *regs) {
   regs->r15 = proc->context.r15;
   regs->r14 = proc->context.r14;
@@ -105,7 +82,7 @@ void scheduler_tick(registers_t *regs) {
     return;
   }
 
-  save_context(current, regs);
+  process_save_context(current, regs);
 
   if (current->state == PROC_STATE_RUNNING) {
     current->state = PROC_STATE_RUNNABLE;

@@ -49,6 +49,12 @@ void mmu_init();
 void mmu_map_page(u64 vaddr, u64 paddr, u64 flags);
 void mmu_unmap_page(u64 vaddr);
 u64 mmu_virt_to_phys(u64 vaddr);
+u64 mmu_create_address_space(void);
+u64 mmu_clone_user_space(u64 src_cr3);
+void mmu_free_user_space(u64 cr3);
+void mmu_map_page_in(u64 *pml4, u64 vaddr, u64 paddr, u64 flags);
+u64 mmu_kernel_cr3(void);
+u64 mmu_get_pte_flags(u64 vaddr);
 
 static inline void mmu_invlpg(u64 vaddr) {
   __asm__ volatile("invlpg (%0)" : : "r"(vaddr) : "memory");

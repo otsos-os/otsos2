@@ -28,6 +28,8 @@
 #include <mlibc/mlibc.h>
 
 int sys_close(int fd) {
+  file_descriptor_t *fd_table = posix_get_fd_table();
+
   if (fd < 0 || fd >= MAX_FDS) {
     return -1;
   }
@@ -36,10 +38,14 @@ int sys_close(int fd) {
     return -1;
   }
 
+  int of_index = fd_table[fd].of_index;
+  if (of_index >= 0) {
+    posix_release_open_file(of_index);
+  }
+
   fd_table[fd].used = 0;
   fd_table[fd].flags = 0;
-  fd_table[fd].offset = 0;
-  memset(fd_table[fd].path, 0, sizeof(fd_table[fd].path));
+  fd_table[fd].of_index = -1;
 
   return 0;
 }

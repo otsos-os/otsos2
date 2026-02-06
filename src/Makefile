@@ -42,6 +42,8 @@ SYSCALL_O = ../bin/syscall.o
 GDT_O = ../bin/gdt.o
 GDT_ASM_O = ../bin/gdt_asm.o
 PROCESS_O = ../bin/process.o
+FORK_O = ../bin/fork.o
+EXEC_O = ../bin/exec.o
 ELF_O = ../bin/elf.o
 USERSPACE_O = ../bin/userspace.o
 USERSPACE_ASM_O = ../bin/userspace_asm.o
@@ -51,7 +53,7 @@ SCHEDULER_O = ../bin/scheduler.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
       $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O) $(VGA_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(SYSCALL_O) \
-      $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O)
+      $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(FORK_O) $(EXEC_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O)
 
 all: $(ISO_IMAGE)
 
@@ -183,6 +185,14 @@ $(GDT_ASM_O): kernel/gdt.asm
 	@$(AS) -f elf64 -g -F dwarf $< -o $@
 
 $(PROCESS_O): kernel/process.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(FORK_O): kernel/posix/fork.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(EXEC_O): kernel/posix/exec.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

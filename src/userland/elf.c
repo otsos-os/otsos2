@@ -169,6 +169,19 @@ u64 elf_load(void *data, u64 size) {
     u64 page_end = (vaddr + memsz + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
 
     for (u64 page = page_start; page < page_end; page += PAGE_SIZE) {
+      u64 existing_phys = mmu_virt_to_phys(page);
+      if (existing_phys != 0) {
+        u64 existing_flags = mmu_get_pte_flags(page);
+        u64 combined_flags =
+            (existing_flags | page_flags | PTE_USER | PTE_PRESENT);
+        int exec = !(existing_flags & PTE_NX) || (phdr->p_flags & PF_X);
+        if (exec) {
+          combined_flags &= ~PTE_NX;
+        }
+        mmu_map_page(page, existing_phys, combined_flags);
+        continue;
+      }
+
       /* Allocate physical page */
       void *phys_page = kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
       if (!phys_page) {

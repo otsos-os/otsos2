@@ -27,16 +27,27 @@
 #ifndef POSIX_H
 #define POSIX_H
 
+#include <kernel/interrupts/idt.h>
 #include <mlibc/mlibc.h>
 
 #define MAX_FDS 32
+#define MAX_OPEN_FILES 64
+
+struct process;
 
 typedef struct {
   int used;
+  int flags;
+  int of_index; /* index into open file table, -1 for stdio */
+} file_descriptor_t;
+
+typedef struct {
+  int used;
+  int refcount;
   char path[256];
   u32 offset;
   int flags;
-} file_descriptor_t;
+} open_file_t;
 
 #define O_RDONLY 0x0001
 #define O_WRONLY 0x0002
@@ -49,12 +60,20 @@ typedef struct {
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
 
-extern file_descriptor_t fd_table[MAX_FDS];
-
 int sys_read(int fd, void *buf, u32 count);
 int sys_write(int fd, const void *buf, u32 count);
 int sys_open(const char *path, int flags);
 int sys_close(int fd);
+int sys_fork(registers_t *regs);
+int sys_execve(const char *path, const char *const *argv,
+               const char *const *envp, registers_t *regs);
 void posix_init(void);
+void posix_init_process(struct process *proc);
+void posix_copy_fds(struct process *dst, const struct process *src);
+void posix_release_fds(struct process *proc);
+file_descriptor_t *posix_get_fd_table(void);
+open_file_t *posix_get_open_file_table(void);
+int posix_alloc_open_file(void);
+void posix_release_open_file(int index);
 
 #endif

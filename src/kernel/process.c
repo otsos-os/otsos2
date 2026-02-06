@@ -95,6 +95,8 @@ process_t *process_create_kernel(const char *name, void (*entry)(void)) {
   proc->context.ss = KERNEL_DS;
 
   proc->exit_code = 0;
+  proc->owns_address_space = 0;
+  posix_init_process(proc);
   proc->next = NULL;
 
   proc->state = PROC_STATE_RUNNABLE;
@@ -152,6 +154,15 @@ void process_exit(int code) {
 
   current_process->exit_code = code;
   current_process->state = PROC_STATE_ZOMBIE;
+  posix_release_fds(current_process);
+  if (current_process->owns_address_space) {
+    u64 old_cr3 = current_process->cr3;
+    mmu_write_cr3(mmu_kernel_cr3());
+    mmu_free_user_space(old_cr3);
+    kfree((void *)(old_cr3 & PTE_ADDR_MASK));
+    current_process->cr3 = 0;
+    current_process->owns_address_space = 0;
+  }
 
 
   while (1) {
@@ -181,6 +192,33 @@ void process_dump(process_t *proc) {
   com1_printf("====================\n");
 }
 
+void process_save_context(process_t *proc, registers_t *regs) {
+  if (!proc || !regs) {
+    return;
+  }
+
+  proc->context.r15 = regs->r15;
+  proc->context.r14 = regs->r14;
+  proc->context.r13 = regs->r13;
+  proc->context.r12 = regs->r12;
+  proc->context.r11 = regs->r11;
+  proc->context.r10 = regs->r10;
+  proc->context.r9 = regs->r9;
+  proc->context.r8 = regs->r8;
+  proc->context.rbp = regs->rbp;
+  proc->context.rdi = regs->rdi;
+  proc->context.rsi = regs->rsi;
+  proc->context.rdx = regs->rdx;
+  proc->context.rcx = regs->rcx;
+  proc->context.rbx = regs->rbx;
+  proc->context.rax = regs->rax;
+  proc->context.rip = regs->rip;
+  proc->context.cs = regs->cs;
+  proc->context.rflags = regs->rflags;
+  proc->context.rsp = regs->rsp;
+  proc->context.ss = regs->ss;
+}
+
 process_t *process_create(const char *name, void *elf_data, u64 elf_size) {
   extern process_t *userspace_load_elf(const char *name, void *elf_data,
                                        u64 elf_size);
@@ -202,6 +240,13 @@ int process_kill(u32 pid) {
     return 0;
   }
 
+  posix_release_fds(proc);
+  if (proc->owns_address_space) {
+    mmu_free_user_space(proc->cr3);
+    kfree((void *)(proc->cr3 & PTE_ADDR_MASK));
+    proc->cr3 = 0;
+    proc->owns_address_space = 0;
+  }
 
   if (proc->kernel_stack) {
     void *kstack_base = (void *)(proc->kernel_stack - KERNEL_STACK_SIZE);

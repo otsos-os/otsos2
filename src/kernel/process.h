@@ -27,6 +27,7 @@
 #ifndef PROCESS_H
 #define PROCESS_H
 
+#include <kernel/posix/posix.h>
 #include <mlibc/mlibc.h>
 
 #define MAX_PROCESSES 64
@@ -76,6 +77,12 @@ typedef struct process {
   /* Exit status */
   int exit_code;
 
+  /* Address space ownership */
+  int owns_address_space;
+
+  /* File descriptors */
+  file_descriptor_t fd_table[MAX_FDS];
+
   /* Links */
   struct process *next; /* For scheduler queue */
 } process_t;
@@ -111,6 +118,9 @@ void process_yield(void);
 
 /* Debug: dump process info */
 void process_dump(process_t *proc);
+
+/* Save CPU context from interrupt/syscall frame */
+void process_save_context(process_t *proc, registers_t *regs);
 
 /* Internal: find free process slot */
 process_t *alloc_process(void);

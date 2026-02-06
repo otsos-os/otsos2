@@ -41,6 +41,8 @@ The kernel uses the `syscall`/`sysret` instruction pair for fast system calls:
 #define SYS_WRITE 1   // write(fd, buf, count)
 #define SYS_OPEN  2   // open(pathname, flags)
 #define SYS_CLOSE 3   // close(fd)
+#define SYS_FORK  57  // fork()
+#define SYS_EXECVE 59 // execve(path, argv, envp)
 #define SYS_EXIT  60  // exit(status)
 #define SYS_KILL  62  // kill(pid, sig)
 ```

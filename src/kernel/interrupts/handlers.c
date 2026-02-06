@@ -27,6 +27,7 @@
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/interrupts/idt.h>
+#include <kernel/mmu.h>
 #include <kernel/scheduler.h>
 #include <mlibc/mlibc.h>
 
@@ -48,12 +49,21 @@ void isr_handler(registers_t *regs) {
                   "(%s) at RIP=%p\n",
                   regs->int_no, proc ? (int)proc->pid : -1,
                   proc ? proc->name : "???", (void *)regs->rip);
+      com1_printf("[KERNEL] CS=0x%x SS=0x%x RSP=%p\n", (unsigned)regs->cs,
+                  (unsigned)regs->ss, (void *)regs->rsp);
 
       
       if (regs->int_no == 13) {
-        com1_printf("[KERNEL] General Protection Fault\n");
+        com1_printf("[KERNEL] General Protection Fault ERR=0x%x\n",
+                    (unsigned)regs->err_code);
       } else if (regs->int_no == 14) {
+        u64 cr2 = 0;
+        __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
         com1_printf("[KERNEL] Segmentation Fault\n");
+        com1_printf("[KERNEL] Page Fault: CR2=%p ERR=0x%x\n", (void *)cr2,
+                    (unsigned)regs->err_code);
+        u64 pte_flags = mmu_get_pte_flags(cr2);
+        com1_printf("[KERNEL] CR2 PTE flags: %p\n", (void *)pte_flags);
       } else if (regs->int_no == 6) {
         com1_printf("[KERNEL] Invalid Opcode\n");
       }

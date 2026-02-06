@@ -26,12 +26,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 # POSIX Syscalls (Kernel Layer)
 
 This layer exposes a minimal POSIX-like API backed by ChainFS and kernel
-devices. It manages a small `fd_table` of file descriptors.
+devices. Each process has a small file descriptor table that refers to shared
+open-file entries.
 
 ## File Descriptors
 - `0` = stdin, `1` = stdout, `2` = stderr (initialized at boot).
 - Additional descriptors are allocated starting from `3`.
-- Each descriptor tracks `path`, `offset`, and `flags`.
+- Each descriptor refers to an open-file entry containing `path`, `offset`, and
+  `flags`.
+- After `fork()`, offsets are shared between parent and child as in POSIX.
 
 ## Syscalls
 
@@ -44,7 +47,7 @@ Opens a file by path and returns a new file descriptor.
 - `O_APPEND` sets the file offset to the end before each write.
 
 ### `close(fd) -> 0/-1`
-Releases the descriptor slot and clears its metadata.
+Releases the descriptor slot and decrements the open-file reference count.
 
 ### `read(fd, buf, count) -> bytes`
 Reads starting at the current file offset and advances it.
@@ -55,4 +58,3 @@ Reads starting at the current file offset and advances it.
 Writes at the current file offset and advances it.
 - `stdout`/`stderr` are sent to VGA and COM1.
 - For file-backed descriptors, writes are merged into the existing file data.
-
