@@ -4,7 +4,7 @@ AS = nasm
 QEMU = qemu-system-x86_64
 QEMU_GUI_OPTS = -display gtk
 
-CFLAGS = -m64 -ffreestanding -fno-pic -fstack-protector-strong -g -O0 -mno-red-zone -mcmodel=kernel -mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-80387 -I.
+CFLAGS = -m64 -ffreestanding -fno-pic -fstack-protector-strong -g -O1 -mno-red-zone -mcmodel=kernel -mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-80387 -I.
 LDFLAGS = -m elf_x86_64 -T linker.ld -Map=../bin/kernel.map
 
 KERNEL_BIN = ../bin/kernel.bin
@@ -66,7 +66,7 @@ $(ISO_IMAGE): $(KERNEL_BIN) $(INIT_BIN)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
 	@cp $(INIT_BIN) $(ISODIR)/boot/init
-	@echo 'set timeout=0' > $(ISODIR)/boot/grub/grub.cfg
+	@echo 'set timeout=4' > $(ISODIR)/boot/grub/grub.cfg
 	@echo 'set default=0' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo 'insmod all_video' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '' >> $(ISODIR)/boot/grub/grub.cfg

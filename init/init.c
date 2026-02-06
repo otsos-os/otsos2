@@ -81,8 +81,6 @@ void _start(void) {
   print("\n");
   print("Hello init\n");
 
-  print("Test: read into kernel memory (should be killed)...\n");
-  read(STDIN, (void *)0xFFFFFFFF80000000ULL, 4);
 
   while (1) {
     char buffer[128];
