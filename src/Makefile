@@ -1,10 +1,10 @@
-CC = gcc
-LD = ld
+CC = clang
+LD = ld.lld
 AS = nasm
 QEMU = qemu-system-x86_64
 QEMU_GUI_OPTS = -display gtk
 
-CFLAGS = -m64 -ffreestanding -fno-pic -fno-stack-protector -g -O0 -mno-red-zone -mcmodel=kernel -I.
+CFLAGS = -m64 -ffreestanding -fno-pic -fno-stack-protector -g -O0 -mno-red-zone -mcmodel=kernel -mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-80387 -I.
 LDFLAGS = -m elf_x86_64 -T linker.ld -Map=../bin/kernel.map
 
 KERNEL_BIN = ../bin/kernel.bin
@@ -77,7 +77,7 @@ $(ISO_IMAGE): $(KERNEL_BIN) $(INIT_BIN)
 	@grub-mkrescue -o $(ISO_IMAGE) $(ISODIR) >/dev/null 2>&1
 
 $(KERNEL_BIN): $(OBJ)
-	@echo "  LD      $@"
+	@echo "  LLD      $@"
 	@$(LD) $(LDFLAGS) $(OBJ) -o $@
 
 $(BOOT_O): boot/boot.s

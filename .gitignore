@@ -6,3 +6,4 @@ isodir/
 *.img
 *.map
 .DS_Store
+todo.md

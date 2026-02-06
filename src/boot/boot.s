@@ -1130,7 +1130,7 @@ do_reboot:
     
     cli
     hlt
-    jmp .
+1:  jmp 1b
 
 
 check_cpuid:
@@ -1391,7 +1391,8 @@ enable_long_mode:
 
     lgdt [pointer64]
     push 0x08
-    push offset start64
+    mov eax, offset start64
+    push eax
     retf
 
 .code64
@@ -1412,4 +1413,4 @@ start64:
 
     cli
     hlt
-    jmp .
+1:  jmp 1b

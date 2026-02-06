@@ -1,5 +1,5 @@
-CC = gcc
-LD = ld
+CC = clang
+LD = ld.lld
 
 # Flags for freestanding userspace code (no libc)
 CFLAGS = -m64 -ffreestanding -fno-pic -fno-stack-protector -nostdlib -nostdinc \
@@ -13,7 +13,7 @@ OBJS = init.o
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
-	@echo "  LD      $@"
+	@echo "  LLD      $@"
 	@$(LD) $(LDFLAGS) $(OBJS) -o $@
 	@echo "  SIZE    $@"
 	@size $@

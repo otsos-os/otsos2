@@ -26,7 +26,7 @@ itoa:
 	add	rsi, 1
 	idiv	edi
 	add	edx, 35
-	movsx	rdx, edx
+	movsxd	rdx, edx
 	movzx	edx, BYTE PTR .LC0[rdx]
 	mov	BYTE PTR [rsi-1], dl
 	test	eax, eax
