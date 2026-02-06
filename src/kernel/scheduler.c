@@ -25,6 +25,7 @@
  */
 
 #include <kernel/mmu.h>
+#include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/process.h>
 #include <kernel/scheduler.h>
 
@@ -69,6 +70,21 @@ static process_t *pick_next(process_t *current) {
 }
 
 void scheduler_tick(registers_t *regs) {
+  static u32 last_magic = 0;
+  if (last_magic == 0) {
+    last_magic = g_chainfs.superblock.magic;
+  } else if (g_chainfs.superblock.magic != last_magic) {
+    process_t *proc = process_current();
+    com1_printf("[CHAINFS] magic changed in tick (pid=%d) old=0x%x new=0x%x "
+                "rip=%p cs=0x%x cr3=%p phys=%p init_phys=%p\n",
+                proc ? proc->pid : -1, last_magic, g_chainfs.superblock.magic,
+                (void *)(regs ? regs->rip : 0), regs ? regs->cs : 0,
+                (void *)mmu_read_cr3(),
+                (void *)mmu_virt_to_phys((u64)&g_chainfs),
+                (void *)g_chainfs_phys);
+    last_magic = g_chainfs.superblock.magic;
+  }
+
   if (!regs) {
     return;
   }

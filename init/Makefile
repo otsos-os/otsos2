@@ -8,9 +8,11 @@ CFLAGS = -m64 -ffreestanding -fno-pic -fno-stack-protector -nostdlib -nostdinc \
 LDFLAGS = -m elf_x86_64 -T linker.ld --oformat=elf64-x86-64 -nostdlib
 
 TARGET = init
+HELLO_BIN = hello
 OBJS = init.o
+HELLO_OBJS = hello.o
 
-all: $(TARGET)
+all: $(TARGET) $(HELLO_BIN)
 
 $(TARGET): $(OBJS)
 	@echo "  LLD      $@"
@@ -18,11 +20,21 @@ $(TARGET): $(OBJS)
 	@echo "  SIZE    $@"
 	@size $@
 
+$(HELLO_BIN): $(HELLO_OBJS)
+	@echo "  LLD      $@"
+	@$(LD) $(LDFLAGS) $(HELLO_OBJS) -o $@
+	@echo "  SIZE    $@"
+	@size $@
+
 init.o: init.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+hello.o: hello.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(OBJS) $(HELLO_OBJS) $(TARGET) $(HELLO_BIN)
 
 .PHONY: all clean

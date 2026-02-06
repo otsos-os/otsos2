@@ -57,6 +57,28 @@ int strlen(const char *str) {
   return len;
 }
 
+#include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <lib/com1.h>
+
+static void debug_chainfs_write(const void *dest, unsigned long n,
+                                const char *op) {
+  static int hits = 0;
+  if (hits >= 8) {
+    return;
+  }
+
+  const unsigned char *start = (const unsigned char *)dest;
+  const unsigned char *end = start + n;
+  const unsigned char *magic =
+      (const unsigned char *)&g_chainfs.superblock.magic;
+
+  if (start <= magic && magic < end) {
+    hits++;
+    com1_printf("[CHAINFS] magic overwritten by %s at %p len=%u ra=%p\n", op,
+                dest, (unsigned int)n, __builtin_return_address(0));
+  }
+}
+
 char* strcpy(char* dest, const char* src) {
   char* original_dest = dest;
   while ((*dest++ = *src++));
@@ -83,12 +105,14 @@ char* strchr(const char* str, int c) {
   return 0;
 }
 void *memset(void *s, int c, unsigned long n) {
+  debug_chainfs_write(s, n, "memset");
   unsigned char *p = (unsigned char *)s;
   while (n--)
     *p++ = (unsigned char)c;
   return s;
 }
 void *memcpy(void *dest, const void *src, unsigned long n) {
+  debug_chainfs_write(dest, n, "memcpy");
   unsigned char *d = (unsigned char *)dest;
   const unsigned char *s = (const unsigned char *)src;
   while (n--)

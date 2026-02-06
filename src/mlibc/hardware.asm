@@ -71,9 +71,9 @@ global insw
 insw:
 %ifdef __x86_64__
     push rdi
+    mov ecx, edx    
     mov dx, di     
     mov rdi, rsi    
-    mov rcx, rdx    
     cld
     rep insw
     pop rdi
@@ -95,8 +95,8 @@ insw:
 global outsw
 outsw:
 %ifdef __x86_64__
+    mov ecx, edx    
     mov dx, di     
-    mov rcx, rdx    
     cld
     rep outsw
     ret

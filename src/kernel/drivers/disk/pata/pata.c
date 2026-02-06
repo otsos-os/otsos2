@@ -24,6 +24,7 @@
  */
 
 #include <kernel/drivers/disk/pata/pata.h>
+#include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
@@ -37,7 +38,50 @@ static void pata_wait_drq() {
     ;
 }
 
-static unsigned short pata_dummy_buffer[256];
+struct pata_dummy_area {
+  unsigned short buffer[256];
+  unsigned short guard[16];
+};
+
+static struct pata_dummy_area pata_dummy_area;
+
+static void pata_guard_init(void) {
+  for (unsigned int i = 0; i < 16; ++i) {
+    pata_dummy_area.guard[i] = (unsigned short)(0xBEEF ^ (i * 0x1111));
+  }
+}
+
+static void pata_guard_check(const char *where) {
+  for (unsigned int i = 0; i < 16; ++i) {
+    unsigned short expected = (unsigned short)(0xBEEF ^ (i * 0x1111));
+    if (pata_dummy_area.guard[i] != expected) {
+      com1_printf("[PATA] dummy guard corrupted at %s idx=%u val=0x%x exp=0x%x\n",
+                  where, i, pata_dummy_area.guard[i], expected);
+      return;
+    }
+  }
+}
+
+static void debug_chainfs_overlap(const void *buffer, unsigned int words,
+                                  const char *op) {
+  const unsigned char *start = (const unsigned char *)buffer;
+  const unsigned char *end = start + (words * 2);
+  const unsigned char *magic =
+      (const unsigned char *)&g_chainfs.superblock.magic;
+
+  if (start <= magic && magic < end) {
+    com1_printf("[CHAINFS] magic overlap in %s: buf=%p words=%u\n", op, buffer,
+                words);
+  }
+}
+
+static void debug_chainfs_magic_change(u32 before, const char *op) {
+  u32 after = g_chainfs.superblock.magic;
+  if (after != before) {
+    com1_printf("[CHAINFS] magic changed during %s: old=0x%x new=0x%x ra=%p\n",
+                op, before, after, __builtin_return_address(0));
+  }
+}
 
 void pata_identify(unsigned short *target_buf) {
   com1_printf("PATA: Identifying drive...\n");
@@ -56,11 +100,17 @@ void pata_identify(unsigned short *target_buf) {
 
   pata_wait_bsy();
 
+  u32 magic_before = g_chainfs.superblock.magic;
   if (target_buf) {
+    debug_chainfs_overlap(target_buf, 256, "pata_identify");
     insw(IDE_DATA, target_buf, 256);
   } else {
-    insw(IDE_DATA, pata_dummy_buffer, 256);
+    debug_chainfs_overlap(pata_dummy_area.buffer, 256, "pata_identify");
+    pata_guard_init();
+    insw(IDE_DATA, pata_dummy_area.buffer, 256);
+    pata_guard_check("identify");
   }
+  debug_chainfs_magic_change(magic_before, "pata_identify");
 
   com1_printf("PATA: Drive identified successfully.\n");
 }
@@ -79,7 +129,10 @@ void pata_read_sector(unsigned int lba, unsigned char *buffer) {
   pata_wait_bsy();
   pata_wait_drq();
 
+  debug_chainfs_overlap(buffer, 256, "pata_read_sector");
+  u32 magic_before = g_chainfs.superblock.magic;
   insw(IDE_DATA, buffer, 256);
+  debug_chainfs_magic_change(magic_before, "pata_read_sector");
 }
 
 void pata_write_sector(unsigned int lba, unsigned char *buffer) {

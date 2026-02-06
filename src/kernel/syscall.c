@@ -29,7 +29,10 @@
 #include <kernel/posix/posix.h>
 #include <kernel/process.h>
 #include <kernel/syscall.h>
+#include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/process.h>
 #include <lib/com1.h>
+#include <kernel/mmu.h>
 
 #define MSR_EFER 0xC0000080
 #define MSR_STAR 0xC0000081
@@ -74,6 +77,21 @@ void syscall_init(void) {
 }
 
 void syscall_handler(registers_t *regs) {
+  static u32 last_magic = 0;
+  if (last_magic == 0) {
+    last_magic = g_chainfs.superblock.magic;
+  } else if (g_chainfs.superblock.magic != last_magic) {
+    process_t *proc = process_current();
+    com1_printf("[CHAINFS] magic changed in syscall (pid=%d) old=0x%x new=0x%x "
+                "rip=%p cs=0x%x cr3=%p phys=%p init_phys=%p\n",
+                proc ? proc->pid : -1, last_magic, g_chainfs.superblock.magic,
+                (void *)(regs ? regs->rip : 0), regs ? regs->cs : 0,
+                (void *)mmu_read_cr3(),
+                (void *)mmu_virt_to_phys((u64)&g_chainfs),
+                (void *)g_chainfs_phys);
+    last_magic = g_chainfs.superblock.magic;
+  }
+
   u64 syscall_number = regs->rax;
   u64 arg1 = regs->rdi;
   u64 arg2 = regs->rsi;

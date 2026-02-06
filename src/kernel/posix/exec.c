@@ -267,19 +267,25 @@ int sys_execve(const char *path, const char *const *argv,
                const char *const *envp, registers_t *regs) {
   process_t *proc = process_current();
   if (!proc || !regs) {
+    com1_printf("[EXEC] Error: no current process or regs\n");
     return -1;
   }
 
   if (!is_user_address(path, 1)) {
+    com1_printf("[EXEC] Error: invalid user path pointer %p\n",
+                (void *)path);
     return -1;
   }
 
   if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+    com1_printf("[EXEC] Error: ChainFS not initialized (magic=0x%x)\n",
+                g_chainfs.superblock.magic);
     return -1;
   }
 
   char *kpath = copy_user_string(path, EXEC_MAX_STR);
   if (!kpath) {
+    com1_printf("[EXEC] Error: failed to copy user path\n");
     return -1;
   }
 
@@ -287,11 +293,13 @@ int sys_execve(const char *path, const char *const *argv,
   char **kenvp = NULL;
   int argc = copy_user_string_array(argv, &kargv, EXEC_MAX_ARGS);
   if (argc < 0) {
+    com1_printf("[EXEC] Error: failed to copy argv\n");
     kfree(kpath);
     return -1;
   }
   int envc = copy_user_string_array(envp, &kenvp, EXEC_MAX_ENVP);
   if (envc < 0) {
+    com1_printf("[EXEC] Error: failed to copy envp\n");
     free_string_array(kargv);
     kfree(kpath);
     return -1;
@@ -300,14 +308,17 @@ int sys_execve(const char *path, const char *const *argv,
   u8 *elf_buf = NULL;
   u32 elf_size = 0;
   if (read_file_into_buffer(kpath, &elf_buf, &elf_size) != 0) {
+    com1_printf("[EXEC] Error: failed to read file '%s'\n", kpath);
     free_string_array(kargv);
     free_string_array(kenvp);
     kfree(kpath);
     return -1;
   }
+  com1_printf("[EXEC] Loaded '%s' (%u bytes)\n", kpath, elf_size);
 
   u64 new_cr3 = mmu_create_address_space();
   if (!new_cr3) {
+    com1_printf("[EXEC] Error: failed to create address space\n");
     kfree(elf_buf);
     free_string_array(kargv);
     free_string_array(kenvp);
@@ -321,6 +332,7 @@ int sys_execve(const char *path, const char *const *argv,
   u64 entry = elf_load(elf_buf, elf_size);
   kfree(elf_buf);
   if (entry == 0) {
+    com1_printf("[EXEC] Error: elf_load failed for '%s'\n", kpath);
     mmu_write_cr3(old_cr3);
     mmu_free_user_space(new_cr3);
     kfree((void *)(new_cr3 & PTE_ADDR_MASK));
@@ -332,6 +344,7 @@ int sys_execve(const char *path, const char *const *argv,
 
   u64 user_stack = allocate_user_stack();
   if (user_stack == 0) {
+    com1_printf("[EXEC] Error: allocate_user_stack failed\n");
     mmu_write_cr3(old_cr3);
     mmu_free_user_space(new_cr3);
     kfree((void *)(new_cr3 & PTE_ADDR_MASK));
@@ -346,6 +359,7 @@ int sys_execve(const char *path, const char *const *argv,
   u64 envp_addr = 0;
   if (build_user_stack(kargv, argc, kenvp, envc, &new_rsp, &argv_addr,
                        &envp_addr) != 0) {
+    com1_printf("[EXEC] Error: build_user_stack failed\n");
     mmu_write_cr3(old_cr3);
     mmu_free_user_space(new_cr3);
     kfree((void *)(new_cr3 & PTE_ADDR_MASK));

@@ -25,8 +25,10 @@
 
 #include <kernel/drivers/disk/pata/pata.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/mmu.h>
 
 chainfs_t g_chainfs;
+u64 g_chainfs_phys = 0;
 #define ENTRIES_PER_BLOCK (CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t))
 
 int chainfs_init(void) {
@@ -49,6 +51,8 @@ int chainfs_init(void) {
 
   // Set current directory to root
   g_chainfs.current_dir_block = g_chainfs.superblock.root_dir_block;
+  g_chainfs_phys = mmu_virt_to_phys((u64)&g_chainfs);
+  com1_printf("[CHAINFS] g_chainfs phys=%p\n", (void *)g_chainfs_phys);
 
   com1_printf("ChainFS: Initialized successfully\n");
   com1_printf("  Total blocks: %u\n", g_chainfs.superblock.block_count);

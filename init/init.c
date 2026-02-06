@@ -32,6 +32,8 @@
 #define SYS_WRITE 1
 #define SYS_OPEN 2
 #define SYS_CLOSE 3
+#define SYS_FORK 57
+#define SYS_EXECVE 59
 #define SYS_EXIT 60
 #define STDIN 0
 #define STDOUT 1
@@ -54,6 +56,12 @@ static long syscall3(long num, long arg1, long arg2, long arg3) {
   return ret;
 }
 
+static long syscall0(long num) {
+  long ret;
+  __asm__ volatile("syscall" : "=a"(ret) : "a"(num) : "rcx", "r11", "memory");
+  return ret;
+}
+
 static long write(int fd, const void *buf, unsigned long count) {
   return syscall3(SYS_WRITE, fd, (long)buf, count);
 }
@@ -68,6 +76,12 @@ static void exit(int code) {
   }
 }
 
+static long fork(void) { return syscall0(SYS_FORK); }
+
+static long execve(const char *path, char *const argv[], char *const envp[]) {
+  return syscall3(SYS_EXECVE, (long)path, (long)argv, (long)envp);
+}
+
 static unsigned long strlen(const char *s) {
   unsigned long len = 0;
   while (s[len])
@@ -77,21 +91,55 @@ static unsigned long strlen(const char *s) {
 
 static void print(const char *s) { write(STDOUT, s, strlen(s)); }
 
+static void trim_newline(char *s) {
+  unsigned long i = 0;
+  while (s[i]) {
+    if (s[i] == '\n' || s[i] == '\r') {
+      s[i] = 0;
+      return;
+    }
+    i++;
+  }
+}
+
 void _start(void) {
   print("\n");
   print("Hello init\n");
 
-
   while (1) {
-    char buffer[128];
-    print("vedi chototo: ");
-    long bytes = read(STDIN, buffer, 100);
-
-    if (bytes > 0) {
-      buffer[bytes] = 0;
-      print("ti vvel: ");
-      print(buffer);
-      print("\n");
+    char path[128];
+    print("Enter program path (relative, e.g. hello): ");
+    long bytes = read(STDIN, path, 120);
+    if (bytes <= 0) {
+      continue;
     }
+    if (bytes >= 120) {
+      bytes = 119;
+    }
+    path[bytes] = 0;
+    trim_newline(path);
+
+    if (path[0] == 0) {
+      print("empty path\n");
+      continue;
+    }
+
+    char *argv[2];
+    argv[0] = path;
+    argv[1] = 0;
+
+    long pid = fork();
+    if (pid == 0) {
+      execve(path, argv, 0);
+      print("execve failed (child)\n");
+      exit(1);
+    }
+
+    if (pid < 0) {
+      print("fork failed\n");
+      continue;
+    }
+
+    print("fork ok, child running\n");
   }
 }

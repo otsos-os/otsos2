@@ -44,6 +44,8 @@
 extern void cpuid_get(u32 code, u32 *res);
 extern void cinfo(char *buf);
 extern u64 rinfo(u64 mb_ptr);
+extern char start;
+extern char kernel_end;
 
 static u32 boot_magic = 0;
 static int is_multiboot2 = 0;
@@ -143,8 +145,12 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   extern void syscall_init(void);
   syscall_init();
 
-  chainfs_init();
-  chainfs_format(64, 8);
+  if (chainfs_init() != 0) {
+    com1_printf("[CHAINFS] init failed, formatting disk...\n");
+    chainfs_format(64, 8);
+  }
+
+  mmu_clear_user_range((u64)&start, (u64)&kernel_end);
 
   boot_magic = (u32)magic;
 

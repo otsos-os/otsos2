@@ -67,6 +67,7 @@ typedef struct {
 } chainfs_t;
 
 extern chainfs_t g_chainfs;
+extern u64 g_chainfs_phys;
 
 int chainfs_init(void);
 int chainfs_format(u32 total_blocks, u32 max_files);
