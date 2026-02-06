@@ -29,9 +29,15 @@
 #include <kernel/process.h>
 #include <mlibc/memory.h>
 
-int sys_fork(registers_t *regs) {
+long sys_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
+  (void)ptid;
   process_t *parent = process_current();
   if (!parent || !regs) {
+    return -1;
+  }
+
+  /* Only support fork-like clone (no shared VM / threads). */
+  if (flags & (CLONE_VM | CLONE_THREAD)) {
     return -1;
   }
 
@@ -79,11 +85,16 @@ int sys_fork(registers_t *regs) {
   child->context = parent->context;
   child->context.rax = 0;
 
+  if (child_stack) {
+    child->context.rsp = child_stack & ~0xFULL;
+    child->user_stack = child->context.rsp;
+  }
+
   child->exit_code = 0;
   child->owns_address_space = 1;
   child->mmap_base = parent->mmap_base;
   posix_copy_fds(child, parent);
   child->next = NULL;
 
-  return (int)child->pid;
+  return (long)child->pid;
 }

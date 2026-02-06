@@ -58,3 +58,22 @@ Reads starting at the current file offset and advances it.
 Writes at the current file offset and advances it.
 - `stdout`/`stderr` are sent to VGA and COM1.
 - For file-backed descriptors, writes are merged into the existing file data.
+
+### `lseek(fd, offset, whence) -> new_offset`
+Moves the file offset.
+- `SEEK_SET`, `SEEK_CUR`, `SEEK_END` supported.
+- Returns `-1` on invalid fd or non-seekable (e.g., pipe).
+
+### `pipe(fds[2]) -> 0/-1`
+Creates a pipe and returns read/write fds in `fds[0]` and `fds[1]`.
+- Reads return `0` if empty (non-blocking) or EOF when writers are gone.
+- Writes return `-1` if no readers; otherwise write up to buffer capacity.
+
+### `mmap(args) -> addr/0`
+Maps memory using an argument struct (kernel ABI).
+- Supported: `MAP_PRIVATE`, `MAP_ANONYMOUS`, `MAP_FIXED`.
+- `PROT_READ`, `PROT_WRITE`, `PROT_EXEC` honored.
+
+### `clone(flags, child_stack, ptid) -> pid/-1`
+Fork-like clone (no shared VM/threads).
+- `CLONE_VM` and `CLONE_THREAD` are rejected.

@@ -115,6 +115,10 @@ int sys_read(int fd, void *buf, u32 count) {
     return -1;
   }
 
+  if (oft[of_index].type == OFT_TYPE_PIPE) {
+    return pipe_read((pipe_t *)oft[of_index].pipe, buf, count);
+  }
+
   chainfs_file_entry_t entry;
   u32 entry_block, entry_offset;
   if (chainfs_find_file(oft[of_index].path, &entry, &entry_block,

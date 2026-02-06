@@ -35,6 +35,9 @@
 #define SYS_OPEN 2
 #define SYS_CLOSE 3
 #define SYS_LSEEK 8
+#define SYS_MMAP 9
+#define SYS_PIPE 22
+#define SYS_CLONE 56
 #define SYS_FORK 57
 #define SYS_EXECVE 59
 #define SYS_EXIT 60

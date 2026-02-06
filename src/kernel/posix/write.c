@@ -53,6 +53,8 @@ int posix_alloc_open_file(void) {
       open_file_table[i].refcount = 1;
       open_file_table[i].offset = 0;
       open_file_table[i].flags = 0;
+      open_file_table[i].type = OFT_TYPE_FILE;
+      open_file_table[i].pipe = NULL;
       memset(open_file_table[i].path, 0, sizeof(open_file_table[i].path));
       return i;
     }
@@ -69,6 +71,22 @@ void posix_release_open_file(int index) {
   }
   open_file_table[index].refcount--;
   if (open_file_table[index].refcount <= 0) {
+    if (open_file_table[index].type == OFT_TYPE_PIPE &&
+        open_file_table[index].pipe) {
+      pipe_t *p = (pipe_t *)open_file_table[index].pipe;
+      if (open_file_table[index].flags & O_WRONLY) {
+        if (p->writers > 0) {
+          p->writers--;
+        }
+      } else {
+        if (p->readers > 0) {
+          p->readers--;
+        }
+      }
+      if (p->readers == 0 && p->writers == 0) {
+        kfree(p);
+      }
+    }
     memset(&open_file_table[index], 0, sizeof(open_file_table[index]));
   }
 }
@@ -180,6 +198,10 @@ int sys_write(int fd, const void *buf, u32 count) {
   int of_index = fd_table[fd].of_index;
   if (of_index < 0 || of_index >= MAX_OPEN_FILES || !oft[of_index].used) {
     return -1;
+  }
+
+  if (oft[of_index].type == OFT_TYPE_PIPE) {
+    return pipe_write((pipe_t *)oft[of_index].pipe, buf, count);
   }
 
   chainfs_file_entry_t entry;

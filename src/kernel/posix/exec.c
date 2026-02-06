@@ -402,6 +402,7 @@ int sys_execve(const char *path, const char *const *argv,
   proc->context.rdx = envp_addr;
   proc->context.rax = 0;
   proc->owns_address_space = 1;
+  proc->mmap_base = MMAP_BASE;
 
   regs->rip = entry;
   regs->rsp = new_rsp;

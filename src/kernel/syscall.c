@@ -110,6 +110,15 @@ void syscall_handler(registers_t *regs) {
   case SYS_CLOSE:
     regs->rax = (u64)sys_close((int)arg1);
     break;
+  case SYS_MMAP:
+    regs->rax = (u64)sys_mmap((const void *)arg1);
+    break;
+  case SYS_PIPE:
+    regs->rax = (u64)sys_pipe((int *)arg1);
+    break;
+  case SYS_CLONE:
+    regs->rax = (u64)sys_clone(arg1, arg2, arg3, regs);
+    break;
   case SYS_LSEEK:
     regs->rax = (u64)sys_lseek((int)arg1, (long)arg2, (int)arg3);
     break;

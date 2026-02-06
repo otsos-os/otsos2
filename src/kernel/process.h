@@ -80,6 +80,9 @@ typedef struct process {
   /* Address space ownership */
   int owns_address_space;
 
+  /* mmap base */
+  u64 mmap_base;
+
   /* File descriptors */
   file_descriptor_t fd_table[MAX_FDS];
 

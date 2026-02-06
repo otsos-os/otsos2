@@ -169,6 +169,7 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
 
   new_proc->exit_code = 0;
   new_proc->owns_address_space = 1;
+  new_proc->mmap_base = MMAP_BASE;
   posix_init_process(new_proc);
   new_proc->next = NULL;
 

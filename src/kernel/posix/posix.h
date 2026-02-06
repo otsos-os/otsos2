@@ -44,9 +44,11 @@ typedef struct {
 typedef struct {
   int used;
   int refcount;
+  int type; /* OFT_TYPE_* */
   char path[256];
   u32 offset;
   int flags;
+  void *pipe;
 } open_file_t;
 
 #define O_RDONLY 0x0001
@@ -60,6 +62,34 @@ typedef struct {
 #define SEEK_CUR 1
 #define SEEK_END 2
 
+#define PROT_READ 0x1
+#define PROT_WRITE 0x2
+#define PROT_EXEC 0x4
+
+#define MAP_PRIVATE 0x02
+#define MAP_FIXED 0x10
+#define MAP_ANONYMOUS 0x20
+
+#define CLONE_VM 0x00000100
+#define CLONE_THREAD 0x00010000
+
+#define OFT_TYPE_FILE 0
+#define OFT_TYPE_PIPE 1
+
+#define MMAP_BASE 0x0000001000000000ULL
+#define MMAP_LIMIT 0x00007FFF00000000ULL
+
+#define PIPE_BUF_SIZE 4096
+
+typedef struct pipe {
+  u8 buffer[PIPE_BUF_SIZE];
+  u32 read_pos;
+  u32 write_pos;
+  u32 size;
+  int readers;
+  int writers;
+} pipe_t;
+
 #define STDIN_FILENO 0
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
@@ -70,7 +100,13 @@ int sys_open(const char *path, int flags);
 int sys_close(int fd);
 long sys_lseek(int fd, long offset, int whence);
 int sys_wait(int *status);
+int sys_pipe(int fds[2]);
+long sys_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs);
+u64 sys_mmap(const void *uargs);
 int sys_fork(registers_t *regs);
+
+int pipe_read(pipe_t *p, void *buf, u32 count);
+int pipe_write(pipe_t *p, const void *buf, u32 count);
 int sys_execve(const char *path, const char *const *argv,
                const char *const *envp, registers_t *regs);
 void posix_init(void);

@@ -96,6 +96,7 @@ process_t *process_create_kernel(const char *name, void (*entry)(void)) {
 
   proc->exit_code = 0;
   proc->owns_address_space = 0;
+  proc->mmap_base = MMAP_BASE;
   posix_init_process(proc);
   proc->next = NULL;
 
@@ -163,6 +164,7 @@ void process_exit(int code) {
     current_process->cr3 = 0;
     current_process->owns_address_space = 0;
   }
+  current_process->mmap_base = MMAP_BASE;
 
 
   while (1) {
