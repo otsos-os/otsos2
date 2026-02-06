@@ -124,6 +124,9 @@ void syscall_handler(registers_t *regs) {
   case SYS_EXIT:
     process_exit((int)arg1);
     break;
+  case SYS_WAIT:
+    regs->rax = (u64)sys_wait((int *)arg1);
+    break;
   case SYS_KILL:
     regs->rax = process_send_signal((u32)arg1, (int)arg2);
     break;

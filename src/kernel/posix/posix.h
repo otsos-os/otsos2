@@ -69,6 +69,7 @@ int sys_write(int fd, const void *buf, u32 count);
 int sys_open(const char *path, int flags);
 int sys_close(int fd);
 long sys_lseek(int fd, long offset, int whence);
+int sys_wait(int *status);
 int sys_fork(registers_t *regs);
 int sys_execve(const char *path, const char *const *argv,
                const char *const *envp, registers_t *regs);

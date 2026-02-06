@@ -24,23 +24,47 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SYSCALL_H
-#define SYSCALL_H
+#include <kernel/mmu.h>
+#include <kernel/process.h>
+#include <kernel/useraddr.h>
+#include <mlibc/memory.h>
 
-#include <kernel/interrupts/idt.h>
-#include <mlibc/mlibc.h>
+int sys_wait(int *status) {
+  process_t *current = process_current();
+  if (!current) {
+    return -1;
+  }
 
-#define SYS_READ 0
-#define SYS_WRITE 1
-#define SYS_OPEN 2
-#define SYS_CLOSE 3
-#define SYS_LSEEK 8
-#define SYS_FORK 57
-#define SYS_EXECVE 59
-#define SYS_EXIT 60
-#define SYS_WAIT 61
-#define SYS_KILL 62
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    process_t *child = &process_table[i];
+    if (child->state != PROC_STATE_ZOMBIE) {
+      continue;
+    }
+    if (child->ppid != current->pid) {
+      continue;
+    }
 
-void syscall_handler(registers_t *regs);
+    if (status && is_user_address(status, sizeof(int))) {
+      *status = child->exit_code;
+    }
 
-#endif
+    if (child->owns_address_space && child->cr3) {
+      mmu_free_user_space(child->cr3);
+      kfree((void *)(child->cr3 & PTE_ADDR_MASK));
+      child->cr3 = 0;
+      child->owns_address_space = 0;
+    }
+
+    if (child->kernel_stack) {
+      u64 kstack_base = child->kernel_stack - KERNEL_STACK_SIZE;
+      kfree((void *)kstack_base);
+    }
+
+    int pid = (int)child->pid;
+    memset(child, 0, sizeof(process_t));
+    child->state = PROC_STATE_UNUSED;
+    return pid;
+  }
+
+  return -1;
+}
