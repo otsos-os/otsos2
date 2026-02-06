@@ -30,7 +30,7 @@ chainfs_t g_chainfs;
 #define ENTRIES_PER_BLOCK (CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t))
 
 int chainfs_init(void) {
-  com1_printf("ChainFS: Initializing...\n");
+  com1_printf("ChainFS: Initializing... (g_chainfs at %p)\n", &g_chainfs);
 
   pata_read_sector(0, g_chainfs.sector_buffer);
 

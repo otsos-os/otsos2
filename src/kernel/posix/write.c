@@ -34,6 +34,7 @@
 file_descriptor_t fd_table[MAX_FDS];
 
 void posix_init() {
+  com1_printf("[POSIX] Initializing FD table at %p\n", fd_table);
   memset(fd_table, 0, sizeof(fd_table));
   fd_table[STDIN_FILENO].used = 1;
   fd_table[STDIN_FILENO].flags = O_RDONLY;
@@ -41,6 +42,7 @@ void posix_init() {
   fd_table[STDOUT_FILENO].flags = O_WRONLY;
   fd_table[STDERR_FILENO].used = 1;
   fd_table[STDERR_FILENO].flags = O_WRONLY;
+  
 }
 
 int sys_write(int fd, const void *buf, u32 count) {

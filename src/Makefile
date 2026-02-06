@@ -55,6 +55,7 @@ all: $(ISO_IMAGE)
 
 INIT_BIN = ../init/init
 
+.PHONY: $(INIT_BIN)
 $(INIT_BIN):
 	@echo "  MAKE    init"
 	@$(MAKE) -C ../init
@@ -163,7 +164,7 @@ $(SYSCALL_O): kernel/syscall.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(READ_O): kernel/posix/read.c
+$(READ_O): kernel/posix/read.c kernel/posix/posix.h kernel/drivers/keyboard/keyboard.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -187,7 +188,7 @@ $(ELF_O): userland/elf.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(USERSPACE_O): userland/userspace.c
+$(USERSPACE_O): userland/userspace.c userland/userspace.h kernel/process.h kernel/mmu.h kernel/gdt.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

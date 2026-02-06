@@ -81,15 +81,16 @@ void _start(void) {
   print("\n");
   print("Hello init\n");
 
-  char buffer[100];
-  print("vedi chototo ");
-  long bytes = read(STDIN, buffer, 100);
+  while (1) {
+    char buffer[128];
+    print("vedi chototo: ");
+    long bytes = read(STDIN, buffer, 100);
 
-  if (bytes > 0) {
-    buffer[bytes] = 0;
-    print("ti vvel ");
-    print(buffer);
+    if (bytes > 0) {
+      buffer[bytes] = 0;
+      print("ti vvel: ");
+      print(buffer);
+      print("\n");
+    }
   }
-
-  exit(0);
 }

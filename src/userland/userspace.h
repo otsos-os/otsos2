@@ -31,8 +31,8 @@
 #include <mlibc/mlibc.h>
 
 /* Default user stack virtual address */
-#define USER_STACK_BASE 0x00007FFFFFFFFFFF
-#define USER_STACK_TOP (USER_STACK_BASE - USER_STACK_SIZE + 1)
+#define USER_STACK_BASE 0x00007FFFFFFFFFF0
+#define USER_STACK_TOP (USER_STACK_BASE - USER_STACK_SIZE + 16)
 
 /* Initialize userspace subsystem */
 void userspace_init(void);

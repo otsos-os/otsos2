@@ -33,6 +33,7 @@
 
 int sys_read(int fd, void *buf, u32 count) {
   if (fd < 0 || fd >= MAX_FDS) {
+    com1_printf("[DEBUG] sys_read: invalid fd %d\n", fd);
     return -1;
   }
 
@@ -47,7 +48,6 @@ int sys_read(int fd, void *buf, u32 count) {
   char *data = (char *)buf;
 
   if (fd == STDIN_FILENO) {
-    __asm__ volatile("sti");
     u32 i = 0;
     while (i < count) {
       char c = keyboard_getchar();

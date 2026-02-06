@@ -139,7 +139,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   mmu_init();
   __asm__ volatile("sti");
 
-  posix_init();
+  // posix_init() moved down
   extern void syscall_init(void);
   syscall_init();
 
@@ -233,6 +233,10 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
 
   if (!boot_option) {
     pata_identify(NULL);
+
+    while (keyboard_getchar() != 0)
+      ;
+
     userspace_init();
 
     void *init_module_start = NULL;
@@ -249,6 +253,9 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
         init_module_size = mod->mod_end - mod->mod_start;
       }
     }
+
+    posix_init();
+    com1_printf("[KERNEL] STDIN used after reload: %d\n", fd_table[0].used);
 
     if (init_module_start && init_module_size > 0) {
       com1_printf(
