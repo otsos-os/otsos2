@@ -110,6 +110,9 @@ void syscall_handler(registers_t *regs) {
   case SYS_CLOSE:
     regs->rax = (u64)sys_close((int)arg1);
     break;
+  case SYS_LSEEK:
+    regs->rax = (u64)sys_lseek((int)arg1, (long)arg2, (int)arg3);
+    break;
   case SYS_FORK:
     regs->rax = (u64)sys_fork(regs);
     break;

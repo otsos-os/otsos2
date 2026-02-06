@@ -56,6 +56,10 @@ typedef struct {
 #define O_TRUNC 0x0200
 #define O_APPEND 0x0400
 
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
 #define STDIN_FILENO 0
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
@@ -64,6 +68,7 @@ int sys_read(int fd, void *buf, u32 count);
 int sys_write(int fd, const void *buf, u32 count);
 int sys_open(const char *path, int flags);
 int sys_close(int fd);
+long sys_lseek(int fd, long offset, int whence);
 int sys_fork(registers_t *regs);
 int sys_execve(const char *path, const char *const *argv,
                const char *const *envp, registers_t *regs);
