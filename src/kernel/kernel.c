@@ -132,6 +132,30 @@ static void debug_multiboot2_tags(multiboot2_info_t *mb_info) {
   }
 }
 
+static int mb2_find_module(multiboot2_info_t *mb_info, const char *name,
+                           void **out_start, u32 *out_size) {
+  multiboot2_tag_t *tag = (multiboot2_tag_t *)((u8 *)mb_info + 8);
+
+  while (tag->type != MULTIBOOT2_TAG_TYPE_END) {
+    if (tag->type == MULTIBOOT2_TAG_TYPE_MODULE) {
+      multiboot2_tag_module_t *mod = (multiboot2_tag_module_t *)tag;
+      if (mod->cmdline && strcmp(mod->cmdline, name) == 0) {
+        if (out_start) {
+          *out_start = (void *)(u64)mod->mod_start;
+        }
+        if (out_size) {
+          *out_size = mod->mod_end - mod->mod_start;
+        }
+        return 0;
+      }
+    }
+    u64 next_addr = (u64)tag + tag->size;
+    next_addr = (next_addr + 7) & ~7;
+    tag = (multiboot2_tag_t *)next_addr;
+  }
+  return -1;
+}
+
 void kmain(u64 magic, u64 addr, u64 boot_option) {
   com1_init();
   com1_set_mirror_callback(vga_putc);
@@ -247,20 +271,29 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
 
     void *init_module_start = NULL;
     u32 init_module_size = 0;
+    void *yes_module_start = NULL;
+    u32 yes_module_size = 0;
 
     if (boot_magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
       multiboot2_info_t *mboot_ptr = (multiboot2_info_t *)addr;
-      multiboot2_tag_module_t *mod =
-          (multiboot2_tag_module_t *)multiboot2_find_tag(
-              mboot_ptr, MULTIBOOT2_TAG_TYPE_MODULE);
-
-      if (mod) {
-        init_module_start = (void *)(u64)mod->mod_start;
-        init_module_size = mod->mod_end - mod->mod_start;
-      }
+      mb2_find_module(mboot_ptr, "init", &init_module_start,
+                      &init_module_size);
+      mb2_find_module(mboot_ptr, "yes", &yes_module_start,
+                      &yes_module_size);
     }
 
     posix_init();
+
+    if (yes_module_start && yes_module_size > 0) {
+      int res =
+          chainfs_write_file("/yes", (const u8 *)yes_module_start, yes_module_size);
+      if (res == 0) {
+        com1_printf("[KERNEL] Installed /yes from module (%u bytes)\n",
+                    yes_module_size);
+      } else {
+        com1_printf("[KERNEL] Failed to install /yes from module\n");
+      }
+    }
 
     if (init_module_start && init_module_size > 0) {
       com1_printf(

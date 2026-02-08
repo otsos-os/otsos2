@@ -91,14 +91,10 @@ static void yes_write_buffered(int argc, char **argv) {
   }
 }
 
-void _start(void) {
-  long *sp;
-  __asm__ volatile("mov %%rsp, %0" : "=r"(sp));
+void _start(long argc, char **argv, char **envp) {
+  (void)envp;
 
-  int argc = (int)sp[0];
-  char **argv = (char **)(sp + 1);
-
-  if (argc <= 1) {
+  if (argc <= 1 || !argv) {
     const char *msg = "y\n";
     for (;;) {
       if (write_all(STDOUT, msg, 2) != 0)

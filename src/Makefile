@@ -11,6 +11,8 @@ KERNEL_BIN = ../bin/kernel.bin
 ISO_IMAGE = ../otsos.iso
 ISODIR = ../isodir
 DISK_IMG = ../bin/disk.img
+PORTS_DIR = ../ports
+YES_BIN = $(PORTS_DIR)/yes
 # object files
 BOOT_O = ../bin/boot.o
 KERNEL_O = ../bin/kernel.o
@@ -69,17 +71,24 @@ $(INIT_BIN):
 	@echo "  MAKE    init"
 	@$(MAKE) -C ../init
 
-$(ISO_IMAGE): $(KERNEL_BIN) $(INIT_BIN)
+.PHONY: $(YES_BIN)
+$(YES_BIN):
+	@echo "  MAKE    ports/yes"
+	@$(MAKE) -C $(PORTS_DIR)
+
+$(ISO_IMAGE): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
 	@cp $(INIT_BIN) $(ISODIR)/boot/init
+	@cp $(YES_BIN) $(ISODIR)/boot/yes
 	@echo 'set timeout=4' > $(ISODIR)/boot/grub/grub.cfg
 	@echo 'set default=0' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo 'insmod all_video' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo 'menuentry "OTSOS" {' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    multiboot2 /boot/kernel.bin' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo '    module2 /boot/init' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '    module2 /boot/init init' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '    module2 /boot/yes yes' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    boot' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '}' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo "  ISO     $(ISO_IMAGE)"
