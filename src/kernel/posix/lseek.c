@@ -46,7 +46,8 @@ long sys_lseek(int fd, long offset, int whence) {
   if (!oft[of_index].used) {
     return -1;
   }
-  if (oft[of_index].type == OFT_TYPE_PIPE) {
+  if (oft[of_index].type == OFT_TYPE_PIPE ||
+      oft[of_index].type == OFT_TYPE_TTY) {
     return -1;
   }
 

@@ -31,6 +31,7 @@ DISK_O = ../bin/disk.o
 RAMDISK_O = ../bin/ramdisk.o
 CHAINFS_O = ../bin/chainfs.o
 VGA_O = ../bin/vga.o
+TTY_O = ../bin/tty.o
 PS2_O = ../bin/ps2.o
 KEYBOARD_O = ../bin/keyboard.o
 FB_O = ../bin/fb.o
@@ -61,7 +62,7 @@ USERADDR_O = ../bin/useraddr.o
 SCHEDULER_O = ../bin/scheduler.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(VGA_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
+      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(VGA_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(FORK_O) $(EXEC_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O)
 
 all: $(ISO_IMAGE)
@@ -144,6 +145,10 @@ $(VGA_O): kernel/drivers/vga.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+$(TTY_O): kernel/drivers/tty.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
 $(PS2_O): kernel/drivers/keyboard/ps2.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
@@ -172,7 +177,7 @@ $(MMU_O): kernel/mmu.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(WRITE_O): kernel/posix/write.c
+$(WRITE_O): kernel/posix/write.c kernel/drivers/tty.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -184,7 +189,7 @@ $(SYSCALL_O): kernel/syscall.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(READ_O): kernel/posix/read.c kernel/posix/posix.h kernel/drivers/keyboard/keyboard.h
+$(READ_O): kernel/posix/read.c kernel/posix/posix.h kernel/drivers/tty.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

@@ -24,6 +24,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <kernel/drivers/tty.h>
 #include <kernel/drivers/vga.h>
 #include <kernel/drivers/video/fb.h>
 #include <mlibc/mlibc.h>
@@ -66,6 +67,9 @@ void clear_scr() {
   }
   cursor_x = 0;
   cursor_y = 0;
+  if (tty_is_initialized()) {
+    tty_clear_active();
+  }
 }
 
 void scroll_scr() {
@@ -100,6 +104,42 @@ static u32 current_fb_color = 0xFFFFFF;
 void vga_set_color(u8 color) {
   terminal_color = color;
   current_fb_color = vga_palette[color & 0x0F];
+  if (tty_is_initialized()) {
+    tty_set_color(color);
+  }
+}
+
+void vga_set_cursor(int x, int y) {
+  cursor_x = x;
+  cursor_y = y;
+}
+
+int vga_get_width(void) {
+  if (is_framebuffer_enabled() != vga_using_fb)
+    update_vga_dims();
+  return vga_width;
+}
+
+int vga_get_height(void) {
+  if (is_framebuffer_enabled() != vga_using_fb)
+    update_vga_dims();
+  return vga_height;
+}
+
+void vga_put_entry_at(char c, u8 color, int x, int y) {
+  if (is_framebuffer_enabled() != vga_using_fb)
+    update_vga_dims();
+
+  if (x < 0 || y < 0 || x >= vga_width || y >= vga_height) {
+    return;
+  }
+
+  if (is_framebuffer_enabled()) {
+    u32 rgb = vga_palette[color & 0x0F];
+    fb_put_char(x * 8, y * 16, c, rgb);
+  } else {
+    vga_buffer[y * 80 + x] = (u16)color << 8 | (u8)c;
+  }
 }
 
 static int ansi_state = 0;
@@ -142,6 +182,11 @@ void vga_apply_ansi(int code) {
 }
 
 void vga_putc(char c) {
+  if (tty_is_initialized()) {
+    tty_putc_from_kernel(c);
+    return;
+  }
+
   if (is_framebuffer_enabled() != vga_using_fb)
     update_vga_dims();
 

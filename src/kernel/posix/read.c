@@ -25,8 +25,7 @@
  */
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
-#include <kernel/drivers/keyboard/keyboard.h>
-#include <kernel/drivers/vga.h>
+#include <kernel/drivers/tty.h>
 #include <kernel/posix/posix.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
@@ -60,46 +59,17 @@ int sys_read(int fd, void *buf, u32 count) {
     return -1;
   }
 
-  char *data = (char *)buf;
-
   if (fd == STDIN_FILENO) {
-    __asm__ volatile("sti");
-    u32 i = 0;
-    while (i < count) {
-      char c = keyboard_getchar_blocking();
-      if (c == 0) {
-        continue;
-      }
+    return tty_read(buf, count);
+  }
 
-      if (c == '\b') {
-        if (i > 0) {
-          i--;
-          vga_putc('\b');
-          vga_putc(' ');
-          vga_putc('\b');
-          com1_write_byte('\b');
-          com1_write_byte(' ');
-          com1_write_byte('\b');
-        }
-        continue;
-      }
-
-      data[i] = c;
-      vga_putc(c);
-      com1_write_byte(c);
-
-      if (c == '\n' || c == '\r') {
-        if (c == '\r') {
-          data[i] = '\n';
-          vga_putc('\n');
-        }
-        i++;
-        break;
-      }
-
-      i++;
+  int of_index = fd_table[fd].of_index;
+  if (of_index >= 0 && of_index < MAX_OPEN_FILES && oft[of_index].used &&
+      oft[of_index].type == OFT_TYPE_TTY) {
+    if (!(fd_table[fd].flags & O_RDONLY)) {
+      return -1;
     }
-    return i;
+    return tty_read(buf, count);
   }
 
   if (!(fd_table[fd].flags & O_RDONLY)) {
@@ -110,7 +80,6 @@ int sys_read(int fd, void *buf, u32 count) {
     return -1;
   }
 
-  int of_index = fd_table[fd].of_index;
   if (of_index < 0 || of_index >= MAX_OPEN_FILES || !oft[of_index].used) {
     return -1;
   }

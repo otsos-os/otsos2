@@ -25,7 +25,7 @@
  */
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
-#include <kernel/drivers/vga.h>
+#include <kernel/drivers/tty.h>
 #include <kernel/posix/posix.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
@@ -175,14 +175,17 @@ int sys_write(int fd, const void *buf, u32 count) {
     return -1;
   }
 
-  const char *data = (const char *)buf;
-
   if (fd == STDOUT_FILENO || fd == STDERR_FILENO) {
-    for (u32 i = 0; i < count; i++) {
-      vga_putc(data[i]);
-      com1_write_byte(data[i]);
+    return tty_write(buf, count);
+  }
+
+  int of_index = fd_table[fd].of_index;
+  if (of_index >= 0 && of_index < MAX_OPEN_FILES && oft[of_index].used &&
+      oft[of_index].type == OFT_TYPE_TTY) {
+    if (!(fd_table[fd].flags & O_WRONLY)) {
+      return -1;
     }
-    return count;
+    return tty_write(buf, count);
   }
 
   if (!(fd_table[fd].flags & O_WRONLY)) {
@@ -195,7 +198,6 @@ int sys_write(int fd, const void *buf, u32 count) {
     return -1;
   }
 
-  int of_index = fd_table[fd].of_index;
   if (of_index < 0 || of_index >= MAX_OPEN_FILES || !oft[of_index].used) {
     return -1;
   }

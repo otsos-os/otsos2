@@ -35,6 +35,7 @@
 #define SYS_FORK 57
 #define SYS_EXECVE 59
 #define SYS_EXIT 60
+#define SYS_WAIT 61
 #define STDIN 0
 #define STDOUT 1
 
@@ -81,6 +82,8 @@ static long fork(void) { return syscall0(SYS_FORK); }
 static long execve(const char *path, char *const argv[], char *const envp[]) {
   return syscall3(SYS_EXECVE, (long)path, (long)argv, (long)envp);
 }
+
+static long wait(int *status) { return syscall1(SYS_WAIT, (long)status); }
 
 static unsigned long strlen(const char *s) {
   unsigned long len = 0;
@@ -141,5 +144,8 @@ void _start(void) {
     }
 
     print("fork ok, child running\n");
+    int status = 0;
+    while (wait(&status) < 0) {
+    }
   }
 }

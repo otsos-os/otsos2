@@ -417,7 +417,8 @@ int chainfs_write_file(const char *filename, const u8 *data, u32 size) {
         com1_printf("ChainFS: Parent is not a directory: %s\n", parent_path);
         return -1;
       }
-      parent_block = parent_entry_block;
+      parent_block = (parent_entry_block - 1) * ENTRIES_PER_BLOCK +
+                     parent_entry_offset;
     }
   } else {
     strcpy(file_name, filename);
@@ -625,12 +626,15 @@ int chainfs_resolve_path(const char *path, chainfs_file_entry_t *entry,
 
   // If path is just "/" return root directory
   if (comp_count == 0 && path[0] == '/') {
-    disk_read(g_chainfs.disk, current_block, g_chainfs.sector_buffer);
+    u32 root_idx = g_chainfs.superblock.root_dir_block;
+    u32 root_block = 1 + (root_idx / ENTRIES_PER_BLOCK);
+    u32 root_offset = root_idx % ENTRIES_PER_BLOCK;
+    disk_read(g_chainfs.disk, root_block, g_chainfs.sector_buffer);
     chainfs_file_entry_t *entries =
         (chainfs_file_entry_t *)g_chainfs.sector_buffer;
-    *entry = entries[0];
-    *entry_block = current_block;
-    *entry_offset = 0;
+    *entry = entries[root_offset];
+    *entry_block = root_block;
+    *entry_offset = root_offset;
     return 0;
   }
 
@@ -714,6 +718,8 @@ int chainfs_mkdir(const char *path) {
       com1_printf("ChainFS: Parent is not a directory: %s\n", parent_path);
       return -1;
     }
+    parent_block =
+        (parent_block - 1) * ENTRIES_PER_BLOCK + parent_offset;
   }
 
   // Check if directory already exists
@@ -747,6 +753,91 @@ int chainfs_mkdir(const char *path) {
   disk_write(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
 
   com1_printf("ChainFS: Created directory: %s\n", path);
+  return 0;
+}
+
+int chainfs_mknod(const char *path, u16 major, u16 minor) {
+  char parent_path[CHAINFS_MAX_PATH];
+  char node_name[32];
+
+  int path_len = strlen(path);
+  int last_slash = -1;
+
+  for (int i = path_len - 1; i >= 0; i--) {
+    if (path[i] == '/') {
+      last_slash = i;
+      break;
+    }
+  }
+
+  if (last_slash == -1) {
+    parent_path[0] = 0;
+    strcpy(node_name, path);
+  } else if (last_slash == 0) {
+    parent_path[0] = '/';
+    parent_path[1] = 0;
+    strcpy(node_name, path + 1);
+  } else {
+    for (int i = 0; i < last_slash; i++) {
+      parent_path[i] = path[i];
+    }
+    parent_path[last_slash] = 0;
+    strcpy(node_name, path + last_slash + 1);
+  }
+
+  chainfs_file_entry_t parent_entry;
+  u32 parent_block, parent_offset;
+
+  if (parent_path[0] == 0) {
+    parent_block = g_chainfs.current_dir_block;
+  } else {
+    if (chainfs_resolve_path(parent_path, &parent_entry, &parent_block,
+                             &parent_offset) != 0) {
+      com1_printf("ChainFS: Parent directory not found: %s\n", parent_path);
+      return -1;
+    }
+    if (parent_entry.type != CHAINFS_TYPE_DIR) {
+      com1_printf("ChainFS: Parent is not a directory: %s\n", parent_path);
+      return -1;
+    }
+    parent_block =
+        (parent_block - 1) * ENTRIES_PER_BLOCK + parent_offset;
+  }
+
+  chainfs_file_entry_t existing_entry;
+  u32 existing_block, existing_offset;
+  if (chainfs_find_in_directory(parent_block, node_name, &existing_entry,
+                                &existing_block, &existing_offset) == 0) {
+    com1_printf("ChainFS: Node already exists: %s\n", path);
+    return -1;
+  }
+
+  u32 entry_block, entry_offset;
+  if (chainfs_find_free_file_entry(&entry_block, &entry_offset) != 0) {
+    com1_printf("ChainFS: No free file entries\n");
+    return -1;
+  }
+
+  disk_read(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
+  chainfs_file_entry_t *entries =
+      (chainfs_file_entry_t *)g_chainfs.sector_buffer;
+
+  entries[entry_offset].status = 1;
+  entries[entry_offset].type = CHAINFS_TYPE_DEV;
+  strcpy(entries[entry_offset].name, node_name);
+  entries[entry_offset].size = 0;
+  entries[entry_offset].start_block = CHAINFS_EOF_MARKER;
+  entries[entry_offset].parent_block = parent_block;
+  memset(entries[entry_offset].reserved, 0,
+         sizeof(entries[entry_offset].reserved));
+  entries[entry_offset].reserved[0] = (u8)(major & 0xFF);
+  entries[entry_offset].reserved[1] = (u8)((major >> 8) & 0xFF);
+  entries[entry_offset].reserved[2] = (u8)(minor & 0xFF);
+  entries[entry_offset].reserved[3] = (u8)((minor >> 8) & 0xFF);
+
+  disk_write(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
+
+  com1_printf("ChainFS: Created device node: %s (%u:%u)\n", path, major, minor);
   return 0;
 }
 
@@ -790,6 +881,7 @@ int chainfs_list_dir(const char *path, chainfs_file_entry_t *files,
       com1_printf("ChainFS: Not a directory: %s\n", path);
       return -1;
     }
+    dir_block = (dir_block - 1) * ENTRIES_PER_BLOCK + dir_offset;
   }
 
   // Find all entries with this directory as parent

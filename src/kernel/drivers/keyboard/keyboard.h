@@ -27,6 +27,8 @@
 #ifndef KEYBOARD_H
 #define KEYBOARD_H
 
+#include <mlibc/mlibc.h>
+
 typedef int (*keyboard_init_fn)();
 typedef char (*keyboard_getchar_fn)();
 typedef void (*keyboard_handler_fn)();
@@ -40,11 +42,16 @@ typedef struct {
   keyboard_poll_fn poll;
 } keyboard_driver_t;
 
+typedef void (*keyboard_scancode_callback_t)(u8 scancode, int released,
+                                             int extended);
+
 void keyboard_manager_init();
 char keyboard_getchar();
 char keyboard_getchar_blocking();
 void keyboard_common_handler();
 void keyboard_poll();
 int scanf(const char *format, ...);
+void keyboard_set_scancode_callback(keyboard_scancode_callback_t cb);
+void keyboard_handle_scancode(u8 scancode, int released, int extended);
 
 #endif

@@ -45,6 +45,8 @@ Opens a file by path and returns a new file descriptor.
 - `O_CREAT` creates an empty file if it does not exist.
 - `O_TRUNC` truncates the file to size 0 (requires write access).
 - `O_APPEND` sets the file offset to the end before each write.
+- Device nodes (e.g. `/dev/tty`, `/dev/console`) are ChainFS entries of type
+  DEV and are handled by the TTY driver.
 
 ### `close(fd) -> 0/-1`
 Releases the descriptor slot and decrements the open-file reference count.
@@ -52,11 +54,11 @@ Releases the descriptor slot and decrements the open-file reference count.
 ### `read(fd, buf, count) -> bytes`
 Reads starting at the current file offset and advances it.
 - Returns `0` on EOF.
-- `stdin` reads from the keyboard driver.
+- `stdin` and TTY device fds read from the TTY driver.
 
 ### `write(fd, buf, count) -> bytes`
 Writes at the current file offset and advances it.
-- `stdout`/`stderr` are sent to VGA and COM1.
+- `stdout`/`stderr` and TTY device fds are sent to VGA and COM1.
 - For file-backed descriptors, writes are merged into the existing file data.
 
 ### `lseek(fd, offset, whence) -> new_offset`

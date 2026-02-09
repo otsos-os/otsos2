@@ -34,5 +34,9 @@ void printf(const char *fmt, ...);
 void vga_putc(char c);
 void vga_puts(const char *str);
 void vga_set_color(u8 color);
+void vga_put_entry_at(char c, u8 color, int x, int y);
+void vga_set_cursor(int x, int y);
+int vga_get_width(void);
+int vga_get_height(void);
 
 #endif

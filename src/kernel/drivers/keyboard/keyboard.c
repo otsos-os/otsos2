@@ -32,6 +32,7 @@
 #define KBD_STATUS_PORT 0x64
 
 static keyboard_driver_t *current_driver = NULL;
+static keyboard_scancode_callback_t scancode_callback = NULL;
 
 static keyboard_driver_t ps2_driver = {.name = "PS/2 Keyboard",
                                        .init = ps2_keyboard_init,
@@ -96,6 +97,16 @@ void keyboard_common_handler() {
 void keyboard_poll() {
   if (current_driver && current_driver->poll) {
     current_driver->poll();
+  }
+}
+
+void keyboard_set_scancode_callback(keyboard_scancode_callback_t cb) {
+  scancode_callback = cb;
+}
+
+void keyboard_handle_scancode(u8 scancode, int released, int extended) {
+  if (scancode_callback) {
+    scancode_callback(scancode, released, extended);
   }
 }
 

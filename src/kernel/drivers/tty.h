@@ -24,28 +24,22 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/posix/posix.h>
+#ifndef TTY_H
+#define TTY_H
+
 #include <mlibc/mlibc.h>
 
-int sys_close(int fd) {
-    file_descriptor_t *fd_table = posix_get_fd_table();
+#define TTY_DEVICE_MAJOR 1
+#define TTY_DEVICE_MINOR_TTY 0
+#define TTY_DEVICE_MINOR_CONSOLE 1
 
-    if (fd < 0 || fd >= MAX_FDS) {
-      return -1;
-    }
+int tty_read(void *buf, u32 count);
+int tty_write(const void *buf, u32 count);
+void tty_init(void);
+int tty_is_initialized(void);
+void tty_putc_from_kernel(char c);
+void tty_set_color(u8 color);
+void tty_clear_active(void);
+void tty_com1_mirror(char c);
 
-    if (!fd_table[fd].used) {
-      return -1;
-    }
-
-    int of_index = fd_table[fd].of_index;
-    if (of_index >= 0) {
-      posix_release_open_file(of_index);
-    }
-
-    fd_table[fd].used = 0;
-    fd_table[fd].flags = 0;
-    fd_table[fd].of_index = -1;
-
-    return 0;
-}
+#endif

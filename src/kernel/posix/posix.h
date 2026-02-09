@@ -75,6 +75,7 @@ typedef struct {
 
 #define OFT_TYPE_FILE 0
 #define OFT_TYPE_PIPE 1
+#define OFT_TYPE_TTY 2
 
 #define MMAP_BASE 0x0000001000000000ULL
 #define MMAP_LIMIT 0x00007FFF00000000ULL

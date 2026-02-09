@@ -30,6 +30,7 @@
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/timer.h>
+#include <kernel/drivers/tty.h>
 #include <kernel/drivers/vga.h>
 #include <kernel/drivers/video/fb.h>
 #include <kernel/interrupts/idt.h>
@@ -158,9 +159,51 @@ static int mb2_find_module(multiboot2_info_t *mb_info, const char *name,
   return -1;
 }
 
+static void ensure_dev_nodes(void) {
+  if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+    return;
+  }
+
+  chainfs_file_entry_t entry;
+  u32 entry_block, entry_offset;
+
+  if (chainfs_resolve_path("/dev", &entry, &entry_block, &entry_offset) != 0) {
+    chainfs_mkdir("/dev");
+  } else if (entry.type != CHAINFS_TYPE_DIR) {
+    com1_printf("[CHAINFS] /dev exists but is not a directory\n");
+    return;
+  }
+
+  if (chainfs_resolve_path("/dev/tty", &entry, &entry_block, &entry_offset) !=
+      0) {
+    chainfs_mknod("/dev/tty", TTY_DEVICE_MAJOR, TTY_DEVICE_MINOR_TTY);
+  } else if (entry.type != CHAINFS_TYPE_DEV) {
+    if (entry.type == CHAINFS_TYPE_FILE) {
+      chainfs_delete_file("/dev/tty");
+      chainfs_mknod("/dev/tty", TTY_DEVICE_MAJOR, TTY_DEVICE_MINOR_TTY);
+    } else {
+      com1_printf("[CHAINFS] /dev/tty exists but is not a device node\n");
+    }
+  }
+
+  if (chainfs_resolve_path("/dev/console", &entry, &entry_block,
+                           &entry_offset) != 0) {
+    chainfs_mknod("/dev/console", TTY_DEVICE_MAJOR,
+                  TTY_DEVICE_MINOR_CONSOLE);
+  } else if (entry.type != CHAINFS_TYPE_DEV) {
+    if (entry.type == CHAINFS_TYPE_FILE) {
+      chainfs_delete_file("/dev/console");
+      chainfs_mknod("/dev/console", TTY_DEVICE_MAJOR,
+                    TTY_DEVICE_MINOR_CONSOLE);
+    } else {
+      com1_printf("[CHAINFS] /dev/console exists but is not a device node\n");
+    }
+  }
+}
+
 void kmain(u64 magic, u64 addr, u64 boot_option) {
   com1_init();
-  com1_set_mirror_callback(vga_putc);
+  com1_set_mirror_callback(tty_com1_mirror);
   init_heap();
   init_idt();
   timer_init(1000);
@@ -219,8 +262,6 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
 
     multiboot_info_t *mboot_ptr = (multiboot_info_t *)addr;
     debug_multiboot_info(mboot_ptr);
-    com1_off_mirror_callback();
-
     fb_init(mboot_ptr);
 
     char cpu_buf[64];
@@ -246,10 +287,10 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   }
 
   sleep(430);
-  com1_off_mirror_callback();
   clear_scr();
 
   keyboard_manager_init();
+  tty_init();
 
   printf("\nSelect boot disk:\n");
   printf("1. Hard Drive (PATA)\n");
@@ -273,21 +314,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
     com1_printf("[CHAINFS] init failed, formatting disk...\n");
     chainfs_format(64, 8);
   }
-
-  printf("\nDo you want to enable debug mode (dont use for default use it make "
-         "you screen dirty)? [y/n]\n");
-
-  while (1) {
-    char c = keyboard_getchar();
-    if (c == 'y') {
-      com1_set_mirror_callback(vga_putc);
-      clear_scr();
-      com1_write_string("test debug mod\n");
-      break;
-    } else if (c == 'n') {
-      break;
-    }
-  }
+  ensure_dev_nodes();
 
   if (!boot_option) {
     // pata_identify already called

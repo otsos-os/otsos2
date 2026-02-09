@@ -24,6 +24,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/keyboard/ps2.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
@@ -248,12 +249,19 @@ static void ps2_process_scancode(u8 scancode) {
   }
 
   if (scancode_extended) {
+    u8 code = scancode & 0x7F;
+    int released = (scancode & 0x80) != 0;
+    keyboard_handle_scancode(code, released, 1);
     scancode_extended = 0;
     return;
   }
 
-  if (scancode & 0x80) {
-    scancode &= 0x7F;
+  int released = (scancode & 0x80) != 0;
+  u8 code = scancode & 0x7F;
+  keyboard_handle_scancode(code, released, 0);
+
+  if (released) {
+    scancode = code;
     if (scancode == 0x2A || scancode == 0x36) {
       shift_pressed = 0;
     }
