@@ -4,8 +4,8 @@
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
- * 1. Redistributions of source code must retain the above copyright notice, this
- *    list of conditions and the following disclaimer.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ * this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
@@ -13,17 +13,17 @@
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/disk/pata/pata.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/mmu.h>
 
@@ -31,10 +31,12 @@ chainfs_t g_chainfs;
 u64 g_chainfs_phys = 0;
 #define ENTRIES_PER_BLOCK (CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t))
 
-int chainfs_init(void) {
-  com1_printf("ChainFS: Initializing... (g_chainfs at %p)\n", &g_chainfs);
+int chainfs_init(disk_t *disk) {
+  g_chainfs.disk = disk;
+  com1_printf("ChainFS: Initializing... (g_chainfs at %p, disk: %s)\n",
+              &g_chainfs, disk ? disk->name : "NULL");
 
-  pata_read_sector(0, g_chainfs.sector_buffer);
+  disk_read(g_chainfs.disk, 0, g_chainfs.sector_buffer);
 
   chainfs_superblock_t *sb = (chainfs_superblock_t *)g_chainfs.sector_buffer;
 
@@ -94,7 +96,7 @@ int chainfs_format(u32 total_blocks, u32 max_files) {
     g_chainfs.sector_buffer[i] = 0;
   }
   *((chainfs_superblock_t *)g_chainfs.sector_buffer) = sb;
-  pata_write_sector(0, g_chainfs.sector_buffer);
+  disk_write(g_chainfs.disk, 0, g_chainfs.sector_buffer);
 
   // Clear file table
   for (int i = 0; i < CHAINFS_BLOCK_SIZE; i++) {
@@ -112,7 +114,7 @@ int chainfs_format(u32 total_blocks, u32 max_files) {
   entries[0].start_block = 0; // Root directory doesn't need data blocks
   entries[0].parent_block = 0xFFFFFFFF; // Root has no parent
 
-  pata_write_sector(1, g_chainfs.sector_buffer);
+  disk_write(g_chainfs.disk, 1, g_chainfs.sector_buffer);
 
   // Clear remaining file table blocks
   for (int i = 0; i < CHAINFS_BLOCK_SIZE; i++) {
@@ -120,7 +122,7 @@ int chainfs_format(u32 total_blocks, u32 max_files) {
   }
 
   for (u32 block = 2; block < 1 + file_table_blocks; block++) {
-    pata_write_sector(block, g_chainfs.sector_buffer);
+    disk_write(g_chainfs.disk, block, g_chainfs.sector_buffer);
   }
 
   // Initialize block map
@@ -131,12 +133,12 @@ int chainfs_format(u32 total_blocks, u32 max_files) {
 
   for (u32 block = 1 + file_table_blocks;
        block < 1 + file_table_blocks + block_map_blocks; block++) {
-    pata_write_sector(block, g_chainfs.sector_buffer);
+    disk_write(g_chainfs.disk, block, g_chainfs.sector_buffer);
   }
 
   com1_printf("ChainFS: Format complete\n");
 
-  return chainfs_init();
+  return chainfs_init(g_chainfs.disk);
 }
 
 int chainfs_find_file(const char *filename, chainfs_file_entry_t *entry,
@@ -159,7 +161,7 @@ int chainfs_find_free_file_entry(u32 *entry_block, u32 *entry_offset) {
 
   for (u32 block = 1; block < 1 + g_chainfs.superblock.file_table_block_count;
        block++) {
-    pata_read_sector(block, g_chainfs.sector_buffer);
+    disk_read(g_chainfs.disk, block, g_chainfs.sector_buffer);
     chainfs_file_entry_t *entries =
         (chainfs_file_entry_t *)g_chainfs.sector_buffer;
 
@@ -185,7 +187,7 @@ int chainfs_read_block_map_entry(u32 block_index, u32 *next_block) {
   }
 
   u32 sector = 1 + g_chainfs.superblock.file_table_block_count + map_block;
-  pata_read_sector(sector, g_chainfs.sector_buffer);
+  disk_read(g_chainfs.disk, sector, g_chainfs.sector_buffer);
 
   u32 *map_entries = (u32 *)g_chainfs.sector_buffer;
   *next_block = map_entries[map_offset];
@@ -203,12 +205,12 @@ int chainfs_write_block_map_entry(u32 block_index, u32 next_block) {
   }
 
   u32 sector = 1 + g_chainfs.superblock.file_table_block_count + map_block;
-  pata_read_sector(sector, g_chainfs.sector_buffer);
+  disk_read(g_chainfs.disk, sector, g_chainfs.sector_buffer);
 
   u32 *map_entries = (u32 *)g_chainfs.sector_buffer;
   map_entries[map_offset] = next_block;
 
-  pata_write_sector(sector, g_chainfs.sector_buffer);
+  disk_write(g_chainfs.disk, sector, g_chainfs.sector_buffer);
 
   return 0;
 }
@@ -262,7 +264,7 @@ int chainfs_read_file(const char *filename, u8 *buffer, u32 buffer_size,
   while (remaining > 0 && current_block != CHAINFS_EOF_MARKER &&
          copied < buffer_size) {
     u32 real_sector = g_chainfs.data_area_start + current_block;
-    pata_read_sector(real_sector, g_chainfs.sector_buffer);
+    disk_read(g_chainfs.disk, real_sector, g_chainfs.sector_buffer);
 
     u32 to_copy = remaining;
     if (to_copy > CHAINFS_BLOCK_SIZE) {
@@ -334,7 +336,7 @@ int chainfs_read_file_range(const char *filename, u8 *buffer, u32 buffer_size,
   u32 copied = 0;
   while (remaining > 0) {
     u32 real_sector = g_chainfs.data_area_start + current_block;
-    pata_read_sector(real_sector, g_chainfs.sector_buffer);
+    disk_read(g_chainfs.disk, real_sector, g_chainfs.sector_buffer);
 
     u32 to_copy = CHAINFS_BLOCK_SIZE - intra_offset;
     if (to_copy > remaining) {
@@ -470,7 +472,7 @@ int chainfs_write_file(const char *filename, const u8 *data, u32 size) {
     }
 
     u32 real_sector = g_chainfs.data_area_start + allocated_blocks[i];
-    pata_write_sector(real_sector, g_chainfs.sector_buffer);
+    disk_write(g_chainfs.disk, real_sector, g_chainfs.sector_buffer);
 
     u32 next_block =
         (i + 1 < blocks_needed) ? allocated_blocks[i + 1] : CHAINFS_EOF_MARKER;
@@ -480,7 +482,7 @@ int chainfs_write_file(const char *filename, const u8 *data, u32 size) {
     data_offset += to_copy;
   }
 
-  pata_read_sector(entry_block, g_chainfs.sector_buffer);
+  disk_read(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
   chainfs_file_entry_t *entries =
       (chainfs_file_entry_t *)g_chainfs.sector_buffer;
 
@@ -502,7 +504,7 @@ int chainfs_write_file(const char *filename, const u8 *data, u32 size) {
   entries[entry_offset].start_block = allocated_blocks[0];
   entries[entry_offset].parent_block = parent_block;
 
-  pata_write_sector(entry_block, g_chainfs.sector_buffer);
+  disk_write(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
 
   kfree(allocated_blocks);
 
@@ -522,11 +524,11 @@ int chainfs_delete_file(const char *filename) {
 
   chainfs_free_block_chain(entry.start_block);
 
-  pata_read_sector(entry_block, g_chainfs.sector_buffer);
+  disk_read(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
   chainfs_file_entry_t *entries =
       (chainfs_file_entry_t *)g_chainfs.sector_buffer;
   entries[entry_offset].status = 0;
-  pata_write_sector(entry_block, g_chainfs.sector_buffer);
+  disk_write(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
 
   com1_printf("ChainFS: Deleted file '%s'\n", filename);
   return 0;
@@ -545,7 +547,7 @@ static int read_entry_by_index(u32 index, chainfs_file_entry_t *entry,
   u32 b = 1 + (index / ENTRIES_PER_BLOCK);
   u32 o = index % ENTRIES_PER_BLOCK;
 
-  pata_read_sector(b, g_chainfs.sector_buffer);
+  disk_read(g_chainfs.disk, b, g_chainfs.sector_buffer);
   chainfs_file_entry_t *entries =
       (chainfs_file_entry_t *)g_chainfs.sector_buffer;
   *entry = entries[o];
@@ -593,7 +595,7 @@ int chainfs_find_in_directory(u32 dir_block, const char *name,
 
   for (u32 block = 1; block < 1 + g_chainfs.superblock.file_table_block_count;
        block++) {
-    pata_read_sector(block, g_chainfs.sector_buffer);
+    disk_read(g_chainfs.disk, block, g_chainfs.sector_buffer);
     chainfs_file_entry_t *entries =
         (chainfs_file_entry_t *)g_chainfs.sector_buffer;
 
@@ -623,7 +625,7 @@ int chainfs_resolve_path(const char *path, chainfs_file_entry_t *entry,
 
   // If path is just "/" return root directory
   if (comp_count == 0 && path[0] == '/') {
-    pata_read_sector(current_block, g_chainfs.sector_buffer);
+    disk_read(g_chainfs.disk, current_block, g_chainfs.sector_buffer);
     chainfs_file_entry_t *entries =
         (chainfs_file_entry_t *)g_chainfs.sector_buffer;
     *entry = entries[0];
@@ -731,7 +733,7 @@ int chainfs_mkdir(const char *path) {
   }
 
   // Create directory entry
-  pata_read_sector(entry_block, g_chainfs.sector_buffer);
+  disk_read(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
   chainfs_file_entry_t *entries =
       (chainfs_file_entry_t *)g_chainfs.sector_buffer;
 
@@ -742,7 +744,7 @@ int chainfs_mkdir(const char *path) {
   entries[entry_offset].start_block = 0; // Directories don't need data blocks
   entries[entry_offset].parent_block = parent_block;
 
-  pata_write_sector(entry_block, g_chainfs.sector_buffer);
+  disk_write(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
 
   com1_printf("ChainFS: Created directory: %s\n", path);
   return 0;
@@ -797,7 +799,7 @@ int chainfs_list_dir(const char *path, chainfs_file_entry_t *files,
   for (u32 block = 1; block < 1 + g_chainfs.superblock.file_table_block_count &&
                       found < max_files;
        block++) {
-    pata_read_sector(block, g_chainfs.sector_buffer);
+    disk_read(g_chainfs.disk, block, g_chainfs.sector_buffer);
     chainfs_file_entry_t *entries =
         (chainfs_file_entry_t *)g_chainfs.sector_buffer;
 
@@ -886,11 +888,11 @@ int chainfs_rmdir(const char *path) {
   }
 
   // Remove directory entry
-  pata_read_sector(entry_block, g_chainfs.sector_buffer);
+  disk_read(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
   chainfs_file_entry_t *entries =
       (chainfs_file_entry_t *)g_chainfs.sector_buffer;
   entries[entry_offset].status = 0;
-  pata_write_sector(entry_block, g_chainfs.sector_buffer);
+  disk_write(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
 
   com1_printf("ChainFS: Removed directory: %s\n", path);
   return 0;

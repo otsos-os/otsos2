@@ -27,6 +27,8 @@ HANDLERS_O = ../bin/handlers_c.o
 PANIC_O = ../bin/panic.o
 MEMORY_O = ../bin/memory.o
 PATA_O = ../bin/pata.o
+DISK_O = ../bin/disk.o
+RAMDISK_O = ../bin/ramdisk.o
 CHAINFS_O = ../bin/chainfs.o
 VGA_O = ../bin/vga.o
 PS2_O = ../bin/ps2.o
@@ -59,7 +61,7 @@ USERADDR_O = ../bin/useraddr.o
 SCHEDULER_O = ../bin/scheduler.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(CHAINFS_O) $(VGA_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
+      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(VGA_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(FORK_O) $(EXEC_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O)
 
 all: $(ISO_IMAGE)
@@ -270,7 +272,11 @@ $(HARDWARE_O): mlibc/hardware.asm
 
 
 
-$(DISK_O): kernel/bin/disk.c
+$(DISK_O): kernel/drivers/disk/disk.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(RAMDISK_O): kernel/drivers/disk/ramdisk/ramdisk.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

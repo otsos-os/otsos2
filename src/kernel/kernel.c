@@ -24,7 +24,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <kernel/drivers/disk/disk.h>
 #include <kernel/drivers/disk/pata/pata.h>
+#include <kernel/drivers/disk/ramdisk/ramdisk.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/timer.h>
@@ -169,10 +171,13 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   extern void syscall_init(void);
   syscall_init();
 
-  if (chainfs_init() != 0) {
-    com1_printf("[CHAINFS] init failed, formatting disk...\n");
-    chainfs_format(64, 8);
-  }
+  disk_manager_init();
+  pata_identify(NULL); // Registers PATA disk (index 0 usually)
+
+  // Create a 4MB ramdisk at 0x4000000 (ensure this doesn't overlap
+  // kernel/bootstack)
+  ramdisk_init((void *)0x4000000, 4 * 1024 * 1024);
+
 
   mmu_clear_user_range((u64)&start, (u64)&kernel_end);
 
@@ -246,6 +251,29 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
 
   keyboard_manager_init();
 
+  printf("\nSelect boot disk:\n");
+  printf("1. Hard Drive (PATA)\n");
+  printf("2. Live USB (RAM Disk)\n");
+
+  disk_t *selected_disk = NULL;
+  while (1) {
+    char c = keyboard_getchar();
+    if (c == '1') {
+      selected_disk = disk_get(0); //PATA
+      printf("Selected PATA\n");
+      break;
+    } else if (c == '2') {
+      selected_disk = disk_get(1); //RAM
+      printf("Selected RAM Disk\n");
+      break;
+    }
+  }
+
+  if (chainfs_init(selected_disk) != 0) {
+    com1_printf("[CHAINFS] init failed, formatting disk...\n");
+    chainfs_format(64, 8);
+  }
+
   printf("\nDo you want to enable debug mode (dont use for default use it make "
          "you screen dirty)? [y/n]\n");
 
@@ -262,7 +290,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   }
 
   if (!boot_option) {
-    pata_identify(NULL);
+    // pata_identify already called
 
     while (keyboard_getchar() != 0)
       ;
@@ -276,17 +304,15 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
 
     if (boot_magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
       multiboot2_info_t *mboot_ptr = (multiboot2_info_t *)addr;
-      mb2_find_module(mboot_ptr, "init", &init_module_start,
-                      &init_module_size);
-      mb2_find_module(mboot_ptr, "yes", &yes_module_start,
-                      &yes_module_size);
+      mb2_find_module(mboot_ptr, "init", &init_module_start, &init_module_size);
+      mb2_find_module(mboot_ptr, "yes", &yes_module_start, &yes_module_size);
     }
 
     posix_init();
 
     if (yes_module_start && yes_module_size > 0) {
-      int res =
-          chainfs_write_file("/yes", (const u8 *)yes_module_start, yes_module_size);
+      int res = chainfs_write_file("/yes", (const u8 *)yes_module_start,
+                                   yes_module_size);
       if (res == 0) {
         com1_printf("[KERNEL] Installed /yes from module (%u bytes)\n",
                     yes_module_size);

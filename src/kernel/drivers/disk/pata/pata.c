@@ -4,8 +4,8 @@
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
- * 1. Redistributions of source code must retain the above copyright notice, this
- *    list of conditions and the following disclaimer.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ * this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
@@ -13,16 +13,18 @@
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <kernel/drivers/disk/disk.h>
 #include <kernel/drivers/disk/pata/pata.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <lib/com1.h>
@@ -44,6 +46,7 @@ struct pata_dummy_area {
 };
 
 static struct pata_dummy_area pata_dummy_area;
+static disk_t pata_disk;
 
 static void pata_guard_init(void) {
   for (unsigned int i = 0; i < 16; ++i) {
@@ -55,8 +58,9 @@ static void pata_guard_check(const char *where) {
   for (unsigned int i = 0; i < 16; ++i) {
     unsigned short expected = (unsigned short)(0xBEEF ^ (i * 0x1111));
     if (pata_dummy_area.guard[i] != expected) {
-      com1_printf("[PATA] dummy guard corrupted at %s idx=%u val=0x%x exp=0x%x\n",
-                  where, i, pata_dummy_area.guard[i], expected);
+      com1_printf(
+          "[PATA] dummy guard corrupted at %s idx=%u val=0x%x exp=0x%x\n",
+          where, i, pata_dummy_area.guard[i], expected);
       return;
     }
   }
@@ -113,6 +117,35 @@ void pata_identify(unsigned short *target_buf) {
   debug_chainfs_magic_change(magic_before, "pata_identify");
 
   com1_printf("PATA: Drive identified successfully.\n");
+
+  pata_disk.type = DISK_TYPE_PATA;
+  pata_disk.sector_size = 512;
+  
+  pata_disk.total_sectors = 0xFFFFFF; //dummy value
+
+  void pata_disk_read(struct disk * self, u32 lba, u8 * buffer);
+  void pata_disk_write(struct disk * self, u32 lba, u8 * buffer);
+
+  pata_disk.read_sector = pata_disk_read;
+  pata_disk.write_sector = pata_disk_write;
+
+  int i = 0;
+  const char *name = "pata0";
+  while (name[i]) {
+    pata_disk.name[i] = name[i];
+    i++;
+  }
+  pata_disk.name[i] = 0;
+
+  disk_register(&pata_disk);
+}
+
+void pata_disk_read(struct disk *self, u32 lba, u8 *buffer) {
+  pata_read_sector(lba, buffer);
+}
+
+void pata_disk_write(struct disk *self, u32 lba, u8 *buffer) {
+  pata_write_sector(lba, buffer);
 }
 
 void pata_read_sector(unsigned int lba, unsigned char *buffer) {
