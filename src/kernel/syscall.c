@@ -40,6 +40,7 @@
 #define MSR_SFMASK 0xC0000084
 
 extern void syscall_entry(void);
+static int syscall_initialized = 0;
 
 static inline void wrmsr(u32 msr, u64 value) {
   u32 low = value & 0xFFFFFFFF;
@@ -74,7 +75,10 @@ void syscall_init(void) {
   wrmsr(MSR_SFMASK, 0x200); /* Mask interrupts (IF) */
 
   com1_printf("[SYSCALL] syscall/sysret initialized\n");
+  syscall_initialized = 1;
 }
+
+int syscall_is_initialized(void) { return syscall_initialized; }
 
 void syscall_handler(registers_t *regs) {
   static u32 last_magic = 0;

@@ -22,6 +22,7 @@ typedef struct disk {
 } disk_t;
 
 void disk_manager_init(void);
+int disk_manager_is_initialized(void);
 int disk_register(disk_t *disk);
 disk_t *disk_get(int index);
 int disk_count(void);

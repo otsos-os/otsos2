@@ -32,6 +32,7 @@
 #define EFER_NXE (1ULL << 11)
 
 static u64 g_kernel_cr3 = 0;
+static int mmu_initialized = 0;
 
 static inline void mmu_wrmsr(u32 msr, u64 value) {
   u32 low = value & 0xFFFFFFFF;
@@ -87,6 +88,18 @@ void mmu_init() {
     g_kernel_cr3 = cr3;
   }
   com1_printf("[MMU] Initialized. Current CR3: %p\n", (void *)cr3);
+  mmu_initialized = 1;
+}
+
+int mmu_is_initialized(void) {
+  if (!mmu_initialized) {
+    return 0;
+  }
+  u64 efer = mmu_rdmsr(MSR_EFER);
+  if (!(efer & EFER_NXE)) {
+    return 0;
+  }
+  return g_kernel_cr3 != 0;
 }
 
 static u64 *get_next_level_from(u64 *current_table, u16 index, int alloc,

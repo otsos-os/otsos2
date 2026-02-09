@@ -127,6 +127,7 @@ void process_save_context(process_t *proc, registers_t *regs);
 
 /* Internal: find free process slot */
 process_t *alloc_process(void);
+int process_is_initialized(void);
 
 /* Global process data */
 extern process_t process_table[MAX_PROCESSES];

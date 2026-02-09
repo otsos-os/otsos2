@@ -33,6 +33,7 @@ void *krealloc(void *ptr, unsigned long size);
 void *kmalloc_aligned(unsigned long size, unsigned long align);
 unsigned long kmalloc_usable_size(void *ptr);
 unsigned long kget_free_memory();
+int kheap_is_initialized(void);
 void kheap_dump();
 void init_heap();
 

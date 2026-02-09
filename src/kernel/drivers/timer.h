@@ -32,5 +32,7 @@
 void timer_init(u32 frequency);
 void timer_handler();
 u64 timer_get_ticks();
+int timer_is_initialized(void);
+u32 timer_get_frequency(void);
 
 #endif

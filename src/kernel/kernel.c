@@ -39,6 +39,7 @@
 #include <kernel/multiboot2.h>
 #include <kernel/panic.h>
 #include <kernel/posix/posix.h>
+#include <kernel/syscall.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdlib.h>
@@ -142,7 +143,7 @@ static int mb2_find_module(multiboot2_info_t *mb_info, const char *name,
   while (tag->type != MULTIBOOT2_TAG_TYPE_END) {
     if (tag->type == MULTIBOOT2_TAG_TYPE_MODULE) {
       multiboot2_tag_module_t *mod = (multiboot2_tag_module_t *)tag;
-      if (mod->cmdline && strcmp(mod->cmdline, name) == 0) {
+      if (strcmp(mod->cmdline, name) == 0) {
         if (out_start) {
           *out_start = (void *)(u64)mod->mod_start;
         }
@@ -157,6 +158,42 @@ static int mb2_find_module(multiboot2_info_t *mb_info, const char *name,
     tag = (multiboot2_tag_t *)next_addr;
   }
   return -1;
+}
+
+static void status_line(const char *label, int ok) {
+  const int pad_col = 32;
+  int len = strlen(label);
+  printf("%s", label);
+  for (int i = len; i < pad_col; i++) {
+    vga_putc(' ');
+  }
+  if (ok) {
+    printf("\033[32m[OK]\033[0m\n");
+  } else {
+    printf("\033[31m[FAILED]\033[0m\n");
+  }
+}
+
+static int disk_has_type(disk_type_t type) {
+  int count = disk_count();
+  for (int i = 0; i < count; i++) {
+    disk_t *disk = disk_get(i);
+    if (disk && disk->type == type) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int timer_sanity_check(void) {
+  if (!timer_is_initialized()) {
+    return 0;
+  }
+  u64 start = timer_get_ticks();
+  for (u64 i = 0; i < 1000000 && timer_get_ticks() == start; i++) {
+    __asm__ volatile("pause");
+  }
+  return timer_get_ticks() != start;
 }
 
 static void ensure_dev_nodes(void) {
@@ -211,7 +248,6 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   __asm__ volatile("sti");
 
   // posix_init() moved down
-  extern void syscall_init(void);
   syscall_init();
 
   disk_manager_init();
@@ -237,6 +273,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
     fb_init_mb2(mboot_ptr);
 
     clear_scr();
+    tty_init();
 
     char cpu_buf[64];
     cinfo(cpu_buf);
@@ -263,6 +300,8 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
     multiboot_info_t *mboot_ptr = (multiboot_info_t *)addr;
     debug_multiboot_info(mboot_ptr);
     fb_init(mboot_ptr);
+    clear_scr();
+    tty_init();
 
     char cpu_buf[64];
     cinfo(cpu_buf);
@@ -286,11 +325,31 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
           boot_magic, MULTIBOOT_BOOTLOADER_MAGIC, MULTIBOOT2_BOOTLOADER_MAGIC);
   }
 
+  int heap_ok = kheap_is_initialized() && kget_free_memory() > 0;
+  int idt_ok = idt_is_loaded();
+  int timer_ok = timer_sanity_check();
+  int mmu_ok = mmu_is_initialized() && mmu_read_cr3() != 0;
+  int syscall_ok = syscall_is_initialized();
+  int disk_ok = disk_manager_is_initialized();
+  int pata_ok = disk_has_type(DISK_TYPE_PATA);
+  int ramdisk_ok = disk_has_type(DISK_TYPE_RAM);
+  int fb_ok = is_framebuffer_enabled() != 0;
+
+  status_line("heap", heap_ok);
+  status_line("idt", idt_ok);
+  status_line("timer", timer_ok);
+  status_line("mmu", mmu_ok);
+  status_line("syscall", syscall_ok);
+  status_line("disk manager", disk_ok);
+  status_line("pata identify", pata_ok);
+  status_line("ramdisk", ramdisk_ok);
+  status_line("framebuffer", fb_ok);
+
   sleep(430);
-  clear_scr();
 
   keyboard_manager_init();
-  tty_init();
+
+  tty_set_active(1);
 
   printf("\nSelect boot disk:\n");
   printf("1. Hard Drive (PATA)\n");
@@ -310,11 +369,18 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
     }
   }
 
-  if (chainfs_init(selected_disk) != 0) {
+  int fs_ok = (chainfs_init(selected_disk) == 0);
+  status_line("chainfs init", fs_ok);
+  if (!fs_ok) {
     com1_printf("[CHAINFS] init failed, formatting disk...\n");
-    chainfs_format(64, 8);
+    int fmt_ok = (chainfs_format(64, 8) == 0);
+    status_line("chainfs format", fmt_ok);
+    fs_ok = fmt_ok;
   }
-  ensure_dev_nodes();
+  status_line("chainfs ready", fs_ok);
+  if (fs_ok) {
+    ensure_dev_nodes();
+  }
 
   if (!boot_option) {
     // pata_identify already called

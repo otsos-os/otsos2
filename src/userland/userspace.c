@@ -25,21 +25,39 @@
  */
 
 #include <kernel/gdt.h>
+#include <kernel/drivers/vga.h>
 #include <kernel/mmu.h>
 #include <kernel/process.h>
 #include <lib/com1.h>
+#include <mlibc/mlibc.h>
 #include <mlibc/memory.h>
 #include <userland/elf.h>
 #include <userland/userspace.h>
+
+static void status_line(const char *label, int ok) {
+  const int pad_col = 32;
+  int len = strlen(label);
+  printf("%s", label);
+  for (int i = len; i < pad_col; i++) {
+    vga_putc(' ');
+  }
+  if (ok) {
+    printf("\033[32m[OK]\033[0m\n");
+  } else {
+    printf("\033[31m[FAILED]\033[0m\n");
+  }
+}
 
 void userspace_init(void) {
   com1_printf("[USERSPACE] Initializing userspace subsystem...\n");
 
   /* Initialize GDT with Ring 3 support */
   gdt_init();
+  status_line("gdt", gdt_is_initialized());
 
   /* Initialize process subsystem */
   process_init();
+  status_line("process", process_is_initialized());
 
   com1_printf("[USERSPACE] Userspace ready\n");
 }

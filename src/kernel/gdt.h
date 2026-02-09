@@ -79,5 +79,6 @@ void tss_set_rsp0(u64 stack);
 
 /* Get current TSS RSP0 */
 u64 tss_get_rsp0(void);
+int gdt_is_initialized(void);
 
 #endif

@@ -32,6 +32,7 @@
 #include <mlibc/mlibc.h>
 
 #define TTY_COUNT 10
+static void tty_lazy_init(void);
 
 typedef struct {
   u16 *cells;
@@ -115,8 +116,8 @@ static void tty_scroll(tty_state_t *tty, int active) {
   }
 
   for (int y = 1; y < tty->height; y++) {
-    memcpy(&tty->cells[(y - 1) * tty->width],
-           &tty->cells[y * tty->width], tty->width * sizeof(u16));
+    memcpy(&tty->cells[(y - 1) * tty->width], &tty->cells[y * tty->width],
+           tty->width * sizeof(u16));
   }
 
   u16 blank = ((u16)tty->color << 8) | ' ';
@@ -231,6 +232,11 @@ static void tty_switch_to(int index) {
   tty_redraw(&ttys[tty_active]);
 }
 
+void tty_set_active(int index) {
+  tty_lazy_init();
+  tty_switch_to(index);
+}
+
 static void tty_maybe_switch(void) {
   int target = tty_switch_pending;
   if (target < 0) {
@@ -313,8 +319,8 @@ void tty_init(void) {
     ttys[i].color = 0x07;
     ttys[i].ansi_state = 0;
     ttys[i].ansi_val = 0;
-    ttys[i].cells = (u16 *)kcalloc((unsigned long)(width * height),
-                                   sizeof(u16));
+    ttys[i].cells =
+        (u16 *)kcalloc((unsigned long)(width * height), sizeof(u16));
     if (ttys[i].cells) {
       u16 blank = ((u16)ttys[i].color << 8) | ' ';
       for (int j = 0; j < width * height; j++) {

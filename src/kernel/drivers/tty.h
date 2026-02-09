@@ -41,5 +41,6 @@ void tty_putc_from_kernel(char c);
 void tty_set_color(u8 color);
 void tty_clear_active(void);
 void tty_com1_mirror(char c);
+void tty_set_active(int index);
 
 #endif

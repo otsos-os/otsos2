@@ -27,6 +27,7 @@
 #define INTERRUPTS_IDT_H
 
 void init_idt();
+int idt_is_loaded(void);
 
 typedef struct {
   unsigned long long r15, r14, r13, r12, r11, r10, r9, r8;

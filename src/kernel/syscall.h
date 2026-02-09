@@ -44,6 +44,8 @@
 #define SYS_WAIT 61
 #define SYS_KILL 62
 
+void syscall_init(void);
 void syscall_handler(registers_t *regs);
+int syscall_is_initialized(void);
 
 #endif

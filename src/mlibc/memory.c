@@ -37,6 +37,7 @@ extern char kernel_end;
 
 static char *heap_start = 0;
 static char *heap_end = 0;
+static int heap_initialized = 0;
 
 typedef struct header {
   unsigned int magic;
@@ -115,6 +116,7 @@ void init_heap() {
   com1_printf("Heap initialized at %p header size: %d\n", heap_start,
               (int)sizeof(header_t));
   com1_printf("free block size: %d\n", (int)heap_head->size);
+  heap_initialized = 1;
 }
 
 void *kmalloc(unsigned long size) {
@@ -259,6 +261,16 @@ unsigned long kget_free_memory() {
     current = current->next;
   }
   return free_mem;
+}
+
+int kheap_is_initialized(void) {
+  if (!heap_initialized || !heap_head) {
+    return 0;
+  }
+  if (heap_head->magic != HEAP_MAGIC) {
+    return 0;
+  }
+  return 1;
 }
 
 void kheap_dump() {

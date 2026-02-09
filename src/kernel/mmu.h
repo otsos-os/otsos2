@@ -46,6 +46,7 @@
 #define PTE_FLAGS_MASK 0xFFF0000000000FFF
 
 void mmu_init();
+int mmu_is_initialized(void);
 void mmu_map_page(u64 vaddr, u64 paddr, u64 flags);
 void mmu_unmap_page(u64 vaddr);
 u64 mmu_virt_to_phys(u64 vaddr);

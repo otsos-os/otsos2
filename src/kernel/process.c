@@ -35,6 +35,7 @@
 process_t process_table[MAX_PROCESSES];
 u32 next_pid = 1;
 static process_t *current_process = NULL;
+static int process_initialized = 0;
 
 void process_init(void) {
   com1_printf("[PROC] Initializing process subsystem...\n");
@@ -44,6 +45,7 @@ void process_init(void) {
   current_process = NULL;
 
   com1_printf("[PROC] Process table initialized (%d slots)\n", MAX_PROCESSES);
+  process_initialized = 1;
 }
 
 process_t *alloc_process(void) {
@@ -119,6 +121,8 @@ process_t *process_get(u32 pid) {
 }
 
 process_t *process_current(void) { return current_process; }
+
+int process_is_initialized(void) { return process_initialized; }
 
 void process_set_current(process_t *proc) {
   current_process = proc;

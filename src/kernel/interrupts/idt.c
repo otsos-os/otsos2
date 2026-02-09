@@ -45,6 +45,7 @@ typedef struct {
 
 idt_entry_t idt[256];
 idt_ptr_t idt_ptr;
+static int idt_loaded = 0;
 
 extern void load_idt(idt_ptr_t *);
 
@@ -172,4 +173,19 @@ void init_idt() {
   idt_set_gate(128, (unsigned long long)isr_stub_128, 0xEE);
 
   load_idt(&idt_ptr);
+  idt_loaded = 1;
+}
+
+int idt_is_loaded(void) {
+  idt_ptr_t current;
+  __asm__ volatile("sidt %0" : "=m"(current));
+  u64 expected_base = (u64)&idt;
+  u16 expected_limit = (u16)(sizeof(idt_entry_t) * 256 - 1);
+  if (current.base != expected_base) {
+    return 0;
+  }
+  if (current.limit != expected_limit) {
+    return 0;
+  }
+  return idt_loaded;
 }

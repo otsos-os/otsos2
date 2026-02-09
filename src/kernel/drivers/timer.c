@@ -29,6 +29,8 @@
 #include <mlibc/mlibc.h>
 
 static u64 timer_ticks = 0;
+static int timer_initialized = 0;
+static u32 timer_frequency = 0;
 
 void timer_handler() {
   timer_ticks++;
@@ -49,6 +51,12 @@ void timer_init(u32 frequency) {
   com1_write_string("[TIMER] initialized ");
   com1_write_dec(frequency);
   com1_write_string(" Hz\n");
+  timer_frequency = frequency;
+  timer_initialized = 1;
 }
 
 u64 timer_get_ticks() { return timer_ticks; }
+
+int timer_is_initialized(void) { return timer_initialized; }
+
+u32 timer_get_frequency(void) { return timer_frequency; }

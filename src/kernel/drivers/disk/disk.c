@@ -31,14 +31,18 @@
 
 static disk_t *disks[MAX_DISKS];
 static int disk_count_val = 0;
+static int disk_manager_initialized = 0;
 
 void disk_manager_init(void) {
   for (int i = 0; i < MAX_DISKS; i++) {
     disks[i] = 0;
   }
   disk_count_val = 0;
+  disk_manager_initialized = 1;
   com1_printf("[DISK] Disk manager initialized\n");
 }
+
+int disk_manager_is_initialized(void) { return disk_manager_initialized; }
 
 int disk_register(disk_t *disk) {
   if (disk_count_val >= MAX_DISKS) {

@@ -65,6 +65,7 @@ typedef struct {
 static gdt_entry_t gdt[7] __attribute__((aligned(16)));
 tss_t tss __attribute__((aligned(16)));
 static gdt_ptr_t gdt_ptr;
+static int gdt_initialized = 0;
 
 /* Kernel stack for TSS (16KB aligned) */
 static u8 kernel_stack[16384] __attribute__((aligned(16)));
@@ -158,6 +159,7 @@ void gdt_init(void) {
 
   /* Load TSS */
   tss_load(GDT_TSS);
+  gdt_initialized = 1;
 
   com1_printf("[GDT] GDT loaded at %p, TSS at %p\n", &gdt, &tss);
   com1_printf("[GDT] Kernel stack RSP0: %p\n", (void *)tss.rsp0);
@@ -166,3 +168,23 @@ void gdt_init(void) {
 void tss_set_rsp0(u64 stack) { tss.rsp0 = stack; }
 
 u64 tss_get_rsp0(void) { return tss.rsp0; }
+
+int gdt_is_initialized(void) {
+  if (!gdt_initialized) {
+    return 0;
+  }
+  gdt_ptr_t current;
+  __asm__ volatile("sgdt %0" : "=m"(current));
+  u16 expected_limit = (u16)(sizeof(gdt) - 1);
+  u64 expected_base = (u64)&gdt;
+  if (current.base != expected_base) {
+    return 0;
+  }
+  if (current.limit != expected_limit) {
+    return 0;
+  }
+  if (tss.rsp0 == 0) {
+    return 0;
+  }
+  return 1;
+}
