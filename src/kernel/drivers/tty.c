@@ -32,6 +32,7 @@
 #include <mlibc/mlibc.h>
 
 #define TTY_COUNT 10
+#define TTY_LINE_BUF_SIZE 256
 static void tty_lazy_init(void);
 void tty_update(void);
 
@@ -46,7 +47,14 @@ typedef struct {
   int ansi_val;
 } tty_state_t;
 
+typedef struct {
+  char data[TTY_LINE_BUF_SIZE];
+  u32 len;
+  u32 read_pos;
+} tty_line_buf_t;
+
 static tty_state_t ttys[TTY_COUNT];
+static tty_line_buf_t tty_line_bufs[TTY_COUNT];
 static int tty_active = 0;
 static int tty_initialized = 0;
 static volatile int tty_switch_pending = -1;
@@ -392,6 +400,43 @@ static char tty_getchar_blocking(void) {
   return c;
 }
 
+static void tty_fill_line_buffer(tty_line_buf_t *line) {
+  if (!line) {
+    return;
+  }
+
+  line->len = 0;
+  line->read_pos = 0;
+
+  while (1) {
+    char c = tty_getchar_blocking();
+    if (c == 0) {
+      continue;
+    }
+
+    if (c == '\b' || c == 0x7F) {
+      if (line->len > 0) {
+        line->len--;
+        tty_emit_backspace();
+      }
+      continue;
+    }
+
+    if (c == '\n' || c == '\r') {
+      if (line->len < (TTY_LINE_BUF_SIZE - 1)) {
+        line->data[line->len++] = '\n';
+      }
+      tty_emit('\n');
+      break;
+    }
+
+    if (line->len < (TTY_LINE_BUF_SIZE - 1)) {
+      line->data[line->len++] = c;
+      tty_emit(c);
+    }
+  }
+}
+
 int tty_read(void *buf, u32 count) {
   tty_lazy_init();
 
@@ -401,39 +446,30 @@ int tty_read(void *buf, u32 count) {
 
   __asm__ volatile("sti");
 
-  char *data = (char *)buf;
-  u32 i = 0;
-
-  while (i < count) {
-    char c = tty_getchar_blocking();
-    if (c == 0) {
-      continue;
-    }
-
-    if (c == '\b') {
-      if (i > 0) {
-        i--;
-        tty_emit_backspace();
-      }
-      continue;
-    }
-
-    data[i] = c;
-    tty_emit(c);
-
-    if (c == '\n' || c == '\r') {
-      if (c == '\r') {
-        data[i] = '\n';
-        tty_emit('\n');
-      }
-      i++;
-      break;
-    }
-
-    i++;
+  tty_line_buf_t *line = &tty_line_bufs[tty_active];
+  if (line->read_pos >= line->len) {
+    line->len = 0;
+    line->read_pos = 0;
+    tty_fill_line_buffer(line);
   }
 
-  return (int)i;
+  u32 available = line->len - line->read_pos;
+  u32 to_copy = count;
+  if (to_copy > available) {
+    to_copy = available;
+  }
+
+  if (to_copy > 0) {
+    memcpy(buf, line->data + line->read_pos, to_copy);
+    line->read_pos += to_copy;
+  }
+
+  if (line->read_pos >= line->len) {
+    line->len = 0;
+    line->read_pos = 0;
+  }
+
+  return (int)to_copy;
 }
 
 int tty_write(const void *buf, u32 count) {
