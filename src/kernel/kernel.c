@@ -24,11 +24,13 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <kernel/drivers/acpi/acpi.h>
 #include <kernel/drivers/disk/disk.h>
 #include <kernel/drivers/disk/pata/pata.h>
 #include <kernel/drivers/disk/ramdisk/ramdisk.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/keyboard/keyboard.h>
+#include <kernel/drivers/power/power.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/drivers/tty.h>
 #include <kernel/drivers/vga.h>
@@ -239,13 +241,11 @@ static void ensure_dev_nodes(void) {
 
   if (chainfs_resolve_path("/dev/console", &entry, &entry_block,
                            &entry_offset) != 0) {
-    chainfs_mknod("/dev/console", TTY_DEVICE_MAJOR,
-                  TTY_DEVICE_MINOR_CONSOLE);
+    chainfs_mknod("/dev/console", TTY_DEVICE_MAJOR, TTY_DEVICE_MINOR_CONSOLE);
   } else if (entry.type != CHAINFS_TYPE_DEV) {
     if (entry.type == CHAINFS_TYPE_FILE) {
       chainfs_delete_file("/dev/console");
-      chainfs_mknod("/dev/console", TTY_DEVICE_MAJOR,
-                    TTY_DEVICE_MINOR_CONSOLE);
+      chainfs_mknod("/dev/console", TTY_DEVICE_MAJOR, TTY_DEVICE_MINOR_CONSOLE);
     } else {
       com1_printf("[CHAINFS] /dev/console exists but is not a device node\n");
     }
@@ -272,7 +272,6 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   // kernel/bootstack)
   ramdisk_init((void *)0x4000000, 4 * 1024 * 1024);
 
-
   mmu_clear_user_range((u64)&start, (u64)&kernel_end);
 
   boot_magic = (u32)magic;
@@ -286,6 +285,8 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
     multiboot2_info_t *mboot_ptr = (multiboot2_info_t *)addr;
     debug_multiboot2_tags(mboot_ptr);
     fb_init_mb2(mboot_ptr);
+
+    acpi_init_from_multiboot2(mboot_ptr);
 
     clear_scr();
     tty_init();
@@ -340,6 +341,11 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
           boot_magic, MULTIBOOT_BOOTLOADER_MAGIC, MULTIBOOT2_BOOTLOADER_MAGIC);
   }
 
+  power_init();
+  if (acpi_is_initialized()) {
+    power_acpi_enable();
+  }
+
   int heap_ok = kheap_is_initialized() && kget_free_memory() > 0;
   int idt_ok = idt_is_loaded();
   int timer_ok = timer_sanity_check();
@@ -349,6 +355,8 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   int pata_ok = disk_has_type(DISK_TYPE_PATA);
   int ramdisk_ok = disk_has_type(DISK_TYPE_RAM);
   int fb_ok = is_framebuffer_enabled() != 0;
+  int acpi_ok = acpi_is_initialized();
+  int power_ok = power_is_initialized();
 
   status_line("heap", heap_ok);
   status_line("idt", idt_ok);
@@ -359,6 +367,8 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   status_line("pata identify", pata_ok);
   status_line("ramdisk", ramdisk_ok);
   status_line("framebuffer", fb_ok);
+  status_line("acpi", acpi_ok);
+  status_line("power", power_ok);
 
   sleep(430);
 

@@ -26,6 +26,7 @@
 
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/keyboard/ps2.h>
+#include <kernel/drivers/power/power.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
@@ -58,13 +59,15 @@ const char kbd_us_caps[128] = {
 
 #define KBD_DATA_PORT 0x60
 #define KBD_STATUS_PORT 0x64
-  
+
 #define KB_BUFFER_SIZE 256
 static char kb_buffer[KB_BUFFER_SIZE];
 static int kb_head = 0;
 static int kb_tail = 0;
 
 static int shift_pressed = 0;
+static int ctrl_pressed = 0;
+static int alt_pressed = 0;
 static int caps_lock = 0;
 static int ps2_ready = 0;
 static int scancode_extended = 0;
@@ -76,7 +79,6 @@ static void ps2_debug_status(const char *tag, u8 status, u8 data) {
   }
   com1_printf("[PS2] %s: status=0x%x data=0x%x\n", tag, status, data);
 }
-
 
 static int ps2_wait_input_clear() {
   for (u32 i = 0; i < 100000; i++) {
@@ -264,18 +266,43 @@ static void ps2_process_scancode(u8 scancode) {
     scancode = code;
     if (scancode == 0x2A || scancode == 0x36) {
       shift_pressed = 0;
+    } else if (scancode == 0x1D) {
+      ctrl_pressed = 0;
+    } else if (scancode == 0x38) {
+      alt_pressed = 0;
     }
     return;
   }
 
+  /* Track modifier key presses */
   if (scancode == 0x2A || scancode == 0x36) {
     shift_pressed = 1;
+    return;
+  }
+
+  if (scancode == 0x1D) {
+    ctrl_pressed = 1;
+    return;
+  }
+
+  if (scancode == 0x38) {
+    alt_pressed = 1;
     return;
   }
 
   if (scancode == 0x3A) {
     caps_lock = !caps_lock;
     return;
+  }
+
+  /*
+   * Ctrl + Alt + Shift + Z  →  system reboot
+   * Z scancode = 0x2C in scancode set 1
+   */
+  if (ctrl_pressed && alt_pressed && shift_pressed && scancode == 0x2C) {
+    com1_printf("[PS2] Ctrl+Alt+Shift+Z pressed, rebooting...\n");
+    power_controller_reboot();
+    /* does not return */
   }
 
   char c = 0;
