@@ -274,7 +274,6 @@ static void ps2_process_scancode(u8 scancode) {
     return;
   }
 
-  /* Track modifier key presses */
   if (scancode == 0x2A || scancode == 0x36) {
     shift_pressed = 1;
     return;
@@ -295,14 +294,10 @@ static void ps2_process_scancode(u8 scancode) {
     return;
   }
 
-  /*
-   * Ctrl + Alt + Shift + Z  →  system reboot
-   * Z scancode = 0x2C in scancode set 1
-   */
+  
   if (ctrl_pressed && alt_pressed && shift_pressed && scancode == 0x2C) {
     com1_printf("[PS2] Ctrl+Alt+Shift+Z pressed, rebooting...\n");
     power_controller_reboot();
-    /* does not return */
   }
 
   char c = 0;

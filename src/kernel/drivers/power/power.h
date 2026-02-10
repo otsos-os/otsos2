@@ -46,7 +46,6 @@ typedef enum {
   POWER_METHOD_KEYBOARD,  /* PS/2 keyboard controller reset (0xFE) */
   POWER_METHOD_TRIPLE,    /* Triple-fault reboot */
   POWER_METHOD_RESET_REG, /* ACPI FADT reset register */
-  POWER_METHOD_QEMU,      /* QEMU-specific I/O port (0x604) */
 } power_method_t;
 
 /* ── Power subsystem status ──────────────────────────────────────────── */
@@ -102,5 +101,11 @@ power_info_t power_get_info(void);
  * power_is_initialized — returns 1 if power_init succeeded.
  */
 int power_is_initialized(void);
+
+
+int power_register_shutdown_hook(void (*fn)(void));
+void power_controller_shutdown(void);
+void power_controller_reboot(void);
+void power_controller_status(void);
 
 #endif
