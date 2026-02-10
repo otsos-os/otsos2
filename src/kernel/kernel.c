@@ -196,6 +196,20 @@ static int timer_sanity_check(void) {
   return timer_get_ticks() != start;
 }
 
+static void enable_sse(void) {
+  u64 cr0, cr4;
+  __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
+  cr0 &= ~(1ULL << 2); // CR0.EM = 0
+  cr0 &= ~(1ULL << 3); // CR0.TS = 0
+  cr0 |= (1ULL << 1);  // CR0.MP = 1
+  __asm__ volatile("mov %0, %%cr0" : : "r"(cr0));
+
+  __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+  cr4 |= (1ULL << 9);  // CR4.OSFXSR = 1
+  cr4 |= (1ULL << 10); // CR4.OSXMMEXCPT = 1
+  __asm__ volatile("mov %0, %%cr4" : : "r"(cr4));
+}
+
 static void ensure_dev_nodes(void) {
   if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
     return;
@@ -245,6 +259,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   init_idt();
   timer_init(1000);
   mmu_init();
+  enable_sse();
   __asm__ volatile("sti");
 
   // posix_init() moved down

@@ -1,4 +1,5 @@
 CC = clang
+ZIG = zig
 LD = ld.lld
 AS = nasm
 QEMU = qemu-system-x86_64
@@ -245,9 +246,9 @@ $(SCHEDULER_O): kernel/scheduler.c kernel/scheduler.h kernel/process.h kernel/mm
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(ELF_O): userland/elf.c
-	@echo "  CC      $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
+$(ELF_O): userland/elf.zig
+	@echo "  ZIG     $<"
+	@$(ZIG) build-obj -femit-bin=$@ -target x86_64-freestanding -mcmodel=kernel -O ReleaseSafe --dep panic -Melf=userland/elf.zig -Mpanic=kernel/panic.zig
 
 $(USERSPACE_O): userland/userspace.c userland/userspace.h kernel/process.h kernel/mmu.h kernel/gdt.h
 	@echo "  CC      $<"

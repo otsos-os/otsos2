@@ -71,9 +71,8 @@ process_t *process_create_kernel(const char *name, void (*entry)(void)) {
   }
   memset(kstack, 0, KERNEL_STACK_SIZE);
 
-  
   proc->pid = next_pid++;
-  proc->ppid = 0; 
+  proc->ppid = 0;
   proc->state = PROC_STATE_EMBRYO;
 
   int i;
@@ -85,14 +84,13 @@ process_t *process_create_kernel(const char *name, void (*entry)(void)) {
   proc->cr3 = mmu_read_cr3();
   proc->entry_point = (u64)entry;
 
-  
   proc->kernel_stack = (u64)(kstack + KERNEL_STACK_SIZE);
-  proc->user_stack = 0; 
+  proc->user_stack = 0;
 
   memset(&proc->context, 0, sizeof(cpu_context_t));
   proc->context.rip = (u64)entry;
   proc->context.cs = KERNEL_CS;
-  proc->context.rflags = 0x202; 
+  proc->context.rflags = 0x202;
   proc->context.rsp = proc->kernel_stack;
   proc->context.ss = KERNEL_DS;
 
@@ -140,9 +138,7 @@ void process_switch(process_t *proc) {
   mmu_write_cr3(proc->cr3);
 }
 
-void process_yield(void) {
-  __asm__ volatile("int $32");
-}
+void process_yield(void) { __asm__ volatile("int $32"); }
 
 void process_exit(int code) {
   if (!current_process) {
@@ -170,7 +166,7 @@ void process_exit(int code) {
   }
   current_process->mmap_base = MMAP_BASE;
 
-
+  __asm__ volatile("sti");
   while (1) {
     __asm__ volatile("hlt");
   }
@@ -233,7 +229,7 @@ process_t *process_create(const char *name, void *elf_data, u64 elf_size) {
 
 int process_kill(u32 pid) {
   if (pid == 1) {
-    return -1; 
+    return -1;
   }
 
   process_t *proc = process_get(pid);

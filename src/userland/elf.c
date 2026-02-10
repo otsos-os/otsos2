@@ -24,6 +24,34 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/*
+ * +--------------------------------------------------------------------------+
+ * |                               DEPRECATED                                 |
+ * +--------------------------------------------------------------------------+
+ * | This C implementation is deprecated. The Zig port is now the source of    |
+ * | truth for ELF loading.                                                   |
+ * |                                                                          |
+ * | File:      userland/elf.zig                                              |
+ * | Status:    active                                                       |
+ * | Replacement: elf_strerror / elf_validate / elf_parse / elf_load in Zig    |
+ * |                                                                          |
+ * | Note: This file remains only for reference and may be removed in future. |
+ * +--------------------------------------------------------------------------+
+ */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #include <kernel/mmu.h>
 #include <lib/com1.h>
 #include <mlibc/memory.h>

@@ -26,6 +26,8 @@
 
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/timer.h>
+#include <kernel/drivers/tty.h>
+#include <kernel/drivers/vga.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/mmu.h>
 #include <kernel/scheduler.h>
@@ -45,6 +47,11 @@ void isr_handler(registers_t *regs) {
   } else {
     if ((regs->cs & 3) == 3) {
       process_t *proc = process_current();
+      printf("\n\033[31m[KERNEL] Exception %d detected in userspace process %d "
+             "(%s) at RIP=%p\033[0m\n",
+             regs->int_no, proc ? (int)proc->pid : -1,
+             proc ? proc->name : "???", (void *)regs->rip);
+
       com1_printf("\n[KERNEL] Exception %d detected in userspace process %d "
                   "(%s) at RIP=%p\n",
                   regs->int_no, proc ? (int)proc->pid : -1,
@@ -52,24 +59,35 @@ void isr_handler(registers_t *regs) {
       com1_printf("[KERNEL] CS=0x%x SS=0x%x RSP=%p\n", (unsigned)regs->cs,
                   (unsigned)regs->ss, (void *)regs->rsp);
 
-      
       if (regs->int_no == 13) {
+        printf("\033[31m[KERNEL] General Protection Fault ERR=0x%x\033[0m\n",
+               (unsigned)regs->err_code);
         com1_printf("[KERNEL] General Protection Fault ERR=0x%x\n",
                     (unsigned)regs->err_code);
       } else if (regs->int_no == 14) {
         u64 cr2 = 0;
         __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+        printf("\033[31m[KERNEL] Segmentation Fault (Page Fault) CR2=%p "
+               "ERR=0x%x\033[0m\n",
+               (void *)cr2, (unsigned)regs->err_code);
+
         com1_printf("[KERNEL] Segmentation Fault\n");
         com1_printf("[KERNEL] Page Fault: CR2=%p ERR=0x%x\n", (void *)cr2,
                     (unsigned)regs->err_code);
         u64 pte_flags = mmu_get_pte_flags(cr2);
         com1_printf("[KERNEL] CR2 PTE flags: %p\n", (void *)pte_flags);
       } else if (regs->int_no == 6) {
+        printf("\033[31m[KERNEL] Invalid Opcode\033[0m\n");
         com1_printf("[KERNEL] Invalid Opcode\n");
+      } else if (regs->int_no == 0) {
+        printf("\033[31m[KERNEL] Division by Zero\033[0m\n");
+        com1_printf("[KERNEL] Division by Zero\n");
       }
 
+      __asm__ volatile("sti");
       process_exit(-1);
     } else {
+      __asm__ volatile("sti");
       kernel_panic(regs);
     }
   }
@@ -80,6 +98,7 @@ void irq_handler(registers_t *regs) {
     timer_handler();
     scheduler_tick(regs);
     keyboard_poll();
+    tty_update();
   } else if (regs->int_no == 33) {
     keyboard_common_handler();
   }

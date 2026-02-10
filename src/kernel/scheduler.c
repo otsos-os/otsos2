@@ -24,8 +24,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/mmu.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/mmu.h>
 #include <kernel/process.h>
 #include <kernel/scheduler.h>
 
@@ -94,7 +94,7 @@ void scheduler_tick(registers_t *regs) {
     return;
   }
 
-  if ((regs->cs & 3) == 0) {
+  if ((regs->cs & 3) == 0 && current->state == PROC_STATE_RUNNING) {
     return;
   }
 

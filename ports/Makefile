@@ -2,7 +2,7 @@ CC = clang
 LD = ld.lld
 
 CFLAGS = -m64 -ffreestanding -fno-pic -fno-stack-protector -nostdlib -nostdinc \
-         -fno-builtin -O2 -Wall -Wextra
+         -fno-builtin -O0 -Wall -Wextra
 
 LDFLAGS = -m elf_x86_64 -T ../init/linker.ld --oformat=elf64-x86-64 -nostdlib
 

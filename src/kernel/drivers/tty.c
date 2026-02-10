@@ -33,6 +33,7 @@
 
 #define TTY_COUNT 10
 static void tty_lazy_init(void);
+void tty_update(void);
 
 typedef struct {
   u16 *cells;
@@ -237,7 +238,7 @@ void tty_set_active(int index) {
   tty_switch_to(index);
 }
 
-static void tty_maybe_switch(void) {
+void tty_update(void) {
   int target = tty_switch_pending;
   if (target < 0) {
     return;
@@ -347,7 +348,7 @@ void tty_putc_from_kernel(char c) {
   if (!tty_initialized) {
     return;
   }
-  tty_maybe_switch();
+  tty_update();
   tty_putc_internal(&ttys[tty_active], c, 1);
 }
 
@@ -384,10 +385,10 @@ void tty_clear_active(void) {
 static char tty_getchar_blocking(void) {
   char c = 0;
   while ((c = keyboard_getchar()) == 0) {
-    tty_maybe_switch();
+    tty_update();
     __asm__ volatile("hlt");
   }
-  tty_maybe_switch();
+  tty_update();
   return c;
 }
 
@@ -437,7 +438,7 @@ int tty_read(void *buf, u32 count) {
 
 int tty_write(const void *buf, u32 count) {
   tty_lazy_init();
-  tty_maybe_switch();
+  tty_update();
 
   if (count == 0) {
     return 0;
