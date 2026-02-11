@@ -40,6 +40,7 @@
 #include <kernel/multiboot.h>
 #include <kernel/multiboot2.h>
 #include <kernel/panic.h>
+#include <kernel/pci/pci.h>
 #include <kernel/posix/posix.h>
 #include <kernel/syscall.h>
 #include <lib/com1.h>
@@ -342,6 +343,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   }
 
   power_init();
+  pci_init();
   if (acpi_is_initialized()) {
     power_acpi_enable();
   }
@@ -357,6 +359,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   int fb_ok = is_framebuffer_enabled() != 0;
   int acpi_ok = acpi_is_initialized();
   int power_ok = power_is_initialized();
+  int pci_ok = pci_is_initialized();
 
   status_line("heap", heap_ok);
   status_line("idt", idt_ok);
@@ -369,6 +372,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   status_line("framebuffer", fb_ok);
   status_line("acpi", acpi_ok);
   status_line("power", power_ok);
+  status_line("pci scan", pci_ok);
 
   sleep(430);
 
