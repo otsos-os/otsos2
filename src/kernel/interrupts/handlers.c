@@ -28,6 +28,7 @@
 #include <kernel/drivers/timer.h>
 #include <kernel/drivers/tty.h>
 #include <kernel/drivers/vga.h>
+#include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/mmu.h>
 #include <kernel/scheduler.h>
@@ -96,6 +97,7 @@ void isr_handler(registers_t *regs) {
 void irq_handler(registers_t *regs) {
   if (regs->int_no == 32) {
     timer_handler();
+    watchdog_tick();
     scheduler_tick(regs);
     keyboard_poll();
     tty_update();

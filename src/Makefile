@@ -70,12 +70,16 @@ PCI_SCAN_O = ../bin/pci_scan.o
 PCI_CONFIG_O = ../bin/pci_config.o
 PCI_DEVICE_O = ../bin/pci_device.o
 PCI_BAR_O = ../bin/pci_bar.o
+WATCHDOG_O = ../bin/watchdog.o
+WATCHDOG_I6300ESB_O = ../bin/watchdog_i6300esb.o
+WATCHDOG_ICH_TCO_O = ../bin/watchdog_ich_tco.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
       $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(VGA_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(FORK_O) $(EXEC_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(POWER_O) $(POWER_CTRL_O) \
-      $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O)
+      $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
+      $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O)
 
 all: $(ISO_IMAGE)
 
@@ -305,6 +309,18 @@ $(PCI_BAR_O): kernel/pci/utils/bar.c kernel/pci/utils/bar.h kernel/pci/pci.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+$(WATCHDOG_O): kernel/drivers/watchdog/watchdog.c kernel/drivers/watchdog/watchdog.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(WATCHDOG_I6300ESB_O): kernel/drivers/watchdog/devices/i6300esb.c kernel/drivers/watchdog/watchdog.h kernel/pci/pci.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(WATCHDOG_ICH_TCO_O): kernel/drivers/watchdog/devices/ich_tco.c kernel/drivers/watchdog/watchdog.h kernel/pci/pci.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
 $(SYSCALL_ASM_O): kernel/syscall_asm.asm
 	@echo "  AS      $<"
 	@$(AS) -f elf64 -g -F dwarf $< -o $@
@@ -347,15 +363,15 @@ OVMF = /usr/share/ovmf/OVMF.fd
 
 run: $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU"
-	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -device i6300esb -watchdog-action reset
 
 run_uefi: $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (UEFI)"
-	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS)
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset
 
 debug: $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  DEBUG   QEMU"
-	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -d int,cpu_reset > debug.txt 2>&1 -no-reboot $(QEMU_GUI_OPTS)
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -d int,cpu_reset > debug.txt 2>&1 -no-reboot $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset
 
 clean:
 	@echo "  CLEAN"

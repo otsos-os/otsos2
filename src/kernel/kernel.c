@@ -35,6 +35,7 @@
 #include <kernel/drivers/tty.h>
 #include <kernel/drivers/vga.h>
 #include <kernel/drivers/video/fb.h>
+#include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/mmu.h>
 #include <kernel/multiboot.h>
@@ -167,13 +168,17 @@ static void status_line(const char *label, int ok) {
   const int pad_col = 32;
   int len = strlen(label);
   printf("%s", label);
+  com1_printf("%s", label);
   for (int i = len; i < pad_col; i++) {
     vga_putc(' ');
+    com1_printf(" ");
   }
   if (ok) {
     printf("\033[32m[OK]\033[0m\n");
+
   } else {
     printf("\033[31m[FAILED]\033[0m\n");
+    
   }
 }
 
@@ -344,6 +349,12 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
 
   power_init();
   pci_init();
+  watchdog_init();
+  if (watchdog_device_count() > 0) {
+    if (watchdog_start(WATCHDOG_DEFAULT_TIMEOUT_SEC) != 0) {
+      panic("[WDT] failed to start watchdog\n");
+    }
+  }
   if (acpi_is_initialized()) {
     power_acpi_enable();
   }
@@ -360,6 +371,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   int acpi_ok = acpi_is_initialized();
   int power_ok = power_is_initialized();
   int pci_ok = pci_is_initialized();
+  int watchdog_ok = watchdog_is_initialized() && watchdog_device_count() > 0;
 
   status_line("heap", heap_ok);
   status_line("idt", idt_ok);
@@ -373,6 +385,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   status_line("acpi", acpi_ok);
   status_line("power", power_ok);
   status_line("pci scan", pci_ok);
+  status_line("watchdog", watchdog_ok);
 
   sleep(430);
 
@@ -388,11 +401,11 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   while (1) {
     char c = keyboard_getchar();
     if (c == '1') {
-      selected_disk = disk_get(0); //PATA
+      selected_disk = disk_get(0); // PATA
       printf("Selected PATA\n");
       break;
     } else if (c == '2') {
-      selected_disk = disk_get(1); //RAM
+      selected_disk = disk_get(1); // RAM
       printf("Selected RAM Disk\n");
       break;
     }
