@@ -27,9 +27,9 @@ The kernel uses the `syscall`/`sysret` instruction pair for fast system calls:
 | Register | Purpose |
 |----------|---------|
 | RAX      | System call number (in), Return value (out) |
-| RDI      | Argument 1 |
-| RSI      | Argument 2 |
-| RDX      | Argument 3 |
+| RDI      | Arg 1 |
+| RSI      | Arg 2 |
+| RDX      | Arg 3 |
 | RCX      | User RIP (saved by syscall) |
 | R11      | User RFLAGS (saved by syscall) |
 | RSP      | Switched to kernel stack during syscall |
