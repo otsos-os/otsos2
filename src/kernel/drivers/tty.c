@@ -53,13 +53,23 @@ typedef struct {
   u32 read_pos;
 } tty_line_buf_t;
 
+typedef struct {
+  char buf[1024];
+  int head;
+  int tail;
+} tty_input_queue_t;
+
 static tty_state_t ttys[TTY_COUNT];
 static tty_line_buf_t tty_line_bufs[TTY_COUNT];
+static tty_input_queue_t tty_inputs[TTY_COUNT];
 static int tty_active = 0;
 static int tty_initialized = 0;
 static volatile int tty_switch_pending = -1;
 static int tty_ctrl_down = 0;
 static int tty_suppress_com1_mirror = 0;
+
+static u64 tty_indicator_end_time = 0;
+static int tty_indicator_active = 0;
 
 static void tty_apply_ansi(tty_state_t *tty, int code) {
   u8 color_idx = 0x07;
@@ -229,6 +239,34 @@ static void tty_request_switch(int index) {
   tty_switch_pending = index;
 }
 
+#include <kernel/drivers/timer.h>
+
+static void tty_draw_indicator(int index) {
+  int x = ttys[index].width - 15;
+  int y = 0;
+  if (x < 0)
+    x = 0;
+
+  char buf[16];
+  buf[0] = 'T';
+  buf[1] = 'T';
+  buf[2] = 'Y';
+  buf[3] = ' ';
+  int tty_num = index + 1;
+  if (tty_num >= 10) {
+    buf[4] = '1';
+    buf[5] = '0';
+    buf[6] = '\0';
+  } else {
+    buf[4] = '0' + tty_num;
+    buf[5] = '\0';
+  }
+
+  for (int i = 0; buf[i]; i++) {
+    vga_put_entry_at(buf[i], 0x0A, x + i, y);
+  }
+}
+
 static void tty_switch_to(int index) {
   if (index < 0 || index >= TTY_COUNT) {
     return;
@@ -239,6 +277,10 @@ static void tty_switch_to(int index) {
 
   tty_active = index;
   tty_redraw(&ttys[tty_active]);
+
+  tty_indicator_end_time = timer_get_ticks() + timer_get_frequency();
+  tty_indicator_active = 1;
+  tty_draw_indicator(index);
 }
 
 void tty_set_active(int index) {
@@ -247,6 +289,11 @@ void tty_set_active(int index) {
 }
 
 void tty_update(void) {
+  if (tty_indicator_active && timer_get_ticks() >= tty_indicator_end_time) {
+    tty_indicator_active = 0;
+    tty_redraw(&ttys[tty_active]);
+  }
+
   int target = tty_switch_pending;
   if (target < 0) {
     return;
@@ -390,17 +437,47 @@ void tty_clear_active(void) {
   tty_redraw(tty);
 }
 
-static char tty_getchar_blocking(void) {
-  char c = 0;
-  while ((c = keyboard_getchar()) == 0) {
-    tty_update();
-    __asm__ volatile("hlt");
+static void tty_pump_keyboard(void) {
+  while (1) {
+    char c = keyboard_getchar();
+    if (c == 0) {
+      break;
+    }
+    tty_input_queue_t *q = &tty_inputs[tty_active];
+    int next = (q->head + 1) % 256;
+    if (next != q->tail) {
+      q->buf[q->head] = c;
+      q->head = next;
+    }
   }
-  tty_update();
-  return c;
 }
 
-static void tty_fill_line_buffer(tty_line_buf_t *line) {
+static char tty_getchar_blocking(int tty_idx) {
+  while (1) {
+    tty_update();
+    tty_pump_keyboard();
+    tty_input_queue_t *q = &tty_inputs[tty_idx];
+    if (q->head != q->tail) {
+      char c = q->buf[q->tail];
+      q->tail = (q->tail + 1) % 256;
+      tty_update();
+      return c;
+    }
+    __asm__ volatile("hlt");
+  }
+}
+
+static void tty_emit_to(int tty_idx, char c) {
+  tty_putc_internal(&ttys[tty_idx], c, tty_idx == tty_active);
+  if (tty_idx == tty_active) {
+    tty_suppress_com1_mirror = 1;
+    com1_write_byte((u8)c);
+    tty_suppress_com1_mirror = 0;
+  }
+}
+
+static void tty_fill_line_buffer(int tty_idx) {
+  tty_line_buf_t *line = &tty_line_bufs[tty_idx];
   if (!line) {
     return;
   }
@@ -409,7 +486,7 @@ static void tty_fill_line_buffer(tty_line_buf_t *line) {
   line->read_pos = 0;
 
   while (1) {
-    char c = tty_getchar_blocking();
+    char c = tty_getchar_blocking(tty_idx);
     if (c == 0) {
       continue;
     }
@@ -417,7 +494,9 @@ static void tty_fill_line_buffer(tty_line_buf_t *line) {
     if (c == '\b' || c == 0x7F) {
       if (line->len > 0) {
         line->len--;
-        tty_emit_backspace();
+        tty_emit_to(tty_idx, '\b');
+        tty_emit_to(tty_idx, ' ');
+        tty_emit_to(tty_idx, '\b');
       }
       continue;
     }
@@ -426,13 +505,13 @@ static void tty_fill_line_buffer(tty_line_buf_t *line) {
       if (line->len < (TTY_LINE_BUF_SIZE - 1)) {
         line->data[line->len++] = '\n';
       }
-      tty_emit('\n');
+      tty_emit_to(tty_idx, '\n');
       break;
     }
 
     if (line->len < (TTY_LINE_BUF_SIZE - 1)) {
       line->data[line->len++] = c;
-      tty_emit(c);
+      tty_emit_to(tty_idx, c);
     }
   }
 }
@@ -446,11 +525,12 @@ int tty_read(void *buf, u32 count) {
 
   __asm__ volatile("sti");
 
-  tty_line_buf_t *line = &tty_line_bufs[tty_active];
+  int tty_idx = tty_active;
+  tty_line_buf_t *line = &tty_line_bufs[tty_idx];
   if (line->read_pos >= line->len) {
     line->len = 0;
     line->read_pos = 0;
-    tty_fill_line_buffer(line);
+    tty_fill_line_buffer(tty_idx);
   }
 
   u32 available = line->len - line->read_pos;

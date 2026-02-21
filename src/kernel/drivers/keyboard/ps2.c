@@ -294,7 +294,6 @@ static void ps2_process_scancode(u8 scancode) {
     return;
   }
 
-  
   if (ctrl_pressed && alt_pressed && shift_pressed && scancode == 0x2C) {
     com1_printf("[PS2] Ctrl+Alt+Shift+Z pressed, rebooting...\n");
     power_controller_reboot();
@@ -319,6 +318,10 @@ static void ps2_process_scancode(u8 scancode) {
     }
   } else {
     c = kbd_us[scancode];
+  }
+
+  if (ctrl_pressed && c >= '0' && c <= '9') {
+    c = 0;
   }
 
   if (c != 0) {

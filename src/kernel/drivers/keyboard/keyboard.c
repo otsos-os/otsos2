@@ -113,7 +113,6 @@ void keyboard_handle_scancode(u8 scancode, int released, int extended) {
 static char helper_read_char() {
   char c = 0;
   while ((c = keyboard_getchar()) == 0) {
-    __asm__ volatile("nop");
   }
   return c;
 }
