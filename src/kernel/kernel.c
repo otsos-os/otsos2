@@ -178,7 +178,6 @@ static void status_line(const char *label, int ok) {
 
   } else {
     printf("\033[31m[FAILED]\033[0m\n");
-    
   }
 }
 
@@ -436,23 +435,40 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
     u32 init_module_size = 0;
     void *yes_module_start = NULL;
     u32 yes_module_size = 0;
+    void *fetch_module_start = NULL;
+    u32 fetch_module_size = 0;
 
     if (boot_magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
       multiboot2_info_t *mboot_ptr = (multiboot2_info_t *)addr;
       mb2_find_module(mboot_ptr, "init", &init_module_start, &init_module_size);
       mb2_find_module(mboot_ptr, "yes", &yes_module_start, &yes_module_size);
+      mb2_find_module(mboot_ptr, "fetch", &fetch_module_start,
+                      &fetch_module_size);
     }
 
     posix_init();
 
+    chainfs_mkdir("/bin");
+
     if (yes_module_start && yes_module_size > 0) {
-      int res = chainfs_write_file("/yes", (const u8 *)yes_module_start,
+      int res = chainfs_write_file("/bin/yes", (const u8 *)yes_module_start,
                                    yes_module_size);
       if (res == 0) {
-        com1_printf("[KERNEL] Installed /yes from module (%u bytes)\n",
+        com1_printf("[KERNEL] Installed /bin/yes from module (%u bytes)\n",
                     yes_module_size);
       } else {
-        com1_printf("[KERNEL] Failed to install /yes from module\n");
+        com1_printf("[KERNEL] Failed to install /bin/yes from module\n");
+      }
+    }
+
+    if (fetch_module_start && fetch_module_size > 0) {
+      int res = chainfs_write_file("/bin/fetch", (const u8 *)fetch_module_start,
+                                   fetch_module_size);
+      if (res == 0) {
+        com1_printf("[KERNEL] Installed /bin/fetch from module (%u bytes)\n",
+                    fetch_module_size);
+      } else {
+        com1_printf("[KERNEL] Failed to install /bin/fetch from module\n");
       }
     }
 
@@ -460,6 +476,10 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
       com1_printf(
           "[KERNEL] Found init module at %p, size %d. Starting init...\n",
           init_module_start, init_module_size);
+      volatile int a = 2;
+      volatile int b = 0;
+      int res = a / b; 
+      com1_printf("res: %d\n", res);
       userspace_load_init(init_module_start, (u64)init_module_size);
     } else {
       com1_printf(

@@ -95,7 +95,17 @@ typedef struct pipe {
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
 
+struct utsname {
+  char sysname[65];
+  char nodename[65];
+  char release[65];
+  char version[65];
+  char machine[65];
+  char domainname[65];
+};
+
 int sys_read(int fd, void *buf, u32 count);
+int sys_uname(struct utsname *buf);
 int sys_write(int fd, const void *buf, u32 count);
 int sys_open(const char *path, int flags);
 int sys_close(int fd);

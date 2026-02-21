@@ -14,6 +14,7 @@ ISODIR = ../isodir
 DISK_IMG = ../bin/disk.img
 PORTS_DIR = ../ports
 YES_BIN = $(PORTS_DIR)/yes
+FETCH_BIN = $(PORTS_DIR)/fetch
 # object files
 BOOT_O = ../bin/boot.o
 KERNEL_O = ../bin/kernel.o
@@ -50,6 +51,7 @@ MMAP_O = ../bin/mmap.o
 PIPE_O = ../bin/pipe.o
 CLONE_O = ../bin/clone.o
 SYSCALL_O = ../bin/syscall.o
+UNAME_O = ../bin/uname.o
 GDT_O = ../bin/gdt.o
 GDT_ASM_O = ../bin/gdt_asm.o
 PROCESS_O = ../bin/process.o
@@ -77,6 +79,7 @@ WATCHDOG_ICH_TCO_O = ../bin/watchdog_ich_tco.o
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
       $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(VGA_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(FORK_O) $(EXEC_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
+      $(UNAME_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(POWER_O) $(POWER_CTRL_O) \
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
       $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O)
@@ -95,11 +98,12 @@ $(YES_BIN):
 	@echo "  MAKE    ports/yes"
 	@$(MAKE) -C $(PORTS_DIR)
 
-$(ISO_IMAGE): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN)
+$(ISO_IMAGE): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
 	@cp $(INIT_BIN) $(ISODIR)/boot/init
 	@cp $(YES_BIN) $(ISODIR)/boot/yes
+	@cp $(FETCH_BIN) $(ISODIR)/boot/fetch
 	@echo 'set timeout=4' > $(ISODIR)/boot/grub/grub.cfg
 	@echo 'set default=0' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo 'insmod all_video' >> $(ISODIR)/boot/grub/grub.cfg
@@ -108,6 +112,7 @@ $(ISO_IMAGE): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN)
 	@echo '    multiboot2 /boot/kernel.bin' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    module2 /boot/init init' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    module2 /boot/yes yes' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '    module2 /boot/fetch fetch' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    boot' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '}' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo "  ISO     $(ISO_IMAGE)"
@@ -226,6 +231,10 @@ $(MMAP_O): kernel/posix/mmap.c
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(PIPE_O): kernel/posix/pipe.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(UNAME_O): kernel/posix/uname.c kernel/posix/posix.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

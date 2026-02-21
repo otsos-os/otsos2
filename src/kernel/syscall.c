@@ -30,7 +30,6 @@
 #include <kernel/process.h>
 #include <kernel/syscall.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
-#include <kernel/process.h>
 #include <lib/com1.h>
 #include <kernel/mmu.h>
 
@@ -130,9 +129,8 @@ void syscall_handler(registers_t *regs) {
     regs->rax = (u64)sys_fork(regs);
     break;
   case SYS_EXECVE:
-    regs->rax =
-        (u64)sys_execve((const char *)arg1, (const char *const *)arg2,
-                        (const char *const *)arg3, regs);
+    regs->rax = (u64)sys_execve((const char *)arg1, (const char *const *)arg2,
+                                (const char *const *)arg3, regs);
     break;
   case SYS_EXIT:
     process_exit((int)arg1);
@@ -142,6 +140,9 @@ void syscall_handler(registers_t *regs) {
     break;
   case SYS_KILL:
     regs->rax = process_send_signal((u32)arg1, (int)arg2);
+    break;
+  case SYS_UNAME:
+    regs->rax = (u64)sys_uname((struct utsname *)arg1);
     break;
   default:
     com1_printf("Unknown syscall: %d\n", syscall_number);

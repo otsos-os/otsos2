@@ -24,29 +24,22 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SYSCALL_H
-#define SYSCALL_H
-
-#include <kernel/interrupts/idt.h>
+#include <kernel/posix/posix.h>
+#include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
 
-#define SYS_READ 0
-#define SYS_WRITE 1
-#define SYS_OPEN 2
-#define SYS_CLOSE 3
-#define SYS_LSEEK 8
-#define SYS_MMAP 9
-#define SYS_PIPE 22
-#define SYS_CLONE 56
-#define SYS_FORK 57
-#define SYS_EXECVE 59
-#define SYS_EXIT 60
-#define SYS_WAIT 61
-#define SYS_KILL 62
-#define SYS_UNAME 63
+int sys_uname(struct utsname *buf) {
+  if (!is_user_address(buf, sizeof(struct utsname))) {
+    return -1;
+  }
 
-void syscall_init(void);
-void syscall_handler(registers_t *regs);
-int syscall_is_initialized(void);
+  memset(buf, 0, sizeof(struct utsname));
+  strcpy(buf->sysname, "otsos2");
+  strcpy(buf->nodename, "localhost");
+  strcpy(buf->release, "2.0.1");
+  strcpy(buf->version, "otsos2-kernel-rev2");
+  strcpy(buf->machine, "x86_64");
+  strcpy(buf->domainname, "localdomain");
 
-#endif
+  return 0;
+}
