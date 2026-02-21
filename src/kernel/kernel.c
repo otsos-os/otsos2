@@ -476,10 +476,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
       com1_printf(
           "[KERNEL] Found init module at %p, size %d. Starting init...\n",
           init_module_start, init_module_size);
-      volatile int a = 2;
-      volatile int b = 0;
-      int res = a / b; 
-      com1_printf("res: %d\n", res);
+      
       userspace_load_init(init_module_start, (u64)init_module_size);
     } else {
       com1_printf(
