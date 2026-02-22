@@ -26,6 +26,7 @@
 
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/keyboard/ps2.h>
+#include <kernel/kshell/kshell.h>
 #include <kernel/drivers/power/power.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
@@ -40,8 +41,8 @@ const char kbd_us[128] = {
     0,    '\\', 'z', 'x',  'c',  'v', 'b', 'n', 'm', ',',
     '.',  '/',  0,                                      /* 0x2A - 0x37 */
     '*',  0,    ' ', 0,                                 /* 0x38 - 0x3B */
-    0,    0,    0,   0,    0,    0,   0,   0,   0,   0, /* Function keys */
-    0,                                                  /* 0x46: Scroll Lock */
+    0,    0,    0,   0,    0,    0,   0,   0,   0,   0, /* 0x3C - 0x45: F2..NumLock */
+    0,    0,                                              /* 0x46: Scroll Lock */
     '7',  '8',  '9', '-',  '4',  '5', '6', '+', '1', '2',
     '3',  '0',  '.',          /* 0x47 - 0x53: Numpad */
     0,    0,    0,   0,    0, /* Rest are 0 */
@@ -53,7 +54,7 @@ const char kbd_us_caps[128] = {
     '{', '}',  '\n', 0,   'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L',
     ':', '\"', '~',  0,   '|', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<',
     '>', '?',  0,    '*', 0,   ' ', 0,   0,   0,   0,   0,   0,   0,
-    0,   0,    0,    0,   0,   '7', '8', '9', '-', '4', '5', '6', '+',
+    0,   0,    0,    0,   0,   0,   '7', '8', '9', '-', '4', '5', '6', '+',
     '1', '2',  '3',  '0', '.', 0,   0,   0,   0,   0,
 };
 
@@ -79,6 +80,7 @@ static int caps_lock_down = 0;
 static int ps2_ready = 0;
 static int scancode_extended = 0;
 static int ps2_debug = 0;
+static int kshell_hotkey_latch = 0;
 
 static void ps2_debug_status(const char *tag, u8 status, u8 data) {
   if (!ps2_debug) {
@@ -275,6 +277,17 @@ static void buffer_write(char c) {
   }
 }
 
+void ps2_keyboard_reset_state(void) {
+  kb_head = 0;
+  kb_tail = 0;
+  shift_pressed = 0;
+  ctrl_pressed = 0;
+  alt_pressed = 0;
+  caps_lock_down = 0;
+  scancode_extended = 0;
+  kshell_hotkey_latch = 0;
+}
+
 char ps2_keyboard_getchar() {
   if (kb_head == kb_tail) {
     return 0;
@@ -303,6 +316,16 @@ static void ps2_process_scancode(u8 scancode) {
     u8 code = scancode & 0x7F;
     int released = (scancode & 0x80) != 0;
     keyboard_handle_scancode(code, released, 1);
+    if (!released && code == 0x35) {
+      buffer_write('/');
+      scancode_extended = 0;
+      return;
+    }
+    if (code == 0x1D) {
+      ctrl_pressed = released ? 0 : 1;
+    } else if (code == 0x38) {
+      alt_pressed = released ? 0 : 1;
+    }
     scancode_extended = 0;
     return;
   }
@@ -326,6 +349,7 @@ static void ps2_process_scancode(u8 scancode) {
       }
       caps_lock_down = 0;
     }
+
     return;
   }
 
@@ -352,6 +376,21 @@ static void ps2_process_scancode(u8 scancode) {
   if (ctrl_pressed && alt_pressed && shift_pressed && scancode == 0x2C) {
     com1_printf("[PS2] Ctrl+Alt+Shift+Z pressed, rebooting...\n");
     power_controller_reboot();
+  }
+
+  if (ctrl_pressed && shift_pressed && scancode == 0x0E ) {
+    kshell_request_open();
+    return;
+  }
+
+  if (scancode == 0x4A) {
+    buffer_write('-');
+    return;
+  }
+
+  if (scancode == 0x4E) {
+    buffer_write('+');
+    return;
   }
 
   char c = 0;

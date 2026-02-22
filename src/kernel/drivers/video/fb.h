@@ -42,6 +42,7 @@ void fb_put_char(int x, int y, char c, u32 color);
 void fb_write_string(int x, int y, const char *str, u32 color);
 u32 fb_get_width();
 u32 fb_get_height();
+u64 fb_get_address();
 void fb_scroll(int lines);
 
 #endif

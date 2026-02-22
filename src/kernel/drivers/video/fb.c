@@ -170,6 +170,7 @@ int is_framebuffer_enabled() { return framebuffer != 0; }
 
 u32 fb_get_width() { return width; }
 u32 fb_get_height() { return height; }
+u64 fb_get_address() { return (u64)framebuffer; }
 
 void fb_scroll(int lines) {
   if (!framebuffer)

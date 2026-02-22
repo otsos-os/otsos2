@@ -76,6 +76,9 @@ PCI_BAR_O = ../bin/pci_bar.o
 WATCHDOG_O = ../bin/watchdog.o
 WATCHDOG_I6300ESB_O = ../bin/watchdog_i6300esb.o
 WATCHDOG_ICH_TCO_O = ../bin/watchdog_ich_tco.o
+KSHELL_O = ../bin/kshell.o
+KSHELL_PARSER_O = ../bin/kshell_parser.o
+KSHELL_ECHO_O = ../bin/kshell_echo.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
       $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(VGA_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
@@ -83,9 +86,45 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_
       $(UNAME_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
-      $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O)
+      $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O) \
+      $(KSHELL_O) $(KSHELL_PARSER_O) $(KSHELL_ECHO_O)
 
-all: $(ISO_IMAGE)
+.PHONY: all ask_version
+
+all: ask_version $(ISO_IMAGE)
+
+ask_version:
+	@set -e; \
+	if [ -t 0 ]; then \
+		printf "do you want to update kernel version? [y/N] "; \
+		read ans; \
+		case "$$ans" in \
+			y|Y|yes|YES) \
+				cur_ver=$$(sed -n 's/.*strcpy(buf->release, "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)").*/\1/p' kernel/posix/uname.c | head -n1); \
+				if [ -z "$$cur_ver" ]; then \
+					echo "  VERSION failed to parse kernel version from kernel/posix/uname.c"; \
+					exit 1; \
+				fi; \
+				IFS=.; set -- $$cur_ver; \
+				major=$$1; minor=$$2; patch=$$3; \
+				patch=$$((patch + 1)); \
+				if [ $$patch -ge 10 ]; then \
+					patch=0; \
+					minor=$$((minor + 1)); \
+				fi; \
+				if [ $$minor -ge 10 ]; then \
+					minor=0; \
+					major=$$((major + 1)); \
+				fi; \
+				next_ver="$$major.$$minor.$$patch"; \
+				sed -i 's/strcpy(buf->release, "[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*")/strcpy(buf->release, "'"$$next_ver"'")/' kernel/posix/uname.c; \
+				echo "  VERSION $$cur_ver -> $$next_ver";; \
+			*) \
+				echo "  VERSION unchanged";; \
+		esac; \
+	else \
+		echo "  VERSION prompt skipped (non-interactive shell)"; \
+	fi
 
 INIT_BIN = ../init/init
 
@@ -332,6 +371,18 @@ $(WATCHDOG_I6300ESB_O): kernel/drivers/watchdog/devices/i6300esb.c kernel/driver
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(WATCHDOG_ICH_TCO_O): kernel/drivers/watchdog/devices/ich_tco.c kernel/drivers/watchdog/watchdog.h kernel/pci/pci.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(KSHELL_O): kernel/kshell/kshell.c kernel/kshell/kshell.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(KSHELL_PARSER_O): kernel/kshell/parser.c kernel/kshell/kshell.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(KSHELL_ECHO_O): kernel/kshell/commands/echo.c kernel/kshell/kshell.h kernel/process.h kernel/posix/posix.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

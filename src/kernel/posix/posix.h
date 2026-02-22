@@ -107,6 +107,7 @@ struct utsname {
 
 int sys_read(int fd, void *buf, u32 count);
 int sys_uname(struct utsname *buf);
+void uname_fill(struct utsname *buf);
 int sys_write(int fd, const void *buf, u32 count);
 int sys_open(const char *path, int flags);
 int sys_close(int fd);

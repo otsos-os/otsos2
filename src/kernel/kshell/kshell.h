@@ -24,14 +24,24 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef PS2_H
-#define PS2_H
+#ifndef KSHELL_H
+#define KSHELL_H
 
-int ps2_keyboard_init();
-void ps2_keyboard_handler();
-char ps2_keyboard_getchar();
-void ps2_keyboard_poll();
-void ps2_keyboard_reset_state(void);
-int ps2Scanf(const char *format, ...);
+#include <mlibc/mlibc.h>
+
+#define KSHELL_MAX_LINE 256
+#define KSHELL_MAX_ARGS 16
+
+void kshell_set_boot_info(int is_multiboot2);
+void kshell_run(void);
+void kshell_request_open(void);
+int kshell_try_open_if_requested(void);
+void kshell_console_clear(void);
+void kshell_console_putc(char c);
+void kshell_console_write(const char *s);
+void kshell_console_write_int(int value);
+void kshell_console_write_ptr(const void *ptr);
+int kshell_parse_line(char *line, char *argv[], int max_args);
+int kshell_echo_command(int argc, char *argv[]);
 
 #endif

@@ -26,6 +26,7 @@
 
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/keyboard/ps2.h>
+#include <kernel/kshell/kshell.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
@@ -68,6 +69,11 @@ void keyboard_manager_init() {
 
 char keyboard_getchar() {
   char c = 0;
+
+  if (kshell_try_open_if_requested()) {
+    return 0;
+  }
+
   if (current_driver) {
     if (current_driver->poll) {
       current_driver->poll();
@@ -77,12 +83,19 @@ char keyboard_getchar() {
     }
   }
 
+  if (kshell_try_open_if_requested()) {
+    return 0;
+  }
+
   return c;
 }
 
 char keyboard_getchar_blocking() {
   char c = 0;
   while ((c = keyboard_getchar()) == 0) {
+    if (kshell_try_open_if_requested()) {
+      continue;
+    }
     __asm__ volatile("hlt");
   }
   return c;
@@ -100,6 +113,12 @@ void keyboard_poll() {
   }
 }
 
+void keyboard_reset_state(void) {
+  if (current_driver == &ps2_driver) {
+    ps2_keyboard_reset_state();
+  }
+}
+
 void keyboard_set_scancode_callback(keyboard_scancode_callback_t cb) {
   scancode_callback = cb;
 }
@@ -108,6 +127,13 @@ void keyboard_handle_scancode(u8 scancode, int released, int extended) {
   if (scancode_callback) {
     scancode_callback(scancode, released, extended);
   }
+}
+
+const char *keyboard_get_driver_name(void) {
+  if (!current_driver) {
+    return NULL;
+  }
+  return current_driver->name;
 }
 
 static char helper_read_char() {

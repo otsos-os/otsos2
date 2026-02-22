@@ -28,18 +28,21 @@
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
 
+void uname_fill(struct utsname *buf) {
+  memset(buf, 0, sizeof(struct utsname));
+  strcpy(buf->sysname, "otsos2");
+  strcpy(buf->nodename, "localhost");
+  strcpy(buf->release, "2.3.2");
+  strcpy(buf->version, "otsos2-kernel-rev2");
+  strcpy(buf->machine, "x86_64");
+  strcpy(buf->domainname, "localdomain");
+}
+
 int sys_uname(struct utsname *buf) {
   if (!is_user_address(buf, sizeof(struct utsname))) {
     return -EFAULT;
   }
 
-  memset(buf, 0, sizeof(struct utsname));
-  strcpy(buf->sysname, "otsos2");
-  strcpy(buf->nodename, "localhost");
-  strcpy(buf->release, "2.0.1");
-  strcpy(buf->version, "otsos2-kernel-rev2");
-  strcpy(buf->machine, "x86_64");
-  strcpy(buf->domainname, "localdomain");
-
+  uname_fill(buf);
   return 0;
 }

@@ -43,6 +43,7 @@
 #include <kernel/panic.h>
 #include <kernel/pci/pci.h>
 #include <kernel/posix/posix.h>
+#include <kernel/kshell/kshell.h>
 #include <kernel/syscall.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
@@ -408,6 +409,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   sleep(430);
 
   keyboard_manager_init();
+  kshell_set_boot_info(is_multiboot2);
 
   tty_set_active(1);
 
@@ -537,9 +539,11 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
     if (safe_mode) {
       printf("\n\033[33m--- SAFE MOD ---\033[0m\n");
       printf("init and userlang are disabled.\n");
+      kshell_run();
     } else if (debug_mode) {
       printf("\n\033[36m--- DEBUG MODE ---\033[0m\n");
       printf("userspace disabled because filesystem is unavailable.\n");
+      kshell_run();
     }
 
     while (1) {

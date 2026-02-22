@@ -50,8 +50,10 @@ char keyboard_getchar();
 char keyboard_getchar_blocking();
 void keyboard_common_handler();
 void keyboard_poll();
+void keyboard_reset_state(void);
 int scanf(const char *format, ...);
 void keyboard_set_scancode_callback(keyboard_scancode_callback_t cb);
 void keyboard_handle_scancode(u8 scancode, int released, int extended);
+const char *keyboard_get_driver_name(void);
 
 #endif

@@ -24,14 +24,40 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef PS2_H
-#define PS2_H
+#include <kernel/kshell/kshell.h>
 
-int ps2_keyboard_init();
-void ps2_keyboard_handler();
-char ps2_keyboard_getchar();
-void ps2_keyboard_poll();
-void ps2_keyboard_reset_state(void);
-int ps2Scanf(const char *format, ...);
+static int kshell_is_space(char c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
 
-#endif
+int kshell_parse_line(char *line, char *argv[], int max_args) {
+  int argc = 0;
+  int i = 0;
+
+  if (!line || !argv || max_args <= 0) {
+    return 0;
+  }
+
+  while (line[i] != '\0') {
+    while (kshell_is_space(line[i])) {
+      line[i] = '\0';
+      i++;
+    }
+
+    if (line[i] == '\0') {
+      break;
+    }
+
+    if (argc >= max_args) {
+      break;
+    }
+
+    argv[argc++] = &line[i];
+
+    while (line[i] != '\0' && !kshell_is_space(line[i])) {
+      i++;
+    }
+  }
+
+  return argc;
+}
