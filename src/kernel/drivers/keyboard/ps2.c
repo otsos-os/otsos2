@@ -59,6 +59,12 @@ const char kbd_us_caps[128] = {
 
 #define KBD_DATA_PORT 0x60
 #define KBD_STATUS_PORT 0x64
+#define PS2_KBD_CMD_SET_LEDS 0xED
+#define PS2_KBD_ACK 0xFA
+#define PS2_KBD_RESEND 0xFE
+#define PS2_LED_SCROLL 0x01
+#define PS2_LED_NUM 0x02
+#define PS2_LED_CAPS 0x04
 
 #define KB_BUFFER_SIZE 256
 static char kb_buffer[KB_BUFFER_SIZE];
@@ -69,6 +75,7 @@ static int shift_pressed = 0;
 static int ctrl_pressed = 0;
 static int alt_pressed = 0;
 static int caps_lock = 0;
+static int caps_lock_down = 0;
 static int ps2_ready = 0;
 static int scancode_extended = 0;
 static int ps2_debug = 0;
@@ -128,11 +135,51 @@ static int ps2_read_data(u8 *data) {
   return 0;
 }
 
+static int ps2_update_leds(void) {
+  u8 led_mask = 0;
+  if (caps_lock) {
+    led_mask |= PS2_LED_CAPS;
+  }
+
+  for (int attempt = 0; attempt < 3; attempt++) {
+    u8 resp = 0;
+    if (ps2_write_data(PS2_KBD_CMD_SET_LEDS) != 0) {
+      return -1;
+    }
+    if (ps2_read_data(&resp) != 0) {
+      return -1;
+    }
+    if (resp == PS2_KBD_RESEND) {
+      continue;
+    }
+    if (resp != PS2_KBD_ACK) {
+      return -1;
+    }
+
+    if (ps2_write_data(led_mask) != 0) {
+      return -1;
+    }
+    if (ps2_read_data(&resp) != 0) {
+      return -1;
+    }
+    if (resp == PS2_KBD_RESEND) {
+      continue;
+    }
+    if (resp != PS2_KBD_ACK) {
+      return -1;
+    }
+    return 0;
+  }
+
+  return -1;
+}
+
 int ps2_keyboard_init() {
   kb_head = 0;
   kb_tail = 0;
   shift_pressed = 0;
   caps_lock = 0;
+  caps_lock_down = 0;
   ps2_ready = 0;
   scancode_extended = 0;
 
@@ -214,6 +261,8 @@ int ps2_keyboard_init() {
     }
   }
 
+  (void)ps2_update_leds();
+
   ps2_ready = 1;
   return 0;
 }
@@ -236,7 +285,7 @@ char ps2_keyboard_getchar() {
 }
 
 static void ps2_process_scancode(u8 scancode) {
-  if (scancode == 0xFA || scancode == 0xFE || scancode == 0xAA) {
+  if (scancode == 0xFA || scancode == 0xFE) {
     return;
   }
 
@@ -270,6 +319,12 @@ static void ps2_process_scancode(u8 scancode) {
       ctrl_pressed = 0;
     } else if (scancode == 0x38) {
       alt_pressed = 0;
+    } else if (scancode == 0x3A) {
+      if (caps_lock_down) {
+        caps_lock = !caps_lock;
+        (void)ps2_update_leds();
+      }
+      caps_lock_down = 0;
     }
     return;
   }
@@ -290,7 +345,7 @@ static void ps2_process_scancode(u8 scancode) {
   }
 
   if (scancode == 0x3A) {
-    caps_lock = !caps_lock;
+    caps_lock_down = 1;
     return;
   }
 
