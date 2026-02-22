@@ -189,7 +189,8 @@ void pci_init(void) {
     return;
   }
 
-  pci_scan();
+  int devices = pci_scan();
+  com1_printf("[PCI] scan complete: %d device(s)\n", devices);
   pci_attach_all_devices();
   pci_initialized = 1;
 }

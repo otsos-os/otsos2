@@ -30,14 +30,38 @@
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
-static void pata_wait_bsy() {
-  while (inb(IDE_STATUS) & IDE_STATUS_BSY)
-    ;
+static int pata_registered = 0;
+
+static int pata_wait_not_bsy(u32 timeout) {
+  while (timeout--) {
+    u8 status = inb(IDE_STATUS);
+    if (status == 0 || status == 0xFF) {
+      return -1;
+    }
+    if (status & IDE_STATUS_ERR) {
+      return -1;
+    }
+    if ((status & IDE_STATUS_BSY) == 0) {
+      return 0;
+    }
+  }
+  return -1;
 }
 
-static void pata_wait_drq() {
-  while (!(inb(IDE_STATUS) & IDE_STATUS_DRQ))
-    ;
+static int pata_wait_drq(u32 timeout) {
+  while (timeout--) {
+    u8 status = inb(IDE_STATUS);
+    if (status == 0 || status == 0xFF) {
+      return -1;
+    }
+    if (status & IDE_STATUS_ERR) {
+      return -1;
+    }
+    if ((status & IDE_STATUS_BSY) == 0 && (status & IDE_STATUS_DRQ)) {
+      return 0;
+    }
+  }
+  return -1;
 }
 
 struct pata_dummy_area {
@@ -97,12 +121,25 @@ void pata_identify(unsigned short *target_buf) {
   outb(IDE_COMMAND, IDE_CMD_IDENTIFY);
 
   unsigned char status = inb(IDE_STATUS);
-  if (status == 0) {
+  if (status == 0 || status == 0xFF) {
     com1_printf("PATA: No drive found.\n");
     return;
   }
 
-  pata_wait_bsy();
+  if (pata_wait_not_bsy(1000000) != 0) {
+    com1_printf("PATA: Identify timeout/error (BSY)\n");
+    return;
+  }
+
+  if (inb(IDE_LBA_MID) != 0 || inb(IDE_LBA_HIGH) != 0) {
+    com1_printf("PATA: Device is not ATA/PATA (ATAPI or unsupported)\n");
+    return;
+  }
+
+  if (pata_wait_drq(1000000) != 0) {
+    com1_printf("PATA: Identify timeout/error (DRQ)\n");
+    return;
+  }
 
   u32 magic_before = g_chainfs.superblock.magic;
   if (target_buf) {
@@ -117,6 +154,9 @@ void pata_identify(unsigned short *target_buf) {
   debug_chainfs_magic_change(magic_before, "pata_identify");
 
   com1_printf("PATA: Drive identified successfully.\n");
+  if (pata_registered) {
+    return;
+  }
 
   pata_disk.type = DISK_TYPE_PATA;
   pata_disk.sector_size = 512;
@@ -137,7 +177,9 @@ void pata_identify(unsigned short *target_buf) {
   }
   pata_disk.name[i] = 0;
 
-  disk_register(&pata_disk);
+  if (disk_register(&pata_disk) >= 0) {
+    pata_registered = 1;
+  }
 }
 
 void pata_disk_read(struct disk *self, u32 lba, u8 *buffer) {
@@ -149,7 +191,12 @@ void pata_disk_write(struct disk *self, u32 lba, u8 *buffer) {
 }
 
 void pata_read_sector(unsigned int lba, unsigned char *buffer) {
-  pata_wait_bsy();
+  if (pata_wait_not_bsy(1000000) != 0) {
+    if (buffer) {
+      memset(buffer, 0, 512);
+    }
+    return;
+  }
 
   outb(IDE_DRIVE_SEL, 0xE0 | ((lba >> 24) & 0x0F));
   outb(IDE_FEATURES, 0x00);
@@ -159,8 +206,12 @@ void pata_read_sector(unsigned int lba, unsigned char *buffer) {
   outb(IDE_LBA_HIGH, (unsigned char)(lba >> 16));
   outb(IDE_COMMAND, IDE_CMD_READ);
 
-  pata_wait_bsy();
-  pata_wait_drq();
+  if (pata_wait_not_bsy(1000000) != 0 || pata_wait_drq(1000000) != 0) {
+    if (buffer) {
+      memset(buffer, 0, 512);
+    }
+    return;
+  }
 
   debug_chainfs_overlap(buffer, 256, "pata_read_sector");
   u32 magic_before = g_chainfs.superblock.magic;
@@ -169,7 +220,9 @@ void pata_read_sector(unsigned int lba, unsigned char *buffer) {
 }
 
 void pata_write_sector(unsigned int lba, unsigned char *buffer) {
-  pata_wait_bsy();
+  if (pata_wait_not_bsy(1000000) != 0) {
+    return;
+  }
 
   outb(IDE_DRIVE_SEL, 0xE0 | ((lba >> 24) & 0x0F));
   outb(IDE_FEATURES, 0x00);
@@ -179,11 +232,12 @@ void pata_write_sector(unsigned int lba, unsigned char *buffer) {
   outb(IDE_LBA_HIGH, (unsigned char)(lba >> 16));
   outb(IDE_COMMAND, IDE_CMD_WRITE);
 
-  pata_wait_bsy();
-  pata_wait_drq();
+  if (pata_wait_not_bsy(1000000) != 0 || pata_wait_drq(1000000) != 0) {
+    return;
+  }
 
   outsw(IDE_DATA, buffer, 256);
 
   outb(IDE_COMMAND, 0xE7);
-  pata_wait_bsy();
+  (void)pata_wait_not_bsy(1000000);
 }

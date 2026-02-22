@@ -91,9 +91,9 @@
 .set PIT_FREQ,              1193182         
 .set TARGET_FREQ,           100             
 
-.set MENU_ITEMS,            4               
+.set MENU_ITEMS,            5               
 .set MENU_START_Y,          10              
-.set AUTO_BOOT_TIMEOUT,     5               
+.set AUTO_BOOT_TIMEOUT,     10              
 
 .section .multiboot
 .align 8
@@ -156,6 +156,8 @@ timer_ticks:
     .long 0                     
 boot_timeout:
     .long AUTO_BOOT_TIMEOUT     
+pit_last_counter:
+    .long 0xFFFFFFFF
 menu_active:
     .byte 1                     
 error_code:
@@ -210,8 +212,9 @@ border_side:    .asciz "║"
 
 menu_item0:     .asciz "  > boot OTSOS default                    "
 menu_item1:     .asciz "  > boot OTSOS safe mode                  "
-menu_item2:     .asciz "  > system info                           "
-menu_item3:     .asciz "  > reboot                                "
+menu_item2:     .asciz "  > boot OTSOS debug mode                 "
+menu_item3:     .asciz "  > system info                           "
+menu_item4:     .asciz "  > reboot                                "
 
 msg_booting:        .asciz "Boot OTSOS..."
 msg_safe_mode:      .asciz "starting in safe mode..."
@@ -841,6 +844,8 @@ update_menu_display:
     je .Litem2
     cmp edi, 3
     je .Litem3
+    cmp edi, 4
+    je .Litem4
     jmp .Lnext_item
     
 .Litem0:
@@ -854,7 +859,10 @@ update_menu_display:
     jmp .Lprint_item
 .Litem3:
     mov esi, offset menu_item3
-    
+    jmp .Lprint_item
+.Litem4:
+    mov esi, offset menu_item4
+
 .Lprint_item:
     call print_string
     
@@ -888,7 +896,21 @@ update_timer_display:
     mov ecx, 220                
     mov edx, 0xFF4444           
     mov eax, [boot_timeout]
-    add eax, '0'                
+    xor edx, edx
+    mov esi, 10
+    div esi
+    test eax, eax
+    jz .Ltimer_tens_space
+    add al, '0'
+    jmp .Ltimer_tens_draw
+.Ltimer_tens_space:
+    mov al, ' '
+.Ltimer_tens_draw:
+    call fb_put_char
+
+    mov ebx, 312
+    mov eax, edx
+    add al, '0'
     call fb_put_char
     
     pop esi
@@ -974,15 +996,16 @@ menu_loop:
     cmp dword ptr [boot_timeout], 0xFFFFFFFF
     je .Lmenu_main_loop
 
-    mov ecx, 0x200000           
-.Ldelay_loop:
-    nop
-    dec ecx
-    jnz .Ldelay_loop
-    
+    call pit_read_counter
+    mov ecx, [pit_last_counter]
+    cmp ecx, 0xFFFFFFFF
+    je .Lpit_first_sample
+    cmp eax, ecx
+    jbe .Lpit_store_and_continue
     inc dword ptr [timer_ticks]
-    cmp dword ptr [timer_ticks], 100 
-    jl .Lmenu_main_loop         
+
+    cmp dword ptr [timer_ticks], TARGET_FREQ
+    jl .Lpit_store_and_continue
     
     mov dword ptr [timer_ticks], 0
     
@@ -993,7 +1016,13 @@ menu_loop:
     dec eax
     mov [boot_timeout], eax
     call update_timer_display
-    
+
+.Lpit_store_and_continue:
+    mov [pit_last_counter], eax
+    jmp .Lmenu_main_loop
+
+.Lpit_first_sample:
+    mov [pit_last_counter], eax
     jmp .Lmenu_main_loop
     
 .Lauto_boot:
@@ -1008,8 +1037,10 @@ menu_loop:
     cmp eax, 1
     je .Lboot_safe
     cmp eax, 2
-    je .Lshow_sysinfo
+    je .Lboot_debug
     cmp eax, 3
+    je .Lshow_sysinfo
+    cmp eax, 4
     je .Lreboot
     
     jmp .Lmenu_main_loop
@@ -1021,6 +1052,13 @@ menu_loop:
     ret                         
     
 .Lboot_safe:
+    
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+.Lboot_debug:
     
     pop ecx
     pop ebx
@@ -1047,6 +1085,20 @@ init_pit_timer:
     out PIT_CHANNEL0, al
     
     pop eax
+    ret
+
+pit_read_counter:
+    push edx
+    xor eax, eax
+    out PIT_COMMAND, al
+    in al, PIT_CHANNEL0
+    mov dl, al
+    in al, PIT_CHANNEL0
+    movzx eax, al
+    shl eax, 8
+    movzx edx, dl
+    or eax, edx
+    pop edx
     ret
 
 show_system_info:

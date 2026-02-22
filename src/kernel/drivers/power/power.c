@@ -33,6 +33,7 @@
  */
 
 #include <kernel/drivers/acpi/acpi.h>
+#include <kernel/drivers/power/pbutton.h>
 #include <kernel/drivers/power/power.h>
 #include <kernel/panic.h>
 #include <lib/com1.h>
@@ -196,6 +197,8 @@ int power_init(void) {
   com1_printf("[POWER] initialized: PM1a=0x%x PM1b=0x%x SLP_TYP_S5=%u/%u\n",
               g_power.pm1a_control, g_power.pm1b_control, g_power.slp_typa_s5,
               g_power.slp_typb_s5);
+
+  (void)power_button_init();
 
   return 0;
 }

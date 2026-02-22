@@ -32,6 +32,10 @@ u64 g_chainfs_phys = 0;
 #define ENTRIES_PER_BLOCK (CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t))
 
 int chainfs_init(disk_t *disk) {
+  if (!disk) {
+    com1_printf("ChainFS: init failed, disk is NULL\n");
+    return -1;
+  }
   g_chainfs.disk = disk;
   com1_printf("ChainFS: Initializing... (g_chainfs at %p, disk: %s)\n",
               &g_chainfs, disk ? disk->name : "NULL");
@@ -70,17 +74,36 @@ int chainfs_init(disk_t *disk) {
 }
 
 int chainfs_format(u32 total_blocks, u32 max_files) {
+  if (!g_chainfs.disk) {
+    com1_printf("ChainFS: format failed, disk is NULL\n");
+    return -1;
+  }
+  if (total_blocks < 8 || max_files == 0) {
+    com1_printf("ChainFS: format failed, invalid params blocks=%u files=%u\n",
+                total_blocks, max_files);
+    return -1;
+  }
+
   com1_printf("ChainFS: Formatting disk with %u blocks, %u max files\n",
               total_blocks, max_files);
 
   u32 entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t);
   u32 file_table_blocks =
       (max_files + entries_per_block - 1) / entries_per_block;
+  if (file_table_blocks >= (total_blocks - 2)) {
+    com1_printf("ChainFS: format failed, file table too large (%u blocks)\n",
+                file_table_blocks);
+    return -1;
+  }
 
   u32 data_blocks = total_blocks - 1 - file_table_blocks;
   u32 map_entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(u32);
   u32 block_map_blocks =
       (data_blocks + map_entries_per_block - 1) / map_entries_per_block;
+  if (1 + file_table_blocks + block_map_blocks >= total_blocks) {
+    com1_printf("ChainFS: format failed, no data area left\n");
+    return -1;
+  }
 
   data_blocks = total_blocks - 1 - file_table_blocks - block_map_blocks;
 
@@ -372,6 +395,11 @@ int chainfs_read_file_range(const char *filename, u8 *buffer, u32 buffer_size,
 }
 
 int chainfs_write_file(const char *filename, const u8 *data, u32 size) {
+  if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+    com1_printf("ChainFS: write failed, filesystem not initialized\n");
+    return -1;
+  }
+
   chainfs_file_entry_t entry;
   u32 entry_block, entry_offset;
   int file_exists =
@@ -668,6 +696,11 @@ int chainfs_resolve_path(const char *path, chainfs_file_entry_t *entry,
 
 // Create directory
 int chainfs_mkdir(const char *path) {
+  if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+    com1_printf("ChainFS: mkdir failed, filesystem not initialized\n");
+    return -1;
+  }
+
   // Find parent directory
   char parent_path[CHAINFS_MAX_PATH];
   char dir_name[32];
@@ -757,6 +790,11 @@ int chainfs_mkdir(const char *path) {
 }
 
 int chainfs_mknod(const char *path, u16 major, u16 minor) {
+  if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+    com1_printf("ChainFS: mknod failed, filesystem not initialized\n");
+    return -1;
+  }
+
   char parent_path[CHAINFS_MAX_PATH];
   char node_name[32];
 

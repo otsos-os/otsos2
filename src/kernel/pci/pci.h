@@ -134,6 +134,7 @@ int pci_unregister_driver(pci_driver_t *driver);
 int pci_scan(void);
 int pci_device_count(void);
 pci_device_t *pci_get_device(int index);
+void pci_set_verbose_scan(int enabled);
 
 u32 pci_cfg_read32(u8 bus, u8 slot, u8 function, u8 offset);
 u16 pci_cfg_read16(u8 bus, u8 slot, u8 function, u8 offset);

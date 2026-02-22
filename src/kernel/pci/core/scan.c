@@ -48,6 +48,11 @@ static const pci_class_info_t pci_class_table[] = {
     {0x06, 0x04, PCI_ANY_PROGIF, "Bridge", "PCI-to-PCI"},
 };
 
+/* Disabled by default. Enable in debug boot mode. */
+static int pci_verbose_scan = 0;
+
+void pci_set_verbose_scan(int enabled) { pci_verbose_scan = enabled ? 1 : 0; }
+
 static void pci_lookup_class(const pci_device_t *dev, const char **class_name,
                              const char **subclass_name) {
   *class_name = "Unknown";
@@ -223,7 +228,9 @@ static void pci_add_device(u8 bus, u8 slot, u8 function) {
   }
 
   pci_fill_device(&pci_devices[pci_device_count_val], bus, slot, function);
-  pci_debug_device(&pci_devices[pci_device_count_val]);
+  if (pci_verbose_scan) {
+    pci_debug_device(&pci_devices[pci_device_count_val]);
+  }
   pci_device_count_val++;
 }
 

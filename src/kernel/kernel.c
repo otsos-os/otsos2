@@ -192,6 +192,17 @@ static int disk_has_type(disk_type_t type) {
   return 0;
 }
 
+static disk_t *disk_find_type(disk_type_t type) {
+  int count = disk_count();
+  for (int i = 0; i < count; i++) {
+    disk_t *disk = disk_get(i);
+    if (disk && disk->type == type) {
+      return disk;
+    }
+  }
+  return NULL;
+}
+
 static int timer_sanity_check(void) {
   if (!timer_is_initialized()) {
     return 0;
@@ -258,6 +269,9 @@ static void ensure_dev_nodes(void) {
 }
 
 void kmain(u64 magic, u64 addr, u64 boot_option) {
+  int safe_mode = (boot_option == 1);
+  int debug_mode = (boot_option == 2);
+
   com1_init();
   com1_set_mirror_callback(tty_com1_mirror);
   init_heap();
@@ -271,7 +285,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   syscall_init();
 
   disk_manager_init();
-  pata_identify(NULL); // Registers PATA disk (index 0 usually)
+  pata_identify(NULL);
 
   // Create a 4MB ramdisk at 0x4000000 (ensure this doesn't overlap
   // kernel/bootstack)
@@ -346,6 +360,11 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
           boot_magic, MULTIBOOT_BOOTLOADER_MAGIC, MULTIBOOT2_BOOTLOADER_MAGIC);
   }
 
+  pci_set_verbose_scan(debug_mode);
+  if (debug_mode) {
+    com1_printf("[BOOT] Debug mode: verbose PCI scan enabled\n");
+  }
+
   power_init();
   pci_init();
   watchdog_init();
@@ -397,15 +416,31 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   printf("2. Live USB (RAM Disk)\n");
 
   disk_t *selected_disk = NULL;
+  disk_t *pata_disk = disk_find_type(DISK_TYPE_PATA);
+  disk_t *ram_disk = disk_find_type(DISK_TYPE_RAM);
   while (1) {
     char c = keyboard_getchar();
     if (c == '1') {
-      selected_disk = disk_get(0); // PATA
-      printf("Selected PATA\n");
+      if (!pata_disk) {
+        printf("PATA disk not available, fallback to RAM disk\n");
+        if (ram_disk) {
+          selected_disk = ram_disk;
+          printf("Selected RAM Disk (%s)\n", selected_disk->name);
+          break;
+        }
+        printf("RAM disk also not available\n");
+        continue;
+      }
+      selected_disk = pata_disk;
+      printf("Selected PATA (%s)\n", selected_disk->name);
       break;
     } else if (c == '2') {
-      selected_disk = disk_get(1); // RAM
-      printf("Selected RAM Disk\n");
+      if (!ram_disk) {
+        printf("RAM disk not available\n");
+        continue;
+      }
+      selected_disk = ram_disk;
+      printf("Selected RAM Disk (%s)\n", selected_disk->name);
       break;
     }
   }
@@ -414,16 +449,23 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   status_line("chainfs init", fs_ok);
   if (!fs_ok) {
     com1_printf("[CHAINFS] init failed, formatting disk...\n");
-    int fmt_ok = (chainfs_format(64, 8) == 0);
+    u32 format_blocks = 64;
+    if (selected_disk && selected_disk->total_sectors > 0 &&
+        selected_disk->total_sectors < format_blocks) {
+      format_blocks = selected_disk->total_sectors;
+    }
+    int fmt_ok = (chainfs_format(format_blocks, 8) == 0);
     status_line("chainfs format", fmt_ok);
     fs_ok = fmt_ok;
   }
   status_line("chainfs ready", fs_ok);
   if (fs_ok) {
     ensure_dev_nodes();
+  } else {
+    com1_printf("[CHAINFS] filesystem unavailable, skipping userspace startup\n");
   }
 
-  if (!boot_option) {
+  if (!safe_mode && fs_ok) {
     // pata_identify already called
 
     while (keyboard_getchar() != 0)
@@ -489,8 +531,16 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
       }
     }
   } else {
-    printf("\n\033[33m--- SAFE MOD ---\033[0m\n");
-    printf("init and userlang are disabled.\n");
+    if (!fs_ok) {
+      printf("\n\033[31mChainFS unavailable. Staying in kernel console.\033[0m\n");
+    }
+    if (safe_mode) {
+      printf("\n\033[33m--- SAFE MOD ---\033[0m\n");
+      printf("init and userlang are disabled.\n");
+    } else if (debug_mode) {
+      printf("\n\033[36m--- DEBUG MODE ---\033[0m\n");
+      printf("userspace disabled because filesystem is unavailable.\n");
+    }
 
     while (1) {
       char c = keyboard_getchar();

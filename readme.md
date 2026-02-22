@@ -12,6 +12,9 @@ It have **own kernel** writen from scratch
 
 it have **posix syscalls** like `open` `close` `clone` and more but it`s not fully posix compatibly it have **own syscalls** to.
 
+
+there are only 2 test lines: my pc (ASUS TUF Gaming FX706LI-H7010) and qemu.
+
 ---
 
 ### Disclaimer

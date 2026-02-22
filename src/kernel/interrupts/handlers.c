@@ -25,6 +25,7 @@
  */
 
 #include <kernel/drivers/keyboard/keyboard.h>
+#include <kernel/drivers/power/pbutton.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/drivers/tty.h>
 #include <kernel/drivers/vga.h>
@@ -97,6 +98,7 @@ void isr_handler(registers_t *regs) {
 void irq_handler(registers_t *regs) {
   if (regs->int_no == 32) {
     timer_handler();
+    power_button_poll();
     watchdog_tick();
     scheduler_tick(regs);
     keyboard_poll();
