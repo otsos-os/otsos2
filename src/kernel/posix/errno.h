@@ -24,22 +24,40 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/posix/posix.h>
-#include <kernel/useraddr.h>
-#include <mlibc/mlibc.h>
+#ifndef POSIX_ERRNO_H
+#define POSIX_ERRNO_H
 
-int sys_uname(struct utsname *buf) {
-  if (!is_user_address(buf, sizeof(struct utsname))) {
-    return -EFAULT;
-  }
+/* linux-compat errno values used by the kernel POSIX layer. */
+#define EPERM 1
+#define ENOENT 2
+#define ESRCH 3
+#define EINTR 4
+#define EIO 5
+#define ENXIO 6
+#define E2BIG 7
+#define ENOEXEC 8
+#define EBADF 9
+#define ECHILD 10
+#define EAGAIN 11
+#define ENOMEM 12
+#define EACCES 13
+#define EFAULT 14
+#define EBUSY 16
+#define EEXIST 17
+#define EXDEV 18
+#define ENODEV 19
+#define ENOTDIR 20
+#define EISDIR 21
+#define EINVAL 22
+#define ENFILE 23
+#define EMFILE 24
+#define ENOTTY 25
+#define EFBIG 27
+#define ENOSPC 28
+#define ESPIPE 29
+#define EROFS 30
+#define EPIPE 32
+#define ENOSYS 38
+#define ENOTSUP 95
 
-  memset(buf, 0, sizeof(struct utsname));
-  strcpy(buf->sysname, "otsos2");
-  strcpy(buf->nodename, "localhost");
-  strcpy(buf->release, "2.0.1");
-  strcpy(buf->version, "otsos2-kernel-rev2");
-  strcpy(buf->machine, "x86_64");
-  strcpy(buf->domainname, "localdomain");
-
-  return 0;
-}
+#endif

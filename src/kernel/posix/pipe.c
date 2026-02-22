@@ -36,7 +36,7 @@ static int posix_find_free_fd(void) {
       return i;
     }
   }
-  return -1;
+  return -EMFILE;
 }
 
 int pipe_read(pipe_t *p, void *buf, u32 count) {
@@ -69,7 +69,7 @@ int pipe_write(pipe_t *p, const void *buf, u32 count) {
     return 0;
   }
   if (p->readers == 0) {
-    return -1;
+    return -EPIPE;
   }
 
   u32 space = PIPE_BUF_SIZE - p->size;
@@ -93,7 +93,7 @@ int pipe_write(pipe_t *p, const void *buf, u32 count) {
 
 int sys_pipe(int fds[2]) {
   if (!is_user_address(fds, sizeof(int) * 2)) {
-    return -1;
+    return -EFAULT;
   }
 
   file_descriptor_t *fd_table = posix_get_fd_table();
@@ -101,31 +101,31 @@ int sys_pipe(int fds[2]) {
 
   int fd_read = posix_find_free_fd();
   if (fd_read < 0) {
-    return -1;
+    return -EMFILE;
   }
   fd_table[fd_read].used = 1;
   int fd_write = posix_find_free_fd();
   if (fd_write < 0) {
     fd_table[fd_read].used = 0;
-    return -1;
+    return -EMFILE;
   }
   fd_table[fd_read].used = 0;
 
   int of_read = posix_alloc_open_file();
   if (of_read < 0) {
-    return -1;
+    return -ENFILE;
   }
   int of_write = posix_alloc_open_file();
   if (of_write < 0) {
     posix_release_open_file(of_read);
-    return -1;
+    return -ENFILE;
   }
 
   pipe_t *p = (pipe_t *)kmalloc(sizeof(pipe_t));
   if (!p) {
     posix_release_open_file(of_read);
     posix_release_open_file(of_write);
-    return -1;
+    return -ENOMEM;
   }
   memset(p, 0, sizeof(pipe_t));
   p->readers = 1;

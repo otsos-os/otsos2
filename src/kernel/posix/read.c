@@ -38,11 +38,11 @@ int sys_read(int fd, void *buf, u32 count) {
 
   if (fd < 0 || fd >= MAX_FDS) {
     com1_printf("[DEBUG] sys_read: invalid fd %d\n", fd);
-    return -1;
+    return -EBADF;
   }
 
   if (!fd_table[fd].used) {
-    return -1;
+    return -EBADF;
   }
 
   if (count == 0) {
@@ -56,7 +56,7 @@ int sys_read(int fd, void *buf, u32 count) {
     if (proc && (proc->context.cs & 3) == 3) {
       process_exit(-1);
     }
-    return -1;
+    return -EFAULT;
   }
 
   if (fd == STDIN_FILENO) {
@@ -67,21 +67,21 @@ int sys_read(int fd, void *buf, u32 count) {
   if (of_index >= 0 && of_index < MAX_OPEN_FILES && oft[of_index].used &&
       oft[of_index].type == OFT_TYPE_TTY) {
     if (!(fd_table[fd].flags & O_RDONLY)) {
-      return -1;
+      return -EBADF;
     }
     return tty_read(buf, count);
   }
 
   if (!(fd_table[fd].flags & O_RDONLY)) {
-    return -1;
+    return -EBADF;
   }
 
   if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
-    return -1;
+    return -EIO;
   }
 
   if (of_index < 0 || of_index >= MAX_OPEN_FILES || !oft[of_index].used) {
-    return -1;
+    return -EBADF;
   }
 
   if (oft[of_index].type == OFT_TYPE_PIPE) {
@@ -92,7 +92,7 @@ int sys_read(int fd, void *buf, u32 count) {
   u32 entry_block, entry_offset;
   if (chainfs_find_file(oft[of_index].path, &entry, &entry_block,
                         &entry_offset) != 0) {
-    return -1;
+    return -ENOENT;
   }
 
   if (oft[of_index].offset >= entry.size) {
@@ -114,5 +114,5 @@ int sys_read(int fd, void *buf, u32 count) {
     return bytes_read;
   }
 
-  return -1;
+  return -EIO;
 }

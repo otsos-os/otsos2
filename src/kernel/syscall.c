@@ -146,7 +146,7 @@ void syscall_handler(registers_t *regs) {
     break;
   default:
     com1_printf("Unknown syscall: %d\n", syscall_number);
-    regs->rax = -1;
+    regs->rax = -ENOSYS;
     break;
   }
 }

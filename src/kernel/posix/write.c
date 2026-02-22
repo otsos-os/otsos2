@@ -59,7 +59,7 @@ int posix_alloc_open_file(void) {
       return i;
     }
   }
-  return -1;
+  return -ENFILE;
 }
 
 void posix_release_open_file(int index) {
@@ -156,11 +156,11 @@ int sys_write(int fd, const void *buf, u32 count) {
   open_file_t *oft = posix_get_open_file_table();
 
   if (fd < 0 || fd >= MAX_FDS) {
-    return -1;
+    return -EBADF;
   }
 
   if (!fd_table[fd].used) {
-    return -1;
+    return -EBADF;
   }
 
   if (count == 0) {
@@ -172,7 +172,7 @@ int sys_write(int fd, const void *buf, u32 count) {
     if (proc && (proc->context.cs & 3) == 3) {
       process_exit(-1);
     }
-    return -1;
+    return -EFAULT;
   }
 
   if (fd == STDOUT_FILENO || fd == STDERR_FILENO) {
@@ -183,23 +183,23 @@ int sys_write(int fd, const void *buf, u32 count) {
   if (of_index >= 0 && of_index < MAX_OPEN_FILES && oft[of_index].used &&
       oft[of_index].type == OFT_TYPE_TTY) {
     if (!(fd_table[fd].flags & O_WRONLY)) {
-      return -1;
+      return -EBADF;
     }
     return tty_write(buf, count);
   }
 
   if (!(fd_table[fd].flags & O_WRONLY)) {
-    return -1;
+    return -EBADF;
   }
 
   if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
     com1_printf("POSIX WRITE: ChainFS not initialized or corrupted magic: %x\n",
                 g_chainfs.superblock.magic);
-    return -1;
+    return -EIO;
   }
 
   if (of_index < 0 || of_index >= MAX_OPEN_FILES || !oft[of_index].used) {
-    return -1;
+    return -EBADF;
   }
 
   if (oft[of_index].type == OFT_TYPE_PIPE) {
@@ -210,7 +210,7 @@ int sys_write(int fd, const void *buf, u32 count) {
   u32 entry_block, entry_offset;
   if (chainfs_find_file(oft[of_index].path, &entry, &entry_block,
                         &entry_offset) != 0) {
-    return -1;
+    return -ENOENT;
   }
 
   if (fd_table[fd].flags & O_APPEND) {
@@ -223,7 +223,7 @@ int sys_write(int fd, const void *buf, u32 count) {
 
   u8 *new_data = (u8 *)kcalloc(new_size, 1);
   if (!new_data) {
-    return -1;
+    return -ENOMEM;
   }
 
   if (entry.size > 0) {
@@ -231,7 +231,7 @@ int sys_write(int fd, const void *buf, u32 count) {
     if (chainfs_read_file(oft[of_index].path, new_data, entry.size,
                           &bytes_read) != 0) {
       kfree(new_data);
-      return -1;
+      return -EIO;
     }
   }
 
@@ -245,5 +245,5 @@ int sys_write(int fd, const void *buf, u32 count) {
     return count;
   }
 
-  return -1;
+  return -EIO;
 }

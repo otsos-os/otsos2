@@ -28,6 +28,7 @@
 #define POSIX_H
 
 #include <kernel/interrupts/idt.h>
+#include <kernel/posix/errno.h>
 #include <mlibc/mlibc.h>
 
 #define MAX_FDS 32

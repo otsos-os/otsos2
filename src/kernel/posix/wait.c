@@ -32,7 +32,7 @@
 int sys_wait(int *status) {
   process_t *current = process_current();
   if (!current) {
-    return -1;
+    return -ECHILD;
   }
 
   for (int i = 0; i < MAX_PROCESSES; i++) {
@@ -66,5 +66,5 @@ int sys_wait(int *status) {
     return pid;
   }
 
-  return -1;
+  return -ECHILD;
 }

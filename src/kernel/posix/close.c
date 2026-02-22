@@ -31,11 +31,11 @@ int sys_close(int fd) {
     file_descriptor_t *fd_table = posix_get_fd_table();
 
     if (fd < 0 || fd >= MAX_FDS) {
-      return -1;
+      return -EBADF;
     }
 
     if (!fd_table[fd].used) {
-      return -1;
+      return -EBADF;
     }
 
     int of_index = fd_table[fd].of_index;

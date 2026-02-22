@@ -89,20 +89,20 @@ static u64 find_free_region(process_t *proc, u64 length) {
 u64 sys_mmap(const void *uargs) {
   process_t *proc = process_current();
   if (!proc) {
-    return 0;
+    return (u64)(-EINVAL);
   }
   if (!is_user_address(uargs, sizeof(mmap_args_t))) {
-    return 0;
+    return (u64)(-EFAULT);
   }
 
   mmap_args_t args;
   memcpy(&args, uargs, sizeof(args));
 
   if (args.length == 0) {
-    return 0;
+    return (u64)(-EINVAL);
   }
   if (!(args.flags & MAP_PRIVATE)) {
-    return 0;
+    return (u64)(-EINVAL);
   }
 
   u64 length = align_up(args.length, PAGE_SIZE);
@@ -110,15 +110,15 @@ u64 sys_mmap(const void *uargs) {
 
   if (args.flags & MAP_FIXED) {
     if (addr == 0 || (addr & (PAGE_SIZE - 1)) != 0) {
-      return 0;
+      return (u64)(-EINVAL);
     }
     if (!range_is_free(addr, length / PAGE_SIZE)) {
-      return 0;
+      return (u64)(-EEXIST);
     }
   } else {
     addr = find_free_region(proc, length);
     if (!addr) {
-      return 0;
+      return (u64)(-ENOMEM);
     }
   }
 
@@ -130,20 +130,20 @@ u64 sys_mmap(const void *uargs) {
     file_descriptor_t *fd_table = posix_get_fd_table();
     open_file_t *oft = posix_get_open_file_table();
     if (args.fd < 0 || args.fd >= MAX_FDS || !fd_table[args.fd].used) {
-      return 0;
+      return (u64)(-EBADF);
     }
     int of_index = fd_table[args.fd].of_index;
     if (of_index < 0 || of_index >= MAX_OPEN_FILES || !oft[of_index].used) {
-      return 0;
+      return (u64)(-EBADF);
     }
     if (oft[of_index].type != OFT_TYPE_FILE) {
-      return 0;
+      return (u64)(-ENODEV);
     }
     chainfs_file_entry_t entry;
     u32 entry_block, entry_offset;
     if (chainfs_find_file(oft[of_index].path, &entry, &entry_block,
                           &entry_offset) != 0) {
-      return 0;
+      return (u64)(-ENOENT);
     }
     file_size = entry.size;
     memset(file_path, 0, sizeof(file_path));
@@ -173,7 +173,7 @@ u64 sys_mmap(const void *uargs) {
           kfree((void *)paddr);
         }
       }
-      return 0;
+      return (u64)(-ENOMEM);
     }
     memset(page, 0, PAGE_SIZE);
     mmu_map_page(addr + off, (u64)page, page_flags);

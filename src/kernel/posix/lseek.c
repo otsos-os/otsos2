@@ -32,30 +32,30 @@ long sys_lseek(int fd, long offset, int whence) {
   open_file_t *oft = posix_get_open_file_table();
 
   if (fd < 0 || fd >= MAX_FDS) {
-    return -1;
+    return -EBADF;
   }
   if (!fd_table[fd].used) {
-    return -1;
+    return -EBADF;
   }
 
   int of_index = fd_table[fd].of_index;
   if (of_index < 0 || of_index >= MAX_OPEN_FILES) {
     /* stdio or invalid: not seekable */
-    return -1;
+    return -ESPIPE;
   }
   if (!oft[of_index].used) {
-    return -1;
+    return -EBADF;
   }
   if (oft[of_index].type == OFT_TYPE_PIPE ||
       oft[of_index].type == OFT_TYPE_TTY) {
-    return -1;
+    return -ESPIPE;
   }
 
   chainfs_file_entry_t entry;
   u32 entry_block, entry_offset;
   if (chainfs_find_file(oft[of_index].path, &entry, &entry_block,
                         &entry_offset) != 0) {
-    return -1;
+    return -ENOENT;
   }
 
   long long new_off = 0;
@@ -70,11 +70,11 @@ long sys_lseek(int fd, long offset, int whence) {
     new_off = (long long)entry.size + (long long)offset;
     break;
   default:
-    return -1;
+    return -EINVAL;
   }
 
   if (new_off < 0) {
-    return -1;
+    return -EINVAL;
   }
 
   oft[of_index].offset = (u32)new_off;

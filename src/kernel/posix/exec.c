@@ -79,12 +79,12 @@ static int copy_user_string_array(const char *const *user, char ***out,
   }
 
   if (!is_user_address(user, sizeof(char *))) {
-    return -1;
+    return -EFAULT;
   }
 
   char **arr = (char **)kcalloc(max_count + 1, sizeof(char *));
   if (!arr) {
-    return -1;
+    return -ENOMEM;
   }
 
   int count = 0;
@@ -102,7 +102,7 @@ static int copy_user_string_array(const char *const *user, char ***out,
         kfree(arr[i]);
       }
       kfree(arr);
-      return -1;
+      return -EFAULT;
     }
     arr[count++] = copy;
   }
@@ -113,7 +113,7 @@ static int copy_user_string_array(const char *const *user, char ***out,
         kfree(arr[i]);
       }
       kfree(arr);
-      return -1;
+      return -E2BIG;
     }
   }
 
@@ -137,24 +137,24 @@ static int read_file_into_buffer(const char *path, u8 **out_buf,
   chainfs_file_entry_t entry;
   u32 entry_block, entry_offset;
   if (chainfs_find_file(path, &entry, &entry_block, &entry_offset) != 0) {
-    return -1;
+    return -ENOENT;
   }
 
   u32 size = entry.size;
   if (size == 0) {
-    return -1;
+    return -ENOEXEC;
   }
 
   u8 *buf = (u8 *)kcalloc(size, 1);
   if (!buf) {
-    return -1;
+    return -ENOMEM;
   }
 
   u32 bytes_read = 0;
   if (chainfs_read_file(path, buf, size, &bytes_read) != 0 ||
       bytes_read != size) {
     kfree(buf);
-    return -1;
+    return -EIO;
   }
 
   *out_buf = buf;
@@ -198,7 +198,7 @@ static int build_user_stack(char **argv, int argc, char **envp, int envc,
   if (!argv_ptrs || !envp_ptrs) {
     kfree(argv_ptrs);
     kfree(envp_ptrs);
-    return -1;
+    return -ENOMEM;
   }
 
   for (int i = envc - 1; i >= 0; i--) {
@@ -206,7 +206,7 @@ static int build_user_stack(char **argv, int argc, char **envp, int envc,
     if (sp < stack_min + len) {
       kfree(argv_ptrs);
       kfree(envp_ptrs);
-      return -1;
+      return -E2BIG;
     }
     sp -= len;
     memcpy((void *)sp, envp[i], len);
@@ -218,7 +218,7 @@ static int build_user_stack(char **argv, int argc, char **envp, int envc,
     if (sp < stack_min + len) {
       kfree(argv_ptrs);
       kfree(envp_ptrs);
-      return -1;
+      return -E2BIG;
     }
     sp -= len;
     memcpy((void *)sp, argv[i], len);
@@ -230,7 +230,7 @@ static int build_user_stack(char **argv, int argc, char **envp, int envc,
   if (sp < stack_min + (u64)(8 * (argc + envc + 3))) {
     kfree(argv_ptrs);
     kfree(envp_ptrs);
-    return -1;
+    return -E2BIG;
   }
 
   sp -= 8;
@@ -268,25 +268,25 @@ int sys_execve(const char *path, const char *const *argv,
   process_t *proc = process_current();
   if (!proc || !regs) {
     com1_printf("[EXEC] Error: no current process or regs\n");
-    return -1;
+    return -EINVAL;
   }
 
   if (!is_user_address(path, 1)) {
     com1_printf("[EXEC] Error: invalid user path pointer %p\n",
                 (void *)path);
-    return -1;
+    return -EFAULT;
   }
 
   if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
     com1_printf("[EXEC] Error: ChainFS not initialized (magic=0x%x)\n",
                 g_chainfs.superblock.magic);
-    return -1;
+    return -EIO;
   }
 
   char *kpath = copy_user_string(path, EXEC_MAX_STR);
   if (!kpath) {
     com1_printf("[EXEC] Error: failed to copy user path\n");
-    return -1;
+    return -EFAULT;
   }
 
   char **kargv = NULL;
@@ -295,24 +295,25 @@ int sys_execve(const char *path, const char *const *argv,
   if (argc < 0) {
     com1_printf("[EXEC] Error: failed to copy argv\n");
     kfree(kpath);
-    return -1;
+    return argc;
   }
   int envc = copy_user_string_array(envp, &kenvp, EXEC_MAX_ENVP);
   if (envc < 0) {
     com1_printf("[EXEC] Error: failed to copy envp\n");
     free_string_array(kargv);
     kfree(kpath);
-    return -1;
+    return envc;
   }
 
   u8 *elf_buf = NULL;
   u32 elf_size = 0;
-  if (read_file_into_buffer(kpath, &elf_buf, &elf_size) != 0) {
+  int err = read_file_into_buffer(kpath, &elf_buf, &elf_size);
+  if (err < 0) {
     com1_printf("[EXEC] Error: failed to read file '%s'\n", kpath);
     free_string_array(kargv);
     free_string_array(kenvp);
     kfree(kpath);
-    return -1;
+    return err;
   }
   com1_printf("[EXEC] Loaded '%s' (%u bytes)\n", kpath, elf_size);
 
@@ -323,7 +324,7 @@ int sys_execve(const char *path, const char *const *argv,
     free_string_array(kargv);
     free_string_array(kenvp);
     kfree(kpath);
-    return -1;
+    return -ENOMEM;
   }
 
   u64 old_cr3 = proc->cr3;
@@ -339,7 +340,7 @@ int sys_execve(const char *path, const char *const *argv,
     free_string_array(kargv);
     free_string_array(kenvp);
     kfree(kpath);
-    return -1;
+    return -ENOEXEC;
   }
 
   u64 user_stack = allocate_user_stack();
@@ -351,14 +352,15 @@ int sys_execve(const char *path, const char *const *argv,
     free_string_array(kargv);
     free_string_array(kenvp);
     kfree(kpath);
-    return -1;
+    return -ENOMEM;
   }
 
   u64 new_rsp = 0;
   u64 argv_addr = 0;
   u64 envp_addr = 0;
-  if (build_user_stack(kargv, argc, kenvp, envc, &new_rsp, &argv_addr,
-                       &envp_addr) != 0) {
+  err = build_user_stack(kargv, argc, kenvp, envc, &new_rsp, &argv_addr,
+                         &envp_addr);
+  if (err < 0) {
     com1_printf("[EXEC] Error: build_user_stack failed\n");
     mmu_write_cr3(old_cr3);
     mmu_free_user_space(new_cr3);
@@ -366,7 +368,7 @@ int sys_execve(const char *path, const char *const *argv,
     free_string_array(kargv);
     free_string_array(kenvp);
     kfree(kpath);
-    return -1;
+    return err;
   }
 
   free_string_array(kargv);

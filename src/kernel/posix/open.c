@@ -68,7 +68,7 @@ static int posix_find_free_fd(void) {
       return i;
     }
   }
-  return -1;
+  return -EMFILE;
 }
 
 static int posix_flags_valid(int flags) {
@@ -95,17 +95,17 @@ static int posix_open_device(const char *kpath, int flags,
   }
 
   if (of_type < 0) {
-    return -1;
+    return -ENODEV;
   }
 
   int fd = posix_find_free_fd();
   if (fd < 0) {
-    return -1;
+    return fd;
   }
 
   int of_index = posix_alloc_open_file();
   if (of_index < 0) {
-    return -1;
+    return of_index;
   }
 
   open_file_t *oft = posix_get_open_file_table();
@@ -136,19 +136,19 @@ int sys_open(const char *path, int flags) {
     if (kpath) {
       kfree(kpath);
     }
-    return -1;
+    return -EFAULT;
   }
 
   if (!posix_flags_valid(flags)) {
     kfree(kpath);
-    return -1;
+    return -EINVAL;
   }
 
   if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
     com1_printf("POSIX OPEN: ChainFS not initialized or corrupted magic: %x\n",
                 g_chainfs.superblock.magic);
     kfree(kpath);
-    return -1;
+    return -EIO;
   }
 
   chainfs_file_entry_t entry;
@@ -159,17 +159,17 @@ int sys_open(const char *path, int flags) {
   if (!exists) {
     if (!(flags & O_CREAT)) {
       kfree(kpath);
-      return -1;
+      return -ENOENT;
     }
     if (chainfs_write_file(kpath, (const u8 *)"", 0) != 0) {
       kfree(kpath);
-      return -1;
+      return -EIO;
     }
     exists =
         (chainfs_find_file(kpath, &entry, &entry_block, &entry_offset) == 0);
     if (!exists) {
       kfree(kpath);
-      return -1;
+      return -EIO;
     }
   } else if (entry.type == CHAINFS_TYPE_DEV) {
     int fd = posix_open_device(kpath, flags, &entry);
@@ -177,28 +177,28 @@ int sys_open(const char *path, int flags) {
     return fd;
   } else if (entry.type == CHAINFS_TYPE_DIR) {
     kfree(kpath);
-    return -1;
+    return -EISDIR;
   } else if (flags & O_TRUNC) {
     if (chainfs_write_file(kpath, (const u8 *)"", 0) != 0) {
       kfree(kpath);
-      return -1;
+      return -EIO;
     }
     if (chainfs_find_file(kpath, &entry, &entry_block, &entry_offset) != 0) {
       kfree(kpath);
-      return -1;
+      return -EIO;
     }
   }
 
   int fd = posix_find_free_fd();
   if (fd < 0) {
     kfree(kpath);
-    return -1;
+    return fd;
   }
 
   int of_index = posix_alloc_open_file();
   if (of_index < 0) {
     kfree(kpath);
-    return -1;
+    return of_index;
   }
 
   oft[of_index].flags = flags;

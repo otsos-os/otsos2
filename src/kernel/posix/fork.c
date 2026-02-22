@@ -32,12 +32,12 @@
 int sys_fork(registers_t *regs) {
   process_t *parent = process_current();
   if (!parent || !regs) {
-    return -1;
+    return -EINVAL;
   }
 
   process_t *child = alloc_process();
   if (!child) {
-    return -1;
+    return -EAGAIN;
   }
 
   child->state = PROC_STATE_EMBRYO;
@@ -46,7 +46,7 @@ int sys_fork(registers_t *regs) {
   if (!child_cr3) {
     memset(child, 0, sizeof(process_t));
     child->state = PROC_STATE_UNUSED;
-    return -1;
+    return -ENOMEM;
   }
 
   u8 *kstack = (u8 *)kmalloc_aligned(KERNEL_STACK_SIZE, 16);
@@ -55,7 +55,7 @@ int sys_fork(registers_t *regs) {
     kfree((void *)(child_cr3 & PTE_ADDR_MASK));
     memset(child, 0, sizeof(process_t));
     child->state = PROC_STATE_UNUSED;
-    return -1;
+    return -ENOMEM;
   }
   memset(kstack, 0, KERNEL_STACK_SIZE);
 
