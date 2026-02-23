@@ -37,6 +37,7 @@ typedef unsigned int u32;
 typedef unsigned long long u64;
 
 static void (*mirror_callback)(char) = 0;
+static int com1_available = 0;
 
 void com1_set_mirror_callback(void (*callback)(char)) {
   mirror_callback = callback;
@@ -54,20 +55,39 @@ static inline u8 inb(u16 port) {
   return value;
 }
 
+int com1_is_available(void) { return com1_available; }
+
 void com1_init(void) {
+  if (inb(COM1_LINE_STATUS) == 0xFF) {
+    com1_available = 0;
+    return;
+  }
+
   outb(COM1_INT_ENABLE, 0x00);
   outb(COM1_LINE_CTRL, 0x80);
   outb(COM1_DATA, 0x01);
   outb(COM1_INT_ENABLE, 0x00);
   outb(COM1_LINE_CTRL, 0x03);
   outb(COM1_FIFO_CTRL, 0xC7);
+
+  outb(COM1_MODEM_CTRL, 0x1E);
+  outb(COM1_DATA, 0xAE);
+  if (inb(COM1_DATA) != 0xAE) {
+    com1_available = 0;
+    outb(COM1_MODEM_CTRL, 0x00);
+    return;
+  }
+
   outb(COM1_MODEM_CTRL, 0x0B);
+  com1_available = 1;
 }
 
 void com1_write_byte(u8 byte) {
-  while ((inb(COM1_LINE_STATUS) & 0x20) == 0)
-    ;
-  outb(COM1_DATA, byte);
+  if (com1_available) {
+    while ((inb(COM1_LINE_STATUS) & 0x20) == 0)
+      ;
+    outb(COM1_DATA, byte);
+  }
   if (mirror_callback) {
     mirror_callback((char)byte);
   }
@@ -106,12 +126,20 @@ void com1_newline(void) {
 }
 
 u8 com1_read_byte(void) {
+  if (!com1_available) {
+    return 0;
+  }
   while ((inb(COM1_LINE_STATUS) & 0x01) == 0)
     ;
   return inb(COM1_DATA);
 }
 
-int com1_has_data(void) { return inb(COM1_LINE_STATUS) & 0x01; }
+int com1_has_data(void) {
+  if (!com1_available) {
+    return 0;
+  }
+  return inb(COM1_LINE_STATUS) & 0x01;
+}
 
 void com1_write_dec(u64 value) {
   if (value == 0) {
