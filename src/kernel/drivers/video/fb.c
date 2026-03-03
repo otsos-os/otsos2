@@ -24,14 +24,118 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <kernel/drivers/video/drm/atomic.h>
 #include <kernel/drivers/video/fb.h>
 #include <lib/com1.h>
+
+#define PAGE_SIZE 4096
 
 static u32 *framebuffer = 0;
 static u32 pitch = 0;
 static u32 width = 0;
 static u32 height = 0;
 static u8 bpp = 0;
+static int framebuffer_enabled = 0;
+static int fb_batch_depth = 0;
+static u32 fb_pending_writes = 0;
+
+#define FB_DEFERRED_COMMIT_THRESHOLD 4096U
+
+static inline void fb_store_pixel_raw(u8 *base, u32 pixel_pitch, u8 pixel_bpp,
+                                      int x, int y, u32 color) {
+  u32 bytes_pp = (u32)(pixel_bpp / 8);
+  u64 offset = (u64)y * pixel_pitch + (u64)x * bytes_pp;
+
+  if (bytes_pp == 4) {
+    *(volatile u32 *)(base + offset) = color;
+  } else if (bytes_pp == 3) {
+    base[offset] = (u8)(color & 0xFF);
+    base[offset + 1] = (u8)((color >> 8) & 0xFF);
+    base[offset + 2] = (u8)((color >> 16) & 0xFF);
+  } else if (bytes_pp == 2) {
+    *(volatile u16 *)(base + offset) = (u16)(color & 0xFFFF);
+  } else {
+    base[offset] = (u8)(color & 0xFF);
+  }
+}
+
+static void fb_atomic_begin_if_needed(void) {
+  if (!drm_atomic_is_enabled()) {
+    return;
+  }
+
+  if (fb_batch_depth == 0) {
+    drm_atomic_begin();
+  }
+  fb_batch_depth++;
+}
+
+static void fb_maybe_commit(int force) {
+  if (!drm_atomic_is_enabled() || !drm_atomic_is_ready()) {
+    return;
+  }
+
+  if (!force && fb_pending_writes < FB_DEFERRED_COMMIT_THRESHOLD) {
+    return;
+  }
+
+  drm_atomic_commit();
+  fb_pending_writes = 0;
+}
+
+static void fb_atomic_end_if_needed(void) {
+  if (!drm_atomic_is_enabled()) {
+    return;
+  }
+
+  if (fb_batch_depth <= 0) {
+    fb_batch_depth = 0;
+    drm_atomic_commit();
+    return;
+  }
+
+  fb_batch_depth--;
+  if (fb_batch_depth == 0) {
+    fb_maybe_commit(1);
+  }
+}
+
+void fb_batch_begin(void) { fb_atomic_begin_if_needed(); }
+
+void fb_batch_end(void) { fb_atomic_end_if_needed(); }
+
+void fb_flush(void) { fb_maybe_commit(1); }
+
+static void fb_map_hw_buffer(void) {
+  u64 fb_addr = (u64)framebuffer;
+  u64 fb_size = (u64)pitch * height;
+  u64 fb_pages = (fb_size + PAGE_SIZE - 1) / PAGE_SIZE;
+
+  extern void mmu_map_page(u64 vaddr, u64 paddr, u64 flags);
+
+  for (u64 i = 0; i < fb_pages; i++) {
+    mmu_map_page(fb_addr + i * PAGE_SIZE, fb_addr + i * PAGE_SIZE, 0x3);
+  }
+}
+
+static void fb_init_common(u64 addr, u32 fb_pitch, u32 fb_width, u32 fb_height,
+                           u8 fb_bpp) {
+  framebuffer = (u32 *)addr;
+  pitch = fb_pitch;
+  width = fb_width;
+  height = fb_height;
+  bpp = fb_bpp;
+
+  fb_map_hw_buffer();
+  framebuffer_enabled = framebuffer != 0;
+  if (drm_atomic_is_ready()) {
+    com1_write_string("[FB] Bound to DRM atomic pipeline\n");
+  } else {
+    com1_write_string("[FB] DRM not ready, using raw framebuffer path\n");
+  }
+
+  fb_clear(0x0000FF);
+}
 
 void fb_init_mb2(multiboot2_info_t *mb_info) {
   multiboot2_tag_framebuffer_t *fb_tag =
@@ -43,101 +147,100 @@ void fb_init_mb2(multiboot2_info_t *mb_info) {
     return;
   }
 
-  framebuffer = (u32 *)(u64)fb_tag->framebuffer_addr;
-  pitch = fb_tag->framebuffer_pitch;
-  width = fb_tag->framebuffer_width;
-  height = fb_tag->framebuffer_height;
-  bpp = fb_tag->framebuffer_bpp;
-
   com1_write_string("[FB] Multiboot2 Initialized:\n");
   com1_write_string("  Addr: 0x");
-  com1_write_hex_qword((u64)framebuffer);
+  com1_write_hex_qword((u64)fb_tag->framebuffer_addr);
   com1_newline();
   com1_write_string("  Res: ");
-  com1_write_dec(width);
+  com1_write_dec(fb_tag->framebuffer_width);
   com1_write_string("x");
-  com1_write_dec(height);
+  com1_write_dec(fb_tag->framebuffer_height);
   com1_newline();
   com1_write_string("  BPP: ");
-  com1_write_dec(bpp);
+  com1_write_dec(fb_tag->framebuffer_bpp);
   com1_newline();
   com1_write_string("  Type: ");
   com1_write_dec(fb_tag->framebuffer_type);
   com1_newline();
 
-  u64 fb_addr = (u64)framebuffer;
-  u64 fb_size = (u64)pitch * height;
-#define PAGE_SIZE 4096
-  u64 fb_pages = (fb_size + PAGE_SIZE - 1) / PAGE_SIZE;
-
-  extern void mmu_map_page(u64 vaddr, u64 paddr, u64 flags);
-
-  for (u64 i = 0; i < fb_pages; i++) {
-    mmu_map_page(fb_addr + i * PAGE_SIZE, fb_addr + i * PAGE_SIZE, 0x3);
-  }
-
-  fb_clear(0x0000FF);
+  fb_init_common((u64)fb_tag->framebuffer_addr, fb_tag->framebuffer_pitch,
+                 fb_tag->framebuffer_width, fb_tag->framebuffer_height,
+                 fb_tag->framebuffer_bpp);
 }
 
-/* Legacy Multiboot1 init - kept for compatibility */
 void fb_init(multiboot_info_t *mb_info) {
   if ((mb_info->flags & (1 << 12)) == 0) {
     com1_write_string("[FB] Framebuffer flag not set in multiboot header!\n");
     return;
   }
 
-  framebuffer = (u32 *)(u64)mb_info->framebuffer_addr;
-  pitch = mb_info->framebuffer_pitch;
-  width = mb_info->framebuffer_width;
-  height = mb_info->framebuffer_height;
-  bpp = mb_info->framebuffer_bpp;
-
   com1_write_string("[FB] Initialized:\n");
   com1_write_string("  Addr: 0x");
-  com1_write_hex_qword((u64)framebuffer);
+  com1_write_hex_qword((u64)mb_info->framebuffer_addr);
   com1_newline();
   com1_write_string("  Res: ");
-  com1_write_dec(width);
+  com1_write_dec(mb_info->framebuffer_width);
   com1_write_string("x");
-  com1_write_dec(height);
+  com1_write_dec(mb_info->framebuffer_height);
   com1_newline();
   com1_write_string("  BPP: ");
-  com1_write_dec(bpp);
+  com1_write_dec(mb_info->framebuffer_bpp);
   com1_newline();
 
-  fb_clear(0x0000FF);
+  fb_init_common((u64)mb_info->framebuffer_addr, mb_info->framebuffer_pitch,
+                 mb_info->framebuffer_width, mb_info->framebuffer_height,
+                 mb_info->framebuffer_bpp);
 }
 
 void fb_put_pixel(int x, int y, u32 color) {
-  if (!framebuffer)
+  if (!framebuffer_enabled || x < 0 || x >= (int)width || y < 0 ||
+      y >= (int)height) {
     return;
-  if (x < 0 || x >= (int)width || y < 0 || y >= (int)height)
-    return;
+  }
 
-  u64 offset = y * pitch + x * (bpp / 8);
-  *(volatile u32 *)((u8 *)framebuffer + offset) = color;
+  if (drm_atomic_is_ready()) {
+    drm_framebuffer_t *draw_fb = drm_atomic_get_draw_fb();
+    if (!draw_fb || !draw_fb->data) {
+      return;
+    }
+
+    fb_store_pixel_raw(draw_fb->data, draw_fb->pitch, draw_fb->bpp, x, y,
+                       color);
+    drm_atomic_mark_dirty();
+    fb_pending_writes++;
+
+    if (fb_batch_depth == 0) {
+      fb_maybe_commit(0);
+    }
+    return;
+  }
+
+  fb_store_pixel_raw((u8 *)framebuffer, pitch, bpp, x, y, color);
 }
 
 void fb_clear(u32 color) {
-  if (!framebuffer)
+  if (!framebuffer_enabled) {
     return;
+  }
+
+  fb_atomic_begin_if_needed();
   for (int y = 0; y < (int)height; y++) {
     for (int x = 0; x < (int)width; x++) {
       fb_put_pixel(x, y, color);
     }
   }
+  fb_atomic_end_if_needed();
 }
-
-extern const u8 glyph_32_data[];
 
 extern const u8 *get_font_data(char c);
 
 void fb_put_char(int x, int y, char c, u32 color) {
   const u8 *data = get_font_data(c);
-  if (!data)
+  if (!data) {
     return;
+  }
 
-  u32 bg_color = 0x000000; // Assuming black background for now
+  u32 bg_color = 0x000000;
 
   for (int row = 0; row < 16; row++) {
     u8 bitmap_row = data[row];
@@ -154,6 +257,8 @@ void fb_put_char(int x, int y, char c, u32 color) {
 void fb_write_string(int x, int y, const char *str, u32 color) {
   int cur_x = x;
   int cur_y = y;
+
+  fb_atomic_begin_if_needed();
   while (*str) {
     if (*str == '\n') {
       cur_x = x;
@@ -164,20 +269,39 @@ void fb_write_string(int x, int y, const char *str, u32 color) {
     }
     str++;
   }
+  fb_atomic_end_if_needed();
 }
 
-int is_framebuffer_enabled() { return framebuffer != 0; }
+int is_framebuffer_enabled() { return framebuffer_enabled; }
 
-u32 fb_get_width() { return width; }
-u32 fb_get_height() { return height; }
-u64 fb_get_address() { return (u64)framebuffer; }
+u32 fb_get_width() {
+  if (drm_atomic_is_ready()) {
+    return drm_atomic_get_width();
+  }
+  return width;
+}
+
+u32 fb_get_height() {
+  if (drm_atomic_is_ready()) {
+    return drm_atomic_get_height();
+  }
+  return height;
+}
+
+u64 fb_get_address() {
+  if (drm_atomic_is_ready()) {
+    return drm_atomic_get_hw_address();
+  }
+  return (u64)framebuffer;
+}
 
 void fb_scroll(int lines) {
-  if (!framebuffer)
+  if (!framebuffer_enabled || lines <= 0) {
     return;
+  }
 
   u32 line_height = 16;
-  u32 lines_to_scroll = lines * line_height;
+  u32 lines_to_scroll = (u32)lines * line_height;
   u32 bytes_per_line = pitch;
   u32 total_lines = height;
 
@@ -186,19 +310,40 @@ void fb_scroll(int lines) {
     return;
   }
 
-  u32 bytes_to_copy = bytes_per_line * (total_lines - lines_to_scroll);
-  u32 *dst = framebuffer;
-  u32 *src = (u32 *)((u8 *)framebuffer + (bytes_per_line * lines_to_scroll));
+  if (drm_atomic_is_ready()) {
+    drm_framebuffer_t *draw_fb = drm_atomic_get_draw_fb();
+    if (!draw_fb || !draw_fb->data) {
+      return;
+    }
 
+    fb_atomic_begin_if_needed();
+    u8 *fb_bytes = draw_fb->data;
+    u32 bytes_to_copy = bytes_per_line * (total_lines - lines_to_scroll);
+    u32 bytes_to_clear = bytes_per_line * lines_to_scroll;
+
+    for (u32 i = 0; i < bytes_to_copy; i++) {
+      fb_bytes[i] = fb_bytes[i + (bytes_per_line * lines_to_scroll)];
+    }
+
+    u8 *bottom_start = fb_bytes + bytes_to_copy;
+    for (u32 i = 0; i < bytes_to_clear; i++) {
+      bottom_start[i] = 0;
+    }
+
+    drm_atomic_mark_dirty();
+    fb_atomic_end_if_needed();
+    return;
+  }
+
+  u32 bytes_to_copy = bytes_per_line * (total_lines - lines_to_scroll);
   u8 *fb_bytes = (u8 *)framebuffer;
-  u64 i;
-  for (i = 0; i < bytes_to_copy; i++) {
+  for (u32 i = 0; i < bytes_to_copy; i++) {
     fb_bytes[i] = fb_bytes[i + (bytes_per_line * lines_to_scroll)];
   }
 
   u32 bytes_to_clear = bytes_per_line * lines_to_scroll;
   u8 *bottom_start = fb_bytes + bytes_to_copy;
-  for (i = 0; i < bytes_to_clear; i++) {
+  for (u32 i = 0; i < bytes_to_clear; i++) {
     bottom_start[i] = 0;
   }
 }

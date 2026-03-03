@@ -42,6 +42,7 @@ void tty_set_color(u8 color);
 void tty_clear_active(void);
 void tty_com1_mirror(char c);
 void tty_set_active(int index);
+void tty_restore_active_display(void);
 void tty_update(void);
 
 #endif

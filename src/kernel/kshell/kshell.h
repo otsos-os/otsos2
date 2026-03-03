@@ -43,5 +43,6 @@ void kshell_console_write_int(int value);
 void kshell_console_write_ptr(const void *ptr);
 int kshell_parse_line(char *line, char *argv[], int max_args);
 int kshell_echo_command(int argc, char *argv[]);
+int kshell_drm_switch_command(int argc, char *argv[]);
 
 #endif

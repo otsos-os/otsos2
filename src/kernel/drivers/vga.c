@@ -26,7 +26,7 @@
 
 #include <kernel/drivers/tty.h>
 #include <kernel/drivers/vga.h>
-#include <kernel/drivers/video/fb.h>
+#include <kernel/drivers/video/drm/frontend.h>
 #include <mlibc/mlibc.h>
 #include <stdarg.h>
 
@@ -40,11 +40,11 @@ static int vga_height = 25;
 static int vga_using_fb = -1;
 
 void update_vga_dims() {
-  int fb_enabled = is_framebuffer_enabled();
+  int fb_enabled = drm_frontend_is_available();
 
   if (fb_enabled) {
-    vga_width = fb_get_width() / 8;
-    vga_height = fb_get_height() / 16;
+    vga_width = drm_frontend_get_cols();
+    vga_height = drm_frontend_get_rows();
   } else {
     vga_width = 80;
     vga_height = 25;
@@ -53,11 +53,12 @@ void update_vga_dims() {
 }
 
 void clear_scr() {
-  if (is_framebuffer_enabled() != vga_using_fb)
+  if (drm_frontend_is_available() != vga_using_fb)
     update_vga_dims();
 
-  if (is_framebuffer_enabled()) {
-    fb_clear(0x000000);
+  if (drm_frontend_is_available()) {
+    drm_frontend_clear(0x000000);
+    drm_frontend_flush();
   } else {
     for (int y = 0; y < 25; y++) {
       for (int x = 0; x < 80; x++) {
@@ -73,11 +74,12 @@ void clear_scr() {
 }
 
 void scroll_scr() {
-  if (is_framebuffer_enabled() != vga_using_fb)
+  if (drm_frontend_is_available() != vga_using_fb)
     update_vga_dims();
 
-  if (is_framebuffer_enabled()) {
-    fb_scroll(1);
+  if (drm_frontend_is_available()) {
+    drm_frontend_scroll_lines(1);
+    drm_frontend_flush();
 
   } else {
     for (int y = 0; y < 24; y++) {
@@ -92,8 +94,6 @@ void scroll_scr() {
   if (cursor_y > 0)
     cursor_y--;
 }
-
-extern int is_framebuffer_enabled();
 
 static u32 vga_palette[16] = {0x000000, 0x0000AA, 0x00AA00, 0x00AAAA,
                               0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA,
@@ -115,28 +115,28 @@ void vga_set_cursor(int x, int y) {
 }
 
 int vga_get_width(void) {
-  if (is_framebuffer_enabled() != vga_using_fb)
+  if (drm_frontend_is_available() != vga_using_fb)
     update_vga_dims();
   return vga_width;
 }
 
 int vga_get_height(void) {
-  if (is_framebuffer_enabled() != vga_using_fb)
+  if (drm_frontend_is_available() != vga_using_fb)
     update_vga_dims();
   return vga_height;
 }
 
 void vga_put_entry_at(char c, u8 color, int x, int y) {
-  if (is_framebuffer_enabled() != vga_using_fb)
+  if (drm_frontend_is_available() != vga_using_fb)
     update_vga_dims();
 
   if (x < 0 || y < 0 || x >= vga_width || y >= vga_height) {
     return;
   }
 
-  if (is_framebuffer_enabled()) {
+  if (drm_frontend_is_available()) {
     u32 rgb = vga_palette[color & 0x0F];
-    fb_put_char(x * 8, y * 16, c, rgb);
+    drm_frontend_put_char_cell(x, y, c, rgb);
   } else {
     vga_buffer[y * 80 + x] = (u16)color << 8 | (u8)c;
   }
@@ -187,7 +187,7 @@ void vga_putc(char c) {
     return;
   }
 
-  if (is_framebuffer_enabled() != vga_using_fb)
+  if (drm_frontend_is_available() != vga_using_fb)
     update_vga_dims();
 
   if (ansi_state == 0) {
@@ -219,8 +219,14 @@ void vga_putc(char c) {
   if (c == '\n') {
     cursor_x = 0;
     cursor_y++;
+    if (drm_frontend_is_available()) {
+      drm_frontend_flush();
+    }
   } else if (c == '\r') {
     cursor_x = 0;
+    if (drm_frontend_is_available()) {
+      drm_frontend_flush();
+    }
   } else if (c == '\b') {
     if (cursor_x > 0) {
       cursor_x--;
@@ -229,8 +235,8 @@ void vga_putc(char c) {
       cursor_x = vga_width - 1;
     }
   } else {
-    if (is_framebuffer_enabled()) {
-      fb_put_char(cursor_x * 8, cursor_y * 16, c, current_fb_color);
+    if (drm_frontend_is_available()) {
+      drm_frontend_put_char_cell(cursor_x, cursor_y, c, current_fb_color);
     } else {
       vga_buffer[cursor_y * 80 + cursor_x] = (u16)terminal_color << 8 | c;
     }

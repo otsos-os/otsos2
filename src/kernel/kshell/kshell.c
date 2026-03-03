@@ -26,7 +26,9 @@
 
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/drivers/tty.h>
 #include <kernel/drivers/vga.h>
+#include <kernel/drivers/video/drm/frontend.h>
 #include <kernel/kshell/kshell.h>
 #include <mlibc/mlibc.h>
 
@@ -94,6 +96,7 @@ static void kshell_redraw(void) {
     return;
   }
 
+  drm_frontend_batch_begin();
   for (int y = 0; y < kshell_cells_h; y++) {
     for (int x = 0; x < kshell_cells_w; x++) {
       u16 cell = kshell_cells[y * kshell_cells_w + x];
@@ -102,6 +105,8 @@ static void kshell_redraw(void) {
       vga_put_entry_at(c, color, x, y);
     }
   }
+  drm_frontend_batch_end();
+  drm_frontend_flush();
 
   if (kshell_visible) {
     vga_set_cursor(kshell_cursor_x, kshell_cursor_y);
@@ -115,6 +120,8 @@ static void kshell_set_visible(int visible) {
   kshell_visible = visible;
   if (kshell_visible) {
     kshell_redraw();
+  } else {
+    tty_restore_active_display();
   }
 }
 
@@ -126,6 +133,7 @@ static void kshell_put_entry_at(char c, int x, int y) {
   }
   if (kshell_visible) {
     vga_put_entry_at(c, kshell_color, x, y);
+    drm_frontend_flush();
   }
 }
 
@@ -170,6 +178,9 @@ void kshell_console_putc(char c) {
 
   if (c == '\n') {
     kshell_newline();
+    if (kshell_visible) {
+      drm_frontend_flush();
+    }
     return;
   }
 
@@ -177,6 +188,7 @@ void kshell_console_putc(char c) {
     kshell_cursor_x = 0;
     if (kshell_visible) {
       vga_set_cursor(kshell_cursor_x, kshell_cursor_y);
+      drm_frontend_flush();
     }
     return;
   }
@@ -188,6 +200,7 @@ void kshell_console_putc(char c) {
     }
     if (kshell_visible) {
       vga_set_cursor(kshell_cursor_x, kshell_cursor_y);
+      drm_frontend_flush();
     }
     return;
   }
@@ -200,8 +213,12 @@ void kshell_console_putc(char c) {
   kshell_cursor_x++;
   if (kshell_cursor_x >= kshell_width()) {
     kshell_newline();
+    if (kshell_visible) {
+      drm_frontend_flush();
+    }
   } else if (kshell_visible) {
     vga_set_cursor(kshell_cursor_x, kshell_cursor_y);
+    drm_frontend_flush();
   }
 }
 
@@ -272,6 +289,7 @@ static void kshell_help_list(void) {
   kshell_console_write("  help\n");
   kshell_console_write("  clear\n");
   kshell_console_write("  echo\n");
+  kshell_console_write("  drm_switch\n");
   kshell_console_write("  exit\n");
   kshell_console_write("redirection:\n");
   kshell_console_write("  <command> > /absolute/path\n");
@@ -298,8 +316,15 @@ static void kshell_help_command(const char *cmd) {
     kshell_console_write("echo\n");
     kshell_console_write("  usage: echo <text>\n");
     kshell_console_write("  usage: echo &<math expression>\n");
-    kshell_console_write("  usage: echo %videoM | %dkey | %prun | %uname\n");
+    kshell_console_write("  usage: echo %videoM | %dkey | %prun | %uname | %drm\n");
     kshell_console_write("  prints text, evaluates math, or prints kernel value\n");
+    return;
+  }
+
+  if (strcmp(cmd, "drm_switch") == 0) {
+    kshell_console_write("drm_switch\n");
+    kshell_console_write("  usage: drm_switch <id>\n");
+    kshell_console_write("  switch active DRM driver by list id from echo %drm\n");
     return;
   }
 
@@ -336,6 +361,10 @@ static int kshell_execute_core(int argc, char *argv[]) {
 
   if (strcmp(argv[0], "echo") == 0) {
     return kshell_echo_command(argc, argv);
+  }
+
+  if (strcmp(argv[0], "drm_switch") == 0) {
+    return kshell_drm_switch_command(argc, argv);
   }
 
   if (strcmp(argv[0], "exit") == 0) {
@@ -482,5 +511,4 @@ void kshell_run(void) {
   keyboard_reset_state();
   kshell_open_requested = 0;
   kshell_set_visible(0);
-  kshell_console_write("Leaving kshell\n");
 }

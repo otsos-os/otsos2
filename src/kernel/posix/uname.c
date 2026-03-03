@@ -32,7 +32,7 @@ void uname_fill(struct utsname *buf) {
   memset(buf, 0, sizeof(struct utsname));
   strcpy(buf->sysname, "otsos2");
   strcpy(buf->nodename, "localhost");
-  strcpy(buf->release, "2.3.2");
+  strcpy(buf->release, "2.3.3");
   strcpy(buf->version, "otsos2-kernel-rev2");
   strcpy(buf->machine, "x86_64");
   strcpy(buf->domainname, "localdomain");

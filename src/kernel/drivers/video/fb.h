@@ -40,6 +40,9 @@ int is_framebuffer_enabled();
 
 void fb_put_char(int x, int y, char c, u32 color);
 void fb_write_string(int x, int y, const char *str, u32 color);
+void fb_batch_begin(void);
+void fb_batch_end(void);
+void fb_flush(void);
 u32 fb_get_width();
 u32 fb_get_height();
 u64 fb_get_address();

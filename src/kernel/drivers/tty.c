@@ -27,6 +27,7 @@
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/tty.h>
 #include <kernel/drivers/vga.h>
+#include <kernel/drivers/video/drm/frontend.h>
 #include <lib/com1.h>
 #include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
@@ -112,6 +113,7 @@ static void tty_redraw(const tty_state_t *tty) {
     return;
   }
 
+  drm_frontend_batch_begin();
   for (int y = 0; y < tty->height; y++) {
     for (int x = 0; x < tty->width; x++) {
       u16 cell = tty->cells[y * tty->width + x];
@@ -120,6 +122,7 @@ static void tty_redraw(const tty_state_t *tty) {
       vga_put_entry_at(c, color, x, y);
     }
   }
+  drm_frontend_batch_end();
 
   vga_set_cursor(tty->cursor_x, tty->cursor_y);
   vga_set_color(tty->color);
@@ -221,6 +224,7 @@ static void tty_putc_internal(tty_state_t *tty, char c, int active) {
 
 static void tty_emit(char c) {
   tty_putc_internal(&ttys[tty_active], c, 1);
+  drm_frontend_flush();
   tty_suppress_com1_mirror = 1;
   com1_write_byte((u8)c);
   tty_suppress_com1_mirror = 0;
@@ -286,6 +290,17 @@ static void tty_switch_to(int index) {
 void tty_set_active(int index) {
   tty_lazy_init();
   tty_switch_to(index);
+}
+
+void tty_restore_active_display(void) {
+  if (!tty_initialized) {
+    return;
+  }
+
+  tty_redraw(&ttys[tty_active]);
+  if (tty_indicator_active) {
+    tty_draw_indicator(tty_active);
+  }
 }
 
 void tty_update(void) {
@@ -470,6 +485,7 @@ static char tty_getchar_blocking(int tty_idx) {
 static void tty_emit_to(int tty_idx, char c) {
   tty_putc_internal(&ttys[tty_idx], c, tty_idx == tty_active);
   if (tty_idx == tty_active) {
+    drm_frontend_flush();
     tty_suppress_com1_mirror = 1;
     com1_write_byte((u8)c);
     tty_suppress_com1_mirror = 0;

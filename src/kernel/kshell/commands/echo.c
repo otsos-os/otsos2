@@ -25,6 +25,9 @@
  */
 
 #include <kernel/drivers/keyboard/keyboard.h>
+#include <kernel/drivers/video/drm/atomic.h>
+#include <kernel/drivers/video/drm/driver.h>
+#include <kernel/drivers/video/drm/init.h>
 #include <kernel/drivers/video/fb.h>
 #include <kernel/kshell/kshell.h>
 #include <kernel/posix/posix.h>
@@ -220,6 +223,60 @@ static int print_kernel_var(const char *name) {
     kshell_console_write("domainname: ");
     kshell_console_write(uts.domainname);
     kshell_console_write("\n");
+    return 0;
+  }
+
+  if (strcmp(name, "drm") == 0) {
+    kshell_console_write("drm enabled: ");
+    kshell_console_write(drm_atomic_is_enabled() ? "yes" : "no");
+    kshell_console_write(", ready: ");
+    kshell_console_write(drm_atomic_is_ready() ? "yes" : "no");
+    kshell_console_write("\n");
+
+    kshell_console_write("active driver: ");
+    kshell_console_write(drm_get_active_driver_name());
+    kshell_console_write(" (id=");
+    kshell_console_write_int(drm_get_active_driver_id());
+    kshell_console_write(")\n");
+
+    if (drm_atomic_is_ready()) {
+      kshell_console_write("mode: ");
+      kshell_console_write_int((int)drm_atomic_get_width());
+      kshell_console_write("x");
+      kshell_console_write_int((int)drm_atomic_get_height());
+      kshell_console_write(", bpp=");
+      kshell_console_write_int((int)drm_atomic_get_bpp());
+      kshell_console_write(", pitch=");
+      kshell_console_write_int((int)drm_atomic_get_pitch());
+      kshell_console_write(", hw=");
+      kshell_console_write_ptr((void *)(u64)drm_atomic_get_hw_address());
+      kshell_console_write("\n");
+    }
+
+    kshell_console_write("drivers:\n");
+    u32 count = drm_driver_count();
+    if (count == 0) {
+      kshell_console_write("  <none>\n");
+      return 0;
+    }
+
+    int active = drm_get_active_driver_id();
+    for (u32 i = 0; i < count; i++) {
+      const drm_driver_t *drv = drm_driver_get_by_index(i);
+      if (!drv) {
+        continue;
+      }
+      kshell_console_write("  [");
+      kshell_console_write_int((int)i);
+      kshell_console_write("] ");
+      kshell_console_write(drv->name ? drv->name : "unnamed");
+      kshell_console_write(", priority=");
+      kshell_console_write_int(drv->priority);
+      if ((int)i == active) {
+        kshell_console_write(" (active)");
+      }
+      kshell_console_write("\n");
+    }
     return 0;
   }
 

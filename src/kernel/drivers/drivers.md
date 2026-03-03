@@ -37,7 +37,24 @@ Unified driver handling both legacy text mode and high-resolution VBE framebuffe
     - `void fb_put_char(int x, int y, char c, u32 color)`: Draw character glyph.
     - `void vga_set_color(u8 color)`: Set text color (works in Text & FB modes).
 
-## 5. Keyboard Manager (`src/kernel/drivers/keyboard/keyboard.c`)
+## 5. DRM Atomic Core (`src/kernel/drivers/video/drm/`)
+Atomic display pipeline used by framebuffer path.
+- **Objects**:
+    - `CRTC` (mode and scanout state)
+    - `Primary Plane` (framebuffer binding)
+    - `Connector` (link state)
+- **Atomic flow**:
+    - Build pending state
+    - Validate all objects
+    - Single commit to hardware backend
+- **Files**:
+    - `driver.h` / `driver.c`: `drm_driver` model and driver selection (auto or preferred name)
+    - `atomic.c` / `atomic.h`: state machine and commit path
+    - `backend.c` / `backend.h`: hw present/copy backend
+    - `frontend.c` / `frontend.h`: DRM console frontend used by VGA/TTY
+    - `types.h`: shared DRM types
+
+## 6. Keyboard Manager (`src/kernel/drivers/keyboard/keyboard.c`)
 Global keyboard abstraction layer for managing input drivers.
 - **Features**:
     - Dynamic driver detection and switching.
@@ -47,7 +64,7 @@ Global keyboard abstraction layer for managing input drivers.
     - `void keyboard_manager_init()`: Detect and initialize available keyboard drivers.
     - `char keyboard_getchar()`: Read a character from the active driver's buffer.
 
-## 6. PS/2 Keyboard Driver (`src/kernel/drivers/keyboard/ps2.c`)
+## 7. PS/2 Keyboard Driver (`src/kernel/drivers/keyboard/ps2.c`)
 Driver for standard PS/2 keyboards.
 - **Ports**: Control `0x64`, Data `0x60`.
 - **Features**:
@@ -55,7 +72,7 @@ Driver for standard PS/2 keyboards.
     - Modifier key support (Shift, Caps Lock).
     - Circular input buffer.
 
-## 7. PIT Timer Driver (`src/kernel/drivers/timer.c`)
+## 8. PIT Timer Driver (`src/kernel/drivers/timer.c`)
 interval timer PIT for system ticks.
 - **ports**: `0x40` , `0x43`
 - **feature**:

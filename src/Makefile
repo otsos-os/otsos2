@@ -38,6 +38,11 @@ PS2_O = ../bin/ps2.o
 KEYBOARD_O = ../bin/keyboard.o
 FB_O = ../bin/fb.o
 FONT_O = ../bin/font.o
+DRM_ATOMIC_O = ../bin/drm_atomic.o
+DRM_BACKEND_O = ../bin/drm_backend.o
+DRM_INIT_O = ../bin/drm_init.o
+DRM_DRIVER_O = ../bin/drm_driver.o
+DRM_FRONTEND_O = ../bin/drm_frontend.o
 TIMER_O = ../bin/timer.o
 STDLIB_O = ../bin/stdlib.o
 MMU_O = ../bin/mmu.o
@@ -79,15 +84,16 @@ WATCHDOG_ICH_TCO_O = ../bin/watchdog_ich_tco.o
 KSHELL_O = ../bin/kshell.o
 KSHELL_PARSER_O = ../bin/kshell_parser.o
 KSHELL_ECHO_O = ../bin/kshell_echo.o
+KSHELL_DRM_O = ../bin/kshell_drm.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(VGA_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
+      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(VGA_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(DRM_ATOMIC_O) $(DRM_BACKEND_O) $(DRM_INIT_O) $(DRM_DRIVER_O) $(DRM_FRONTEND_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(FORK_O) $(EXEC_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(UNAME_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
       $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O) \
-      $(KSHELL_O) $(KSHELL_PARSER_O) $(KSHELL_ECHO_O)
+      $(KSHELL_O) $(KSHELL_PARSER_O) $(KSHELL_ECHO_O) $(KSHELL_DRM_O)
 
 .PHONY: all ask_version
 
@@ -223,6 +229,26 @@ $(FB_O): kernel/drivers/video/fb.c
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(FONT_O): kernel/drivers/video/font.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DRM_ATOMIC_O): kernel/drivers/video/drm/atomic.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DRM_BACKEND_O): kernel/drivers/video/drm/backend.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DRM_INIT_O): kernel/drivers/video/drm/init.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DRM_DRIVER_O): kernel/drivers/video/drm/driver.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DRM_FRONTEND_O): kernel/drivers/video/drm/frontend.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -383,6 +409,10 @@ $(KSHELL_PARSER_O): kernel/kshell/parser.c kernel/kshell/kshell.h
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(KSHELL_ECHO_O): kernel/kshell/commands/echo.c kernel/kshell/kshell.h kernel/process.h kernel/posix/posix.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(KSHELL_DRM_O): kernel/kshell/commands/drm.c kernel/kshell/kshell.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
