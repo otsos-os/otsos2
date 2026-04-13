@@ -100,9 +100,38 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_
       $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O) \
       $(KSHELL_O) $(KSHELL_PARSER_O) $(KSHELL_ECHO_O) $(KSHELL_DRM_O)
 
-.PHONY: all ask_version
+.PHONY: all ask_version check_build_tools check_run_tools
 
-all: ask_version $(ISO_IMAGE)
+all: check_build_tools ask_version $(ISO_IMAGE)
+
+check_build_tools:
+	@set -e; \
+	for tool in "$(CC)" "$(LD)" "$(AS)" "$(ZIG)" grub-mkrescue llvm-size; do \
+		if ! command -v "$$tool" >/dev/null 2>&1; then \
+			echo "  MISSING $$tool"; \
+			echo "  install missing tools to build"; \
+			exit 1; \
+		fi; \
+	done
+
+check_run_tools: check_build_tools
+	@set -e; \
+	for tool in "$(QEMU)" "$(OVMF)"; do \
+		case "$$tool" in \
+			/*) \
+				if [ ! -e "$$tool" ]; then \
+					echo "  MISSING $$tool"; \
+					echo "  install OVMF to run"; \
+					exit 1; \
+				fi ;; \
+			*) \
+				if ! command -v "$$tool" >/dev/null 2>&1; then \
+					echo "  MISSING $$tool"; \
+					echo "  install missing tools to run"; \
+					exit 1; \
+				fi ;; \
+		esac; \
+	done
 
 ask_version:
 	@set -e; \
@@ -149,7 +178,7 @@ $(YES_BIN):
 	@echo "  MAKE    ports/yes"
 	@$(MAKE) -C $(PORTS_DIR)
 
-$(ISO_IMAGE): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN)
+$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
 	@cp $(INIT_BIN) $(ISODIR)/boot/init
@@ -461,19 +490,19 @@ $(DISK_IMG):
 
 OVMF ?= /usr/share/ovmf/OVMF.fd
 
-run: $(ISO_IMAGE) $(DISK_IMG)
+run: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (UEFI)"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset
 
-run_nodis: $(ISO_IMAGE) $(DISK_IMG)
+run_nodis: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (UEFI, terminal)"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_NODISPLAY_OPTS) -device i6300esb -watchdog-action reset
 
-run_bios: $(ISO_IMAGE) $(DISK_IMG)
+run_bios: check_build_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -device i6300esb -watchdog-action reset
 
-debug: $(ISO_IMAGE) $(DISK_IMG)
+debug: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  DEBUG   QEMU"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) -d int,cpu_reset > debug.txt 2>&1 -no-reboot $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset
 
