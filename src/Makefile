@@ -1,12 +1,17 @@
-CC = clang
-ZIG = zig
-LD = ld.lld
-AS = nasm
-QEMU = qemu-system-x86_64
-QEMU_GUI_OPTS = -display gtk
+TARGET ?= x86_64-elf
+CC ?= clang
+ZIG ?= zig
+LD ?= ld.lld
+AS ?= nasm
+QEMU ?= qemu-system-x86_64
+QEMU_GUI_OPTS ?= -display gtk
+QEMU_NODISPLAY_OPTS ?= -display none
 
-CFLAGS = -m64 -ffreestanding -fno-pic -fstack-protector-strong -g -O0 -fno-builtin -mno-red-zone -mcmodel=kernel -mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-80387 -I.
-LDFLAGS = -m elf_x86_64 -T linker.ld -Map=../bin/kernel.map
+TARGET_CFLAGS ?= --target=$(TARGET)
+CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fno-pic -fstack-protector-strong -g -O0 -fno-builtin -mno-red-zone -mcmodel=kernel -mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-80387 -I.
+LDFLAGS ?= -m elf_x86_64 -T linker.ld -Map=../bin/kernel.map
+NASM_FORMAT ?= elf64
+ZIG_TARGET ?= x86_64-freestanding
 
 KERNEL_BIN = ../bin/kernel.bin
 ISO_IMAGE = ../otsos.iso
@@ -174,7 +179,7 @@ $(BOOT_O): boot/boot.s
 
 $(IDT_ASM_O): kernel/interrupts/idt.asm
 	@echo "  AS      $<"
-	@$(AS) -f elf64 -g -F dwarf $< -o $@
+	@$(AS) -f $(NASM_FORMAT) -g -F dwarf $< -o $@
 
 $(KERNEL_O): kernel/kernel.c
 	@echo "  CC      $<"
@@ -314,7 +319,7 @@ $(GDT_O): kernel/gdt.c
 
 $(GDT_ASM_O): kernel/gdt.asm
 	@echo "  AS      $<"
-	@$(AS) -f elf64 -g -F dwarf $< -o $@
+	@$(AS) -f $(NASM_FORMAT) -g -F dwarf $< -o $@
 
 $(PROCESS_O): kernel/process.c
 	@echo "  CC      $<"
@@ -338,7 +343,7 @@ $(SCHEDULER_O): kernel/scheduler.c kernel/scheduler.h kernel/process.h kernel/mm
 
 $(ELF_O): userland/elf.zig
 	@echo "  ZIG     $<"
-	@$(ZIG) build-obj -femit-bin=$@ -target x86_64-freestanding -mcmodel=kernel -O ReleaseSafe --dep panic -Melf=userland/elf.zig -Mpanic=kernel/panic.zig
+	@$(ZIG) build-obj -femit-bin=$@ -target $(ZIG_TARGET) -mcmodel=kernel -O ReleaseSafe --dep panic -Melf=userland/elf.zig -Mpanic=kernel/panic.zig
 
 $(USERSPACE_O): userland/userspace.c userland/userspace.h kernel/process.h kernel/mmu.h kernel/gdt.h
 	@echo "  CC      $<"
@@ -346,7 +351,7 @@ $(USERSPACE_O): userland/userspace.c userland/userspace.h kernel/process.h kerne
 
 $(USERSPACE_ASM_O): userland/userspace.asm
 	@echo "  AS      $<"
-	@$(AS) -f elf64 -g -F dwarf $< -o $@
+	@$(AS) -f $(NASM_FORMAT) -g -F dwarf $< -o $@
 
 $(ACPI_O): kernel/drivers/acpi/acpi.c kernel/drivers/acpi/acpi.h
 	@echo "  CC      $<"
@@ -418,7 +423,7 @@ $(KSHELL_DRM_O): kernel/kshell/commands/drm.c kernel/kshell/kshell.h
 
 $(SYSCALL_ASM_O): kernel/syscall_asm.asm
 	@echo "  AS      $<"
-	@$(AS) -f elf64 -g -F dwarf $< -o $@
+	@$(AS) -f $(NASM_FORMAT) -g -F dwarf $< -o $@
 
 
 $(STRING_O): mlibc/string.c
@@ -431,7 +436,7 @@ $(ITOA_O): mlibc/itoa.s
 
 $(HARDWARE_O): mlibc/hardware.asm
 	@echo "  AS      $<"
-	@$(AS) -f elf64 -g -F dwarf $< -o $@ -D__x86_64__
+	@$(AS) -f $(NASM_FORMAT) -g -F dwarf $< -o $@ -D__x86_64__
 
 
 
@@ -454,19 +459,23 @@ $(DISK_IMG):
 	@mkdir -p $(dir $(DISK_IMG))
 	@dd if=/dev/zero of=$(DISK_IMG) bs=1M count=10 2>/dev/null
 
-OVMF = /usr/share/ovmf/OVMF.fd
+OVMF ?= /usr/share/ovmf/OVMF.fd
 
 run: $(ISO_IMAGE) $(DISK_IMG)
-	@echo "  RUN     QEMU"
-	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -device i6300esb -watchdog-action reset
-
-run_uefi: $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (UEFI)"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset
 
+run_nodis: $(ISO_IMAGE) $(DISK_IMG)
+	@echo "  RUN     QEMU (UEFI, terminal)"
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_NODISPLAY_OPTS) -device i6300esb -watchdog-action reset
+
+run_bios: $(ISO_IMAGE) $(DISK_IMG)
+	@echo "  RUN     QEMU"
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -device i6300esb -watchdog-action reset
+
 debug: $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  DEBUG   QEMU"
-	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -d int,cpu_reset > debug.txt 2>&1 -no-reboot $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) -d int,cpu_reset > debug.txt 2>&1 -no-reboot $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset
 
 clean:
 	@echo "  CLEAN"
