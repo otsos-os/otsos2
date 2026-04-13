@@ -432,7 +432,7 @@ $(STRING_O): mlibc/string.c
 
 $(ITOA_O): mlibc/itoa.s
 	@echo "  AS      $<"
-	@$(CC) -c $< -o $@
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(HARDWARE_O): mlibc/hardware.asm
 	@echo "  AS      $<"
