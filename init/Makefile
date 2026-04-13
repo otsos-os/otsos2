@@ -1,7 +1,7 @@
 TARGET ?= x86_64-elf
-CC ?= clang
-LD ?= ld.lld
-SIZE ?= llvm-size
+CC = clang
+LD = ld.lld
+SIZE = llvm-size
 
 # Flags for freestanding userspace code (no libc)
 TARGET_CFLAGS ?= --target=$(TARGET)
@@ -10,14 +10,14 @@ CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fno-pic -fno-stack-protector -nostdli
 
 LDFLAGS ?= -m elf_x86_64 -T linker.ld --oformat=elf64-x86-64 -nostdlib
 
-TARGET = init
+INIT_BIN = init
 HELLO_BIN = hello
 OBJS = init.o
 HELLO_OBJS = hello.o
 
-all: $(TARGET) $(HELLO_BIN)
+all: $(INIT_BIN) $(HELLO_BIN)
 
-$(TARGET): $(OBJS)
+$(INIT_BIN): $(OBJS)
 	@echo "  LLD      $@"
 	@$(LD) $(LDFLAGS) $(OBJS) -o $@
 	@echo "  SIZE    $@"
@@ -38,6 +38,6 @@ hello.o: hello.c
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(HELLO_OBJS) $(TARGET) $(HELLO_BIN)
+	rm -f $(OBJS) $(HELLO_OBJS) $(INIT_BIN) $(HELLO_BIN)
 
 .PHONY: all clean

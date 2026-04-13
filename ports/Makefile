@@ -1,7 +1,7 @@
 TARGET ?= x86_64-elf
-CC ?= clang
-LD ?= ld.lld
-SIZE ?= llvm-size
+CC = clang
+LD = ld.lld
+SIZE = llvm-size
 
 TARGET_CFLAGS ?= --target=$(TARGET)
 CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fno-pic -fno-stack-protector -nostdlib -nostdinc \

@@ -1,9 +1,9 @@
 TARGET ?= x86_64-elf
-CC ?= clang
-ZIG ?= zig
-LD ?= ld.lld
-AS ?= nasm
-QEMU ?= qemu-system-x86_64
+CC = clang
+ZIG = zig
+LD = ld.lld
+AS = nasm
+QEMU = qemu-system-x86_64
 QEMU_GUI_OPTS ?= -display gtk
 QEMU_NODISPLAY_OPTS ?= -display none
 
