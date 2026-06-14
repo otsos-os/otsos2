@@ -24,25 +24,39 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/posix/posix.h>
-#include <kernel/useraddr.h>
-#include <mlibc/mlibc.h>
+#ifndef API_ERRNO_H
+#define API_ERRNO_H
 
-void uname_fill(struct utsname *buf) {
-  memset(buf, 0, sizeof(struct utsname));
-  strcpy(buf->sysname, "otsos2");
-  strcpy(buf->nodename, "localhost");
-  strcpy(buf->release, "2.3.3");
-  strcpy(buf->version, "otsos2-kernel-rev2");
-  strcpy(buf->machine, "x86_64");
-  strcpy(buf->domainname, "localdomain");
-}
+#define API_ERR_PERM 1
+#define API_ERR_NOT_FOUND 2
+#define API_ERR_NO_PROC 3
+#define API_ERR_INTR 4
+#define API_ERR_IO 5
+#define API_ERR_NO_DEVICE_ADDR 6
+#define API_ERR_TOO_BIG 7
+#define API_ERR_BAD_IMAGE 8
+#define API_ERR_BAD_HANDLE 9
+#define API_ERR_NO_CHILD 10
+#define API_ERR_RETRY 11
+#define API_ERR_NO_MEMORY 12
+#define API_ERR_ACCESS 13
+#define API_ERR_BAD_ADDR 14
+#define API_ERR_BUSY 16
+#define API_ERR_EXISTS 17
+#define API_ERR_CROSS_DEVICE 18
+#define API_ERR_NO_DEVICE 19
+#define API_ERR_NOT_DIR 20
+#define API_ERR_IS_DIR 21
+#define API_ERR_BAD_VALUE 22
+#define API_ERR_OBJECTS_FULL 23
+#define API_ERR_HANDLES_FULL 24
+#define API_ERR_NOT_TERM 25
+#define API_ERR_FILE_TOO_BIG 27
+#define API_ERR_NO_SPACE 28
+#define API_ERR_NOT_SEEKABLE 29
+#define API_ERR_READ_ONLY 30
+#define API_ERR_PIPE_CLOSED 32
+#define API_ERR_NO_CALL 38
+#define API_ERR_NOT_SUPPORTED 95
 
-int sys_uname(struct utsname *buf) {
-  if (!is_user_address(buf, sizeof(struct utsname))) {
-    return -EFAULT;
-  }
-
-  uname_fill(buf);
-  return 0;
-}
+#endif

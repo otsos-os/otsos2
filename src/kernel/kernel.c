@@ -44,7 +44,7 @@
 #include <kernel/multiboot2.h>
 #include <kernel/panic.h>
 #include <kernel/pci/pci.h>
-#include <kernel/posix/posix.h>
+#include <kernel/api/api.h>
 #include <kernel/kshell/kshell.h>
 #include <kernel/syscall.h>
 #include <lib/com1.h>
@@ -231,46 +231,6 @@ static void enable_sse(void) {
   __asm__ volatile("mov %0, %%cr4" : : "r"(cr4));
 }
 
-static void ensure_dev_nodes(void) {
-  if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
-    return;
-  }
-
-  chainfs_file_entry_t entry;
-  u32 entry_block, entry_offset;
-
-  if (chainfs_resolve_path("/dev", &entry, &entry_block, &entry_offset) != 0) {
-    chainfs_mkdir("/dev");
-  } else if (entry.type != CHAINFS_TYPE_DIR) {
-    com1_printf("[CHAINFS] /dev exists but is not a directory\n");
-    return;
-  }
-
-  if (chainfs_resolve_path("/dev/tty", &entry, &entry_block, &entry_offset) !=
-      0) {
-    chainfs_mknod("/dev/tty", TTY_DEVICE_MAJOR, TTY_DEVICE_MINOR_TTY);
-  } else if (entry.type != CHAINFS_TYPE_DEV) {
-    if (entry.type == CHAINFS_TYPE_FILE) {
-      chainfs_delete_file("/dev/tty");
-      chainfs_mknod("/dev/tty", TTY_DEVICE_MAJOR, TTY_DEVICE_MINOR_TTY);
-    } else {
-      com1_printf("[CHAINFS] /dev/tty exists but is not a device node\n");
-    }
-  }
-
-  if (chainfs_resolve_path("/dev/console", &entry, &entry_block,
-                           &entry_offset) != 0) {
-    chainfs_mknod("/dev/console", TTY_DEVICE_MAJOR, TTY_DEVICE_MINOR_CONSOLE);
-  } else if (entry.type != CHAINFS_TYPE_DEV) {
-    if (entry.type == CHAINFS_TYPE_FILE) {
-      chainfs_delete_file("/dev/console");
-      chainfs_mknod("/dev/console", TTY_DEVICE_MAJOR, TTY_DEVICE_MINOR_CONSOLE);
-    } else {
-      com1_printf("[CHAINFS] /dev/console exists but is not a device node\n");
-    }
-  }
-}
-
 void kmain(u64 magic, u64 addr, u64 boot_option) {
   int safe_mode = (boot_option == 1);
   int debug_mode = (boot_option == 2);
@@ -284,7 +244,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   enable_sse();
   __asm__ volatile("sti");
 
-  // posix_init() moved down
+  // api_init() moved down
   syscall_init();
 
   disk_manager_init();
@@ -467,9 +427,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
     fs_ok = fmt_ok;
   }
   status_line("chainfs ready", fs_ok);
-  if (fs_ok) {
-    ensure_dev_nodes();
-  } else {
+  if (!fs_ok) {
     com1_printf("[CHAINFS] filesystem unavailable, skipping userspace startup\n");
   }
 
@@ -496,7 +454,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
                       &fetch_module_size);
     }
 
-    posix_init();
+    api_init();
 
     chainfs_mkdir("/bin");
 

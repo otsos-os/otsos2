@@ -10,7 +10,10 @@ Simple [amd64](https://www.amd.com/content/dam/amd/en/documents/processor-tech-d
 
 It have **own kernel** writen from scratch
 
-it have **posix syscalls** like `open` `close` `clone` and more but it`s not fully posix compatibly it have **own syscalls** to.
+it has its own DOD-ish syscall/API surface: `termWrite`, `termRead`,
+`dataOpen`, `dataClose`, `procSpawn`, `procKill`, `drmCall`, and more.
+
+terminal I/O goes through `term*` calls, not device nodes.
 
 
 there are only 2 test lines: my pc (ASUS TUF Gaming FX706LI-H7010) and qemu.

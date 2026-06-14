@@ -30,20 +30,23 @@
 #include <kernel/interrupts/idt.h>
 #include <mlibc/mlibc.h>
 
-#define SYS_READ 0
-#define SYS_WRITE 1
-#define SYS_OPEN 2
-#define SYS_CLOSE 3
-#define SYS_LSEEK 8
-#define SYS_MMAP 9
-#define SYS_PIPE 22
-#define SYS_CLONE 56
-#define SYS_FORK 57
-#define SYS_EXECVE 59
-#define SYS_EXIT 60
-#define SYS_WAIT 61
-#define SYS_KILL 62
-#define SYS_UNAME 63
+#define CALL_TERM_READ 0x100
+#define CALL_TERM_WRITE 0x101
+#define CALL_DATA_OPEN 0x200
+#define CALL_DATA_CLOSE 0x201
+#define CALL_DATA_READ 0x202
+#define CALL_DATA_WRITE 0x203
+#define CALL_DATA_SEEK 0x204
+#define CALL_DATA_PIPE 0x205
+#define CALL_MEM_MAP 0x300
+#define CALL_PROC_CLONE 0x400
+#define CALL_PROC_FORK 0x401
+#define CALL_PROC_SPAWN 0x402
+#define CALL_PROC_EXIT 0x403
+#define CALL_PROC_WAIT 0x404
+#define CALL_PROC_KILL 0x405
+#define CALL_SYS_INFO 0x500
+#define CALL_DRM_CALL 0x600
 
 void syscall_init(void);
 void syscall_handler(registers_t *regs);

@@ -25,58 +25,56 @@
  */
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
-#include <kernel/posix/posix.h>
+#include <kernel/api/api.h>
 
-long sys_lseek(int fd, long offset, int whence) {
-  file_descriptor_t *fd_table = posix_get_fd_table();
-  open_file_t *oft = posix_get_open_file_table();
+long api_data_seek(int handle, long offset, int whence) {
+  api_handle_t *handles = api_get_handle_table();
+  api_object_t *objects = api_get_object_table();
 
-  if (fd < 0 || fd >= MAX_FDS) {
-    return -EBADF;
+  if (handle < 0 || handle >= MAX_HANDLES) {
+    return -API_ERR_BAD_HANDLE;
   }
-  if (!fd_table[fd].used) {
-    return -EBADF;
+  if (!handles[handle].used) {
+    return -API_ERR_BAD_HANDLE;
   }
 
-  int of_index = fd_table[fd].of_index;
-  if (of_index < 0 || of_index >= MAX_OPEN_FILES) {
-    /* stdio or invalid: not seekable */
-    return -ESPIPE;
+  int object_index = handles[handle].object_index;
+  if (object_index < 0 || object_index >= MAX_DATA_OBJECTS) {
+    return -API_ERR_NOT_SEEKABLE;
   }
-  if (!oft[of_index].used) {
-    return -EBADF;
+  if (!objects[object_index].used) {
+    return -API_ERR_BAD_HANDLE;
   }
-  if (oft[of_index].type == OFT_TYPE_PIPE ||
-      oft[of_index].type == OFT_TYPE_TTY) {
-    return -ESPIPE;
+  if (objects[object_index].type == API_OBJECT_PIPE) {
+    return -API_ERR_NOT_SEEKABLE;
   }
 
   chainfs_file_entry_t entry;
   u32 entry_block, entry_offset;
-  if (chainfs_find_file(oft[of_index].path, &entry, &entry_block,
+  if (chainfs_find_file(objects[object_index].path, &entry, &entry_block,
                         &entry_offset) != 0) {
-    return -ENOENT;
+    return -API_ERR_NOT_FOUND;
   }
 
   long long new_off = 0;
   switch (whence) {
-  case SEEK_SET:
+  case API_SEEK_SET:
     new_off = (long long)offset;
     break;
-  case SEEK_CUR:
-    new_off = (long long)oft[of_index].offset + (long long)offset;
+  case API_SEEK_CUR:
+    new_off = (long long)objects[object_index].offset + (long long)offset;
     break;
-  case SEEK_END:
+  case API_SEEK_END:
     new_off = (long long)entry.size + (long long)offset;
     break;
   default:
-    return -EINVAL;
+    return -API_ERR_BAD_VALUE;
   }
 
   if (new_off < 0) {
-    return -EINVAL;
+    return -API_ERR_BAD_VALUE;
   }
 
-  oft[of_index].offset = (u32)new_off;
-  return (long)oft[of_index].offset;
+  objects[object_index].offset = (u32)new_off;
+  return (long)objects[object_index].offset;
 }

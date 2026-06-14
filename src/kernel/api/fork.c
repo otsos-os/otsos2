@@ -25,25 +25,19 @@
  */
 
 #include <kernel/mmu.h>
-#include <kernel/posix/posix.h>
+#include <kernel/api/api.h>
 #include <kernel/process.h>
 #include <mlibc/memory.h>
 
-long sys_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
-  (void)ptid;
+int api_proc_fork(registers_t *regs) {
   process_t *parent = process_current();
   if (!parent || !regs) {
-    return -EINVAL;
-  }
-
-  /* Only support fork-like clone (no shared VM / threads). */
-  if (flags & (CLONE_VM | CLONE_THREAD)) {
-    return -EINVAL;
+    return -API_ERR_BAD_VALUE;
   }
 
   process_t *child = alloc_process();
   if (!child) {
-    return -EAGAIN;
+    return -API_ERR_RETRY;
   }
 
   child->state = PROC_STATE_EMBRYO;
@@ -52,7 +46,7 @@ long sys_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
   if (!child_cr3) {
     memset(child, 0, sizeof(process_t));
     child->state = PROC_STATE_UNUSED;
-    return -ENOMEM;
+    return -API_ERR_NO_MEMORY;
   }
 
   u8 *kstack = (u8 *)kmalloc_aligned(KERNEL_STACK_SIZE, 16);
@@ -61,7 +55,7 @@ long sys_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
     kfree((void *)(child_cr3 & PTE_ADDR_MASK));
     memset(child, 0, sizeof(process_t));
     child->state = PROC_STATE_UNUSED;
-    return -ENOMEM;
+    return -API_ERR_NO_MEMORY;
   }
   memset(kstack, 0, KERNEL_STACK_SIZE);
 
@@ -85,16 +79,11 @@ long sys_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
   child->context = parent->context;
   child->context.rax = 0;
 
-  if (child_stack) {
-    child->context.rsp = child_stack & ~0xFULL;
-    child->user_stack = child->context.rsp;
-  }
-
   child->exit_code = 0;
   child->owns_address_space = 1;
   child->mmap_base = parent->mmap_base;
-  posix_copy_fds(child, parent);
+  api_copy_handles(child, parent);
   child->next = NULL;
 
-  return (long)child->pid;
+  return (int)child->pid;
 }

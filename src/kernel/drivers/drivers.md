@@ -82,6 +82,6 @@ interval timer PIT for system ticks.
     - `u64 timer_get_ticks()`: return number of tick since boot
 
 8. TTY (src/kernel/drivers/tty.c)
-simple console device that join to keyboard input VGA/COM1 output
-    device /dev/tty, /dev/console
+simple console manager that joins keyboard input with DRM/VGA fallback output
+    userspace API: termRead, termWrite
     switch: Ctrl + Numpad 0..9

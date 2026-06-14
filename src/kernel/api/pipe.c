@@ -24,19 +24,19 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/posix/posix.h>
+#include <kernel/api/api.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mlibc/memory.h>
 
-static int posix_find_free_fd(void) {
-  file_descriptor_t *fd_table = posix_get_fd_table();
-  for (int i = 3; i < MAX_FDS; i++) {
-    if (!fd_table[i].used) {
+static int api_find_free_handle(void) {
+  api_handle_t *handles = api_get_handle_table();
+  for (int i = 0; i < MAX_HANDLES; i++) {
+    if (!handles[i].used) {
       return i;
     }
   }
-  return -EMFILE;
+  return -API_ERR_HANDLES_FULL;
 }
 
 int pipe_read(pipe_t *p, void *buf, u32 count) {
@@ -69,7 +69,7 @@ int pipe_write(pipe_t *p, const void *buf, u32 count) {
     return 0;
   }
   if (p->readers == 0) {
-    return -EPIPE;
+    return -API_ERR_PIPE_CLOSED;
   }
 
   u32 space = PIPE_BUF_SIZE - p->size;
@@ -91,63 +91,63 @@ int pipe_write(pipe_t *p, const void *buf, u32 count) {
   return (int)to_write;
 }
 
-int sys_pipe(int fds[2]) {
-  if (!is_user_address(fds, sizeof(int) * 2)) {
-    return -EFAULT;
+int api_data_pipe(int handles_out[2]) {
+  if (!is_user_address(handles_out, sizeof(int) * 2)) {
+    return -API_ERR_BAD_ADDR;
   }
 
-  file_descriptor_t *fd_table = posix_get_fd_table();
-  open_file_t *oft = posix_get_open_file_table();
+  api_handle_t *handles = api_get_handle_table();
+  api_object_t *objects = api_get_object_table();
 
-  int fd_read = posix_find_free_fd();
-  if (fd_read < 0) {
-    return -EMFILE;
+  int handle_read = api_find_free_handle();
+  if (handle_read < 0) {
+    return handle_read;
   }
-  fd_table[fd_read].used = 1;
-  int fd_write = posix_find_free_fd();
-  if (fd_write < 0) {
-    fd_table[fd_read].used = 0;
-    return -EMFILE;
+  handles[handle_read].used = 1;
+  int handle_write = api_find_free_handle();
+  if (handle_write < 0) {
+    handles[handle_read].used = 0;
+    return handle_write;
   }
-  fd_table[fd_read].used = 0;
+  handles[handle_read].used = 0;
 
-  int of_read = posix_alloc_open_file();
+  int of_read = api_alloc_object();
   if (of_read < 0) {
-    return -ENFILE;
+    return of_read;
   }
-  int of_write = posix_alloc_open_file();
+  int of_write = api_alloc_object();
   if (of_write < 0) {
-    posix_release_open_file(of_read);
-    return -ENFILE;
+    api_release_object(of_read);
+    return of_write;
   }
 
   pipe_t *p = (pipe_t *)kmalloc(sizeof(pipe_t));
   if (!p) {
-    posix_release_open_file(of_read);
-    posix_release_open_file(of_write);
-    return -ENOMEM;
+    api_release_object(of_read);
+    api_release_object(of_write);
+    return -API_ERR_NO_MEMORY;
   }
   memset(p, 0, sizeof(pipe_t));
   p->readers = 1;
   p->writers = 1;
 
-  oft[of_read].type = OFT_TYPE_PIPE;
-  oft[of_read].pipe = p;
-  oft[of_read].flags = O_RDONLY;
+  objects[of_read].type = API_OBJECT_PIPE;
+  objects[of_read].pipe = p;
+  objects[of_read].flags = API_OPEN_READ;
 
-  oft[of_write].type = OFT_TYPE_PIPE;
-  oft[of_write].pipe = p;
-  oft[of_write].flags = O_WRONLY;
+  objects[of_write].type = API_OBJECT_PIPE;
+  objects[of_write].pipe = p;
+  objects[of_write].flags = API_OPEN_WRITE;
 
-  fd_table[fd_read].used = 1;
-  fd_table[fd_read].flags = O_RDONLY;
-  fd_table[fd_read].of_index = of_read;
+  handles[handle_read].used = 1;
+  handles[handle_read].flags = API_OPEN_READ;
+  handles[handle_read].object_index = of_read;
 
-  fd_table[fd_write].used = 1;
-  fd_table[fd_write].flags = O_WRONLY;
-  fd_table[fd_write].of_index = of_write;
+  handles[handle_write].used = 1;
+  handles[handle_write].flags = API_OPEN_WRITE;
+  handles[handle_write].object_index = of_write;
 
-  fds[0] = fd_read;
-  fds[1] = fd_write;
+  handles_out[0] = handle_read;
+  handles_out[1] = handle_write;
   return 0;
 }

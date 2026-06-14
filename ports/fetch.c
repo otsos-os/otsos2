@@ -1,9 +1,8 @@
-#define SYS_WRITE 1
-#define SYS_UNAME 63
-#define SYS_EXIT 60
-#define STDOUT 1
+#define CALL_TERM_WRITE 0x101
+#define CALL_PROC_EXIT 0x403
+#define CALL_SYS_INFO 0x500
 
-struct utsname {
+struct api_sysinfo {
   char sysname[65];
   char nodename[65];
   char release[65];
@@ -38,12 +37,12 @@ static unsigned long strlen(const char *s) {
 }
 
 static void print(const char *s) {
-  syscall3(SYS_WRITE, STDOUT, (long)s, strlen(s));
+  syscall3(CALL_TERM_WRITE, (long)s, strlen(s), 0);
 }
 
 void _start(void) {
-  struct utsname name;
-  if (syscall1(SYS_UNAME, (long)&name) == 0) {
+  struct api_sysinfo name;
+  if (syscall1(CALL_SYS_INFO, (long)&name) == 0) {
     print(
   "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n"
   "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@+@@@@@##@@@@@:@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n"
@@ -89,5 +88,5 @@ void _start(void) {
   } else {
     print("fetch: uname failed\n");
   }
-  syscall1(SYS_EXIT, 0);
+  syscall1(CALL_PROC_EXIT, 0);
 }

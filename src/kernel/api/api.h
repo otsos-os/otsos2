@@ -24,60 +24,58 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef POSIX_H
-#define POSIX_H
+#ifndef API_H
+#define API_H
 
 #include <kernel/interrupts/idt.h>
-#include <kernel/posix/errno.h>
+#include <kernel/api/errno.h>
 #include <mlibc/mlibc.h>
 
-#define MAX_FDS 32
-#define MAX_OPEN_FILES 64
+#define MAX_HANDLES 32
+#define MAX_DATA_OBJECTS 64
 
 struct process;
 
 typedef struct {
   int used;
   int flags;
-  int of_index; /* index into open file table, -1 for stdio */
-} file_descriptor_t;
+  int object_index;
+} api_handle_t;
 
 typedef struct {
   int used;
   int refcount;
-  int type; /* OFT_TYPE_* */
+  int type;
   char path[256];
   u32 offset;
   int flags;
   void *pipe;
-} open_file_t;
+} api_object_t;
 
-#define O_RDONLY 0x0001
-#define O_WRONLY 0x0002
-#define O_RDWR (O_RDONLY | O_WRONLY)
-#define O_CREAT 0x0040
-#define O_TRUNC 0x0200
-#define O_APPEND 0x0400
+#define API_OPEN_READ 0x0001
+#define API_OPEN_WRITE 0x0002
+#define API_OPEN_RW (API_OPEN_READ | API_OPEN_WRITE)
+#define API_OPEN_CREATE 0x0040
+#define API_OPEN_TRUNC 0x0200
+#define API_OPEN_APPEND 0x0400
 
-#define SEEK_SET 0
-#define SEEK_CUR 1
-#define SEEK_END 2
+#define API_SEEK_SET 0
+#define API_SEEK_CUR 1
+#define API_SEEK_END 2
 
-#define PROT_READ 0x1
-#define PROT_WRITE 0x2
-#define PROT_EXEC 0x4
+#define API_MAP_READ 0x1
+#define API_MAP_WRITE 0x2
+#define API_MAP_EXEC 0x4
 
-#define MAP_PRIVATE 0x02
-#define MAP_FIXED 0x10
-#define MAP_ANONYMOUS 0x20
+#define API_MAP_PRIVATE 0x02
+#define API_MAP_FIXED 0x10
+#define API_MAP_ANON 0x20
 
-#define CLONE_VM 0x00000100
-#define CLONE_THREAD 0x00010000
+#define API_CLONE_VM 0x00000100
+#define API_CLONE_THREAD 0x00010000
 
-#define OFT_TYPE_FILE 0
-#define OFT_TYPE_PIPE 1
-#define OFT_TYPE_TTY 2
-
+#define API_OBJECT_FILE 0
+#define API_OBJECT_PIPE 1
 #define MMAP_BASE 0x0000001000000000ULL
 #define MMAP_LIMIT 0x00007FFF00000000ULL
 
@@ -92,11 +90,7 @@ typedef struct pipe {
   int writers;
 } pipe_t;
 
-#define STDIN_FILENO 0
-#define STDOUT_FILENO 1
-#define STDERR_FILENO 2
-
-struct utsname {
+struct api_sysinfo {
   char sysname[65];
   char nodename[65];
   char release[65];
@@ -105,30 +99,32 @@ struct utsname {
   char domainname[65];
 };
 
-int sys_read(int fd, void *buf, u32 count);
-int sys_uname(struct utsname *buf);
-void uname_fill(struct utsname *buf);
-int sys_write(int fd, const void *buf, u32 count);
-int sys_open(const char *path, int flags);
-int sys_close(int fd);
-long sys_lseek(int fd, long offset, int whence);
-int sys_wait(int *status);
-int sys_pipe(int fds[2]);
-long sys_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs);
-u64 sys_mmap(const void *uargs);
-int sys_fork(registers_t *regs);
+int api_term_read(void *buf, u32 count);
+int api_term_write(const void *buf, u32 count);
+int api_data_read(int handle, void *buf, u32 count);
+int api_info(struct api_sysinfo *buf);
+void api_info_fill(struct api_sysinfo *buf);
+int api_data_write(int handle, const void *buf, u32 count);
+int api_data_open(const char *path, int flags);
+int api_data_close(int handle);
+long api_data_seek(int handle, long offset, int whence);
+int api_proc_wait(int *status);
+int api_data_pipe(int handles[2]);
+long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs);
+u64 api_mem_map(const void *uargs);
+int api_proc_fork(registers_t *regs);
 
 int pipe_read(pipe_t *p, void *buf, u32 count);
 int pipe_write(pipe_t *p, const void *buf, u32 count);
-int sys_execve(const char *path, const char *const *argv,
-               const char *const *envp, registers_t *regs);
-void posix_init(void);
-void posix_init_process(struct process *proc);
-void posix_copy_fds(struct process *dst, const struct process *src);
-void posix_release_fds(struct process *proc);
-file_descriptor_t *posix_get_fd_table(void);
-open_file_t *posix_get_open_file_table(void);
-int posix_alloc_open_file(void);
-void posix_release_open_file(int index);
+int api_proc_spawn(const char *path, const char *const *argv,
+                   const char *const *envp, registers_t *regs);
+void api_init(void);
+void api_init_process(struct process *proc);
+void api_copy_handles(struct process *dst, const struct process *src);
+void api_release_handles(struct process *proc);
+api_handle_t *api_get_handle_table(void);
+api_object_t *api_get_object_table(void);
+int api_alloc_object(void);
+void api_release_object(int index);
 
 #endif

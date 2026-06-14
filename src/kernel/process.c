@@ -97,7 +97,7 @@ process_t *process_create_kernel(const char *name, void (*entry)(void)) {
   proc->exit_code = 0;
   proc->owns_address_space = 0;
   proc->mmap_base = MMAP_BASE;
-  posix_init_process(proc);
+  api_init_process(proc);
   proc->next = NULL;
 
   proc->state = PROC_STATE_RUNNABLE;
@@ -155,7 +155,7 @@ void process_exit(int code) {
 
   current_process->exit_code = code;
   current_process->state = PROC_STATE_ZOMBIE;
-  posix_release_fds(current_process);
+  api_release_handles(current_process);
   if (current_process->owns_address_space) {
     u64 old_cr3 = current_process->cr3;
     mmu_write_cr3(mmu_kernel_cr3());
@@ -242,7 +242,7 @@ int process_kill(u32 pid) {
     return 0;
   }
 
-  posix_release_fds(proc);
+  api_release_handles(proc);
   if (proc->owns_address_space) {
     mmu_free_user_space(proc->cr3);
     kfree((void *)(proc->cr3 & PTE_ADDR_MASK));

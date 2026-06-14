@@ -28,16 +28,12 @@
  * init - First userspace process (PID 1)
  */
 
-#define SYS_READ 0
-#define SYS_WRITE 1
-#define SYS_OPEN 2
-#define SYS_CLOSE 3
-#define SYS_FORK 57
-#define SYS_EXECVE 59
-#define SYS_EXIT 60
-#define SYS_WAIT 61
-#define STDIN 0
-#define STDOUT 1
+#define CALL_TERM_READ 0x100
+#define CALL_TERM_WRITE 0x101
+#define CALL_PROC_FORK 0x401
+#define CALL_PROC_SPAWN 0x402
+#define CALL_PROC_EXIT 0x403
+#define CALL_PROC_WAIT 0x404
 
 static long syscall1(long num, long arg1) {
   long ret;
@@ -63,27 +59,27 @@ static long syscall0(long num) {
   return ret;
 }
 
-static long write(int fd, const void *buf, unsigned long count) {
-  return syscall3(SYS_WRITE, fd, (long)buf, count);
+static long termWrite(const void *buf, unsigned long count) {
+  return syscall3(CALL_TERM_WRITE, (long)buf, count, 0);
 }
 
-static long read(int fd, void *buf, unsigned long count) {
-  return syscall3(SYS_READ, fd, (long)buf, count);
+static long termRead(void *buf, unsigned long count) {
+  return syscall3(CALL_TERM_READ, (long)buf, count, 0);
 }
 
-static void exit(int code) {
-  syscall1(SYS_EXIT, code);
+static void procExit(int code) {
+  syscall1(CALL_PROC_EXIT, code);
   while (1) {
   }
 }
 
-static long fork(void) { return syscall0(SYS_FORK); }
+static long procFork(void) { return syscall0(CALL_PROC_FORK); }
 
-static long execve(const char *path, char *const argv[], char *const envp[]) {
-  return syscall3(SYS_EXECVE, (long)path, (long)argv, (long)envp);
+static long procSpawn(const char *path, char *const argv[], char *const envp[]) {
+  return syscall3(CALL_PROC_SPAWN, (long)path, (long)argv, (long)envp);
 }
 
-static long wait(int *status) { return syscall1(SYS_WAIT, (long)status); }
+static long procWait(int *status) { return syscall1(CALL_PROC_WAIT, (long)status); }
 
 static unsigned long strlen(const char *s) {
   unsigned long len = 0;
@@ -92,7 +88,7 @@ static unsigned long strlen(const char *s) {
   return len;
 }
 
-static void print(const char *s) { write(STDOUT, s, strlen(s)); }
+static void print(const char *s) { termWrite(s, strlen(s)); }
 
 static void trim_newline(char *s) {
   unsigned long i = 0;
@@ -112,7 +108,7 @@ void _start(void) {
   while (1) {
     char path[128];
     print("Enter program path (relative, e.g. hello): ");
-    long bytes = read(STDIN, path, 120);
+    long bytes = termRead(path, 120);
     if (bytes <= 0) {
       continue;
     }
@@ -131,11 +127,11 @@ void _start(void) {
     argv[0] = path;
     argv[1] = 0;
 
-    long pid = fork();
+    long pid = procFork();
     if (pid == 0) {
-      execve(path, argv, 0);
-      print("execve failed (child)\n");
-      exit(1);
+      procSpawn(path, argv, 0);
+      print("procSpawn failed (child)\n");
+      procExit(1);
     }
 
     if (pid < 0) {
@@ -145,7 +141,7 @@ void _start(void) {
 
     print("fork ok, child running\n");
     int status = 0;
-    while (wait(&status) < 0) {
+    while (procWait(&status) < 0) {
     }
   }
 }

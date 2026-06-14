@@ -27,7 +27,7 @@
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/gdt.h>
 #include <kernel/mmu.h>
-#include <kernel/posix/posix.h>
+#include <kernel/api/api.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mlibc/memory.h>
@@ -79,12 +79,12 @@ static int copy_user_string_array(const char *const *user, char ***out,
   }
 
   if (!is_user_address(user, sizeof(char *))) {
-    return -EFAULT;
+    return -API_ERR_BAD_ADDR;
   }
 
   char **arr = (char **)kcalloc(max_count + 1, sizeof(char *));
   if (!arr) {
-    return -ENOMEM;
+    return -API_ERR_NO_MEMORY;
   }
 
   int count = 0;
@@ -102,7 +102,7 @@ static int copy_user_string_array(const char *const *user, char ***out,
         kfree(arr[i]);
       }
       kfree(arr);
-      return -EFAULT;
+      return -API_ERR_BAD_ADDR;
     }
     arr[count++] = copy;
   }
@@ -113,7 +113,7 @@ static int copy_user_string_array(const char *const *user, char ***out,
         kfree(arr[i]);
       }
       kfree(arr);
-      return -E2BIG;
+      return -API_ERR_TOO_BIG;
     }
   }
 
@@ -137,24 +137,24 @@ static int read_file_into_buffer(const char *path, u8 **out_buf,
   chainfs_file_entry_t entry;
   u32 entry_block, entry_offset;
   if (chainfs_find_file(path, &entry, &entry_block, &entry_offset) != 0) {
-    return -ENOENT;
+    return -API_ERR_NOT_FOUND;
   }
 
   u32 size = entry.size;
   if (size == 0) {
-    return -ENOEXEC;
+    return -API_ERR_BAD_IMAGE;
   }
 
   u8 *buf = (u8 *)kcalloc(size, 1);
   if (!buf) {
-    return -ENOMEM;
+    return -API_ERR_NO_MEMORY;
   }
 
   u32 bytes_read = 0;
   if (chainfs_read_file(path, buf, size, &bytes_read) != 0 ||
       bytes_read != size) {
     kfree(buf);
-    return -EIO;
+    return -API_ERR_IO;
   }
 
   *out_buf = buf;
@@ -198,7 +198,7 @@ static int build_user_stack(char **argv, int argc, char **envp, int envc,
   if (!argv_ptrs || !envp_ptrs) {
     kfree(argv_ptrs);
     kfree(envp_ptrs);
-    return -ENOMEM;
+    return -API_ERR_NO_MEMORY;
   }
 
   for (int i = envc - 1; i >= 0; i--) {
@@ -206,7 +206,7 @@ static int build_user_stack(char **argv, int argc, char **envp, int envc,
     if (sp < stack_min + len) {
       kfree(argv_ptrs);
       kfree(envp_ptrs);
-      return -E2BIG;
+      return -API_ERR_TOO_BIG;
     }
     sp -= len;
     memcpy((void *)sp, envp[i], len);
@@ -218,7 +218,7 @@ static int build_user_stack(char **argv, int argc, char **envp, int envc,
     if (sp < stack_min + len) {
       kfree(argv_ptrs);
       kfree(envp_ptrs);
-      return -E2BIG;
+      return -API_ERR_TOO_BIG;
     }
     sp -= len;
     memcpy((void *)sp, argv[i], len);
@@ -230,7 +230,7 @@ static int build_user_stack(char **argv, int argc, char **envp, int envc,
   if (sp < stack_min + (u64)(8 * (argc + envc + 3))) {
     kfree(argv_ptrs);
     kfree(envp_ptrs);
-    return -E2BIG;
+    return -API_ERR_TOO_BIG;
   }
 
   sp -= 8;
@@ -263,30 +263,30 @@ static int build_user_stack(char **argv, int argc, char **envp, int envc,
   return 0;
 }
 
-int sys_execve(const char *path, const char *const *argv,
+int api_proc_spawn(const char *path, const char *const *argv,
                const char *const *envp, registers_t *regs) {
   process_t *proc = process_current();
   if (!proc || !regs) {
     com1_printf("[EXEC] Error: no current process or regs\n");
-    return -EINVAL;
+    return -API_ERR_BAD_VALUE;
   }
 
   if (!is_user_address(path, 1)) {
     com1_printf("[EXEC] Error: invalid user path pointer %p\n",
                 (void *)path);
-    return -EFAULT;
+    return -API_ERR_BAD_ADDR;
   }
 
   if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
     com1_printf("[EXEC] Error: ChainFS not initialized (magic=0x%x)\n",
                 g_chainfs.superblock.magic);
-    return -EIO;
+    return -API_ERR_IO;
   }
 
   char *kpath = copy_user_string(path, EXEC_MAX_STR);
   if (!kpath) {
     com1_printf("[EXEC] Error: failed to copy user path\n");
-    return -EFAULT;
+    return -API_ERR_BAD_ADDR;
   }
 
   char **kargv = NULL;
@@ -324,7 +324,7 @@ int sys_execve(const char *path, const char *const *argv,
     free_string_array(kargv);
     free_string_array(kenvp);
     kfree(kpath);
-    return -ENOMEM;
+    return -API_ERR_NO_MEMORY;
   }
 
   u64 old_cr3 = proc->cr3;
@@ -340,7 +340,7 @@ int sys_execve(const char *path, const char *const *argv,
     free_string_array(kargv);
     free_string_array(kenvp);
     kfree(kpath);
-    return -ENOEXEC;
+    return -API_ERR_BAD_IMAGE;
   }
 
   u64 user_stack = allocate_user_stack();
@@ -352,7 +352,7 @@ int sys_execve(const char *path, const char *const *argv,
     free_string_array(kargv);
     free_string_array(kenvp);
     kfree(kpath);
-    return -ENOMEM;
+    return -API_ERR_NO_MEMORY;
   }
 
   u64 new_rsp = 0;

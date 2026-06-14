@@ -27,7 +27,7 @@
 #ifndef PROCESS_H
 #define PROCESS_H
 
-#include <kernel/posix/posix.h>
+#include <kernel/api/api.h>
 #include <mlibc/mlibc.h>
 
 #define MAX_PROCESSES 64
@@ -84,7 +84,7 @@ typedef struct process {
   u64 mmap_base;
 
   /* File descriptors */
-  file_descriptor_t fd_table[MAX_FDS];
+  api_handle_t handles[MAX_HANDLES];
 
   /* Links */
   struct process *next; /* For scheduler queue */

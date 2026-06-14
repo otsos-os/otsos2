@@ -25,8 +25,7 @@
  */
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
-#include <kernel/drivers/tty.h>
-#include <kernel/posix/posix.h>
+#include <kernel/api/api.h>
 #include <kernel/useraddr.h>
 #include <lib/com1.h>
 #include <mlibc/memory.h>
@@ -61,94 +60,61 @@ static char *copy_user_path(const char *path) {
   return buf;
 }
 
-static int posix_find_free_fd(void) {
-  file_descriptor_t *fd_table = posix_get_fd_table();
-  for (int i = 3; i < MAX_FDS; i++) {
-    if (!fd_table[i].used) {
+static int api_find_free_handle(void) {
+  api_handle_t *handles = api_get_handle_table();
+  for (int i = 0; i < MAX_HANDLES; i++) {
+    if (!handles[i].used) {
       return i;
     }
   }
-  return -EMFILE;
+  return -API_ERR_HANDLES_FULL;
 }
 
-static int posix_flags_valid(int flags) {
-  if ((flags & O_RDWR) == 0) {
+static int api_flags_valid(int flags) {
+  if ((flags & API_OPEN_RW) == 0) {
     return 0;
   }
 
-  if ((flags & (O_CREAT | O_TRUNC | O_APPEND)) && !(flags & O_WRONLY)) {
+  if ((flags & (API_OPEN_CREATE | API_OPEN_TRUNC | API_OPEN_APPEND)) &&
+      !(flags & API_OPEN_WRITE)) {
     return 0;
   }
 
   return 1;
 }
 
-static int posix_open_device(const char *kpath, int flags,
-                             const chainfs_file_entry_t *entry) {
-  u16 major = (u16)entry->reserved[0] | ((u16)entry->reserved[1] << 8);
-  u16 minor = (u16)entry->reserved[2] | ((u16)entry->reserved[3] << 8);
-
-  int of_type = -1;
-  if (major == TTY_DEVICE_MAJOR) {
-    (void)minor;
-    of_type = OFT_TYPE_TTY;
-  }
-
-  if (of_type < 0) {
-    return -ENODEV;
-  }
-
-  int fd = posix_find_free_fd();
-  if (fd < 0) {
-    return fd;
-  }
-
-  int of_index = posix_alloc_open_file();
-  if (of_index < 0) {
-    return of_index;
-  }
-
-  open_file_t *oft = posix_get_open_file_table();
-  oft[of_index].type = of_type;
-  oft[of_index].flags = flags;
-  oft[of_index].offset = 0;
-  memset(oft[of_index].path, 0, sizeof(oft[of_index].path));
-  int path_len = strlen(kpath);
-  if (path_len >= (int)sizeof(oft[of_index].path)) {
-    path_len = (int)sizeof(oft[of_index].path) - 1;
-  }
-  memcpy(oft[of_index].path, kpath, path_len);
-
-  file_descriptor_t *fd_table = posix_get_fd_table();
-  fd_table[fd].used = 1;
-  fd_table[fd].flags = flags;
-  fd_table[fd].of_index = of_index;
-
-  return fd;
+static int path_is_device_namespace(const char *path) {
+  return path && path[0] == '/' && path[1] == 'd' && path[2] == 'e' &&
+         path[3] == 'v' && (path[4] == '\0' || path[4] == '/');
 }
 
-int sys_open(const char *path, int flags) {
-  file_descriptor_t *fd_table = posix_get_fd_table();
-  open_file_t *oft = posix_get_open_file_table();
+int api_data_open(const char *path, int flags) {
+  api_handle_t *handles = api_get_handle_table();
+  api_object_t *objects = api_get_object_table();
 
   char *kpath = copy_user_path(path);
   if (!kpath || kpath[0] == 0) {
     if (kpath) {
       kfree(kpath);
     }
-    return -EFAULT;
+    return -API_ERR_BAD_ADDR;
   }
 
-  if (!posix_flags_valid(flags)) {
+  if (!api_flags_valid(flags)) {
     kfree(kpath);
-    return -EINVAL;
+    return -API_ERR_BAD_VALUE;
+  }
+
+  if (path_is_device_namespace(kpath)) {
+    kfree(kpath);
+    return -API_ERR_NO_DEVICE;
   }
 
   if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
-    com1_printf("POSIX OPEN: ChainFS not initialized or corrupted magic: %x\n",
+    com1_printf("API OPEN: ChainFS not initialized or corrupted magic: %x\n",
                 g_chainfs.superblock.magic);
     kfree(kpath);
-    return -EIO;
+    return -API_ERR_IO;
   }
 
   chainfs_file_entry_t entry;
@@ -157,64 +123,63 @@ int sys_open(const char *path, int flags) {
       (chainfs_find_file(kpath, &entry, &entry_block, &entry_offset) == 0);
 
   if (!exists) {
-    if (!(flags & O_CREAT)) {
+    if (!(flags & API_OPEN_CREATE)) {
       kfree(kpath);
-      return -ENOENT;
+      return -API_ERR_NOT_FOUND;
     }
     if (chainfs_write_file(kpath, (const u8 *)"", 0) != 0) {
       kfree(kpath);
-      return -EIO;
+      return -API_ERR_IO;
     }
     exists =
         (chainfs_find_file(kpath, &entry, &entry_block, &entry_offset) == 0);
     if (!exists) {
       kfree(kpath);
-      return -EIO;
+      return -API_ERR_IO;
     }
   } else if (entry.type == CHAINFS_TYPE_DEV) {
-    int fd = posix_open_device(kpath, flags, &entry);
     kfree(kpath);
-    return fd;
+    return -API_ERR_NO_DEVICE;
   } else if (entry.type == CHAINFS_TYPE_DIR) {
     kfree(kpath);
-    return -EISDIR;
-  } else if (flags & O_TRUNC) {
+    return -API_ERR_IS_DIR;
+  } else if (flags & API_OPEN_TRUNC) {
     if (chainfs_write_file(kpath, (const u8 *)"", 0) != 0) {
       kfree(kpath);
-      return -EIO;
+      return -API_ERR_IO;
     }
     if (chainfs_find_file(kpath, &entry, &entry_block, &entry_offset) != 0) {
       kfree(kpath);
-      return -EIO;
+      return -API_ERR_IO;
     }
   }
 
-  int fd = posix_find_free_fd();
-  if (fd < 0) {
+  int handle = api_find_free_handle();
+  if (handle < 0) {
     kfree(kpath);
-    return fd;
+    return handle;
   }
 
-  int of_index = posix_alloc_open_file();
-  if (of_index < 0) {
+  int object_index = api_alloc_object();
+  if (object_index < 0) {
     kfree(kpath);
-    return of_index;
+    return object_index;
   }
 
-  oft[of_index].flags = flags;
-  oft[of_index].offset = (flags & O_APPEND) ? entry.size : 0;
+  objects[object_index].flags = flags;
+  objects[object_index].offset = (flags & API_OPEN_APPEND) ? entry.size : 0;
 
-  memset(oft[of_index].path, 0, sizeof(oft[of_index].path));
+  memset(objects[object_index].path, 0, sizeof(objects[object_index].path));
   int path_len = strlen(kpath);
-  if (path_len >= (int)sizeof(oft[of_index].path)) {
-    path_len = (int)sizeof(oft[of_index].path) - 1;
+  if (path_len >= (int)sizeof(objects[object_index].path)) {
+    path_len = (int)sizeof(objects[object_index].path) - 1;
   }
-  memcpy(oft[of_index].path, kpath, path_len);
+  memcpy(objects[object_index].path, kpath, path_len);
   kfree(kpath);
 
-  fd_table[fd].used = 1;
-  fd_table[fd].flags = flags;
-  fd_table[fd].of_index = of_index;
+  handles[handle].used = 1;
+  handles[handle].flags = flags;
+  handles[handle].object_index = object_index;
 
-  return fd;
+  return handle;
 }

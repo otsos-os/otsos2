@@ -72,6 +72,29 @@ static int tty_suppress_com1_mirror = 0;
 static u64 tty_indicator_end_time = 0;
 static int tty_indicator_active = 0;
 
+static u32 tty_palette[16] = {0x000000, 0x0000AA, 0x00AA00, 0x00AAAA,
+                              0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA,
+                              0x555555, 0x5555FF, 0x55FF55, 0x55FFFF,
+                              0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF};
+
+static void tty_draw_cell(int x, int y, char c, u8 color) {
+  if (drm_frontend_is_available()) {
+    drm_frontend_put_char_cell(x, y, c, tty_palette[color & 0x0F]);
+    return;
+  }
+  vga_put_entry_at(c, color, x, y);
+}
+
+static void tty_set_hw_cursor(const tty_state_t *tty) {
+  if (!tty) {
+    return;
+  }
+  if (!drm_frontend_is_available()) {
+    vga_set_cursor(tty->cursor_x, tty->cursor_y);
+    vga_set_color(tty->color);
+  }
+}
+
 static void tty_apply_ansi(tty_state_t *tty, int code) {
   u8 color_idx = 0x07;
   switch (code) {
@@ -119,13 +142,12 @@ static void tty_redraw(const tty_state_t *tty) {
       u16 cell = tty->cells[y * tty->width + x];
       char c = (char)(cell & 0xFF);
       u8 color = (u8)((cell >> 8) & 0xFF);
-      vga_put_entry_at(c, color, x, y);
+      tty_draw_cell(x, y, c, color);
     }
   }
   drm_frontend_batch_end();
 
-  vga_set_cursor(tty->cursor_x, tty->cursor_y);
-  vga_set_color(tty->color);
+  tty_set_hw_cursor(tty);
 }
 
 static void tty_scroll(tty_state_t *tty, int active) {
@@ -200,7 +222,7 @@ static void tty_putc_internal(tty_state_t *tty, char c, int active) {
     if (x >= 0 && y >= 0 && x < tty->width && y < tty->height) {
       tty->cells[y * tty->width + x] = ((u16)tty->color << 8) | (u8)c;
       if (active) {
-        vga_put_entry_at(c, tty->color, x, y);
+        tty_draw_cell(x, y, c, tty->color);
       }
     }
     tty->cursor_x++;
@@ -217,8 +239,7 @@ static void tty_putc_internal(tty_state_t *tty, char c, int active) {
   }
 
   if (active) {
-    vga_set_cursor(tty->cursor_x, tty->cursor_y);
-    vga_set_color(tty->color);
+    tty_set_hw_cursor(tty);
   }
 }
 
@@ -267,7 +288,7 @@ static void tty_draw_indicator(int index) {
   }
 
   for (int i = 0; buf[i]; i++) {
-    vga_put_entry_at(buf[i], 0x0A, x + i, y);
+    tty_draw_cell(x + i, y, buf[i], 0x0A);
   }
 }
 

@@ -4,9 +4,8 @@
  * Minimal freestanding port for Otsos (no libc).
  */
 
-#define SYS_WRITE 1
-#define SYS_EXIT 60
-#define STDOUT 1
+#define CALL_TERM_WRITE 0x101
+#define CALL_PROC_EXIT 0x403
 
 typedef unsigned long usize;
 
@@ -28,12 +27,12 @@ static long syscall3(long num, long arg1, long arg2, long arg3) {
   return ret;
 }
 
-static long write_sys(int fd, const void *buf, usize count) {
-  return syscall3(SYS_WRITE, fd, (long)buf, count);
+static long termWrite(const void *buf, usize count) {
+  return syscall3(CALL_TERM_WRITE, (long)buf, count, 0);
 }
 
-static void exit_sys(int code) {
-  syscall1(SYS_EXIT, code);
+static void procExit(int code) {
+  syscall1(CALL_PROC_EXIT, code);
   while (1) {
   }
 }
@@ -45,9 +44,9 @@ static usize strlen_sys(const char *s) {
   return len;
 }
 
-static int write_all(int fd, const char *buf, usize len) {
+static int write_all(const char *buf, usize len) {
   while (len) {
-    long n = write_sys(fd, buf, len);
+    long n = termWrite(buf, len);
     if (n <= 0)
       return -1;
     buf += (usize)n;
@@ -59,15 +58,15 @@ static int write_all(int fd, const char *buf, usize len) {
 static void yes_write_pieces(int argc, char **argv) {
   for (;;) {
     for (int i = 1; i < argc; i++) {
-      if (write_all(STDOUT, argv[i], strlen_sys(argv[i])) != 0)
-        exit_sys(1);
+      if (write_all(argv[i], strlen_sys(argv[i])) != 0)
+        procExit(1);
       if (i + 1 < argc) {
-        if (write_all(STDOUT, " ", 1) != 0)
-          exit_sys(1);
+        if (write_all(" ", 1) != 0)
+          procExit(1);
       }
     }
-    if (write_all(STDOUT, "\n", 1) != 0)
-      exit_sys(1);
+    if (write_all("\n", 1) != 0)
+      procExit(1);
   }
 }
 
@@ -86,8 +85,8 @@ static void yes_write_buffered(int argc, char **argv) {
   buf[used++] = '\n';
 
   for (;;) {
-    if (write_all(STDOUT, buf, used) != 0)
-      exit_sys(1);
+    if (write_all(buf, used) != 0)
+      procExit(1);
   }
 }
 
@@ -100,8 +99,8 @@ void _start(long argc, char **argv, char **envp) {
       volatile int a = 2;
       volatile int b = 0;
       int ressss = a / b;
-      if (write_all(STDOUT, msg, 2) != 0)
-        exit_sys(1);
+      if (write_all(msg, 2) != 0)
+        procExit(1);
     }
   }
 

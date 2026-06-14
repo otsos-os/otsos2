@@ -25,65 +25,46 @@
  */
 
 #include <kernel/mmu.h>
-#include <kernel/posix/posix.h>
 #include <kernel/process.h>
+#include <kernel/useraddr.h>
 #include <mlibc/memory.h>
 
-int sys_fork(registers_t *regs) {
-  process_t *parent = process_current();
-  if (!parent || !regs) {
-    return -EINVAL;
+int api_proc_wait(int *status) {
+  process_t *current = process_current();
+  if (!current) {
+    return -API_ERR_NO_CHILD;
   }
 
-  process_t *child = alloc_process();
-  if (!child) {
-    return -EAGAIN;
-  }
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    process_t *child = &process_table[i];
+    if (child->state != PROC_STATE_ZOMBIE) {
+      continue;
+    }
+    if (child->ppid != current->pid) {
+      continue;
+    }
 
-  child->state = PROC_STATE_EMBRYO;
+    if (status && is_user_address(status, sizeof(int))) {
+      *status = child->exit_code;
+    }
 
-  u64 child_cr3 = mmu_clone_user_space(parent->cr3);
-  if (!child_cr3) {
+    if (child->owns_address_space && child->cr3) {
+      mmu_free_user_space(child->cr3);
+      kfree((void *)(child->cr3 & PTE_ADDR_MASK));
+      child->cr3 = 0;
+      child->owns_address_space = 0;
+    }
+
+    if (child->kernel_stack) {
+      u64 kstack_base = child->kernel_stack - KERNEL_STACK_SIZE;
+      kfree((void *)kstack_base);
+    }
+
+    int pid = (int)child->pid;
     memset(child, 0, sizeof(process_t));
     child->state = PROC_STATE_UNUSED;
-    return -ENOMEM;
+    return pid;
   }
 
-  u8 *kstack = (u8 *)kmalloc_aligned(KERNEL_STACK_SIZE, 16);
-  if (!kstack) {
-    mmu_free_user_space(child_cr3);
-    kfree((void *)(child_cr3 & PTE_ADDR_MASK));
-    memset(child, 0, sizeof(process_t));
-    child->state = PROC_STATE_UNUSED;
-    return -ENOMEM;
-  }
-  memset(kstack, 0, KERNEL_STACK_SIZE);
-
-  memset(child, 0, sizeof(process_t));
-
-  child->pid = next_pid++;
-  child->ppid = parent->pid;
-  child->state = PROC_STATE_RUNNABLE;
-  child->cr3 = child_cr3;
-  child->entry_point = parent->entry_point;
-
-  for (int i = 0; i < PROCESS_NAME_LEN - 1 && parent->name[i]; i++) {
-    child->name[i] = parent->name[i];
-  }
-  child->name[PROCESS_NAME_LEN - 1] = '\0';
-
-  child->kernel_stack = (u64)(kstack + KERNEL_STACK_SIZE);
-  child->user_stack = parent->user_stack;
-
-  process_save_context(parent, regs);
-  child->context = parent->context;
-  child->context.rax = 0;
-
-  child->exit_code = 0;
-  child->owns_address_space = 1;
-  child->mmap_base = parent->mmap_base;
-  posix_copy_fds(child, parent);
-  child->next = NULL;
-
-  return (int)child->pid;
+  return -API_ERR_NO_CHILD;
 }

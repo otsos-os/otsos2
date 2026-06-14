@@ -26,7 +26,7 @@
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/mmu.h>
-#include <kernel/posix/posix.h>
+#include <kernel/api/api.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <lib/com1.h>
@@ -86,79 +86,80 @@ static u64 find_free_region(process_t *proc, u64 length) {
   return 0;
 }
 
-u64 sys_mmap(const void *uargs) {
+u64 api_mem_map(const void *uargs) {
   process_t *proc = process_current();
   if (!proc) {
-    return (u64)(-EINVAL);
+    return (u64)(-API_ERR_BAD_VALUE);
   }
   if (!is_user_address(uargs, sizeof(mmap_args_t))) {
-    return (u64)(-EFAULT);
+    return (u64)(-API_ERR_BAD_ADDR);
   }
 
   mmap_args_t args;
   memcpy(&args, uargs, sizeof(args));
 
   if (args.length == 0) {
-    return (u64)(-EINVAL);
+    return (u64)(-API_ERR_BAD_VALUE);
   }
-  if (!(args.flags & MAP_PRIVATE)) {
-    return (u64)(-EINVAL);
+  if (!(args.flags & API_MAP_PRIVATE)) {
+    return (u64)(-API_ERR_BAD_VALUE);
   }
 
   u64 length = align_up(args.length, PAGE_SIZE);
   u64 addr = args.addr;
 
-  if (args.flags & MAP_FIXED) {
+  if (args.flags & API_MAP_FIXED) {
     if (addr == 0 || (addr & (PAGE_SIZE - 1)) != 0) {
-      return (u64)(-EINVAL);
+      return (u64)(-API_ERR_BAD_VALUE);
     }
     if (!range_is_free(addr, length / PAGE_SIZE)) {
-      return (u64)(-EEXIST);
+      return (u64)(-API_ERR_EXISTS);
     }
   } else {
     addr = find_free_region(proc, length);
     if (!addr) {
-      return (u64)(-ENOMEM);
+      return (u64)(-API_ERR_NO_MEMORY);
     }
   }
 
-  int file_backed = !(args.flags & MAP_ANONYMOUS);
+  int file_backed = !(args.flags & API_MAP_ANON);
   char file_path[256];
   u32 file_size = 0;
 
   if (file_backed) {
-    file_descriptor_t *fd_table = posix_get_fd_table();
-    open_file_t *oft = posix_get_open_file_table();
-    if (args.fd < 0 || args.fd >= MAX_FDS || !fd_table[args.fd].used) {
-      return (u64)(-EBADF);
+    api_handle_t *handles = api_get_handle_table();
+    api_object_t *objects = api_get_object_table();
+    if (args.fd < 0 || args.fd >= MAX_HANDLES || !handles[args.fd].used) {
+      return (u64)(-API_ERR_BAD_HANDLE);
     }
-    int of_index = fd_table[args.fd].of_index;
-    if (of_index < 0 || of_index >= MAX_OPEN_FILES || !oft[of_index].used) {
-      return (u64)(-EBADF);
+    int object_index = handles[args.fd].object_index;
+    if (object_index < 0 || object_index >= MAX_DATA_OBJECTS ||
+        !objects[object_index].used) {
+      return (u64)(-API_ERR_BAD_HANDLE);
     }
-    if (oft[of_index].type != OFT_TYPE_FILE) {
-      return (u64)(-ENODEV);
+    if (objects[object_index].type != API_OBJECT_FILE) {
+      return (u64)(-API_ERR_NO_DEVICE);
     }
     chainfs_file_entry_t entry;
     u32 entry_block, entry_offset;
-    if (chainfs_find_file(oft[of_index].path, &entry, &entry_block,
+    if (chainfs_find_file(objects[object_index].path, &entry, &entry_block,
                           &entry_offset) != 0) {
-      return (u64)(-ENOENT);
+      return (u64)(-API_ERR_NOT_FOUND);
     }
     file_size = entry.size;
     memset(file_path, 0, sizeof(file_path));
-    int len = strlen(oft[of_index].path);
+    int len = strlen(objects[object_index].path);
     if (len >= (int)sizeof(file_path)) {
       len = (int)sizeof(file_path) - 1;
     }
-    memcpy(file_path, oft[of_index].path, len);
+    memcpy(file_path, objects[object_index].path, len);
   }
 
   u64 page_flags = PTE_PRESENT | PTE_USER;
-  if (args.prot & PROT_WRITE) {
+  if (args.prot & API_MAP_WRITE) {
     page_flags |= PTE_RW;
   }
-  if (!(args.prot & PROT_EXEC)) {
+  if (!(args.prot & API_MAP_EXEC)) {
     page_flags |= PTE_NX;
   }
 
@@ -173,7 +174,7 @@ u64 sys_mmap(const void *uargs) {
           kfree((void *)paddr);
         }
       }
-      return (u64)(-ENOMEM);
+      return (u64)(-API_ERR_NO_MEMORY);
     }
     memset(page, 0, PAGE_SIZE);
     mmu_map_page(addr + off, (u64)page, page_flags);

@@ -2,9 +2,8 @@
  * hello - simple userspace test program
  */
 
-#define SYS_WRITE 1
-#define SYS_EXIT 60
-#define STDOUT 1
+#define CALL_TERM_WRITE 0x101
+#define CALL_PROC_EXIT 0x403
 
 static long syscall1(long num, long arg1) {
   long ret;
@@ -24,12 +23,12 @@ static long syscall3(long num, long arg1, long arg2, long arg3) {
   return ret;
 }
 
-static long write(int fd, const void *buf, unsigned long count) {
-  return syscall3(SYS_WRITE, fd, (long)buf, count);
+static long termWrite(const void *buf, unsigned long count) {
+  return syscall3(CALL_TERM_WRITE, (long)buf, count, 0);
 }
 
-static void exit(int code) {
-  syscall1(SYS_EXIT, code);
+static void procExit(int code) {
+  syscall1(CALL_PROC_EXIT, code);
   while (1) {
   }
 }
@@ -43,6 +42,6 @@ static unsigned long strlen(const char *s) {
 
 void _start(void) {
   const char *msg = "Hello from hello.bin\n";
-  write(STDOUT, msg, strlen(msg));
-  exit(0);
+  termWrite(msg, strlen(msg));
+  procExit(0);
 }

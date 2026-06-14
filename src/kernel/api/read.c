@@ -26,23 +26,41 @@
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/tty.h>
-#include <kernel/posix/posix.h>
+#include <kernel/api/api.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
-int sys_read(int fd, void *buf, u32 count) {
-  file_descriptor_t *fd_table = posix_get_fd_table();
-  open_file_t *oft = posix_get_open_file_table();
-
-  if (fd < 0 || fd >= MAX_FDS) {
-    com1_printf("[DEBUG] sys_read: invalid fd %d\n", fd);
-    return -EBADF;
+int api_term_read(void *buf, u32 count) {
+  if (count == 0) {
+    return 0;
   }
 
-  if (!fd_table[fd].used) {
-    return -EBADF;
+  if (!is_user_address(buf, count)) {
+    com1_printf("[DEBUG] api_term_read: invalid user buffer %p (%d)\n", buf,
+                (int)count);
+    process_t *proc = process_current();
+    if (proc && (proc->context.cs & 3) == 3) {
+      process_exit(-1);
+    }
+    return -API_ERR_BAD_ADDR;
+  }
+
+  return tty_read(buf, count);
+}
+
+int api_data_read(int handle, void *buf, u32 count) {
+  api_handle_t *handles = api_get_handle_table();
+  api_object_t *objects = api_get_object_table();
+
+  if (handle < 0 || handle >= MAX_HANDLES) {
+    com1_printf("[DEBUG] api_data_read: invalid handle %d\n", handle);
+    return -API_ERR_BAD_HANDLE;
+  }
+
+  if (!handles[handle].used) {
+    return -API_ERR_BAD_HANDLE;
   }
 
   if (count == 0) {
@@ -50,69 +68,59 @@ int sys_read(int fd, void *buf, u32 count) {
   }
 
   if (!is_user_address(buf, count)) {
-    com1_printf("[DEBUG] sys_read: invalid user buffer %p (%d)\n", buf,
+    com1_printf("[DEBUG] api_data_read: invalid user buffer %p (%d)\n", buf,
                 (int)count);
     process_t *proc = process_current();
     if (proc && (proc->context.cs & 3) == 3) {
       process_exit(-1);
     }
-    return -EFAULT;
+    return -API_ERR_BAD_ADDR;
   }
 
-  if (fd == STDIN_FILENO) {
-    return tty_read(buf, count);
-  }
-
-  int of_index = fd_table[fd].of_index;
-  if (of_index >= 0 && of_index < MAX_OPEN_FILES && oft[of_index].used &&
-      oft[of_index].type == OFT_TYPE_TTY) {
-    if (!(fd_table[fd].flags & O_RDONLY)) {
-      return -EBADF;
-    }
-    return tty_read(buf, count);
-  }
-
-  if (!(fd_table[fd].flags & O_RDONLY)) {
-    return -EBADF;
+  if (!(handles[handle].flags & API_OPEN_READ)) {
+    return -API_ERR_BAD_HANDLE;
   }
 
   if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
-    return -EIO;
+    return -API_ERR_IO;
   }
 
-  if (of_index < 0 || of_index >= MAX_OPEN_FILES || !oft[of_index].used) {
-    return -EBADF;
+  int object_index = handles[handle].object_index;
+  if (object_index < 0 || object_index >= MAX_DATA_OBJECTS ||
+      !objects[object_index].used) {
+    return -API_ERR_BAD_HANDLE;
   }
 
-  if (oft[of_index].type == OFT_TYPE_PIPE) {
-    return pipe_read((pipe_t *)oft[of_index].pipe, buf, count);
+  if (objects[object_index].type == API_OBJECT_PIPE) {
+    return pipe_read((pipe_t *)objects[object_index].pipe, buf, count);
   }
 
   chainfs_file_entry_t entry;
   u32 entry_block, entry_offset;
-  if (chainfs_find_file(oft[of_index].path, &entry, &entry_block,
+  if (chainfs_find_file(objects[object_index].path, &entry, &entry_block,
                         &entry_offset) != 0) {
-    return -ENOENT;
+    return -API_ERR_NOT_FOUND;
   }
 
-  if (oft[of_index].offset >= entry.size) {
+  if (objects[object_index].offset >= entry.size) {
     return 0;
   }
 
   u32 to_read = count;
-  u32 remaining = entry.size - oft[of_index].offset;
+  u32 remaining = entry.size - objects[object_index].offset;
   if (to_read > remaining) {
     to_read = remaining;
   }
 
   u32 bytes_read = 0;
-  int res = chainfs_read_file_range(oft[of_index].path, (u8 *)buf, to_read,
-                                    oft[of_index].offset, &bytes_read);
+  int res = chainfs_read_file_range(objects[object_index].path, (u8 *)buf,
+                                    to_read, objects[object_index].offset,
+                                    &bytes_read);
 
   if (res == 0) {
-    oft[of_index].offset += bytes_read;
+    objects[object_index].offset += bytes_read;
     return bytes_read;
   }
 
-  return -EIO;
+  return -API_ERR_IO;
 }

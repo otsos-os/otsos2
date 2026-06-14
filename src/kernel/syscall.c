@@ -26,7 +26,7 @@
 
 #include <kernel/gdt.h>
 #include <kernel/interrupts/idt.h>
-#include <kernel/posix/posix.h>
+#include <kernel/api/api.h>
 #include <kernel/process.h>
 #include <kernel/syscall.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
@@ -101,52 +101,61 @@ void syscall_handler(registers_t *regs) {
   u64 arg3 = regs->rdx;
 
   switch (syscall_number) {
-  case SYS_READ:
-    regs->rax = (u64)sys_read((int)arg1, (void *)arg2, (u32)arg3);
+  case CALL_TERM_READ:
+    regs->rax = (u64)api_term_read((void *)arg1, (u32)arg2);
     break;
-  case SYS_WRITE:
-    regs->rax = (u64)sys_write((int)arg1, (const void *)arg2, (u32)arg3);
+  case CALL_TERM_WRITE:
+    regs->rax = (u64)api_term_write((const void *)arg1, (u32)arg2);
     break;
-  case SYS_OPEN:
-    regs->rax = (u64)sys_open((const char *)arg1, (int)arg2);
+  case CALL_DATA_OPEN:
+    regs->rax = (u64)api_data_open((const char *)arg1, (int)arg2);
     break;
-  case SYS_CLOSE:
-    regs->rax = (u64)sys_close((int)arg1);
+  case CALL_DATA_CLOSE:
+    regs->rax = (u64)api_data_close((int)arg1);
     break;
-  case SYS_MMAP:
-    regs->rax = (u64)sys_mmap((const void *)arg1);
+  case CALL_DATA_READ:
+    regs->rax = (u64)api_data_read((int)arg1, (void *)arg2, (u32)arg3);
     break;
-  case SYS_PIPE:
-    regs->rax = (u64)sys_pipe((int *)arg1);
+  case CALL_DATA_WRITE:
+    regs->rax = (u64)api_data_write((int)arg1, (const void *)arg2, (u32)arg3);
     break;
-  case SYS_CLONE:
-    regs->rax = (u64)sys_clone(arg1, arg2, arg3, regs);
+  case CALL_DATA_SEEK:
+    regs->rax = (u64)api_data_seek((int)arg1, (long)arg2, (int)arg3);
     break;
-  case SYS_LSEEK:
-    regs->rax = (u64)sys_lseek((int)arg1, (long)arg2, (int)arg3);
+  case CALL_DATA_PIPE:
+    regs->rax = (u64)api_data_pipe((int *)arg1);
     break;
-  case SYS_FORK:
-    regs->rax = (u64)sys_fork(regs);
+  case CALL_MEM_MAP:
+    regs->rax = (u64)api_mem_map((const void *)arg1);
     break;
-  case SYS_EXECVE:
-    regs->rax = (u64)sys_execve((const char *)arg1, (const char *const *)arg2,
+  case CALL_PROC_CLONE:
+    regs->rax = (u64)api_proc_clone(arg1, arg2, arg3, regs);
+    break;
+  case CALL_PROC_FORK:
+    regs->rax = (u64)api_proc_fork(regs);
+    break;
+  case CALL_PROC_SPAWN:
+    regs->rax = (u64)api_proc_spawn((const char *)arg1, (const char *const *)arg2,
                                 (const char *const *)arg3, regs);
     break;
-  case SYS_EXIT:
+  case CALL_PROC_EXIT:
     process_exit((int)arg1);
     break;
-  case SYS_WAIT:
-    regs->rax = (u64)sys_wait((int *)arg1);
+  case CALL_PROC_WAIT:
+    regs->rax = (u64)api_proc_wait((int *)arg1);
     break;
-  case SYS_KILL:
+  case CALL_PROC_KILL:
     regs->rax = process_send_signal((u32)arg1, (int)arg2);
     break;
-  case SYS_UNAME:
-    regs->rax = (u64)sys_uname((struct utsname *)arg1);
+  case CALL_SYS_INFO:
+    regs->rax = (u64)api_info((struct api_sysinfo *)arg1);
+    break;
+  case CALL_DRM_CALL:
+    regs->rax = -API_ERR_NOT_SUPPORTED;
     break;
   default:
     com1_printf("Unknown syscall: %d\n", syscall_number);
-    regs->rax = -ENOSYS;
+    regs->rax = -API_ERR_NO_CALL;
     break;
   }
 }

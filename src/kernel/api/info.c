@@ -24,47 +24,25 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/mmu.h>
-#include <kernel/process.h>
+#include <kernel/api/api.h>
 #include <kernel/useraddr.h>
-#include <mlibc/memory.h>
+#include <mlibc/mlibc.h>
 
-int sys_wait(int *status) {
-  process_t *current = process_current();
-  if (!current) {
-    return -ECHILD;
+void api_info_fill(struct api_sysinfo *buf) {
+  memset(buf, 0, sizeof(struct api_sysinfo));
+  strcpy(buf->sysname, "otsos2");
+  strcpy(buf->nodename, "localhost");
+  strcpy(buf->release, "2.3.3");
+  strcpy(buf->version, "otsos2-kernel-rev2");
+  strcpy(buf->machine, "x86_64");
+  strcpy(buf->domainname, "localdomain");
+}
+
+int api_info(struct api_sysinfo *buf) {
+  if (!is_user_address(buf, sizeof(struct api_sysinfo))) {
+    return -API_ERR_BAD_ADDR;
   }
 
-  for (int i = 0; i < MAX_PROCESSES; i++) {
-    process_t *child = &process_table[i];
-    if (child->state != PROC_STATE_ZOMBIE) {
-      continue;
-    }
-    if (child->ppid != current->pid) {
-      continue;
-    }
-
-    if (status && is_user_address(status, sizeof(int))) {
-      *status = child->exit_code;
-    }
-
-    if (child->owns_address_space && child->cr3) {
-      mmu_free_user_space(child->cr3);
-      kfree((void *)(child->cr3 & PTE_ADDR_MASK));
-      child->cr3 = 0;
-      child->owns_address_space = 0;
-    }
-
-    if (child->kernel_stack) {
-      u64 kstack_base = child->kernel_stack - KERNEL_STACK_SIZE;
-      kfree((void *)kstack_base);
-    }
-
-    int pid = (int)child->pid;
-    memset(child, 0, sizeof(process_t));
-    child->state = PROC_STATE_UNUSED;
-    return pid;
-  }
-
-  return -ECHILD;
+  api_info_fill(buf);
+  return 0;
 }

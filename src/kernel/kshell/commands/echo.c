@@ -30,7 +30,7 @@
 #include <kernel/drivers/video/drm/init.h>
 #include <kernel/drivers/video/fb.h>
 #include <kernel/kshell/kshell.h>
-#include <kernel/posix/posix.h>
+#include <kernel/api/api.h>
 #include <kernel/process.h>
 #include <mlibc/mlibc.h>
 
@@ -203,8 +203,8 @@ static int print_kernel_var(const char *name) {
   }
 
   if (strcmp(name, "uname") == 0) {
-    struct utsname uts;
-    uname_fill(&uts);
+    struct api_sysinfo uts;
+    api_info_fill(&uts);
     kshell_console_write("sysname: ");
     kshell_console_write(uts.sysname);
     kshell_console_write("\n");

@@ -140,9 +140,9 @@ ask_version:
 		read ans; \
 		case "$$ans" in \
 			y|Y|yes|YES) \
-				cur_ver=$$(sed -n 's/.*strcpy(buf->release, "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)").*/\1/p' kernel/posix/uname.c | head -n1); \
+				cur_ver=$$(sed -n 's/.*strcpy(buf->release, "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)").*/\1/p' kernel/api/info.c | head -n1); \
 				if [ -z "$$cur_ver" ]; then \
-					echo "  VERSION failed to parse kernel version from kernel/posix/uname.c"; \
+					echo "  VERSION failed to parse kernel version from kernel/api/info.c"; \
 					exit 1; \
 				fi; \
 				IFS=.; set -- $$cur_ver; \
@@ -157,7 +157,7 @@ ask_version:
 					major=$$((major + 1)); \
 				fi; \
 				next_ver="$$major.$$minor.$$patch"; \
-				sed -i 's/strcpy(buf->release, "[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*")/strcpy(buf->release, "'"$$next_ver"'")/' kernel/posix/uname.c; \
+				sed -i 's/strcpy(buf->release, "[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*")/strcpy(buf->release, "'"$$next_ver"'")/' kernel/api/info.c; \
 				echo "  VERSION $$cur_ver -> $$next_ver";; \
 			*) \
 				echo "  VERSION unchanged";; \
@@ -298,11 +298,11 @@ $(MMU_O): kernel/mmu.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(WRITE_O): kernel/posix/write.c kernel/drivers/tty.h
+$(WRITE_O): kernel/api/write.c kernel/drivers/tty.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(OPEN_O): kernel/posix/open.c
+$(OPEN_O): kernel/api/open.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -310,35 +310,35 @@ $(SYSCALL_O): kernel/syscall.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(READ_O): kernel/posix/read.c kernel/posix/posix.h kernel/drivers/tty.h
+$(READ_O): kernel/api/read.c kernel/api/api.h kernel/drivers/tty.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(CLOSE_O): kernel/posix/close.c
+$(CLOSE_O): kernel/api/close.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(LSEEK_O): kernel/posix/lseek.c
+$(LSEEK_O): kernel/api/lseek.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(WAIT_O): kernel/posix/wait.c
+$(WAIT_O): kernel/api/wait.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(MMAP_O): kernel/posix/mmap.c
+$(MMAP_O): kernel/api/mmap.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(PIPE_O): kernel/posix/pipe.c
+$(PIPE_O): kernel/api/pipe.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(UNAME_O): kernel/posix/uname.c kernel/posix/posix.h
+$(UNAME_O): kernel/api/info.c kernel/api/api.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(CLONE_O): kernel/posix/clone.c
+$(CLONE_O): kernel/api/clone.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -354,11 +354,11 @@ $(PROCESS_O): kernel/process.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(FORK_O): kernel/posix/fork.c
+$(FORK_O): kernel/api/fork.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(EXEC_O): kernel/posix/exec.c
+$(EXEC_O): kernel/api/exec.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -442,7 +442,7 @@ $(KSHELL_PARSER_O): kernel/kshell/parser.c kernel/kshell/kshell.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(KSHELL_ECHO_O): kernel/kshell/commands/echo.c kernel/kshell/kshell.h kernel/process.h kernel/posix/posix.h
+$(KSHELL_ECHO_O): kernel/kshell/commands/echo.c kernel/kshell/kshell.h kernel/process.h kernel/api/api.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
