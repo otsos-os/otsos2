@@ -116,6 +116,9 @@ Child files and directories are identified by their `ParentBlock` field matching
    - ParentBlock = `test` directory block.
    - StartBlock = 0, Size = 0 (directories do not use data blocks).
 
+ChainFS intentionally has no device-node entry type. Terminal/video/hardware
+access lives in explicit kernel APIs, not in filesystem paths.
+
 ### 4.4. Deleting a directory
 1. Locate the directory via its path.
 2. **Check empty**: Ensure no entries exist with `ParentBlock = this_block`.

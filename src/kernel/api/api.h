@@ -112,12 +112,12 @@ int api_proc_wait(int *status);
 int api_data_pipe(int handles[2]);
 long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs);
 u64 api_mem_map(const void *uargs);
-int api_proc_fork(registers_t *regs);
+int api_proc_copy(registers_t *regs);
 
 int pipe_read(pipe_t *p, void *buf, u32 count);
 int pipe_write(pipe_t *p, const void *buf, u32 count);
 int api_proc_spawn(const char *path, const char *const *argv,
-                   const char *const *envp, registers_t *regs);
+                   const char *const *envp);
 void api_init(void);
 void api_init_process(struct process *proc);
 void api_copy_handles(struct process *dst, const struct process *src);

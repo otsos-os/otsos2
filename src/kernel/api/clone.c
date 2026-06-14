@@ -36,7 +36,7 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
     return -API_ERR_BAD_VALUE;
   }
 
-  /* Only support fork-like clone (no shared VM / threads). */
+  /* Only support full process copy for now. */
   if (flags & (API_CLONE_VM | API_CLONE_THREAD)) {
     return -API_ERR_BAD_VALUE;
   }

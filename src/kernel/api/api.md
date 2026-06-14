@@ -18,7 +18,7 @@ Data handles:
 - `dataPipe(handles[2])`
 
 Process:
-- `procFork()`
+- `procCopy()`
 - `procSpawn(path, argv, envp)`
 - `procExit(code)`
 - `procWait(status)`
@@ -32,8 +32,8 @@ Other:
 ## Data Model
 
 `term*` calls are separate from file/data handles. ChainFS files and pipes use
-small integer handles backed by shared kernel objects. Process fork copies the
-handle table and shares object offsets/refcounts.
+small integer handles backed by shared kernel objects. `procSpawn` creates a new
+process from a ChainFS ELF image and returns its PID.
 
 The old device namespace is not created by the kernel and data handles reject
 device paths. Console I/O goes through `termRead` and `termWrite`.

@@ -29,10 +29,6 @@
 
 #include <mlibc/mlibc.h>
 
-#define TTY_DEVICE_MAJOR 1
-#define TTY_DEVICE_MINOR_TTY 0
-#define TTY_DEVICE_MINOR_CONSOLE 1
-
 int tty_read(void *buf, u32 count);
 int tty_write(const void *buf, u32 count);
 void tty_init(void);

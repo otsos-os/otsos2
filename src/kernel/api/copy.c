@@ -29,7 +29,7 @@
 #include <kernel/process.h>
 #include <mlibc/memory.h>
 
-int api_proc_fork(registers_t *regs) {
+int api_proc_copy(registers_t *regs) {
   process_t *parent = process_current();
   if (!parent || !regs) {
     return -API_ERR_BAD_VALUE;

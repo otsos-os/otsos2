@@ -30,9 +30,7 @@
 
 #define CALL_TERM_READ 0x100
 #define CALL_TERM_WRITE 0x101
-#define CALL_PROC_FORK 0x401
 #define CALL_PROC_SPAWN 0x402
-#define CALL_PROC_EXIT 0x403
 #define CALL_PROC_WAIT 0x404
 
 static long syscall1(long num, long arg1) {
@@ -53,12 +51,6 @@ static long syscall3(long num, long arg1, long arg2, long arg3) {
   return ret;
 }
 
-static long syscall0(long num) {
-  long ret;
-  __asm__ volatile("syscall" : "=a"(ret) : "a"(num) : "rcx", "r11", "memory");
-  return ret;
-}
-
 static long termWrite(const void *buf, unsigned long count) {
   return syscall3(CALL_TERM_WRITE, (long)buf, count, 0);
 }
@@ -66,14 +58,6 @@ static long termWrite(const void *buf, unsigned long count) {
 static long termRead(void *buf, unsigned long count) {
   return syscall3(CALL_TERM_READ, (long)buf, count, 0);
 }
-
-static void procExit(int code) {
-  syscall1(CALL_PROC_EXIT, code);
-  while (1) {
-  }
-}
-
-static long procFork(void) { return syscall0(CALL_PROC_FORK); }
 
 static long procSpawn(const char *path, char *const argv[], char *const envp[]) {
   return syscall3(CALL_PROC_SPAWN, (long)path, (long)argv, (long)envp);
@@ -127,19 +111,13 @@ void _start(void) {
     argv[0] = path;
     argv[1] = 0;
 
-    long pid = procFork();
-    if (pid == 0) {
-      procSpawn(path, argv, 0);
-      print("procSpawn failed (child)\n");
-      procExit(1);
-    }
-
+    long pid = procSpawn(path, argv, 0);
     if (pid < 0) {
-      print("fork failed\n");
+      print("procSpawn failed\n");
       continue;
     }
 
-    print("fork ok, child running\n");
+    print("child running\n");
     int status = 0;
     while (procWait(&status) < 0) {
     }

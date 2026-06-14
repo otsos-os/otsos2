@@ -131,12 +131,12 @@ void syscall_handler(registers_t *regs) {
   case CALL_PROC_CLONE:
     regs->rax = (u64)api_proc_clone(arg1, arg2, arg3, regs);
     break;
-  case CALL_PROC_FORK:
-    regs->rax = (u64)api_proc_fork(regs);
+  case CALL_PROC_COPY:
+    regs->rax = (u64)api_proc_copy(regs);
     break;
   case CALL_PROC_SPAWN:
     regs->rax = (u64)api_proc_spawn((const char *)arg1, (const char *const *)arg2,
-                                (const char *const *)arg3, regs);
+                                (const char *const *)arg3);
     break;
   case CALL_PROC_EXIT:
     process_exit((int)arg1);

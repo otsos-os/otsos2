@@ -39,7 +39,6 @@
 
 #define CHAINFS_TYPE_FILE 0
 #define CHAINFS_TYPE_DIR 1
-#define CHAINFS_TYPE_DEV 2
 
 typedef struct {
   u32 magic; // 0xCAFEBABE
@@ -92,7 +91,6 @@ int chainfs_chdir(const char *path);
 int chainfs_list_dir(const char *path, chainfs_file_entry_t *files,
                      u32 max_files, u32 *file_count);
 char *chainfs_get_current_path(char *buffer, u32 buffer_size);
-int chainfs_mknod(const char *path, u16 major, u16 minor);
 
 // Path resolution
 int chainfs_resolve_path(const char *path, chainfs_file_entry_t *entry,

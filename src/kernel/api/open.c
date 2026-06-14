@@ -83,7 +83,7 @@ static int api_flags_valid(int flags) {
   return 1;
 }
 
-static int path_is_device_namespace(const char *path) {
+static int path_is_old_dev_namespace(const char *path) {
   return path && path[0] == '/' && path[1] == 'd' && path[2] == 'e' &&
          path[3] == 'v' && (path[4] == '\0' || path[4] == '/');
 }
@@ -105,7 +105,7 @@ int api_data_open(const char *path, int flags) {
     return -API_ERR_BAD_VALUE;
   }
 
-  if (path_is_device_namespace(kpath)) {
+  if (path_is_old_dev_namespace(kpath)) {
     kfree(kpath);
     return -API_ERR_NO_DEVICE;
   }
@@ -137,9 +137,6 @@ int api_data_open(const char *path, int flags) {
       kfree(kpath);
       return -API_ERR_IO;
     }
-  } else if (entry.type == CHAINFS_TYPE_DEV) {
-    kfree(kpath);
-    return -API_ERR_NO_DEVICE;
   } else if (entry.type == CHAINFS_TYPE_DIR) {
     kfree(kpath);
     return -API_ERR_IS_DIR;

@@ -33,7 +33,7 @@ not Linux/POSIX compatible.
 #define CALL_MEM_MAP     0x300
 
 #define CALL_PROC_CLONE  0x400
-#define CALL_PROC_FORK   0x401
+#define CALL_PROC_COPY   0x401
 #define CALL_PROC_SPAWN  0x402
 #define CALL_PROC_EXIT   0x403
 #define CALL_PROC_WAIT   0x404
@@ -50,5 +50,6 @@ Returns are non-negative on success and negative `API_ERR_*` values on failure.
 - Terminal I/O is `termRead/termWrite`, not file descriptor `0/1/2`.
 - ChainFS files and pipes use data handles.
 - The kernel does not create terminal device nodes.
-- `procSpawn` currently replaces the current process image; init uses it after
-  `procFork`.
+- `procSpawn(path, argv, envp)` creates a new process and returns its PID.
+- `procCopy` is a low-level process copy call for experiments; normal userspace
+  should prefer `procSpawn`.

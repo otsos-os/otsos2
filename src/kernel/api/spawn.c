@@ -35,9 +35,9 @@
 #include <userland/elf.h>
 #include <userland/userspace.h>
 
-#define EXEC_MAX_ARGS 64
-#define EXEC_MAX_ENVP 64
-#define EXEC_MAX_STR 256
+#define SPAWN_MAX_ARGS 64
+#define SPAWN_MAX_ENVP 64
+#define SPAWN_MAX_STR 256
 
 static char *copy_user_string(const char *user, size_t max_len) {
   if (!user) {
@@ -96,7 +96,7 @@ static int copy_user_string_array(const char *const *user, char ***out,
     if (!ptr) {
       break;
     }
-    char *copy = copy_user_string(ptr, EXEC_MAX_STR);
+    char *copy = copy_user_string(ptr, SPAWN_MAX_STR);
     if (!copy) {
       for (int i = 0; i < count; i++) {
         kfree(arr[i]);
@@ -263,43 +263,65 @@ static int build_user_stack(char **argv, int argc, char **envp, int envc,
   return 0;
 }
 
+static void copy_process_name(char *dst, const char *path) {
+  const char *base = path;
+  for (const char *p = path; *p; p++) {
+    if (*p == '/') {
+      base = p + 1;
+    }
+  }
+
+  memset(dst, 0, PROCESS_NAME_LEN);
+  for (int i = 0; i < PROCESS_NAME_LEN - 1 && base[i]; i++) {
+    dst[i] = base[i];
+  }
+}
+
+static void free_spawn_cr3(u64 cr3) {
+  if (!cr3) {
+    return;
+  }
+  mmu_free_user_space(cr3);
+  kfree((void *)(cr3 & PTE_ADDR_MASK));
+}
+
 int api_proc_spawn(const char *path, const char *const *argv,
-               const char *const *envp, registers_t *regs) {
-  process_t *proc = process_current();
-  if (!proc || !regs) {
-    com1_printf("[EXEC] Error: no current process or regs\n");
+                   const char *const *envp) {
+  process_t *parent = process_current();
+  if (!parent) {
+    com1_printf("[SPAWN] Error: no current process\n");
     return -API_ERR_BAD_VALUE;
   }
 
   if (!is_user_address(path, 1)) {
-    com1_printf("[EXEC] Error: invalid user path pointer %p\n",
+    com1_printf("[SPAWN] Error: invalid user path pointer %p\n",
                 (void *)path);
     return -API_ERR_BAD_ADDR;
   }
 
   if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
-    com1_printf("[EXEC] Error: ChainFS not initialized (magic=0x%x)\n",
+    com1_printf("[SPAWN] Error: ChainFS not initialized (magic=0x%x)\n",
                 g_chainfs.superblock.magic);
     return -API_ERR_IO;
   }
 
-  char *kpath = copy_user_string(path, EXEC_MAX_STR);
+  char *kpath = copy_user_string(path, SPAWN_MAX_STR);
   if (!kpath) {
-    com1_printf("[EXEC] Error: failed to copy user path\n");
+    com1_printf("[SPAWN] Error: failed to copy user path\n");
     return -API_ERR_BAD_ADDR;
   }
 
   char **kargv = NULL;
   char **kenvp = NULL;
-  int argc = copy_user_string_array(argv, &kargv, EXEC_MAX_ARGS);
+  int argc = copy_user_string_array(argv, &kargv, SPAWN_MAX_ARGS);
   if (argc < 0) {
-    com1_printf("[EXEC] Error: failed to copy argv\n");
+    com1_printf("[SPAWN] Error: failed to copy argv\n");
     kfree(kpath);
     return argc;
   }
-  int envc = copy_user_string_array(envp, &kenvp, EXEC_MAX_ENVP);
+  int envc = copy_user_string_array(envp, &kenvp, SPAWN_MAX_ENVP);
   if (envc < 0) {
-    com1_printf("[EXEC] Error: failed to copy envp\n");
+    com1_printf("[SPAWN] Error: failed to copy envp\n");
     free_string_array(kargv);
     kfree(kpath);
     return envc;
@@ -309,17 +331,28 @@ int api_proc_spawn(const char *path, const char *const *argv,
   u32 elf_size = 0;
   int err = read_file_into_buffer(kpath, &elf_buf, &elf_size);
   if (err < 0) {
-    com1_printf("[EXEC] Error: failed to read file '%s'\n", kpath);
+    com1_printf("[SPAWN] Error: failed to read file '%s'\n", kpath);
     free_string_array(kargv);
     free_string_array(kenvp);
     kfree(kpath);
     return err;
   }
-  com1_printf("[EXEC] Loaded '%s' (%u bytes)\n", kpath, elf_size);
+
+  process_t *child = alloc_process();
+  if (!child) {
+    kfree(elf_buf);
+    free_string_array(kargv);
+    free_string_array(kenvp);
+    kfree(kpath);
+    return -API_ERR_RETRY;
+  }
+  child->state = PROC_STATE_EMBRYO;
 
   u64 new_cr3 = mmu_create_address_space();
   if (!new_cr3) {
-    com1_printf("[EXEC] Error: failed to create address space\n");
+    com1_printf("[SPAWN] Error: failed to create address space\n");
+    memset(child, 0, sizeof(process_t));
+    child->state = PROC_STATE_UNUSED;
     kfree(elf_buf);
     free_string_array(kargv);
     free_string_array(kenvp);
@@ -327,16 +360,31 @@ int api_proc_spawn(const char *path, const char *const *argv,
     return -API_ERR_NO_MEMORY;
   }
 
-  u64 old_cr3 = proc->cr3;
+  u8 *kstack = (u8 *)kmalloc_aligned(KERNEL_STACK_SIZE, 16);
+  if (!kstack) {
+    free_spawn_cr3(new_cr3);
+    memset(child, 0, sizeof(process_t));
+    child->state = PROC_STATE_UNUSED;
+    kfree(elf_buf);
+    free_string_array(kargv);
+    free_string_array(kenvp);
+    kfree(kpath);
+    return -API_ERR_NO_MEMORY;
+  }
+  memset(kstack, 0, KERNEL_STACK_SIZE);
+
+  u64 old_cr3 = mmu_read_cr3();
   mmu_write_cr3(new_cr3);
 
   u64 entry = elf_load(elf_buf, elf_size);
   kfree(elf_buf);
   if (entry == 0) {
-    com1_printf("[EXEC] Error: elf_load failed for '%s'\n", kpath);
+    com1_printf("[SPAWN] Error: elf_load failed for '%s'\n", kpath);
     mmu_write_cr3(old_cr3);
-    mmu_free_user_space(new_cr3);
-    kfree((void *)(new_cr3 & PTE_ADDR_MASK));
+    free_spawn_cr3(new_cr3);
+    kfree(kstack);
+    memset(child, 0, sizeof(process_t));
+    child->state = PROC_STATE_UNUSED;
     free_string_array(kargv);
     free_string_array(kenvp);
     kfree(kpath);
@@ -345,10 +393,12 @@ int api_proc_spawn(const char *path, const char *const *argv,
 
   u64 user_stack = allocate_user_stack();
   if (user_stack == 0) {
-    com1_printf("[EXEC] Error: allocate_user_stack failed\n");
+    com1_printf("[SPAWN] Error: allocate_user_stack failed\n");
     mmu_write_cr3(old_cr3);
-    mmu_free_user_space(new_cr3);
-    kfree((void *)(new_cr3 & PTE_ADDR_MASK));
+    free_spawn_cr3(new_cr3);
+    kfree(kstack);
+    memset(child, 0, sizeof(process_t));
+    child->state = PROC_STATE_UNUSED;
     free_string_array(kargv);
     free_string_array(kenvp);
     kfree(kpath);
@@ -361,10 +411,12 @@ int api_proc_spawn(const char *path, const char *const *argv,
   err = build_user_stack(kargv, argc, kenvp, envc, &new_rsp, &argv_addr,
                          &envp_addr);
   if (err < 0) {
-    com1_printf("[EXEC] Error: build_user_stack failed\n");
+    com1_printf("[SPAWN] Error: build_user_stack failed\n");
     mmu_write_cr3(old_cr3);
-    mmu_free_user_space(new_cr3);
-    kfree((void *)(new_cr3 & PTE_ADDR_MASK));
+    free_spawn_cr3(new_cr3);
+    kfree(kstack);
+    memset(child, 0, sizeof(process_t));
+    child->state = PROC_STATE_UNUSED;
     free_string_array(kargv);
     free_string_array(kenvp);
     kfree(kpath);
@@ -373,48 +425,41 @@ int api_proc_spawn(const char *path, const char *const *argv,
 
   free_string_array(kargv);
   free_string_array(kenvp);
+  mmu_write_cr3(old_cr3);
 
-  if (proc->owns_address_space) {
-    mmu_free_user_space(old_cr3);
-    kfree((void *)(old_cr3 & PTE_ADDR_MASK));
-  }
+  u32 pid = next_pid++;
+  memset(child, 0, sizeof(process_t));
 
-  const char *base = kpath;
-  for (const char *p = kpath; *p; p++) {
-    if (*p == '/') {
-      base = p + 1;
-    }
-  }
-  memset(proc->name, 0, sizeof(proc->name));
-  for (int i = 0; i < PROCESS_NAME_LEN - 1 && base[i]; i++) {
-    proc->name[i] = base[i];
-  }
+  child->pid = pid;
+  child->ppid = parent->pid;
+  child->state = PROC_STATE_RUNNABLE;
+  copy_process_name(child->name, kpath);
+
+  child->cr3 = new_cr3;
+  child->entry_point = entry;
+  child->kernel_stack = (u64)(kstack + KERNEL_STACK_SIZE);
+  child->user_stack = user_stack;
+
+  memset(&child->context, 0, sizeof(cpu_context_t));
+  child->context.rip = entry;
+  child->context.rsp = new_rsp;
+  child->context.cs = USER_CS;
+  child->context.ss = USER_DS;
+  child->context.rflags = 0x202;
+  child->context.rdi = (u64)argc;
+  child->context.rsi = argv_addr;
+  child->context.rdx = envp_addr;
+  child->context.rax = 0;
+
+  child->exit_code = 0;
+  child->owns_address_space = 1;
+  child->mmap_base = MMAP_BASE;
+  api_copy_handles(child, parent);
+  child->next = NULL;
+
+  com1_printf("[SPAWN] Created '%s' (PID %d) from '%s'\n", child->name,
+              child->pid, kpath);
   kfree(kpath);
 
-  proc->cr3 = new_cr3;
-  proc->entry_point = entry;
-  proc->user_stack = user_stack;
-  proc->context.rip = entry;
-  proc->context.rsp = new_rsp;
-  proc->context.cs = USER_CS;
-  proc->context.ss = USER_DS;
-  proc->context.rflags = 0x202;
-  proc->context.rdi = (u64)argc;
-  proc->context.rsi = argv_addr;
-  proc->context.rdx = envp_addr;
-  proc->context.rax = 0;
-  proc->owns_address_space = 1;
-  proc->mmap_base = MMAP_BASE;
-
-  regs->rip = entry;
-  regs->rsp = new_rsp;
-  regs->cs = USER_CS;
-  regs->ss = USER_DS;
-  regs->rflags = 0x202;
-  regs->rdi = (u64)argc;
-  regs->rsi = argv_addr;
-  regs->rdx = envp_addr;
-  regs->rax = 0;
-
-  return 0;
+  return (int)pid;
 }
