@@ -4,8 +4,8 @@ ENTRY(_start)
 
 SECTIONS
 {
-    /* Load at a low address suitable for userspace */
-    . = 0x400000;
+    /* Load above kernel heap end (~9.5 MB) to avoid virtual alias bug */
+    . = 0x1000000;
 
     .text : {
         *(.text)
