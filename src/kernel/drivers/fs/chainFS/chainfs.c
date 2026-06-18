@@ -25,6 +25,7 @@
  */
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/api/errno.h>
 #include <kernel/mmu.h>
 
 chainfs_t g_chainfs;
@@ -796,12 +797,12 @@ int chainfs_chdir(const char *path) {
 
   if (chainfs_resolve_path(path, &entry, &entry_block, &entry_offset) != 0) {
     com1_printf("ChainFS: Directory not found: %s\n", path);
-    return -1;
+    return -API_ERR_NOT_FOUND;
   }
 
   if (entry.type != CHAINFS_TYPE_DIR) {
     com1_printf("ChainFS: Not a directory: %s\n", path);
-    return -1;
+    return -API_ERR_NOT_DIR;
   }
 
   g_chainfs.current_dir_block =
@@ -822,12 +823,12 @@ int chainfs_list_dir(const char *path, chainfs_file_entry_t *files,
   } else {
     if (chainfs_resolve_path(path, &dir_entry, &dir_block, &dir_offset) != 0) {
       com1_printf("ChainFS: Directory not found: %s\n", path);
-      return -1;
+      return -API_ERR_NOT_FOUND;
     }
 
     if (dir_entry.type != CHAINFS_TYPE_DIR) {
       com1_printf("ChainFS: Not a directory: %s\n", path);
-      return -1;
+      return -API_ERR_NOT_DIR;
     }
     dir_block = (dir_block - 1) * ENTRIES_PER_BLOCK + dir_offset;
   }

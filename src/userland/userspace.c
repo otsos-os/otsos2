@@ -215,6 +215,10 @@ void userspace_load_init(void *module_start, u64 module_size) {
       __asm__ volatile("hlt");
   }
 
+  /* Init always has kusr rights */
+  init->kusr_auth = 1;
+  com1_printf("[USERSPACE] Granted kusr rights to init (PID %d)\n", init->pid);
+
   /* Init must be PID 1 */
   if (init->pid != 1) {
     com1_printf("[USERSPACE] Warning: init is not PID 1 (got %d)\n", init->pid);

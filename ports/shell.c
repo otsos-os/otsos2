@@ -21,9 +21,44 @@
 #define CALL_PROC_EXIT  0x403
 #define CALL_PROC_WAIT  0x404
 #define CALL_PROC_LIST  0x406
+#define CALL_KUSR_AUTH  0x407
 #define CALL_SYS_INFO   0x500
 
 #define API_OPEN_READ   0x0001
+
+/* Kernel error codes (mirror of kernel/api/errno.h).
+ * Syscalls return these as negative values on failure. */
+#define ERR_PERM          1
+#define ERR_NOT_FOUND     2
+#define ERR_NO_PROC       3
+#define ERR_INTR          4
+#define ERR_IO            5
+#define ERR_NO_DEVICE_ADDR 6
+#define ERR_TOO_BIG       7
+#define ERR_BAD_IMAGE     8
+#define ERR_BAD_HANDLE    9
+#define ERR_NO_CHILD      10
+#define ERR_RETRY         11
+#define ERR_NO_MEMORY     12
+#define ERR_ACCESS        13
+#define ERR_BAD_ADDR      14
+#define ERR_BUSY          16
+#define ERR_EXISTS        17
+#define ERR_CROSS_DEVICE  18
+#define ERR_NO_DEVICE     19
+#define ERR_NOT_DIR       20
+#define ERR_IS_DIR        21
+#define ERR_BAD_VALUE     22
+#define ERR_OBJECTS_FULL  23
+#define ERR_HANDLES_FULL  24
+#define ERR_NOT_TERM      25
+#define ERR_FILE_TOO_BIG  27
+#define ERR_NO_SPACE      28
+#define ERR_NOT_SEEKABLE  29
+#define ERR_READ_ONLY     30
+#define ERR_PIPE_CLOSED   32
+#define ERR_NO_CALL       38
+#define ERR_NOT_SUPPORTED 95
 
 #define MAX_LINE  512
 #define MAX_ARGS  64
@@ -111,6 +146,10 @@ static long proc_wait(int *status) {
 
 static long proc_list(struct api_proc_info *buf, u32 max) {
   return syscall3(CALL_PROC_LIST, (long)buf, (long)max, 0);
+}
+
+static long kusr_auth(const char *password) {
+  return syscall3(CALL_KUSR_AUTH, (long)password, 0, 0);
 }
 
 static long data_open(const char *path, int flags) {
@@ -208,6 +247,63 @@ static void printc(char c) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  error reporting                                                   */
+/* ------------------------------------------------------------------ */
+
+/* Convert a (possibly negative) syscall return value into a short
+ * human-readable error string. Treats `code` as an error code by its
+ * absolute value. */
+static const char *err_str(long code) {
+  if (code < 0) code = -code;
+  switch (code) {
+  case 0:              return "ok";
+  case ERR_PERM:       return "operation not permitted";
+  case ERR_NOT_FOUND:  return "no such file or directory";
+  case ERR_NO_PROC:    return "no such process";
+  case ERR_INTR:       return "interrupted";
+  case ERR_IO:         return "i/o error";
+  case ERR_NO_DEVICE_ADDR: return "no device address";
+  case ERR_TOO_BIG:    return "argument/value too large";
+  case ERR_BAD_IMAGE:  return "invalid executable image";
+  case ERR_BAD_HANDLE: return "bad file handle";
+  case ERR_NO_CHILD:   return "no child process";
+  case ERR_RETRY:      return "resource busy, try again";
+  case ERR_NO_MEMORY:  return "out of memory";
+  case ERR_ACCESS:     return "permission denied";
+  case ERR_BAD_ADDR:   return "bad address";
+  case ERR_BUSY:       return "device or resource busy";
+  case ERR_EXISTS:     return "file exists";
+  case ERR_CROSS_DEVICE: return "cross-device link";
+  case ERR_NO_DEVICE:  return "no such device";
+  case ERR_NOT_DIR:    return "not a directory";
+  case ERR_IS_DIR:     return "is a directory";
+  case ERR_BAD_VALUE:  return "invalid argument";
+  case ERR_OBJECTS_FULL: return "kernel object table full";
+  case ERR_HANDLES_FULL: return "process handle table full";
+  case ERR_NOT_TERM:   return "not a terminal";
+  case ERR_FILE_TOO_BIG: return "file too large";
+  case ERR_NO_SPACE:   return "no space left on device";
+  case ERR_NOT_SEEKABLE: return "not seekable";
+  case ERR_READ_ONLY:  return "read-only filesystem";
+  case ERR_PIPE_CLOSED: return "broken pipe";
+  case ERR_NO_CALL:    return "no such syscall";
+  case ERR_NOT_SUPPORTED: return "operation not supported";
+  default:             return "unknown error";
+  }
+}
+
+/* Print "<prefix>: <reason> (code N)\n".
+ * `ret` is the raw syscall return value (negative on error). */
+static void print_err(const char *prefix, long ret) {
+  print(prefix);
+  print(": ");
+  print(err_str(ret));
+  print(" (code ");
+  print_int((int)ret);
+  print(")\n");
+}
+
+/* ------------------------------------------------------------------ */
 /*  line input                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -279,36 +375,49 @@ static int parse_line(char *line, char **argv, int max_args) {
 /*  external command helpers                                          */
 /* ------------------------------------------------------------------ */
 
-static int file_exists(const char *path) {
+/* Try to open `path` for reading. Returns 1 if it exists, 0 if it does
+ * not, or a negative error code if the open failed for another reason. */
+static long file_exists(const char *path) {
   int fd = data_open(path, API_OPEN_READ);
-  if (fd < 0) return 0;
-  data_close(fd);
-  return 1;
+  if (fd >= 0) {
+    data_close(fd);
+    return 1;
+  }
+  if (fd == -ERR_NOT_FOUND) return 0;
+  return fd; /* propagate real error */
 }
 
-static int resolve_path(const char *cmd, char *out, u32 out_sz) {
+/* Resolve a command name to a filesystem path.
+ * Returns 0 on success (path filled in `out`), -ERR_NOT_FOUND if the
+ * command does not exist, or another negative error code. */
+static long resolve_path(const char *cmd, char *out, u32 out_sz) {
   if (cmd[0] == '/' || cmd[0] == '.') {
     u32 len = strlen_s(cmd);
-    if (len >= out_sz) return -1;
+    if (len >= out_sz) return -ERR_TOO_BIG;
     memcpy_s(out, cmd, len + 1);
-    return file_exists(out) ? 0 : -1;
+    return file_exists(out) ? 0 : -ERR_NOT_FOUND;
   }
 
   const char *prefix = "/bin/";
   u32 plen = strlen_s(prefix);
   u32 clen = strlen_s(cmd);
-  if (plen + clen >= out_sz) return -1;
+  if (plen + clen >= out_sz) return -ERR_TOO_BIG;
   memcpy_s(out, prefix, plen);
   memcpy_s(out + plen, cmd, clen + 1);
-  return file_exists(out) ? 0 : -1;
+  return file_exists(out) ? 0 : -ERR_NOT_FOUND;
 }
 
 static int run_external(const char *path, char **argv, char **envp) {
   long pid = proc_spawn(path, (const char *const *)argv,
                         (const char *const *)envp);
   if (pid < 0) {
-    print("sh: failed to spawn ");
-    println(path);
+    print("sh: ");
+    print(path);
+    print(": ");
+    print(err_str(pid));
+    print(" (code ");
+    print_int((int)pid);
+    print(")\n");
     return -1;
   }
 
@@ -316,10 +425,8 @@ static int run_external(const char *path, char **argv, char **envp) {
   for (;;) {
     long w = proc_wait(&status);
     if (w > 0) break;
-    if (w < 0 && w != -10) {
-      print("sh: wait error: ");
-      print_int((int)w);
-      printc('\n');
+    if (w < 0 && w != -ERR_NO_CHILD) {
+      print_err("sh: wait", w);
       return -1;
     }
   }
@@ -340,6 +447,7 @@ static void cmd_help(void) {
   println("  cat <file>         print file contents");
   println("  clear              clear screen");
   println("  color <hex>        set text color (e.g. FF0000)");
+  println("  kusr               authenticate as kernel user");
   println("  env                print environment");
   println("  exit               exit shell");
   println("  help               this help");
@@ -366,7 +474,7 @@ static void cmd_pwd(void) {
   char buf[MAX_PATH];
   long ret = fs_getcwd(buf, sizeof(buf));
   if (ret < 0) {
-    println("pwd: error");
+    print_err("pwd", ret);
   } else {
     println(buf);
   }
@@ -386,7 +494,12 @@ static void cmd_cd(int argc, char **argv) {
   long ret = fs_chdir(path);
   if (ret < 0) {
     print("cd: ");
-    println(path);
+    print(path);
+    print(": ");
+    print(err_str(ret));
+    print(" (code ");
+    print_int((int)ret);
+    print(")\n");
   }
 }
 
@@ -399,9 +512,15 @@ static void cmd_ls(int argc, char **argv) {
   struct api_dirent entries[MAX_DIRENT];
   long n = fs_listdir(path, entries, MAX_DIRENT);
   if (n < 0) {
-    print("ls: error ");
+    print("ls: ");
+    if (path[0]) {
+      print(path);
+      print(": ");
+    }
+    print(err_str(n));
+    print(" (code ");
     print_int((int)n);
-    printc('\n');
+    print(")\n");
     return;
   }
   for (long i = 0; i < n; i++) {
@@ -431,7 +550,7 @@ static void cmd_ps(void) {
   struct api_proc_info procs[MAX_PROCS];
   long n = proc_list(procs, MAX_PROCS);
   if (n < 0) {
-    println("ps: error");
+    print_err("ps", n);
     return;
   }
   println("PID\tPPID\tSTATE\tNAME");
@@ -458,13 +577,27 @@ static void cmd_cat(int argc, char **argv) {
   int fd = data_open(argv[1], API_OPEN_READ);
   if (fd < 0) {
     print("cat: ");
-    println(argv[1]);
+    print(argv[1]);
+    print(": ");
+    print(err_str(fd));
+    print(" (code ");
+    print_int((int)fd);
+    print(")\n");
     return;
   }
   char buf[256];
   for (;;) {
     long n = data_read(fd, buf, sizeof(buf));
-    if (n < 0) break;
+    if (n < 0) {
+      print("\ncat: ");
+      print(argv[1]);
+      print(": read error: ");
+      print(err_str(n));
+      print(" (code ");
+      print_int((int)n);
+      print(")\n");
+      break;
+    }
     if (n == 0) break;
     term_write(buf, (u32)n);
   }
@@ -544,6 +677,50 @@ static void cmd_color(int argc, char **argv) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  built-in: kusr                                                    */
+/* ------------------------------------------------------------------ */
+
+static void cmd_kusr(void) {
+  char pass[128];
+  int pos = 0;
+
+  print("kusr password: ");
+  for (;;) {
+    char c;
+    long n = term_read(&c, 1);
+    if (n <= 0) continue;
+    if (c == '\r' || c == '\n') {
+      printc('\n');
+      pass[pos] = '\0';
+      break;
+    }
+    if (c == '\b' || c == 0x7F) {
+      if (pos > 0) pos--;
+      continue;
+    }
+    if (c == 0x03) {
+      print("^C\n");
+      return;
+    }
+    if (c >= 32 && c < 127 && pos < 127)
+      pass[pos++] = c;
+  }
+
+  long ret = kusr_auth(pass);
+  for (int i = 0; i < pos; i++) pass[i] = 0;
+
+  if (ret == 0) {
+    println("kusr: authenticated");
+  } else if (ret == -ERR_PERM) {
+    println("kusr: wrong password");
+  } else if (ret == -ERR_NOT_FOUND) {
+    println("kusr: not configured (no kusr password set)");
+  } else {
+    print_err("kusr", ret);
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  prompt                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -572,6 +749,7 @@ static int exec_builtin(int argc, char **argv) {
   if (strcmp_s(cmd, "cat") == 0)    { cmd_cat(argc, argv); return 0; }
   if (strcmp_s(cmd, "clear") == 0)  { cmd_clear(); return 0; }
   if (strcmp_s(cmd, "color") == 0)  { cmd_color(argc, argv); return 0; }
+  if (strcmp_s(cmd, "kusr") == 0)   { cmd_kusr(); return 0; }
   if (strcmp_s(cmd, "env") == 0)    { cmd_env(); return 0; }
   if (strcmp_s(cmd, "exit") == 0)   { return 1; }
 
@@ -585,13 +763,24 @@ static int exec_line(int argc, char **argv) {
   if (r >= 0) return r;
 
   char path[MAX_PATH];
-  if (resolve_path(argv[0], path, sizeof(path)) == 0) {
+  long rr = resolve_path(argv[0], path, sizeof(path));
+  if (rr == 0) {
     run_external(path, argv, g_envp);
     return 0;
   }
 
-  print("sh: command not found: ");
-  println(argv[0]);
+  if (rr == -ERR_NOT_FOUND) {
+    print("sh: command not found: ");
+    println(argv[0]);
+  } else {
+    print("sh: ");
+    print(argv[0]);
+    print(": ");
+    print(err_str(rr));
+    print(" (code ");
+    print_int((int)rr);
+    print(")\n");
+  }
   return 0;
 }
 

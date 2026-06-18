@@ -37,7 +37,6 @@
 
 #define KUSR_CONFIG_PATH "/conf/kernel.toml"
 #define KUSR_PASS_MIN_LEN 4
-#define KUSR_MAX_TRIES 3
 
 static int g_kusr_authenticated = 0;
 
@@ -63,19 +62,6 @@ static void hash_to_hex(u64 hash, char *out) {
   for (int i = 0; i < 16; i++)
     out[i] = hex[(hash >> (60 - i * 4)) & 0xF];
   out[16] = '\0';
-}
-
-static u64 hex_to_u64(const char *hex) {
-  u64 val = 0;
-  for (int i = 0; i < 16 && hex[i]; i++) {
-    val <<= 4;
-    char c = hex[i];
-    if (c >= '0' && c <= '9')      val |= (c - '0');
-    else if (c >= 'a' && c <= 'f') val |= (c - 'a' + 10);
-    else if (c >= 'A' && c <= 'F') val |= (c - 'A' + 10);
-    else return 0;
-  }
-  return val;
 }
 
 static void kusr_hash_password(const char *pass, char *hash_out) {
@@ -169,56 +155,20 @@ static int kusr_first_boot_setup(void) {
   }
 }
 
-static int kusr_authenticate(void) {
-  toml_doc_t *doc = toml_parse_file(KUSR_CONFIG_PATH);
-  if (!doc) {
-    printf("[KUSR] Config not found, starting first boot setup\n");
-    kusr_flush();
-    return kusr_first_boot_setup();
-  }
-
-  const char *stored_hash = toml_get(doc, "kusr", "password_hash");
-  if (!stored_hash) {
-    toml_free(doc);
-    printf("[KUSR] No password hash in config, re-running setup\n");
-    kusr_flush();
-    return kusr_first_boot_setup();
-  }
-
-  u64 expected = hex_to_u64(stored_hash);
-  toml_free(doc);
-
-  for (int attempt = 1; attempt <= KUSR_MAX_TRIES; attempt++) {
-    char pass[128];
-    kusr_read_password(pass, sizeof(pass), "kusr password: ");
-
-    u64 actual = fnv1a_64(pass, strlen(pass));
-    kusr_wipe(pass, sizeof(pass));
-
-    if (actual == expected) {
-      g_kusr_authenticated = 1;
-      printf("\n\033[32mkusr authenticated\033[0m\n");
-      kusr_flush();
-      return 1;
-    }
-
-    printf("\033[31mWrong password (%d/%d)\033[0m\n\n", attempt, KUSR_MAX_TRIES);
-    kusr_flush();
-  }
-
-  printf("\033[31mkusr authentication failed after %d tries\033[0m\n",
-         KUSR_MAX_TRIES);
-  kusr_flush();
-  return 0;
-}
-
 void kusr_init(void) {
   com1_printf("[KUSR] Initializing...\n");
 
-  if (kusr_authenticate()) {
-    com1_printf("[KUSR] Authentication successful\n");
-  } else {
-    com1_printf("[KUSR] Authentication failed - continuing without kusr\n");
+  chainfs_file_entry_t entry;
+  u32 entry_block, entry_offset;
+  if (chainfs_find_file(KUSR_CONFIG_PATH, &entry, &entry_block, &entry_offset) == 0) {
+    com1_printf("[KUSR] Config exists, skipping first-boot setup\n");
     g_kusr_authenticated = 0;
+    return;
   }
+
+  kusr_first_boot_setup();
+  if (g_kusr_authenticated)
+    com1_printf("[KUSR] First-boot setup complete\n");
+  else
+    com1_printf("[KUSR] First-boot setup was cancelled\n");
 }
