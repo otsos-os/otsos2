@@ -24,7 +24,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/vga.h>
+#include <kernel/console.h>
+#include <kernel/drivers/tty.h>
+#include <kernel/drivers/video/drm/kms/console.h>
 #include <kernel/interrupts/idt.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
@@ -207,8 +209,8 @@ void print_panic_logo() {
                      "@@@@@@@@@@@@@@@@@"
                      "@@@@@\n";
 
-  int width = vga_get_width();
-  int height = vga_get_height();
+  int width = console_get_width();
+  int height = console_get_height();
   int x = width - 81;
   if (x < 0)
     x = 0;
@@ -224,17 +226,23 @@ void print_panic_logo() {
       cur_y++;
       cur_x = x;
     } else {
-      vga_put_entry_at(*p, 0x1F, cur_x, cur_y);
+      kms_console_t *con = kms_kernel_console();
+      if (con) {
+        kms_console_glyph(con, (u32)(cur_x * 8), (u32)(cur_y * 16),
+                           *p, console_color_rgb(0x1F), 0x000000);
+      }
       cur_x++;
     }
   }
+  kms_console_t *con = kms_kernel_console();
+  if (con) kms_console_flush(con);
 }
 
 void kernel_panic(registers_t *regs) {
   com1_off_mirror_callback();
   __asm__ volatile("cli");
 
-  vga_set_color(0x1F);
+  console_set_color(0x1F);
   clear_scr();
 
   const char *msg = (regs->int_no < 32) ? exception_messages[regs->int_no]
@@ -319,8 +327,9 @@ void kernel_panic(registers_t *regs) {
   print_stack_trace(regs->rbp);
 
   com1_printf("\n\rSystem Halted.\n\r");
-  printf("\nSystem Halted.");
+  printf("\nSystem Halted.\n");
 
+  tty_flush_kernel();
   print_panic_logo();
 
   while (1) {
@@ -331,7 +340,7 @@ void kernel_panic(registers_t *regs) {
 void panic(const char *format, ...) {
   __asm__ volatile("cli");
 
-  vga_set_color(0x1F);
+  console_set_color(0x1F);
   clear_scr();
 
   com1_printf(
@@ -409,8 +418,9 @@ void panic(const char *format, ...) {
   printf("%s\n", buffer);
 
   com1_printf("\n\rSystem Halted.\n\r");
-  printf("\nSystem Halted.");
+  printf("\nSystem Halted.\n");
 
+  tty_flush_kernel();
   print_panic_logo();
 
   while (1) {

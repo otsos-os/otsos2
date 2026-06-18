@@ -24,8 +24,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <kernel/console.h>
 #include <kernel/gdt.h>
-#include <kernel/drivers/vga.h>
 #include <kernel/mmu.h>
 #include <kernel/process.h>
 #include <lib/com1.h>
@@ -39,7 +39,7 @@ static void status_line(const char *label, int ok) {
   int len = strlen(label);
   printf("%s", label);
   for (int i = len; i < pad_col; i++) {
-    vga_putc(' ');
+    console_putchar(' ');
   }
   if (ok) {
     printf("\033[32m[OK]\033[0m\n");

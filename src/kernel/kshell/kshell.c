@@ -24,11 +24,12 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <kernel/console.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/tty.h>
-#include <kernel/drivers/vga.h>
-#include <kernel/drivers/video/drm/frontend.h>
+#include <kernel/drivers/video/drm/drm.h>
+#include <kernel/drivers/video/drm/kms/console.h>
 #include <kernel/kshell/kshell.h>
 #include <mlibc/mlibc.h>
 
@@ -47,7 +48,7 @@ static u32 kshell_capture_len = 0;
 static int kshell_capture_overflow = 0;
 
 static int kshell_width(void) {
-  int w = vga_get_width();
+  int w = console_get_width();
   if (w <= 0) {
     w = 80;
   }
@@ -55,7 +56,7 @@ static int kshell_width(void) {
 }
 
 static int kshell_height(void) {
-  int h = vga_get_height();
+  int h = console_get_height();
   if (h <= 0) {
     h = 25;
   }
@@ -90,27 +91,36 @@ static void kshell_sync_cells(void) {
   kshell_cursor_y = 0;
 }
 
+static kms_console_t *g_con;
+
+static kms_console_t *kshell_con(void) {
+  if (g_con) return g_con;
+  g_con = kms_kernel_console();
+  return g_con;
+}
+
+static void kshell_draw_cell(int x, int y, char c, u8 color) {
+  kms_console_t *con = kshell_con();
+  if (!con) return;
+  kms_console_glyph(con, (u32)(x * 8), (u32)(y * 16), c,
+                    console_color_rgb(color), 0x000000);
+}
+
 static void kshell_redraw(void) {
   kshell_sync_cells();
   if (!kshell_cells) {
     return;
   }
 
-  drm_frontend_batch_begin();
   for (int y = 0; y < kshell_cells_h; y++) {
     for (int x = 0; x < kshell_cells_w; x++) {
       u16 cell = kshell_cells[y * kshell_cells_w + x];
       char c = (char)(cell & 0xFF);
       u8 color = (u8)((cell >> 8) & 0xFF);
-      vga_put_entry_at(c, color, x, y);
+      kshell_draw_cell(x, y, c, color);
     }
   }
-  drm_frontend_batch_end();
-  drm_frontend_flush();
-
-  if (kshell_visible) {
-    vga_set_cursor(kshell_cursor_x, kshell_cursor_y);
-  }
+  if (g_con) kms_console_flush(g_con);
 }
 
 static void kshell_set_visible(int visible) {
@@ -132,8 +142,8 @@ static void kshell_put_entry_at(char c, int x, int y) {
     kshell_cells[y * kshell_cells_w + x] = ((u16)kshell_color << 8) | (u8)c;
   }
   if (kshell_visible) {
-    vga_put_entry_at(c, kshell_color, x, y);
-    drm_frontend_flush();
+    kshell_draw_cell(x, y, c, kshell_color);
+    /* No flush here — caller batches and flushes. */
   }
 }
 
@@ -147,9 +157,7 @@ void kshell_console_clear(void) {
   }
   kshell_cursor_x = 0;
   kshell_cursor_y = 0;
-  if (kshell_visible) {
-    vga_set_cursor(0, 0);
-  }
+  if (g_con) kms_console_flush(g_con);
 }
 
 static void kshell_newline(void) {
@@ -157,9 +165,6 @@ static void kshell_newline(void) {
   kshell_cursor_y++;
   if (kshell_cursor_y >= kshell_height()) {
     kshell_console_clear();
-  }
-  if (kshell_visible) {
-    vga_set_cursor(kshell_cursor_x, kshell_cursor_y);
   }
 }
 
@@ -179,7 +184,7 @@ void kshell_console_putc(char c) {
   if (c == '\n') {
     kshell_newline();
     if (kshell_visible) {
-      drm_frontend_flush();
+      if (g_con) kms_console_flush(g_con);
     }
     return;
   }
@@ -187,8 +192,7 @@ void kshell_console_putc(char c) {
   if (c == '\r') {
     kshell_cursor_x = 0;
     if (kshell_visible) {
-      vga_set_cursor(kshell_cursor_x, kshell_cursor_y);
-      drm_frontend_flush();
+      if (g_con) kms_console_flush(g_con);
     }
     return;
   }
@@ -199,8 +203,7 @@ void kshell_console_putc(char c) {
       kshell_put_entry_at(' ', kshell_cursor_x, kshell_cursor_y);
     }
     if (kshell_visible) {
-      vga_set_cursor(kshell_cursor_x, kshell_cursor_y);
-      drm_frontend_flush();
+      if (g_con) kms_console_flush(g_con);
     }
     return;
   }
@@ -214,11 +217,10 @@ void kshell_console_putc(char c) {
   if (kshell_cursor_x >= kshell_width()) {
     kshell_newline();
     if (kshell_visible) {
-      drm_frontend_flush();
+      if (g_con) kms_console_flush(g_con);
     }
   } else if (kshell_visible) {
-    vga_set_cursor(kshell_cursor_x, kshell_cursor_y);
-    drm_frontend_flush();
+    if (g_con) kms_console_flush(g_con);
   }
 }
 

@@ -27,6 +27,7 @@
 #include <kernel/mmu.h>
 #include <kernel/api/api.h>
 #include <kernel/process.h>
+#include <kernel/vma.h>
 #include <mlibc/memory.h>
 
 int api_proc_copy(registers_t *regs) {
@@ -83,6 +84,7 @@ int api_proc_copy(registers_t *regs) {
   child->owns_address_space = 1;
   child->mmap_base = parent->mmap_base;
   child->kusr_auth = parent->kusr_auth;
+  vma_copy(child, parent);
   api_copy_handles(child, parent);
   child->next = NULL;
 

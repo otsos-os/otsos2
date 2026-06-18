@@ -24,22 +24,35 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef TTY_H
-#define TTY_H
+/*
+ * GEM — Graphics Execution Manager.
+ *
+ * GEM buffers are chunks of kernel memory that back scanout framebuffers and
+ * user render targets. A buffer is referenced by a process-local handle.
+ * Userspace mmaps the handle (via memMap) and writes pixels directly; the
+ * DRM layer never interprets the contents. There is no VRAM path yet — all
+ * buffers live in system RAM (which the fbdev driver can blit to the hw
+ * linear framebuffer).
+ */
 
-#include <mlibc/mlibc.h>
+#ifndef DRM_GEM_H
+#define DRM_GEM_H
 
-int tty_read(void *buf, u32 count);
-int tty_write(const void *buf, u32 count);
-void tty_init(void);
-int tty_is_initialized(void);
-void tty_putc_from_kernel(char c);
-void tty_flush_kernel(void);
-void tty_set_color(u8 color);
-void tty_clear_active(void);
-void tty_com1_mirror(char c);
-void tty_set_active(int index);
-void tty_restore_active_display(void);
-void tty_update(void);
+#include <drm/drm.h>
+
+/* Allocate a buffer of `size` bytes. Returns a handle or 0 on failure. */
+drm_handle_t drm_gem_create(u64 size);
+
+/* Look up a buffer by handle. Returns NULL if invalid. */
+drm_gem_buffer_t *drm_gem_lookup(drm_handle_t handle);
+
+/* Kernel virtual address of the buffer (NULL if invalid). */
+void *drm_gem_vaddr(drm_handle_t handle);
+
+/* Size in bytes of the buffer (0 if invalid). */
+u64 drm_gem_size(drm_handle_t handle);
+
+/* Release a handle (decrements refcount, frees when last). */
+int drm_gem_close(drm_handle_t handle);
 
 #endif

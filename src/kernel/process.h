@@ -35,6 +35,16 @@
 #define USER_STACK_SIZE (64 * 1024)   /* 64 KB user stack */
 #define KERNEL_STACK_SIZE (16 * 1024) /* 16 KB kernel stack per process */
 
+/* Virtual Memory Area — tracks a mapped region of a process's address space. */
+typedef struct vma {
+  u64 start;           /* page-aligned virtual address */
+  u64 end;             /* page-aligned end (exclusive) */
+  u32 prot;            /* API_MAP_READ / WRITE / EXEC */
+  u32 flags;           /* API_MAP_ANON / MAP_GEM / MAP_PRIVATE etc */
+  u32 gem_handle;      /* GEM handle if MAP_GEM, else 0 */
+  struct vma *next;    /* singly-linked list, sorted by start */
+} vma_t;
+
 /* Process states */
 typedef enum {
   PROC_STATE_UNUSED = 0,
@@ -83,8 +93,9 @@ typedef struct process {
   /* KUSR privilege */
   int kusr_auth;
 
-  /* mmap base */
+  /* mmap */
   u64 mmap_base;
+  vma_t *vma_list;    /* sorted list of virtual memory areas */
 
   /* File descriptors */
   api_handle_t handles[MAX_HANDLES];

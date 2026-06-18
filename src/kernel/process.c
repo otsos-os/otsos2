@@ -29,6 +29,7 @@
 #include <kernel/panic.h>
 #include <kernel/process.h>
 #include <kernel/signal.h>
+#include <kernel/vma.h>
 #include <lib/com1.h>
 #include <mlibc/memory.h>
 
@@ -164,6 +165,7 @@ void process_exit(int code) {
     current_process->cr3 = 0;
     current_process->owns_address_space = 0;
   }
+  vma_free_all(current_process);
   current_process->mmap_base = MMAP_BASE;
 
   __asm__ volatile("sti");

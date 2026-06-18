@@ -25,10 +25,10 @@
  */
 
 #include <kernel/drivers/keyboard/keyboard.h>
+#include <kernel/console.h>
 #include <kernel/drivers/power/pbutton.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/drivers/tty.h>
-#include <kernel/drivers/vga.h>
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/mmu.h>

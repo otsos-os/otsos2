@@ -1,37 +1,19 @@
 /*
  * Copyright (c) 2026, otsos team
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the documentation
- *    and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/fs/chainFS/chainfs.h>
-#include <kernel/mmu.h>
 #include <kernel/api/api.h>
+#include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/drivers/video/drm/gem.h>
+#include <kernel/mmu.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
+#include <kernel/vma.h>
 #include <lib/com1.h>
 #include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
+
+#define PAGE_SIZE 4096
 
 typedef struct {
   u64 addr;
@@ -46,44 +28,174 @@ static u64 align_up(u64 val, u64 align) {
   return (val + align - 1) & ~(align - 1);
 }
 
-static int range_is_free(u64 base, u64 pages) {
-  for (u64 i = 0; i < pages; i++) {
-    u64 vaddr = base + i * PAGE_SIZE;
-    u64 flags = mmu_get_pte_flags(vaddr);
-    if (flags & PTE_PRESENT) {
-      return 0;
-    }
-  }
-  return 1;
+static u64 page_flags_for_prot(u32 prot) {
+  u64 flags = PTE_PRESENT | PTE_USER;
+  if (prot & API_MAP_WRITE) flags |= PTE_RW;
+  if (!(prot & API_MAP_EXEC)) flags |= PTE_NX;
+  return flags;
 }
 
-static u64 find_free_region(process_t *proc, u64 length) {
-  u64 pages = align_up(length, PAGE_SIZE) / PAGE_SIZE;
-  u64 start = proc->mmap_base;
-  if (start < MMAP_BASE) {
-    start = MMAP_BASE;
+/* Map a GEM buffer into the current process's address space. The GEM
+ * buffer's physical pages are shared — writes are visible to the kernel
+ * (and to other processes that map the same handle). This is zero-copy:
+ * no data is duplicated. */
+static u64 mmap_gem(process_t *proc, u32 gem_handle, u64 length, u32 prot,
+                    u32 flags, u64 addr) {
+  drm_gem_buffer_t *buf = drm_gem_lookup(gem_handle);
+  if (!buf) {
+    return (u64)(-API_ERR_NOT_FOUND);
   }
-  if (start >= MMAP_LIMIT) {
-    start = MMAP_BASE;
+  if (length > buf->size) {
+    length = buf->size;
   }
+  u64 aligned = align_up(length, PAGE_SIZE);
 
-  for (u64 addr = align_up(start, PAGE_SIZE); addr + pages * PAGE_SIZE < MMAP_LIMIT;
-       addr += PAGE_SIZE) {
-    if (range_is_free(addr, pages)) {
-      proc->mmap_base = addr + pages * PAGE_SIZE;
-      return addr;
+  if (flags & API_MAP_FIXED) {
+    if (addr == 0 || (addr & (PAGE_SIZE - 1)) != 0) {
+      return (u64)(-API_ERR_BAD_VALUE);
+    }
+  } else {
+    addr = vma_find_free(proc, aligned);
+    if (!addr) {
+      return (u64)(-API_ERR_NO_MEMORY);
     }
   }
 
-  for (u64 addr = MMAP_BASE; addr + pages * PAGE_SIZE < start;
-       addr += PAGE_SIZE) {
-    if (range_is_free(addr, pages)) {
-      proc->mmap_base = addr + pages * PAGE_SIZE;
-      return addr;
+  u64 pflags = page_flags_for_prot(prot);
+
+  /* Map each page of the GEM buffer into the process VA. The GEM buffer
+   * was allocated with kmalloc_aligned(4096), so its physical pages are
+   * contiguous and page-aligned. */
+  u64 phys_base = (u64)buf->data;
+  for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
+    mmu_map_page(addr + off, phys_base + off, pflags);
+  }
+
+  if (vma_add(proc, addr, addr + aligned, prot, flags, gem_handle) != 0) {
+    for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
+      mmu_unmap_page(addr + off);
+    }
+    return (u64)(-API_ERR_NO_MEMORY);
+  }
+
+  return addr;
+}
+
+/* Anonymous mapping: allocate fresh physical pages. */
+static u64 mmap_anon(process_t *proc, u64 length, u32 prot, u32 flags,
+                     u64 addr) {
+  u64 aligned = align_up(length, PAGE_SIZE);
+
+  if (flags & API_MAP_FIXED) {
+    if (addr == 0 || (addr & (PAGE_SIZE - 1)) != 0) {
+      return (u64)(-API_ERR_BAD_VALUE);
+    }
+  } else {
+    addr = vma_find_free(proc, aligned);
+    if (!addr) {
+      return (u64)(-API_ERR_NO_MEMORY);
     }
   }
 
-  return 0;
+  u64 pflags = page_flags_for_prot(prot);
+
+  for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
+    void *page = kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+    if (!page) {
+      for (u64 rollback = 0; rollback < off; rollback += PAGE_SIZE) {
+        mmu_unmap_page(addr + rollback);
+        /* Pages were identity-mapped, so phys == virt. */
+        kfree((void *)(addr + rollback));
+      }
+      return (u64)(-API_ERR_NO_MEMORY);
+    }
+    memset(page, 0, PAGE_SIZE);
+    mmu_map_page(addr + off, (u64)page, pflags);
+  }
+
+  if (vma_add(proc, addr, addr + aligned, prot, flags, 0) != 0) {
+    for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
+      mmu_unmap_page(addr + off);
+      kfree((void *)(addr + off));
+    }
+    return (u64)(-API_ERR_NO_MEMORY);
+  }
+
+  return addr;
+}
+
+/* File-backed mapping: read file contents into freshly allocated pages. */
+static u64 mmap_file(process_t *proc, u64 length, u32 prot, u32 flags,
+                     u64 addr, int fd, u64 offset) {
+  api_handle_t *handles = api_get_handle_table();
+  api_object_t *objects = api_get_object_table();
+
+  if (fd < 0 || fd >= MAX_HANDLES || !handles[fd].used) {
+    return (u64)(-API_ERR_BAD_HANDLE);
+  }
+  int oi = handles[fd].object_index;
+  if (oi < 0 || oi >= MAX_DATA_OBJECTS || !objects[oi].used) {
+    return (u64)(-API_ERR_BAD_HANDLE);
+  }
+  if (objects[oi].type != API_OBJECT_FILE) {
+    return (u64)(-API_ERR_NO_DEVICE);
+  }
+
+  chainfs_file_entry_t entry;
+  u32 entry_block, entry_offset;
+  if (chainfs_find_file(objects[oi].path, &entry, &entry_block,
+                        &entry_offset) != 0) {
+    return (u64)(-API_ERR_NOT_FOUND);
+  }
+
+  u32 file_size = entry.size;
+  u64 aligned = align_up(length, PAGE_SIZE);
+
+  if (flags & API_MAP_FIXED) {
+    if (addr == 0 || (addr & (PAGE_SIZE - 1)) != 0) {
+      return (u64)(-API_ERR_BAD_VALUE);
+    }
+  } else {
+    addr = vma_find_free(proc, aligned);
+    if (!addr) {
+      return (u64)(-API_ERR_NO_MEMORY);
+    }
+  }
+
+  u64 pflags = page_flags_for_prot(prot);
+
+  for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
+    void *page = kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+    if (!page) {
+      for (u64 rollback = 0; rollback < off; rollback += PAGE_SIZE) {
+        mmu_unmap_page(addr + rollback);
+        kfree((void *)(addr + rollback));
+      }
+      return (u64)(-API_ERR_NO_MEMORY);
+    }
+    memset(page, 0, PAGE_SIZE);
+
+    u64 file_off = offset + off;
+    if (file_off < file_size) {
+      u32 to_copy = (u32)(file_size - file_off);
+      if (to_copy > PAGE_SIZE) to_copy = PAGE_SIZE;
+      u32 bytes_read = 0;
+      chainfs_read_file_range(objects[oi].path, (u8 *)page, to_copy,
+                              (u32)file_off, &bytes_read);
+    }
+
+    mmu_map_page(addr + off, (u64)page, pflags);
+  }
+
+  if (vma_add(proc, addr, addr + aligned, prot, flags, 0) != 0) {
+    for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
+      mmu_unmap_page(addr + off);
+      kfree((void *)(addr + off));
+    }
+    return (u64)(-API_ERR_NO_MEMORY);
+  }
+
+  return addr;
 }
 
 u64 api_mem_map(const void *uargs) {
@@ -101,99 +213,60 @@ u64 api_mem_map(const void *uargs) {
   if (args.length == 0) {
     return (u64)(-API_ERR_BAD_VALUE);
   }
-  if (!(args.flags & API_MAP_PRIVATE)) {
-    return (u64)(-API_ERR_BAD_VALUE);
-  }
 
   u64 length = align_up(args.length, PAGE_SIZE);
   u64 addr = args.addr;
 
-  if (args.flags & API_MAP_FIXED) {
-    if (addr == 0 || (addr & (PAGE_SIZE - 1)) != 0) {
-      return (u64)(-API_ERR_BAD_VALUE);
-    }
-    if (!range_is_free(addr, length / PAGE_SIZE)) {
-      return (u64)(-API_ERR_EXISTS);
-    }
-  } else {
-    addr = find_free_region(proc, length);
-    if (!addr) {
-      return (u64)(-API_ERR_NO_MEMORY);
-    }
+  /* GEM buffer mapping — maps GPU memory into userspace, zero-copy. */
+  if (args.flags & API_MAP_GEM) {
+    return mmap_gem(proc, (u32)args.fd, length, args.prot, args.flags, addr);
   }
 
-  int file_backed = !(args.flags & API_MAP_ANON);
-  char file_path[256];
-  u32 file_size = 0;
-
-  if (file_backed) {
-    api_handle_t *handles = api_get_handle_table();
-    api_object_t *objects = api_get_object_table();
-    if (args.fd < 0 || args.fd >= MAX_HANDLES || !handles[args.fd].used) {
-      return (u64)(-API_ERR_BAD_HANDLE);
-    }
-    int object_index = handles[args.fd].object_index;
-    if (object_index < 0 || object_index >= MAX_DATA_OBJECTS ||
-        !objects[object_index].used) {
-      return (u64)(-API_ERR_BAD_HANDLE);
-    }
-    if (objects[object_index].type != API_OBJECT_FILE) {
-      return (u64)(-API_ERR_NO_DEVICE);
-    }
-    chainfs_file_entry_t entry;
-    u32 entry_block, entry_offset;
-    if (chainfs_find_file(objects[object_index].path, &entry, &entry_block,
-                          &entry_offset) != 0) {
-      return (u64)(-API_ERR_NOT_FOUND);
-    }
-    file_size = entry.size;
-    memset(file_path, 0, sizeof(file_path));
-    int len = strlen(objects[object_index].path);
-    if (len >= (int)sizeof(file_path)) {
-      len = (int)sizeof(file_path) - 1;
-    }
-    memcpy(file_path, objects[object_index].path, len);
+  /* Anonymous mapping — fresh zero-filled pages. */
+  if (args.flags & API_MAP_ANON) {
+    return mmap_anon(proc, length, args.prot, args.flags, addr);
   }
 
-  u64 page_flags = PTE_PRESENT | PTE_USER;
-  if (args.prot & API_MAP_WRITE) {
-    page_flags |= PTE_RW;
-  }
-  if (!(args.prot & API_MAP_EXEC)) {
-    page_flags |= PTE_NX;
+  /* File-backed mapping. */
+  return mmap_file(proc, length, args.prot, args.flags, addr, args.fd,
+                   args.offset);
+}
+
+int api_mem_unmap(void *addr, u64 length) {
+  process_t *proc = process_current();
+  if (!proc || !addr || length == 0) {
+    return -API_ERR_BAD_VALUE;
   }
 
-  for (u64 off = 0; off < length; off += PAGE_SIZE) {
-    void *page = kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
-    if (!page) {
-      for (u64 rollback = 0; rollback < off; rollback += PAGE_SIZE) {
-        u64 vaddr = addr + rollback;
-        u64 paddr = mmu_virt_to_phys(vaddr);
-        mmu_unmap_page(vaddr);
-        if (paddr) {
-          kfree((void *)paddr);
-        }
-      }
-      return (u64)(-API_ERR_NO_MEMORY);
-    }
-    memset(page, 0, PAGE_SIZE);
-    mmu_map_page(addr + off, (u64)page, page_flags);
+  u64 vaddr = (u64)addr;
+  if ((vaddr & (PAGE_SIZE - 1)) != 0) {
+    return -API_ERR_BAD_VALUE;
+  }
+  if (!is_user_address(addr, length)) {
+    return -API_ERR_BAD_ADDR;
+  }
 
-    if (file_backed) {
-      u64 file_off = args.offset + off;
-      if (file_off < file_size) {
-        u32 to_copy = (u32)(file_size - file_off);
-        if (to_copy > PAGE_SIZE) {
-          to_copy = PAGE_SIZE;
-        }
-        u32 bytes_read = 0;
-        if (chainfs_read_file_range(file_path, (u8 *)page, to_copy,
-                                    (u32)file_off, &bytes_read) != 0) {
-          com1_printf("[MMAP] Error: file read failed\n");
-        }
+  vma_t *vma = vma_find(proc, vaddr);
+  if (!vma) {
+    return -API_ERR_NOT_FOUND;
+  }
+
+  u64 aligned = align_up(length, PAGE_SIZE);
+
+  /* Unmap pages. For GEM mappings, we do NOT free the physical pages —
+   * they belong to the GEM buffer. For anonymous/file mappings, we free
+   * the physical pages. */
+  for (u64 off = 0; off < aligned && vaddr + off < vma->end; off += PAGE_SIZE) {
+    u64 va = vaddr + off;
+    if (!(vma->flags & API_MAP_GEM)) {
+      u64 phys = mmu_virt_to_phys(va);
+      if (phys) {
+        kfree((void *)phys);
       }
     }
+    mmu_unmap_page(va);
   }
 
-  return addr;
+  vma_remove(proc, vaddr);
+  return 0;
 }

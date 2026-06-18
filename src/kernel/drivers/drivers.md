@@ -17,42 +17,44 @@ The default file system for OTSOS.
 Used primarily for kernel debugging and logging.
 - **Port**: `0x3F8`.
 
-## 4. VGA & Framebuffer Driver (`src/kernel/drivers/vga.c`, `src/kernel/drivers/video/fb.c`)
-Unified driver handling both legacy text mode and high-resolution VBE framebuffer.
-- **Modes**: 
-    - Legacy: 80x25 Text Mode (0xB8000).
-    - Graphical: High-resolution (e.g., 1024x768x32) linear framebuffer.
-- **Features**:
-    - **Dynamic Mode Switching**: Automatically uses framebuffer if initialized.
-    - **Font Rendering**: Uses embedded Spleen font (8x16) for text on graphics.
-    - **Text Output**: Standard `printf` works in both modes.
-    - **ANSI Parsing**: Supports ANSI escape codes for colored text (e.g., `\033[31m`).
-        - Colors: 30-37 (Black, Red, Green, Yellow, Blue, Magenta, Cyan, White).
-    - **Scrolling**: Hardware-accelerated scrolling in both text and graphics modes.
-- **API**:
-    - `void printf(const char *fmt, ...)`: Universal formatted output.
-    - `void clear_scr()`: Clears screen (black).
-    - `void fb_init(multiboot_info_t *mb_info)`: Initializes VBE framebuffer.
-    - `void fb_put_pixel(int x, int y, u32 color)`: Draw single pixel.
-    - `void fb_put_char(int x, int y, char c, u32 color)`: Draw character glyph.
-    - `void vga_set_color(u8 color)`: Set text color (works in Text & FB modes).
+## 4. Video architecture: GPU drivers under DRM
 
-## 5. DRM Atomic Core (`src/kernel/drivers/video/drm/`)
-Atomic display pipeline used by framebuffer path.
-- **Objects**:
-    - `CRTC` (mode and scanout state)
-    - `Primary Plane` (framebuffer binding)
-    - `Connector` (link state)
-- **Atomic flow**:
-    - Build pending state
-    - Validate all objects
-    - Single commit to hardware backend
-- **Files**:
-    - `driver.h` / `driver.c`: `drm_driver` model and driver selection (auto or preferred name)
-    - `atomic.c` / `atomic.h`: state machine and commit path
-    - `backend.c` / `backend.h`: hw present/copy backend
-    - `frontend.c` / `frontend.h`: DRM console frontend used by VGA/TTY
-    - `types.h`: shared DRM types
+OTSOS targets modern (UEFI) systems and ships no legacy VGA text-mode
+driver. All display output goes through the DRM subsystem, which manages a
+stack of GPU backend drivers plus a frame/monitor pipeline.
+
+Layering (top to bottom):
+
+    userspace (drmCall syscall) / tty / panic / kshell / console
+                        |
+                  DRM frontend  (drawing: put_pixel, fill_rect,
+                                 put_char_cell, clear, scroll, batch)
+                        |
+                  DRM atomic core (frame, shadow buffer, dirty
+                                   tracking, monitor/connector state)
+                        |
+                  DRM driver manager (selects a GPU driver)
+                        |
+                  GPU backend drivers (hardware only)
+
+- `kernel/console.c` / `console.h`: kernel console layer. Provides
+  `printf`, `clear_scr`, `console_putchar`, `console_put_entry_at`,
+  `console_get_width/height`. Routes to the active tty when ready, else
+  draws straight to the DRM frontend with an internal cursor (early boot).
+- `kernel/drivers/video/fb.c` / `fb.h`: the **fbdev GPU backend driver**.
+  Probes the boot display, maps the linear framebuffer, and implements
+  `present` / `present_rect` to blit a finished frame to the hardware. It
+  does NO drawing — rendering happens in the DRM frontend.
+- `kernel/drivers/video/drm/`:
+    - `driver.h` / `driver.c`: `drm_driver_t` model and driver selection
+      (auto or preferred name). The fbdev driver is registered here.
+    - `atomic.c` / `atomic.h`: atomic state machine and commit path
+      (CRTC, primary plane, connector/monitor).
+    - `frontend.c` / `frontend.h`: drawing API used by tty/kshell/panic
+      and the `drmCall` syscall.
+    - `init.c` / `init.h`: multiboot framebuffer probing and DRM bring-up.
+    - `types.h`: shared DRM types.
+- The old `vga.c`/`vga.h` and `drm/backend.c`/`backend.h` were removed.
 
 ## 6. Keyboard Manager (`src/kernel/drivers/keyboard/keyboard.c`)
 Global keyboard abstraction layer for managing input drivers.
@@ -81,7 +83,7 @@ interval timer PIT for system ticks.
     - `void timer_init(u32 frequency)`: set frequency
     - `u64 timer_get_ticks()`: return number of tick since boot
 
-8. TTY (src/kernel/drivers/tty.c)
-simple console manager that joins keyboard input with DRM/VGA fallback output
-    userspace API: termRead, termWrite
-    switch: Ctrl + Numpad 0..9
+## 9. TTY (`src/kernel/drivers/tty.c`)
+Console manager joining keyboard input with DRM frontend output.
+- userspace API: termRead, termWrite
+- switch: Ctrl + Numpad 0..9

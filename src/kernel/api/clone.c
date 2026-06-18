@@ -27,6 +27,7 @@
 #include <kernel/mmu.h>
 #include <kernel/api/api.h>
 #include <kernel/process.h>
+#include <kernel/vma.h>
 #include <mlibc/memory.h>
 
 long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
@@ -93,6 +94,7 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
   child->exit_code = 0;
   child->owns_address_space = 1;
   child->mmap_base = parent->mmap_base;
+  vma_copy(child, parent);
   api_copy_handles(child, parent);
   child->next = NULL;
 

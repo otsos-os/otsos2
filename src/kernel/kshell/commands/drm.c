@@ -1,4 +1,4 @@
-#include <kernel/drivers/video/drm/init.h>
+#include <kernel/drivers/video/drm/drm.h>
 #include <kernel/kshell/kshell.h>
 
 static int parse_nonneg_int(const char *s, int *ok) {
@@ -35,15 +35,15 @@ int kshell_drm_switch_command(int argc, char *argv[]) {
     return -1;
   }
 
-  if (drm_switch_driver_by_id(id) != 0) {
+  if (drm_driver_switch_by_id(id) != 0) {
     kshell_console_write("drm_switch: failed to switch drm driver\n");
     return -1;
   }
 
   kshell_console_write("drm_switch: active driver: ");
-  kshell_console_write(drm_get_active_driver_name());
+  kshell_console_write(drm_driver_get_selected_name());
   kshell_console_write(" (id=");
-  kshell_console_write_int(drm_get_active_driver_id());
+  kshell_console_write_int(drm_driver_get_selected_index());
   kshell_console_write(")\n");
 
   return 0;

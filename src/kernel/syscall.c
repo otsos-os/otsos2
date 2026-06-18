@@ -138,6 +138,9 @@ void syscall_handler(registers_t *regs) {
   case CALL_MEM_MAP:
     regs->rax = (u64)api_mem_map((const void *)arg1);
     break;
+  case CALL_MEM_UNMAP:
+    regs->rax = (u64)api_mem_unmap((void *)arg1, arg2);
+    break;
   case CALL_PROC_CLONE:
     regs->rax = (u64)api_proc_clone(arg1, arg2, arg3, regs);
     break;
@@ -167,7 +170,7 @@ void syscall_handler(registers_t *regs) {
     regs->rax = (u64)api_info((struct api_sysinfo *)arg1);
     break;
   case CALL_DRM_CALL:
-    regs->rax = -API_ERR_NOT_SUPPORTED;
+    regs->rax = (u64)api_drm_call(arg1, (void *)arg2);
     break;
   default:
     com1_printf("Unknown syscall: %d\n", syscall_number);

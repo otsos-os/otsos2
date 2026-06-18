@@ -24,12 +24,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <kernel/console.h>
 #include <kernel/other/kusr.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/tty.h>
-#include <kernel/drivers/vga.h>
-#include <kernel/drivers/video/drm/frontend.h>
 #include <lib/com1.h>
 #include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
@@ -44,8 +43,7 @@ int kusr_is_authenticated(void) { return g_kusr_authenticated; }
 void kusr_set_authenticated(int auth) { g_kusr_authenticated = auth ? 1 : 0; }
 
 static void kusr_flush(void) {
-  if (drm_frontend_is_available())
-    drm_frontend_flush();
+  tty_flush_kernel();
 }
 
 static u64 fnv1a_64(const char *data, int len) {
@@ -79,7 +77,10 @@ static int kusr_read_password(char *buf, int max, const char *prompt) {
   kusr_flush();
   while (1) {
     char c = keyboard_getchar();
-    if (c == 0) continue;
+    if (c == 0) {
+      __asm__ volatile("hlt");
+      continue;
+    }
     if (c == '\r' || c == '\n') {
       printf("\n");
       kusr_flush();

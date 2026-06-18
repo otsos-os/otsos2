@@ -24,10 +24,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <kernel/console.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/tty.h>
-#include <kernel/drivers/vga.h>
-#include <kernel/drivers/video/drm/frontend.h>
+#include <kernel/drivers/video/drm/drm.h>
+#include <kernel/drivers/video/drm/kms/console.h>
 #include <lib/com1.h>
 #include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
@@ -80,28 +81,29 @@ static u32 tty_palette[16] = {0x000000, 0x0000AA, 0x00AA00, 0x00AAAA,
                               0x555555, 0x5555FF, 0x55FF55, 0x55FFFF,
                               0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF};
 
+/* Use the shared kernel console singleton. */
+static kms_console_t *g_con;
+
+static kms_console_t *tty_con(void) {
+  if (g_con) return g_con;
+  g_con = kms_kernel_console();
+  return g_con;
+}
+
 static void tty_draw_cell(int x, int y, char c, u8 color) {
-  if (drm_frontend_is_available()) {
-    u32 rgb;
-    tty_state_t *tty = &ttys[tty_active];
-    if (tty->fg_rgb != 0xFFFFFFFF)
-      rgb = tty->fg_rgb;
-    else
-      rgb = tty_palette[color & 0x0F];
-    drm_frontend_put_char_cell(x, y, c, rgb);
-    return;
-  }
-  vga_put_entry_at(c, color, x, y);
+  kms_console_t *con = tty_con();
+  if (!con) return;
+  u32 rgb;
+  tty_state_t *tty = &ttys[tty_active];
+  if (tty->fg_rgb != 0xFFFFFFFF)
+    rgb = tty->fg_rgb;
+  else
+    rgb = tty_palette[color & 0x0F];
+  kms_console_glyph(con, (u32)(x * 8), (u32)(y * 16), c, rgb, 0x000000);
 }
 
 static void tty_set_hw_cursor(const tty_state_t *tty) {
-  if (!tty) {
-    return;
-  }
-  if (!drm_frontend_is_available()) {
-    vga_set_cursor(tty->cursor_x, tty->cursor_y);
-    vga_set_color(tty->color);
-  }
+  (void)tty;
 }
 
 static void tty_ansi_sgr(tty_state_t *tty, int params[], int count) {
@@ -279,7 +281,6 @@ static void tty_redraw(const tty_state_t *tty) {
     return;
   }
 
-  drm_frontend_batch_begin();
   for (int y = 0; y < tty->height; y++) {
     for (int x = 0; x < tty->width; x++) {
       u16 cell = tty->cells[y * tty->width + x];
@@ -288,7 +289,7 @@ static void tty_redraw(const tty_state_t *tty) {
       tty_draw_cell(x, y, c, color);
     }
   }
-  drm_frontend_batch_end();
+  if (g_con) kms_console_flush(g_con);
 
   tty_set_hw_cursor(tty);
 }
@@ -394,7 +395,6 @@ static void tty_putc_internal(tty_state_t *tty, char c, int active) {
 
 static void tty_emit(char c) {
   tty_putc_internal(&ttys[tty_active], c, 1);
-  drm_frontend_flush();
   tty_suppress_com1_mirror = 1;
   com1_write_byte((u8)c);
   tty_suppress_com1_mirror = 0;
@@ -543,8 +543,12 @@ void tty_init(void) {
     return;
   }
 
-  int width = vga_get_width();
-  int height = vga_get_height();
+  int width = 0;
+  int height = 0;
+  if (tty_con()) {
+    width = (int)g_con->cols;
+    height = (int)g_con->rows;
+  }
   if (width <= 0) {
     width = 80;
   }
@@ -594,12 +598,21 @@ void tty_set_color(u8 color) {
   ttys[tty_active].color = color;
 }
 
+void tty_flush_kernel(void) {
+  if (g_con) kms_console_flush(g_con);
+}
+
 void tty_putc_from_kernel(char c) {
   if (!tty_initialized) {
     return;
   }
   tty_update();
   tty_putc_internal(&ttys[tty_active], c, 1);
+  /* Batch flush: only present to hardware on newline, not every character.
+   * This avoids a ~3 MB memcpy per glyph. */
+  if (c == '\n') {
+    tty_flush_kernel();
+  }
 }
 
 void tty_com1_mirror(char c) {
@@ -607,7 +620,7 @@ void tty_com1_mirror(char c) {
     return;
   }
   if (!tty_initialized) {
-    vga_putc(c);
+    console_putchar(c);
     return;
   }
   tty_putc_internal(&ttys[0], c, tty_active == 0);
@@ -675,7 +688,6 @@ static char tty_getchar_blocking(int tty_idx) {
 static void tty_emit_to(int tty_idx, char c) {
   tty_putc_internal(&ttys[tty_idx], c, tty_idx == tty_active);
   if (tty_idx == tty_active) {
-    drm_frontend_flush();
     tty_suppress_com1_mirror = 1;
     com1_write_byte((u8)c);
     tty_suppress_com1_mirror = 0;
@@ -703,6 +715,7 @@ static void tty_fill_line_buffer(int tty_idx) {
         tty_emit_to(tty_idx, '\b');
         tty_emit_to(tty_idx, ' ');
         tty_emit_to(tty_idx, '\b');
+        if (tty_idx == tty_active && g_con) kms_console_flush(g_con);
       }
       continue;
     }
@@ -712,12 +725,14 @@ static void tty_fill_line_buffer(int tty_idx) {
         line->data[line->len++] = '\n';
       }
       tty_emit_to(tty_idx, '\n');
+      if (tty_idx == tty_active && g_con) kms_console_flush(g_con);
       break;
     }
 
     if (line->len < (TTY_LINE_BUF_SIZE - 1)) {
       line->data[line->len++] = c;
       tty_emit_to(tty_idx, c);
+      if (tty_idx == tty_active && g_con) kms_console_flush(g_con);
     }
   }
 }
@@ -770,6 +785,10 @@ int tty_write(const void *buf, u32 count) {
   for (u32 i = 0; i < count; i++) {
     tty_emit(data[i]);
   }
+
+  /* Flush once after the entire write — this covers prompts that don't
+   * end with \n (e.g. "/ $ " or "Enter path: "). */
+  if (g_con) kms_console_flush(g_con);
 
   return (int)count;
 }

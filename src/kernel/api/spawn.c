@@ -454,7 +454,10 @@ int api_proc_spawn(const char *path, const char *const *argv,
   child->exit_code = 0;
   child->owns_address_space = 1;
   child->mmap_base = MMAP_BASE;
-  child->kusr_auth = parent->kusr_auth;
+  /* Spawn loads a new program — it starts unprivileged. kusr rights are
+   * not inherited; the program must authenticate via kusr_auth(password)
+   * if it needs elevated access (e.g. to display anything on screen). */
+  child->kusr_auth = 0;
   api_copy_handles(child, parent);
   child->next = NULL;
 

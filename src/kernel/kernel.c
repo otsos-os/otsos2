@@ -33,12 +33,11 @@
 #include <kernel/drivers/power/power.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/drivers/tty.h>
-#include <kernel/drivers/vga.h>
-#include <kernel/drivers/video/drm/atomic.h>
+#include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/init.h>
-#include <kernel/drivers/video/fb.h>
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/interrupts/idt.h>
+#include <kernel/console.h>
 #include <kernel/mmu.h>
 #include <kernel/multiboot.h>
 #include <kernel/multiboot2.h>
@@ -174,7 +173,7 @@ static void status_line(const char *label, int ok) {
   printf("%s", label);
   com1_printf("%s", label);
   for (int i = len; i < pad_col; i++) {
-    vga_putc(' ');
+    console_putchar(' ');
     com1_printf(" ");
   }
   if (ok) {
@@ -268,7 +267,6 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
     multiboot2_info_t *mboot_ptr = (multiboot2_info_t *)addr;
     debug_multiboot2_tags(mboot_ptr);
     drm_boot_init_mb2(mboot_ptr, 0);
-    fb_init_mb2(mboot_ptr);
 
     acpi_init_from_multiboot2(mboot_ptr);
 
@@ -286,7 +284,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
     com1_printf("CPU: %s\n", p);
     com1_printf("RAM: %u MB (%u KB)\n", ram_kb / 1024, ram_kb);
 
-    if (is_framebuffer_enabled()) {
+    if (drm_is_ready()) {
       printf("CPU: %s\n", p);
       printf("RAM: %u MB\n", ram_kb / 1024);
     }
@@ -300,7 +298,6 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
     multiboot_info_t *mboot_ptr = (multiboot_info_t *)addr;
     debug_multiboot_info(mboot_ptr);
     drm_boot_init_mb1(mboot_ptr, 0);
-    fb_init(mboot_ptr);
     clear_scr();
     tty_init();
 
@@ -315,7 +312,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
     com1_printf("CPU: %s\n", p);
     com1_printf("RAM: %u MB (%u KB)\n", ram_kb / 1024, ram_kb);
 
-    if (is_framebuffer_enabled()) {
+    if (drm_is_ready()) {
       printf("CPU: %s\n", p);
       printf("RAM: %u MB\n", ram_kb / 1024);
     }
@@ -351,8 +348,8 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   int disk_ok = disk_manager_is_initialized();
   int pata_ok = disk_has_type(DISK_TYPE_PATA);
   int ramdisk_ok = disk_has_type(DISK_TYPE_RAM);
-  int fb_ok = is_framebuffer_enabled() != 0;
-  int drm_atomic_ok = drm_atomic_is_ready();
+  int fb_ok = drm_is_ready() != 0;
+  int drm_atomic_ok = drm_is_ready();
   int acpi_ok = acpi_is_initialized();
   int power_ok = power_is_initialized();
   int pci_ok = pci_is_initialized();
@@ -367,7 +364,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   status_line("pata identify", pata_ok);
   status_line("ramdisk", ramdisk_ok);
   status_line("framebuffer", fb_ok);
-  status_line("drm atomic", drm_atomic_ok);
+  status_line("drm", drm_atomic_ok);
   status_line("acpi", acpi_ok);
   status_line("power", power_ok);
   status_line("pci scan", pci_ok);
@@ -419,8 +416,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   if (!fs_ok) {
     com1_printf("[CHAINFS] init failed, formatting disk...\n");
     u32 format_blocks = 64;
-    if (selected_disk && selected_disk->total_sectors > 0 &&
-        selected_disk->total_sectors < format_blocks) {
+    if (selected_disk && selected_disk->total_sectors > 0) {
       format_blocks = selected_disk->total_sectors;
     }
     int fmt_ok = (chainfs_format(format_blocks, 8) == 0);

@@ -25,10 +25,8 @@
  */
 
 #include <kernel/drivers/keyboard/keyboard.h>
-#include <kernel/drivers/video/drm/atomic.h>
-#include <kernel/drivers/video/drm/driver.h>
-#include <kernel/drivers/video/drm/init.h>
-#include <kernel/drivers/video/fb.h>
+#include <kernel/drivers/video/drm/drm.h>
+#include <kernel/drivers/video/drm/kms/crtc.h>
 #include <kernel/kshell/kshell.h>
 #include <kernel/api/api.h>
 #include <kernel/process.h>
@@ -163,14 +161,14 @@ static int parse_expr(const char *expr, int *ok) {
 
 static int print_kernel_var(const char *name) {
   if (strcmp(name, "videoM") == 0) {
-    if (is_framebuffer_enabled()) {
+    if (drm_is_ready()) {
       kshell_console_write("linear fb, address: ");
-      kshell_console_write_ptr((void *)(u64)fb_get_address());
+      kshell_console_write_ptr((void *)(u64)drm_crtc_get_hw_address());
       kshell_console_write(", multiboot");
       kshell_console_write_int(g_kshell_is_multiboot2 ? 2 : 1);
       kshell_console_write("\n");
     } else {
-      kshell_console_write("vga\n");
+      kshell_console_write("unavailable\n");
     }
     return 0;
   }
@@ -227,29 +225,27 @@ static int print_kernel_var(const char *name) {
   }
 
   if (strcmp(name, "drm") == 0) {
-    kshell_console_write("drm enabled: ");
-    kshell_console_write(drm_atomic_is_enabled() ? "yes" : "no");
-    kshell_console_write(", ready: ");
-    kshell_console_write(drm_atomic_is_ready() ? "yes" : "no");
+    kshell_console_write("drm ready: ");
+    kshell_console_write(drm_is_ready() ? "yes" : "no");
     kshell_console_write("\n");
 
     kshell_console_write("active driver: ");
-    kshell_console_write(drm_get_active_driver_name());
+    kshell_console_write(drm_driver_get_selected_name());
     kshell_console_write(" (id=");
-    kshell_console_write_int(drm_get_active_driver_id());
+    kshell_console_write_int(drm_driver_get_selected_index());
     kshell_console_write(")\n");
 
-    if (drm_atomic_is_ready()) {
+    if (drm_is_ready()) {
       kshell_console_write("mode: ");
-      kshell_console_write_int((int)drm_atomic_get_width());
+      kshell_console_write_int((int)drm_crtc_get_width());
       kshell_console_write("x");
-      kshell_console_write_int((int)drm_atomic_get_height());
+      kshell_console_write_int((int)drm_crtc_get_height());
       kshell_console_write(", bpp=");
-      kshell_console_write_int((int)drm_atomic_get_bpp());
+      kshell_console_write_int((int)drm_crtc_get_bpp());
       kshell_console_write(", pitch=");
-      kshell_console_write_int((int)drm_atomic_get_pitch());
+      kshell_console_write_int((int)drm_crtc_get_pitch());
       kshell_console_write(", hw=");
-      kshell_console_write_ptr((void *)(u64)drm_atomic_get_hw_address());
+      kshell_console_write_ptr((void *)(u64)drm_crtc_get_hw_address());
       kshell_console_write("\n");
     }
 
@@ -260,7 +256,7 @@ static int print_kernel_var(const char *name) {
       return 0;
     }
 
-    int active = drm_get_active_driver_id();
+    int active = drm_driver_get_selected_index();
     for (u32 i = 0; i < count; i++) {
       const drm_driver_t *drv = drm_driver_get_by_index(i);
       if (!drv) {

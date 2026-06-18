@@ -8,7 +8,7 @@ QEMU_GUI_OPTS ?= -display gtk
 QEMU_NODISPLAY_OPTS ?= -display none
 
 TARGET_CFLAGS ?= --target=$(TARGET)
-CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fno-pic -fstack-protector-strong -g -O0 -fno-builtin -mno-red-zone -mcmodel=kernel -mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-80387 -I.
+CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fno-pic -fstack-protector-strong -g -O0 -fno-builtin -mno-red-zone -mcmodel=kernel -mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-80387 -I. -Ikernel/drivers/video
 LDFLAGS ?= -m elf_x86_64 -T linker.ld -Map=../bin/kernel.map
 NASM_FORMAT ?= elf64
 ZIG_TARGET ?= x86_64-freestanding
@@ -33,22 +33,29 @@ IDT_C_O = ../bin/idt_c.o
 PIC_O = ../bin/pic_c.o
 HANDLERS_O = ../bin/handlers_c.o
 PANIC_O = ../bin/panic.o
+CONSOLE_O = ../bin/console.o
 MEMORY_O = ../bin/memory.o
 PATA_O = ../bin/pata.o
 DISK_O = ../bin/disk.o
 RAMDISK_O = ../bin/ramdisk.o
 CHAINFS_O = ../bin/chainfs.o
-VGA_O = ../bin/vga.o
 TTY_O = ../bin/tty.o
 PS2_O = ../bin/ps2.o
 KEYBOARD_O = ../bin/keyboard.o
-FB_O = ../bin/fb.o
 FONT_O = ../bin/font.o
-DRM_ATOMIC_O = ../bin/drm_atomic.o
-DRM_BACKEND_O = ../bin/drm_backend.o
+DRM_CORE_O = ../bin/drm_core.o
+DRM_GEM_O = ../bin/drm_gem.o
+DRM_OBJ_O = ../bin/drm_obj.o
+DRM_AUTH_O = ../bin/drm_auth.o
 DRM_INIT_O = ../bin/drm_init.o
-DRM_DRIVER_O = ../bin/drm_driver.o
-DRM_FRONTEND_O = ../bin/drm_frontend.o
+DRM_FBDEV_O = ../bin/drm_fbdev.o
+DRM_KMS_FB_O = ../bin/drm_kms_fb.o
+DRM_KMS_PLANE_O = ../bin/drm_kms_plane.o
+DRM_KMS_CRTC_O = ../bin/drm_kms_crtc.o
+DRM_KMS_CONN_O = ../bin/drm_kms_conn.o
+DRM_KMS_ATOMIC_O = ../bin/drm_kms_atomic.o
+DRM_KMS_CONSOLE_O = ../bin/drm_kms_console.o
+DRM_RAPI_O = ../bin/drm_rapi.o
 TIMER_O = ../bin/timer.o
 STDLIB_O = ../bin/stdlib.o
 MMU_O = ../bin/mmu.o
@@ -59,6 +66,7 @@ CLOSE_O = ../bin/close.o
 LSEEK_O = ../bin/lseek.o
 WAIT_O = ../bin/wait.o
 MMAP_O = ../bin/mmap.o
+VMA_O = ../bin/vma.o
 PIPE_O = ../bin/pipe.o
 CLONE_O = ../bin/clone.o
 SYSCALL_O = ../bin/syscall.o
@@ -98,17 +106,18 @@ KSHELL_DRM_O = ../bin/kshell_drm.o
 TOML_O = ../bin/toml.o
 KUSR_O = ../bin/kusr.o
 KUSR_AUTH_O = ../bin/kusr_auth.o
+DRM_API_O = ../bin/drm_api.o
 RESTRICT_O = ../bin/restrict.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(VGA_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(DRM_ATOMIC_O) $(DRM_BACKEND_O) $(DRM_INIT_O) $(DRM_DRIVER_O) $(DRM_FRONTEND_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
+      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(DRM_KMS_CONSOLE_O) $(DRM_RAPI_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(VMA_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(UNAME_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
       $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O) \
       $(KSHELL_O) $(KSHELL_PARSER_O) $(KSHELL_ECHO_O) $(KSHELL_DRM_O) \
-      $(TOML_O) $(KUSR_O) $(KUSR_AUTH_O) $(RESTRICT_O)
+      $(TOML_O) $(KUSR_O) $(KUSR_AUTH_O) $(DRM_API_O) $(RESTRICT_O)
 
 .PHONY: all ask_version check_build_tools check_run_tools
 
@@ -247,6 +256,10 @@ $(PANIC_O): kernel/panic.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+$(CONSOLE_O): kernel/console.c kernel/console.h kernel/drivers/tty.h kernel/drivers/video/drm/drm.h kernel/drivers/video/drm/kms/console.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
 $(MEMORY_O): mlibc/memory.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
@@ -256,10 +269,6 @@ $(PATA_O): kernel/drivers/disk/pata/pata.c
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(CHAINFS_O): kernel/drivers/fs/chainFS/chainfs.c
-	@echo "  CC      $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-
-$(VGA_O): kernel/drivers/vga.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -275,31 +284,59 @@ $(KEYBOARD_O): kernel/drivers/keyboard/keyboard.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(FB_O): kernel/drivers/video/fb.c
-	@echo "  CC      $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-
 $(FONT_O): kernel/drivers/video/font.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(DRM_ATOMIC_O): kernel/drivers/video/drm/atomic.c
+$(DRM_CORE_O): kernel/drivers/video/drm/drm.c kernel/drivers/video/drm/drm.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(DRM_BACKEND_O): kernel/drivers/video/drm/backend.c
+$(DRM_GEM_O): kernel/drivers/video/drm/gem.c kernel/drivers/video/drm/gem.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(DRM_INIT_O): kernel/drivers/video/drm/init.c
+$(DRM_OBJ_O): kernel/drivers/video/drm/object.c kernel/drivers/video/drm/object.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(DRM_DRIVER_O): kernel/drivers/video/drm/driver.c
+$(DRM_AUTH_O): kernel/drivers/video/drm/auth.c kernel/drivers/video/drm/auth.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(DRM_FRONTEND_O): kernel/drivers/video/drm/frontend.c
+$(DRM_INIT_O): kernel/drivers/video/drm/init.c kernel/drivers/video/drm/init.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DRM_FBDEV_O): kernel/drivers/video/drm/fbdev.c kernel/drivers/video/drm/fbdev.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DRM_KMS_FB_O): kernel/drivers/video/drm/kms/framebuffer.c kernel/drivers/video/drm/kms/framebuffer.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DRM_KMS_PLANE_O): kernel/drivers/video/drm/kms/plane.c kernel/drivers/video/drm/kms/plane.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DRM_KMS_CRTC_O): kernel/drivers/video/drm/kms/crtc.c kernel/drivers/video/drm/kms/crtc.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DRM_KMS_CONN_O): kernel/drivers/video/drm/kms/connector.c kernel/drivers/video/drm/kms/connector.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DRM_KMS_ATOMIC_O): kernel/drivers/video/drm/kms/atomic.c kernel/drivers/video/drm/kms/atomic.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DRM_KMS_CONSOLE_O): kernel/drivers/video/drm/kms/console.c kernel/drivers/video/drm/kms/console.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DRM_RAPI_O): kernel/drivers/video/drm/rapi/rapi.c kernel/drivers/video/drm/rapi/rapi.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -343,7 +380,11 @@ $(WAIT_O): kernel/api/wait.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(MMAP_O): kernel/api/mmap.c
+$(MMAP_O): kernel/api/mmap.c kernel/api/api.h kernel/vma.h kernel/drivers/video/drm/gem.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(VMA_O): kernel/vma.c kernel/vma.h kernel/process.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -492,6 +533,10 @@ $(KUSR_O): kernel/other/kusr.c kernel/other/kusr.h mlibc/toml.h
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(KUSR_AUTH_O): kernel/api/kusr_auth.c kernel/api/api.h kernel/process.h mlibc/toml.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DRM_API_O): kernel/api/drm.c kernel/api/api.h kernel/drivers/video/drm/drm.h kernel/drivers/video/drm/gem.h kernel/drivers/video/drm/kms/atomic.h kernel/drivers/video/drm/rapi/rapi.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
