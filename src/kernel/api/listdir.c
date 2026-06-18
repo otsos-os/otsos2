@@ -24,36 +24,62 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SYSCALL_H
-#define SYSCALL_H
-
-#include <kernel/interrupts/idt.h>
+#include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/api/api.h>
+#include <kernel/useraddr.h>
+#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
-#define CALL_TERM_READ 0x100
-#define CALL_TERM_WRITE 0x101
-#define CALL_DATA_OPEN 0x200
-#define CALL_DATA_CLOSE 0x201
-#define CALL_DATA_READ 0x202
-#define CALL_DATA_WRITE 0x203
-#define CALL_DATA_SEEK 0x204
-#define CALL_DATA_PIPE 0x205
-#define CALL_FS_CHDIR 0x206
-#define CALL_FS_GETCWD 0x207
-#define CALL_FS_LISTDIR 0x208
-#define CALL_MEM_MAP 0x300
-#define CALL_PROC_CLONE 0x400
-#define CALL_PROC_COPY 0x401
-#define CALL_PROC_SPAWN 0x402
-#define CALL_PROC_EXIT 0x403
-#define CALL_PROC_WAIT 0x404
-#define CALL_PROC_KILL 0x405
-#define CALL_PROC_LIST 0x406
-#define CALL_SYS_INFO 0x500
-#define CALL_DRM_CALL 0x600
+#define LISTDIR_MAX_FILES 128
 
-void syscall_init(void);
-void syscall_handler(registers_t *regs);
-int syscall_is_initialized(void);
+int api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries) {
+  if (!buf || max_entries == 0) {
+    return -API_ERR_BAD_VALUE;
+  }
+  if (!is_user_address(buf, max_entries * sizeof(struct api_dirent))) {
+    return -API_ERR_BAD_ADDR;
+  }
 
-#endif
+  const char *use_path = path;
+  if (path) {
+    if (!is_user_address(path, 1)) {
+      return -API_ERR_BAD_ADDR;
+    }
+  }
+
+  chainfs_file_entry_t entries[LISTDIR_MAX_FILES];
+  u32 file_count = 0;
+
+  const char *list_path = NULL;
+  if (use_path && use_path[0] == '\0') {
+    list_path = NULL;
+  } else {
+    list_path = use_path;
+  }
+
+  int ret = chainfs_list_dir(list_path, entries, LISTDIR_MAX_FILES, &file_count);
+  if (ret != 0) {
+    return ret;
+  }
+
+  u32 to_copy = file_count;
+  if (to_copy > max_entries) {
+    to_copy = max_entries;
+  }
+
+  for (u32 i = 0; i < to_copy; i++) {
+    memset(buf[i].name, 0, sizeof(buf[i].name));
+    int j = 0;
+    while (j < 31 && entries[i].name[j] != '\0') {
+      buf[i].name[j] = entries[i].name[j];
+      j++;
+    }
+    buf[i].name[j] = '\0';
+    buf[i].type = entries[i].type;
+    buf[i].pad[0] = 0;
+    buf[i].pad[1] = 0;
+    buf[i].pad[2] = 0;
+  }
+
+  return (int)to_copy;
+}

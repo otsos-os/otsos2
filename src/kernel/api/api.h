@@ -99,6 +99,19 @@ struct api_sysinfo {
   char domainname[65];
 };
 
+struct api_dirent {
+  char name[32];
+  u8 type;
+  u8 pad[3];
+};
+
+struct api_proc_info {
+  u32 pid;
+  u32 ppid;
+  char name[32];
+  u32 state;
+};
+
 int api_term_read(void *buf, u32 count);
 int api_term_write(const void *buf, u32 count);
 int api_data_read(int handle, void *buf, u32 count);
@@ -118,6 +131,10 @@ int pipe_read(pipe_t *p, void *buf, u32 count);
 int pipe_write(pipe_t *p, const void *buf, u32 count);
 int api_proc_spawn(const char *path, const char *const *argv,
                    const char *const *envp);
+int api_fs_chdir(const char *path);
+int api_fs_getcwd(char *buf, u32 size);
+int api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries);
+int api_proc_list(struct api_proc_info *buf, u32 max_entries);
 void api_init(void);
 void api_init_process(struct process *proc);
 void api_copy_handles(struct process *dst, const struct process *src);

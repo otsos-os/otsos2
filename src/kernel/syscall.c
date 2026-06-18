@@ -125,6 +125,16 @@ void syscall_handler(registers_t *regs) {
   case CALL_DATA_PIPE:
     regs->rax = (u64)api_data_pipe((int *)arg1);
     break;
+  case CALL_FS_CHDIR:
+    regs->rax = (u64)api_fs_chdir((const char *)arg1);
+    break;
+  case CALL_FS_GETCWD:
+    regs->rax = (u64)api_fs_getcwd((char *)arg1, (u32)arg2);
+    break;
+  case CALL_FS_LISTDIR:
+    regs->rax = (u64)api_fs_listdir((const char *)arg1,
+                                (struct api_dirent *)arg2, (u32)arg3);
+    break;
   case CALL_MEM_MAP:
     regs->rax = (u64)api_mem_map((const void *)arg1);
     break;
@@ -146,6 +156,9 @@ void syscall_handler(registers_t *regs) {
     break;
   case CALL_PROC_KILL:
     regs->rax = process_send_signal((u32)arg1, (int)arg2);
+    break;
+  case CALL_PROC_LIST:
+    regs->rax = (u64)api_proc_list((struct api_proc_info *)arg1, (u32)arg2);
     break;
   case CALL_SYS_INFO:
     regs->rax = (u64)api_info((struct api_sysinfo *)arg1);

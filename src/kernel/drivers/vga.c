@@ -142,45 +142,6 @@ void vga_put_entry_at(char c, u8 color, int x, int y) {
   }
 }
 
-static int ansi_state = 0;
-static int ansi_val = 0;
-
-void vga_apply_ansi(int code) {
-  u8 color_idx = 0x07;
-  switch (code) {
-  case 0:
-    color_idx = 0x07;
-    break;
-  case 30:
-    color_idx = 0x00;
-    break; // black
-  case 31:
-    color_idx = 0x04;
-    break; // red
-  case 32:
-    color_idx = 0x02;
-    break; // green
-  case 33:
-    color_idx = 0x0E;
-    break; // yellow
-  case 34:
-    color_idx = 0x01;
-    break; // blue
-  case 35:
-    color_idx = 0x05;
-    break; // magenta
-  case 36:
-    color_idx = 0x03;
-    break; // cyan
-  case 37:
-    color_idx = 0x0F;
-    break; // white
-  default:
-    return;
-  }
-  vga_set_color(color_idx);
-}
-
 void vga_putc(char c) {
   if (tty_is_initialized()) {
     tty_putc_from_kernel(c);
@@ -189,32 +150,6 @@ void vga_putc(char c) {
 
   if (drm_frontend_is_available() != vga_using_fb)
     update_vga_dims();
-
-  if (ansi_state == 0) {
-    if (c == 0x1B) {
-      ansi_state = 1;
-      return;
-    }
-  } else if (ansi_state == 1) {
-    if (c == '[') {
-      ansi_state = 2;
-      ansi_val = 0;
-      return;
-    } else {
-      ansi_state = 0;
-    }
-  } else if (ansi_state == 2) {
-    if (c >= '0' && c <= '9') {
-      ansi_val = ansi_val * 10 + (c - '0');
-      return;
-    } else if (c == 'm') {
-      vga_apply_ansi(ansi_val);
-      ansi_state = 0;
-      return;
-    } else {
-      ansi_state = 0;
-    }
-  }
 
   if (c == '\n') {
     cursor_x = 0;

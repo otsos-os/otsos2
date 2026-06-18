@@ -20,6 +20,7 @@ DISK_IMG = ../bin/disk.img
 PORTS_DIR = ../ports
 YES_BIN = $(PORTS_DIR)/yes
 FETCH_BIN = $(PORTS_DIR)/fetch
+SHELL_BIN = $(PORTS_DIR)/sh
 # object files
 BOOT_O = ../bin/boot.o
 KERNEL_O = ../bin/kernel.o
@@ -67,6 +68,10 @@ GDT_ASM_O = ../bin/gdt_asm.o
 PROCESS_O = ../bin/process.o
 COPY_O = ../bin/proc_copy.o
 SPAWN_O = ../bin/spawn.o
+CHDIR_O = ../bin/chdir.o
+GETCWD_O = ../bin/getcwd.o
+LISTDIR_O = ../bin/listdir.o
+PROCLIST_O = ../bin/proclist.o
 ELF_O = ../bin/elf.o
 USERSPACE_O = ../bin/userspace.o
 USERSPACE_ASM_O = ../bin/userspace_asm.o
@@ -93,7 +98,7 @@ KSHELL_DRM_O = ../bin/kshell_drm.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
       $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(VGA_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(DRM_ATOMIC_O) $(DRM_BACKEND_O) $(DRM_INIT_O) $(DRM_DRIVER_O) $(DRM_FRONTEND_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
-      $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
+      $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(UNAME_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
@@ -178,12 +183,18 @@ $(YES_BIN):
 	@echo "  MAKE    ports/yes"
 	@$(MAKE) -C $(PORTS_DIR)
 
-$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN)
+.PHONY: $(SHELL_BIN)
+$(SHELL_BIN):
+	@echo "  MAKE    ports/shell"
+	@$(MAKE) -C $(PORTS_DIR)
+
+$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
 	@cp $(INIT_BIN) $(ISODIR)/boot/init
 	@cp $(YES_BIN) $(ISODIR)/boot/yes
 	@cp $(FETCH_BIN) $(ISODIR)/boot/fetch
+	@cp $(SHELL_BIN) $(ISODIR)/boot/sh
 	@echo 'set timeout=4' > $(ISODIR)/boot/grub/grub.cfg
 	@echo 'set default=0' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo 'insmod all_video' >> $(ISODIR)/boot/grub/grub.cfg
@@ -193,6 +204,7 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 	@echo '    module2 /boot/init init' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    module2 /boot/yes yes' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    module2 /boot/fetch fetch' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '    module2 /boot/sh sh' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    boot' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '}' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo "  ISO     $(ISO_IMAGE)"
@@ -359,6 +371,22 @@ $(COPY_O): kernel/api/copy.c
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(SPAWN_O): kernel/api/spawn.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(CHDIR_O): kernel/api/chdir.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(GETCWD_O): kernel/api/getcwd.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(LISTDIR_O): kernel/api/listdir.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(PROCLIST_O): kernel/api/proclist.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

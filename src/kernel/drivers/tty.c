@@ -44,8 +44,11 @@ typedef struct {
   int cursor_x;
   int cursor_y;
   u8 color;
+  u32 fg_rgb;
   int ansi_state;
-  int ansi_val;
+  int ansi_params[8];
+  int ansi_param_count;
+  int ansi_cur_param;
 } tty_state_t;
 
 typedef struct {
@@ -79,7 +82,13 @@ static u32 tty_palette[16] = {0x000000, 0x0000AA, 0x00AA00, 0x00AAAA,
 
 static void tty_draw_cell(int x, int y, char c, u8 color) {
   if (drm_frontend_is_available()) {
-    drm_frontend_put_char_cell(x, y, c, tty_palette[color & 0x0F]);
+    u32 rgb;
+    tty_state_t *tty = &ttys[tty_active];
+    if (tty->fg_rgb != 0xFFFFFFFF)
+      rgb = tty->fg_rgb;
+    else
+      rgb = tty_palette[color & 0x0F];
+    drm_frontend_put_char_cell(x, y, c, rgb);
     return;
   }
   vga_put_entry_at(c, color, x, y);
@@ -95,40 +104,174 @@ static void tty_set_hw_cursor(const tty_state_t *tty) {
   }
 }
 
-static void tty_apply_ansi(tty_state_t *tty, int code) {
-  u8 color_idx = 0x07;
-  switch (code) {
+static void tty_ansi_sgr(tty_state_t *tty, int params[], int count) {
+  int i = 0;
+  while (i < count) {
+    int code = params[i];
+
+    if (code == 38 && i + 3 < count && params[i + 1] == 2) {
+      int r = params[i + 2];
+      int g = params[i + 3];
+      int b = params[i + 4];
+      tty->fg_rgb = ((u32)r << 16) | ((u32)g << 8) | (u32)b;
+      i += 5;
+      continue;
+    }
+
+    if (code == 39) {
+      tty->fg_rgb = 0xFFFFFFFF;
+      tty->color = 0x07;
+      i++;
+      continue;
+    }
+
+    u8 color_idx = 0x07;
+    switch (code) {
+    case 0:  color_idx = 0x07; break;
+    case 30: color_idx = 0x00; break;
+    case 31: color_idx = 0x04; break;
+    case 32: color_idx = 0x02; break;
+    case 33: color_idx = 0x0E; break;
+    case 34: color_idx = 0x01; break;
+    case 35: color_idx = 0x05; break;
+    case 36: color_idx = 0x03; break;
+    case 37: color_idx = 0x0F; break;
+    case 90: color_idx = 0x08; break;
+    case 91: color_idx = 0x0C; break;
+    case 92: color_idx = 0x0A; break;
+    case 93: color_idx = 0x0E; break;
+    case 94: color_idx = 0x09; break;
+    case 95: color_idx = 0x0D; break;
+    case 96: color_idx = 0x0B; break;
+    case 97: color_idx = 0x0F; break;
+    default: i++; continue;
+    }
+    tty->fg_rgb = 0xFFFFFFFF;
+    tty->color = color_idx;
+    i++;
+  }
+}
+
+static void tty_erase_line(tty_state_t *tty, int mode, int active) {
+  if (!tty || !tty->cells) return;
+  int y = tty->cursor_y;
+  if (y < 0 || y >= tty->height) return;
+
+  int from, to;
+  switch (mode) {
+  case 0: from = tty->cursor_x; to = tty->width; break;
+  case 1: from = 0; to = tty->cursor_x + 1; break;
+  case 2: from = 0; to = tty->width; break;
+  default: return;
+  }
+
+  u16 blank = ((u16)tty->color << 8) | ' ';
+  for (int x = from; x < to && x < tty->width; x++) {
+    tty->cells[y * tty->width + x] = blank;
+    if (active) tty_draw_cell(x, y, ' ', tty->color);
+  }
+}
+
+static void tty_erase_display(tty_state_t *tty, int mode, int active) {
+  if (!tty || !tty->cells) return;
+
+  u16 blank = ((u16)tty->color << 8) | ' ';
+  switch (mode) {
   case 0:
-    color_idx = 0x07;
+    tty_erase_line(tty, 0, active);
+    for (int y = tty->cursor_y + 1; y < tty->height; y++) {
+      for (int x = 0; x < tty->width; x++) {
+        tty->cells[y * tty->width + x] = blank;
+        if (active) tty_draw_cell(x, y, ' ', tty->color);
+      }
+    }
     break;
-  case 30:
-    color_idx = 0x00;
+  case 1:
+    for (int y = 0; y < tty->cursor_y; y++) {
+      for (int x = 0; x < tty->width; x++) {
+        tty->cells[y * tty->width + x] = blank;
+        if (active) tty_draw_cell(x, y, ' ', tty->color);
+      }
+    }
+    tty_erase_line(tty, 1, active);
     break;
-  case 31:
-    color_idx = 0x04;
+  case 2:
+    for (int y = 0; y < tty->height; y++) {
+      for (int x = 0; x < tty->width; x++) {
+        tty->cells[y * tty->width + x] = blank;
+        if (active) tty_draw_cell(x, y, ' ', tty->color);
+      }
+    }
+    tty->cursor_x = 0;
+    tty->cursor_y = 0;
     break;
-  case 32:
-    color_idx = 0x02;
+  }
+  if (active) tty_set_hw_cursor(tty);
+}
+
+static int tty_ansi_param(tty_state_t *tty, int idx, int def) {
+  if (idx < tty->ansi_param_count) return tty->ansi_params[idx];
+  return def;
+}
+
+static void tty_ansi_execute(tty_state_t *tty, char cmd, int active) {
+  switch (cmd) {
+  case 'A': {
+    int n = tty_ansi_param(tty, 0, 1);
+    if (n <= 0) n = 1;
+    tty->cursor_y -= n;
+    if (tty->cursor_y < 0) tty->cursor_y = 0;
     break;
-  case 33:
-    color_idx = 0x0E;
+  }
+  case 'B': {
+    int n = tty_ansi_param(tty, 0, 1);
+    if (n <= 0) n = 1;
+    tty->cursor_y += n;
+    if (tty->cursor_y >= tty->height) tty->cursor_y = tty->height - 1;
     break;
-  case 34:
-    color_idx = 0x01;
+  }
+  case 'C': {
+    int n = tty_ansi_param(tty, 0, 1);
+    if (n <= 0) n = 1;
+    tty->cursor_x += n;
+    if (tty->cursor_x >= tty->width) tty->cursor_x = tty->width - 1;
     break;
-  case 35:
-    color_idx = 0x05;
+  }
+  case 'D': {
+    int n = tty_ansi_param(tty, 0, 1);
+    if (n <= 0) n = 1;
+    tty->cursor_x -= n;
+    if (tty->cursor_x < 0) tty->cursor_x = 0;
     break;
-  case 36:
-    color_idx = 0x03;
+  }
+  case 'H':
+  case 'f': {
+    int row = tty_ansi_param(tty, 0, 1);
+    int col = tty_ansi_param(tty, 1, 1);
+    if (row <= 0) row = 1;
+    if (col <= 0) col = 1;
+    tty->cursor_y = row - 1;
+    tty->cursor_x = col - 1;
+    if (tty->cursor_y >= tty->height) tty->cursor_y = tty->height - 1;
+    if (tty->cursor_x >= tty->width) tty->cursor_x = tty->width - 1;
     break;
-  case 37:
-    color_idx = 0x0F;
-    break;
-  default:
+  }
+  case 'J': {
+    int mode = tty_ansi_param(tty, 0, 0);
+    tty_erase_display(tty, mode, active);
     return;
   }
-  tty->color = color_idx;
+  case 'K': {
+    int mode = tty_ansi_param(tty, 0, 0);
+    tty_erase_line(tty, mode, active);
+    return;
+  }
+  case 'm': {
+    tty_ansi_sgr(tty, tty->ansi_params, tty->ansi_param_count);
+    break;
+  }
+  }
+  tty_set_hw_cursor(tty);
 }
 
 static void tty_redraw(const tty_state_t *tty) {
@@ -187,21 +330,27 @@ static void tty_putc_internal(tty_state_t *tty, char c, int active) {
   } else if (tty->ansi_state == 1) {
     if (c == '[') {
       tty->ansi_state = 2;
-      tty->ansi_val = 0;
+      tty->ansi_param_count = 0;
+      tty->ansi_cur_param = 0;
       return;
     }
     tty->ansi_state = 0;
   } else if (tty->ansi_state == 2) {
     if (c >= '0' && c <= '9') {
-      tty->ansi_val = tty->ansi_val * 10 + (c - '0');
+      tty->ansi_cur_param = tty->ansi_cur_param * 10 + (c - '0');
       return;
     }
-    if (c == 'm') {
-      tty_apply_ansi(tty, tty->ansi_val);
-      tty->ansi_state = 0;
+    if (c == ';') {
+      if (tty->ansi_param_count < 8)
+        tty->ansi_params[tty->ansi_param_count++] = tty->ansi_cur_param;
+      tty->ansi_cur_param = 0;
       return;
     }
+    if (tty->ansi_param_count < 8)
+      tty->ansi_params[tty->ansi_param_count++] = tty->ansi_cur_param;
+    tty_ansi_execute(tty, c, active);
     tty->ansi_state = 0;
+    return;
   }
 
   if (c == '\n') {
@@ -410,7 +559,17 @@ void tty_init(void) {
     ttys[i].cursor_y = 0;
     ttys[i].color = 0x07;
     ttys[i].ansi_state = 0;
-    ttys[i].ansi_val = 0;
+    ttys[i].fg_rgb = 0xFFFFFFFF;
+    ttys[i].ansi_params[0] = 0;
+    ttys[i].ansi_params[1] = 0;
+    ttys[i].ansi_params[2] = 0;
+    ttys[i].ansi_params[3] = 0;
+    ttys[i].ansi_params[4] = 0;
+    ttys[i].ansi_params[5] = 0;
+    ttys[i].ansi_params[6] = 0;
+    ttys[i].ansi_params[7] = 0;
+    ttys[i].ansi_param_count = 0;
+    ttys[i].ansi_cur_param = 0;
     ttys[i].cells =
         (u16 *)kcalloc((unsigned long)(width * height), sizeof(u16));
     if (ttys[i].cells) {
@@ -469,7 +628,17 @@ void tty_clear_active(void) {
   tty->cursor_x = 0;
   tty->cursor_y = 0;
   tty->ansi_state = 0;
-  tty->ansi_val = 0;
+  tty->fg_rgb = 0xFFFFFFFF;
+  tty->ansi_params[0] = 0;
+  tty->ansi_params[1] = 0;
+  tty->ansi_params[2] = 0;
+  tty->ansi_params[3] = 0;
+  tty->ansi_params[4] = 0;
+  tty->ansi_params[5] = 0;
+  tty->ansi_params[6] = 0;
+  tty->ansi_params[7] = 0;
+  tty->ansi_param_count = 0;
+  tty->ansi_cur_param = 0;
   tty_redraw(tty);
 }
 

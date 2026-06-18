@@ -24,36 +24,34 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SYSCALL_H
-#define SYSCALL_H
-
-#include <kernel/interrupts/idt.h>
+#include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/api/api.h>
+#include <kernel/useraddr.h>
+#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
-#define CALL_TERM_READ 0x100
-#define CALL_TERM_WRITE 0x101
-#define CALL_DATA_OPEN 0x200
-#define CALL_DATA_CLOSE 0x201
-#define CALL_DATA_READ 0x202
-#define CALL_DATA_WRITE 0x203
-#define CALL_DATA_SEEK 0x204
-#define CALL_DATA_PIPE 0x205
-#define CALL_FS_CHDIR 0x206
-#define CALL_FS_GETCWD 0x207
-#define CALL_FS_LISTDIR 0x208
-#define CALL_MEM_MAP 0x300
-#define CALL_PROC_CLONE 0x400
-#define CALL_PROC_COPY 0x401
-#define CALL_PROC_SPAWN 0x402
-#define CALL_PROC_EXIT 0x403
-#define CALL_PROC_WAIT 0x404
-#define CALL_PROC_KILL 0x405
-#define CALL_PROC_LIST 0x406
-#define CALL_SYS_INFO 0x500
-#define CALL_DRM_CALL 0x600
+int api_fs_getcwd(char *buf, u32 size) {
+  if (!buf || size == 0) {
+    return -API_ERR_BAD_VALUE;
+  }
+  if (!is_user_address(buf, size)) {
+    return -API_ERR_BAD_ADDR;
+  }
 
-void syscall_init(void);
-void syscall_handler(registers_t *regs);
-int syscall_is_initialized(void);
+  char kbuf[256];
+  memset(kbuf, 0, sizeof(kbuf));
 
-#endif
+  char *path = chainfs_get_current_path(kbuf, sizeof(kbuf));
+  if (!path) {
+    return -API_ERR_IO;
+  }
+
+  u32 path_len = strlen(path);
+  if (path_len >= size) {
+    return -API_ERR_TOO_BIG;
+  }
+
+  memcpy(buf, path, path_len);
+  buf[path_len] = '\0';
+  return 0;
+}

@@ -15,7 +15,10 @@ YES_OBJS = yes.o
 FETCH_BIN = fetch
 FETCH_OBJS = fetch.o
 
-all: $(YES_BIN) $(FETCH_BIN)
+SHELL_BIN = sh
+SHELL_OBJS = shell.o
+
+all: $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN)
 
 $(YES_BIN): $(YES_OBJS)
 	@echo "  LLD      $@"
@@ -29,11 +32,17 @@ $(FETCH_BIN): $(FETCH_OBJS)
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
+$(SHELL_BIN): $(SHELL_OBJS)
+	@echo "  LLD      $@"
+	@$(LD) $(LDFLAGS) $(SHELL_OBJS) -o $@
+	@echo "  SIZE    $@"
+	@$(SIZE) $@
+
 %.o: %.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN)
+	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN)
 
 .PHONY: all clean

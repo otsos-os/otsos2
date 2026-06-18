@@ -445,6 +445,8 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
     u32 yes_module_size = 0;
     void *fetch_module_start = NULL;
     u32 fetch_module_size = 0;
+    void *sh_module_start = NULL;
+    u32 sh_module_size = 0;
 
     if (boot_magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
       multiboot2_info_t *mboot_ptr = (multiboot2_info_t *)addr;
@@ -452,6 +454,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
       mb2_find_module(mboot_ptr, "yes", &yes_module_start, &yes_module_size);
       mb2_find_module(mboot_ptr, "fetch", &fetch_module_start,
                       &fetch_module_size);
+      mb2_find_module(mboot_ptr, "sh", &sh_module_start, &sh_module_size);
     }
 
     api_init();
@@ -477,6 +480,17 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
                     fetch_module_size);
       } else {
         com1_printf("[KERNEL] Failed to install /bin/fetch from module\n");
+      }
+    }
+
+    if (sh_module_start && sh_module_size > 0) {
+      int res = chainfs_write_file("/bin/sh", (const u8 *)sh_module_start,
+                                   sh_module_size);
+      if (res == 0) {
+        com1_printf("[KERNEL] Installed /bin/sh from module (%u bytes)\n",
+                    sh_module_size);
+      } else {
+        com1_printf("[KERNEL] Failed to install /bin/sh from module\n");
       }
     }
 

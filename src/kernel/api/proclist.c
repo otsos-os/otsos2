@@ -24,36 +24,41 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SYSCALL_H
-#define SYSCALL_H
-
-#include <kernel/interrupts/idt.h>
+#include <kernel/api/api.h>
+#include <kernel/process.h>
+#include <kernel/useraddr.h>
+#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
-#define CALL_TERM_READ 0x100
-#define CALL_TERM_WRITE 0x101
-#define CALL_DATA_OPEN 0x200
-#define CALL_DATA_CLOSE 0x201
-#define CALL_DATA_READ 0x202
-#define CALL_DATA_WRITE 0x203
-#define CALL_DATA_SEEK 0x204
-#define CALL_DATA_PIPE 0x205
-#define CALL_FS_CHDIR 0x206
-#define CALL_FS_GETCWD 0x207
-#define CALL_FS_LISTDIR 0x208
-#define CALL_MEM_MAP 0x300
-#define CALL_PROC_CLONE 0x400
-#define CALL_PROC_COPY 0x401
-#define CALL_PROC_SPAWN 0x402
-#define CALL_PROC_EXIT 0x403
-#define CALL_PROC_WAIT 0x404
-#define CALL_PROC_KILL 0x405
-#define CALL_PROC_LIST 0x406
-#define CALL_SYS_INFO 0x500
-#define CALL_DRM_CALL 0x600
+int api_proc_list(struct api_proc_info *buf, u32 max_entries) {
+  if (!buf || max_entries == 0) {
+    return -API_ERR_BAD_VALUE;
+  }
+  if (!is_user_address(buf, max_entries * sizeof(struct api_proc_info))) {
+    return -API_ERR_BAD_ADDR;
+  }
 
-void syscall_init(void);
-void syscall_handler(registers_t *regs);
-int syscall_is_initialized(void);
+  u32 count = 0;
+  for (int i = 0; i < MAX_PROCESSES && count < max_entries; i++) {
+    process_t *proc = &process_table[i];
+    if (proc->state == PROC_STATE_UNUSED) {
+      continue;
+    }
 
-#endif
+    buf[count].pid = proc->pid;
+    buf[count].ppid = proc->ppid;
+    buf[count].state = (u32)proc->state;
+
+    memset(buf[count].name, 0, sizeof(buf[count].name));
+    int j = 0;
+    while (j < 31 && proc->name[j] != '\0') {
+      buf[count].name[j] = proc->name[j];
+      j++;
+    }
+    buf[count].name[j] = '\0';
+
+    count++;
+  }
+
+  return (int)count;
+}
