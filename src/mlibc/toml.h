@@ -24,37 +24,30 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SYSCALL_H
-#define SYSCALL_H
+#ifndef TOML_H
+#define TOML_H
 
-#include <kernel/interrupts/idt.h>
 #include <mlibc/mlibc.h>
 
-#define CALL_TERM_READ 0x100
-#define CALL_TERM_WRITE 0x101
-#define CALL_DATA_OPEN 0x200
-#define CALL_DATA_CLOSE 0x201
-#define CALL_DATA_READ 0x202
-#define CALL_DATA_WRITE 0x203
-#define CALL_DATA_SEEK 0x204
-#define CALL_DATA_PIPE 0x205
-#define CALL_FS_CHDIR 0x206
-#define CALL_FS_GETCWD 0x207
-#define CALL_FS_LISTDIR 0x208
-#define CALL_MEM_MAP 0x300
-#define CALL_PROC_CLONE 0x400
-#define CALL_PROC_COPY 0x401
-#define CALL_PROC_SPAWN 0x402
-#define CALL_PROC_EXIT 0x403
-#define CALL_PROC_WAIT 0x404
-#define CALL_PROC_KILL 0x405
-#define CALL_PROC_LIST 0x406
-#define CALL_KUSR_AUTH 0x407
-#define CALL_SYS_INFO 0x500
-#define CALL_DRM_CALL 0x600
+typedef struct toml_entry {
+  char *section;
+  char *key;
+  char *value;
+  struct toml_entry *next;
+} toml_entry_t;
 
-void syscall_init(void);
-void syscall_handler(registers_t *regs);
-int syscall_is_initialized(void);
+typedef struct {
+  toml_entry_t *entries;
+  int count;
+} toml_doc_t;
+
+toml_doc_t *toml_parse(const char *data, u32 len);
+toml_doc_t *toml_parse_file(const char *path);
+const char *toml_get(toml_doc_t *doc, const char *section, const char *key);
+void toml_set(toml_doc_t *doc, const char *section, const char *key, const char *value);
+char *toml_serialize(toml_doc_t *doc);
+int toml_save(toml_doc_t *doc, const char *path);
+void toml_free(toml_doc_t *doc);
+toml_doc_t *toml_new(void);
 
 #endif

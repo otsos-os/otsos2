@@ -82,6 +82,7 @@ int api_proc_copy(registers_t *regs) {
   child->exit_code = 0;
   child->owns_address_space = 1;
   child->mmap_base = parent->mmap_base;
+  child->kusr_auth = parent->kusr_auth;
   api_copy_handles(child, parent);
   child->next = NULL;
 

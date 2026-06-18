@@ -26,6 +26,7 @@
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/api/api.h>
+#include <kernel/other/restrict.h>
 #include <kernel/useraddr.h>
 #include <lib/com1.h>
 #include <mlibc/memory.h>
@@ -108,6 +109,11 @@ int api_data_open(const char *path, int flags) {
   if (path_is_old_dev_namespace(kpath)) {
     kfree(kpath);
     return -API_ERR_NO_DEVICE;
+  }
+
+  if (restrict_kusr_check(kpath)) {
+    kfree(kpath);
+    return -API_ERR_PERM;
   }
 
   if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {

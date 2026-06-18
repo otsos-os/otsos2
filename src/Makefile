@@ -95,6 +95,8 @@ KSHELL_O = ../bin/kshell.o
 KSHELL_PARSER_O = ../bin/kshell_parser.o
 KSHELL_ECHO_O = ../bin/kshell_echo.o
 KSHELL_DRM_O = ../bin/kshell_drm.o
+TOML_O = ../bin/toml.o
+KUSR_O = ../bin/kusr.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
       $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(VGA_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FB_O) $(FONT_O) $(DRM_ATOMIC_O) $(DRM_BACKEND_O) $(DRM_INIT_O) $(DRM_DRIVER_O) $(DRM_FRONTEND_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
@@ -103,7 +105,8 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_
       $(ACPI_O) $(ACPI_TABLES_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
       $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O) \
-      $(KSHELL_O) $(KSHELL_PARSER_O) $(KSHELL_ECHO_O) $(KSHELL_DRM_O)
+      $(KSHELL_O) $(KSHELL_PARSER_O) $(KSHELL_ECHO_O) $(KSHELL_DRM_O) \
+      $(TOML_O) $(KUSR_O)
 
 .PHONY: all ask_version check_build_tools check_run_tools
 
@@ -475,6 +478,14 @@ $(KSHELL_ECHO_O): kernel/kshell/commands/echo.c kernel/kshell/kshell.h kernel/pr
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(KSHELL_DRM_O): kernel/kshell/commands/drm.c kernel/kshell/kshell.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(TOML_O): mlibc/toml.c mlibc/toml.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(KUSR_O): kernel/other/kusr.c kernel/other/kusr.h mlibc/toml.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

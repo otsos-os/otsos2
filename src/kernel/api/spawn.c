@@ -454,6 +454,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
   child->exit_code = 0;
   child->owns_address_space = 1;
   child->mmap_base = MMAP_BASE;
+  child->kusr_auth = parent->kusr_auth;
   api_copy_handles(child, parent);
   child->next = NULL;
 

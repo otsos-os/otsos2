@@ -80,6 +80,9 @@ typedef struct process {
   /* Address space ownership */
   int owns_address_space;
 
+  /* KUSR privilege */
+  int kusr_auth;
+
   /* mmap base */
   u64 mmap_base;
 

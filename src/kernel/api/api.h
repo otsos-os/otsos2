@@ -135,6 +135,7 @@ int api_fs_chdir(const char *path);
 int api_fs_getcwd(char *buf, u32 size);
 int api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries);
 int api_proc_list(struct api_proc_info *buf, u32 max_entries);
+int api_kusr_auth(const char *password);
 void api_init(void);
 void api_init_process(struct process *proc);
 void api_copy_handles(struct process *dst, const struct process *src);

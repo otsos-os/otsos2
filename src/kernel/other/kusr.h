@@ -24,37 +24,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SYSCALL_H
-#define SYSCALL_H
+#ifndef KUSR_H
+#define KUSR_H
 
-#include <kernel/interrupts/idt.h>
-#include <mlibc/mlibc.h>
-
-#define CALL_TERM_READ 0x100
-#define CALL_TERM_WRITE 0x101
-#define CALL_DATA_OPEN 0x200
-#define CALL_DATA_CLOSE 0x201
-#define CALL_DATA_READ 0x202
-#define CALL_DATA_WRITE 0x203
-#define CALL_DATA_SEEK 0x204
-#define CALL_DATA_PIPE 0x205
-#define CALL_FS_CHDIR 0x206
-#define CALL_FS_GETCWD 0x207
-#define CALL_FS_LISTDIR 0x208
-#define CALL_MEM_MAP 0x300
-#define CALL_PROC_CLONE 0x400
-#define CALL_PROC_COPY 0x401
-#define CALL_PROC_SPAWN 0x402
-#define CALL_PROC_EXIT 0x403
-#define CALL_PROC_WAIT 0x404
-#define CALL_PROC_KILL 0x405
-#define CALL_PROC_LIST 0x406
-#define CALL_KUSR_AUTH 0x407
-#define CALL_SYS_INFO 0x500
-#define CALL_DRM_CALL 0x600
-
-void syscall_init(void);
-void syscall_handler(registers_t *regs);
-int syscall_is_initialized(void);
+void kusr_init(void);
+int kusr_is_authenticated(void);
+void kusr_set_authenticated(int auth);
 
 #endif

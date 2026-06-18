@@ -160,6 +160,9 @@ void syscall_handler(registers_t *regs) {
   case CALL_PROC_LIST:
     regs->rax = (u64)api_proc_list((struct api_proc_info *)arg1, (u32)arg2);
     break;
+  case CALL_KUSR_AUTH:
+    regs->rax = (u64)api_kusr_auth((const char *)arg1);
+    break;
   case CALL_SYS_INFO:
     regs->rax = (u64)api_info((struct api_sysinfo *)arg1);
     break;

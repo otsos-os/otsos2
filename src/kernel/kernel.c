@@ -46,6 +46,7 @@
 #include <kernel/pci/pci.h>
 #include <kernel/api/api.h>
 #include <kernel/kshell/kshell.h>
+#include <kernel/other/kusr.h>
 #include <kernel/syscall.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
@@ -493,6 +494,8 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
         com1_printf("[KERNEL] Failed to install /bin/sh from module\n");
       }
     }
+
+    kusr_init();
 
     if (init_module_start && init_module_size > 0) {
       com1_printf(
