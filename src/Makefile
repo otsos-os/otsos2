@@ -108,6 +108,11 @@ KUSR_O = ../bin/kusr.o
 KUSR_AUTH_O = ../bin/kusr_auth.o
 DRM_API_O = ../bin/drm_api.o
 RESTRICT_O = ../bin/restrict.o
+CRYPTO_UTIL_O = ../bin/crypto_util.o
+CRYPTO_SHA256_O = ../bin/crypto_sha256.o
+CRYPTO_HMAC_O = ../bin/crypto_hmac.o
+CRYPTO_PBKDF2_O = ../bin/crypto_pbkdf2.o
+CRYPTO_RNG_O = ../bin/crypto_rng.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
       $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(DRM_KMS_CONSOLE_O) $(DRM_RAPI_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(VMA_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
@@ -117,7 +122,8 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
       $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O) \
       $(KSHELL_O) $(KSHELL_PARSER_O) $(KSHELL_ECHO_O) $(KSHELL_DRM_O) \
-      $(TOML_O) $(KUSR_O) $(KUSR_AUTH_O) $(DRM_API_O) $(RESTRICT_O)
+      $(TOML_O) $(KUSR_O) $(KUSR_AUTH_O) $(DRM_API_O) $(RESTRICT_O) \
+      $(CRYPTO_UTIL_O) $(CRYPTO_SHA256_O) $(CRYPTO_HMAC_O) $(CRYPTO_PBKDF2_O) $(CRYPTO_RNG_O)
 
 .PHONY: all ask_version check_build_tools check_run_tools
 
@@ -528,11 +534,11 @@ $(TOML_O): mlibc/toml.c mlibc/toml.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(KUSR_O): kernel/other/kusr.c kernel/other/kusr.h mlibc/toml.h
+$(KUSR_O): kernel/other/kusr.c kernel/other/kusr.h mlibc/toml.h kernel/crypto/crypto.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(KUSR_AUTH_O): kernel/api/kusr_auth.c kernel/api/api.h kernel/process.h mlibc/toml.h
+$(KUSR_AUTH_O): kernel/api/kusr_auth.c kernel/api/api.h kernel/process.h mlibc/toml.h kernel/crypto/crypto.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -541,6 +547,26 @@ $(DRM_API_O): kernel/api/drm.c kernel/api/api.h kernel/drivers/video/drm/drm.h k
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(RESTRICT_O): kernel/other/restrict.c kernel/other/restrict.h kernel/process.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(CRYPTO_UTIL_O): kernel/crypto/util/crypto_util.c kernel/crypto/util/crypto_util.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(CRYPTO_SHA256_O): kernel/crypto/hash/sha256.c kernel/crypto/hash/sha256.h kernel/crypto/util/crypto_util.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(CRYPTO_HMAC_O): kernel/crypto/hmac/hmac_sha256.c kernel/crypto/hmac/hmac_sha256.h kernel/crypto/hash/sha256.h kernel/crypto/util/crypto_util.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(CRYPTO_PBKDF2_O): kernel/crypto/kdf/pbkdf2.c kernel/crypto/kdf/pbkdf2.h kernel/crypto/hmac/hmac_sha256.h kernel/crypto/util/crypto_util.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(CRYPTO_RNG_O): kernel/crypto/rng/rng.c kernel/crypto/rng/rng.h kernel/crypto/hash/sha256.h kernel/crypto/util/crypto_util.h kernel/drivers/timer.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

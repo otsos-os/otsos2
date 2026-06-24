@@ -26,6 +26,7 @@
 
 #include <kernel/console.h>
 #include <kernel/other/kusr.h>
+#include <kernel/crypto/crypto.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/tty.h>
@@ -36,6 +37,11 @@
 
 #define KUSR_CONFIG_PATH "/conf/kernel.toml"
 #define KUSR_PASS_MIN_LEN 4
+#define KUSR_SALT_LEN     PBKDF2_SALT_DEFAULT
+#define KUSR_ITERATIONS   PBKDF2_DEFAULT_ITERS
+#define KUSR_HASH_LEN     PBKDF2_DIGEST_SIZE
+#define KUSR_HASH_HEX_LEN (KUSR_HASH_LEN * 2 + 1)
+#define KUSR_SALT_HEX_LEN (KUSR_SALT_LEN * 2 + 1)
 
 static int g_kusr_authenticated = 0;
 
@@ -46,29 +52,18 @@ static void kusr_flush(void) {
   tty_flush_kernel();
 }
 
-static u64 fnv1a_64(const char *data, int len) {
-  u64 hash = 0xcbf29ce484222325ULL;
-  for (int i = 0; i < len; i++) {
-    hash ^= (u8)data[i];
-    hash *= 0x100000001b3ULL;
-  }
-  return hash;
+static void kusr_hash_password(const char *pass, u32 pass_len,
+                               const u8 *salt, u32 salt_len,
+                               u32 iterations,
+                               u8 *hash_out) {
+  pbkdf2_hmac_sha256((const u8 *)pass, pass_len,
+                     salt, salt_len,
+                     iterations,
+                     hash_out, KUSR_HASH_LEN);
 }
 
-static void hash_to_hex(u64 hash, char *out) {
-  const char *hex = "0123456789abcdef";
-  for (int i = 0; i < 16; i++)
-    out[i] = hex[(hash >> (60 - i * 4)) & 0xF];
-  out[16] = '\0';
-}
-
-static void kusr_hash_password(const char *pass, char *hash_out) {
-  u64 h = fnv1a_64(pass, strlen(pass));
-  hash_to_hex(h, hash_out);
-}
-
-static void kusr_wipe(char *buf, int len) {
-  for (int i = 0; i < len; i++) buf[i] = 0;
+static void kusr_generate_salt(u8 *salt, u32 len) {
+  crypto_rng_bytes(salt, len);
 }
 
 static int kusr_read_password(char *buf, int max, const char *prompt) {
@@ -101,6 +96,8 @@ static int kusr_first_boot_setup(void) {
   printf("\n\033[36m=== OTSOS First Boot Setup ===\033[0m\n");
   printf("Create kernel user (kusr) password.\n");
   printf("This protects dangerous syscalls (drm, raw disk, etc).\n");
+  printf("Password is hashed with PBKDF2-HMAC-SHA256 (%d iterations).\n",
+         KUSR_ITERATIONS);
   kusr_flush();
 
   for (;;) {
@@ -111,7 +108,7 @@ static int kusr_first_boot_setup(void) {
       printf("\033[31mPassword must be at least %d chars. Try again.\033[0m\n\n",
              KUSR_PASS_MIN_LEN);
       kusr_flush();
-      kusr_wipe(pass1, sizeof(pass1));
+      crypto_secure_wipe(pass1, sizeof(pass1));
       continue;
     }
 
@@ -119,15 +116,29 @@ static int kusr_first_boot_setup(void) {
     if (strcmp(pass1, pass2) != 0) {
       printf("\033[31mPasswords do not match. Try again.\033[0m\n\n");
       kusr_flush();
-      kusr_wipe(pass1, sizeof(pass1));
-      kusr_wipe(pass2, sizeof(pass2));
+      crypto_secure_wipe(pass1, sizeof(pass1));
+      crypto_secure_wipe(pass2, sizeof(pass2));
       continue;
     }
 
-    char hash[17];
-    kusr_hash_password(pass1, hash);
-    kusr_wipe(pass1, sizeof(pass1));
-    kusr_wipe(pass2, sizeof(pass2));
+    u8 salt[KUSR_SALT_LEN];
+    u8 hash[KUSR_HASH_LEN];
+    char salt_hex[KUSR_SALT_HEX_LEN];
+    char hash_hex[KUSR_HASH_HEX_LEN];
+
+    kusr_generate_salt(salt, KUSR_SALT_LEN);
+    kusr_hash_password(pass1, strlen(pass1),
+                       salt, KUSR_SALT_LEN,
+                       KUSR_ITERATIONS,
+                       hash);
+    crypto_secure_wipe(pass1, sizeof(pass1));
+    crypto_secure_wipe(pass2, sizeof(pass2));
+
+    crypto_hex_encode(salt, KUSR_SALT_LEN, salt_hex);
+    crypto_hex_encode(hash, KUSR_HASH_LEN, hash_hex);
+
+    crypto_secure_wipe(salt, sizeof(salt));
+    crypto_secure_wipe(hash, sizeof(hash));
 
     chainfs_mkdir("/conf");
 
@@ -135,22 +146,35 @@ static int kusr_first_boot_setup(void) {
     if (!doc) {
       printf("\033[31mFailed to create config. Retrying...\033[0m\n\n");
       kusr_flush();
+      crypto_secure_wipe(salt_hex, sizeof(salt_hex));
+      crypto_secure_wipe(hash_hex, sizeof(hash_hex));
       continue;
     }
 
-    toml_set(doc, "kusr", "password_hash", hash);
+    toml_set(doc, "kusr", "password_hash", hash_hex);
+    toml_set(doc, "kusr", "password_salt", salt_hex);
+
+    char iter_str[16];
+    itoa((int)KUSR_ITERATIONS, iter_str, 10);
+    toml_set(doc, "kusr", "password_iterations", iter_str);
     toml_set(doc, "kusr", "created", "1");
+    toml_set(doc, "kusr", "kdf", "pbkdf2-hmac-sha256");
 
     if (toml_save(doc, KUSR_CONFIG_PATH) != 0) {
       printf("\033[31mFailed to save config to disk. Retrying...\033[0m\n\n");
       kusr_flush();
       toml_free(doc);
+      crypto_secure_wipe(salt_hex, sizeof(salt_hex));
+      crypto_secure_wipe(hash_hex, sizeof(hash_hex));
       continue;
     }
 
     toml_free(doc);
+    crypto_secure_wipe(salt_hex, sizeof(salt_hex));
+    crypto_secure_wipe(hash_hex, sizeof(hash_hex));
+
     g_kusr_authenticated = 1;
-    printf("\n\033[32mSetup complete. kusr configured.\033[0m\n");
+    printf("\n\033[32mSetup complete. kusr configured (PBKDF2).\033[0m\n");
     kusr_flush();
     return 1;
   }
@@ -158,6 +182,7 @@ static int kusr_first_boot_setup(void) {
 
 void kusr_init(void) {
   com1_printf("[KUSR] Initializing...\n");
+  crypto_rng_init();
 
   chainfs_file_entry_t entry;
   u32 entry_block, entry_offset;
