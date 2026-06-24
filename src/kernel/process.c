@@ -25,13 +25,13 @@
  */
 
 #include <kernel/gdt.h>
-#include <kernel/mmu.h>
+#include <mm/vm/pmap.h>
 #include <kernel/panic.h>
 #include <kernel/process.h>
 #include <kernel/signal.h>
-#include <kernel/vma.h>
+#include <mm/vm/vm_map.h>
 #include <lib/com1.h>
-#include <mlibc/memory.h>
+#include <mm/kmem.h>
 
 process_t process_table[MAX_PROCESSES];
 u32 next_pid = 1;
@@ -65,7 +65,7 @@ process_t *process_create_kernel(const char *name, void (*entry)(void)) {
     return NULL;
   }
 
-  u8 *kstack = (u8 *)kmalloc_aligned(KERNEL_STACK_SIZE, 16);
+  u8 *kstack = (u8 *)kmem_alloc_aligned(KERNEL_STACK_SIZE, 16);
   if (!kstack) {
     com1_printf("[PROC] Error: Failed to allocate kernel stack\n");
     return NULL;
@@ -82,7 +82,7 @@ process_t *process_create_kernel(const char *name, void (*entry)(void)) {
   }
   proc->name[i] = '\0';
 
-  proc->cr3 = mmu_read_cr3();
+  proc->cr3 = pmap_get_cr3();
   proc->entry_point = (u64)entry;
 
   proc->kernel_stack = (u64)(kstack + KERNEL_STACK_SIZE);
@@ -136,7 +136,7 @@ void process_switch(process_t *proc) {
     return;
   }
   process_set_current(proc);
-  mmu_write_cr3(proc->cr3);
+  pmap_load(proc->cr3);
 }
 
 void process_yield(void) { __asm__ volatile("int $32"); }
@@ -159,13 +159,13 @@ void process_exit(int code) {
   api_release_handles(current_process);
   if (current_process->owns_address_space) {
     u64 old_cr3 = current_process->cr3;
-    mmu_write_cr3(mmu_kernel_cr3());
-    mmu_free_user_space(old_cr3);
-    kfree((void *)(old_cr3 & PTE_ADDR_MASK));
+    pmap_load(pmap_kernel_cr3());
+    pmap_destroy(old_cr3);
+    kmem_free((void *)(old_cr3 & PTE_ADDR_MASK));
     current_process->cr3 = 0;
     current_process->owns_address_space = 0;
   }
-  vma_free_all(current_process);
+  vm_map_free_all(current_process);
   current_process->mmap_base = MMAP_BASE;
 
   __asm__ volatile("sti");
@@ -246,15 +246,15 @@ int process_kill(u32 pid) {
 
   api_release_handles(proc);
   if (proc->owns_address_space) {
-    mmu_free_user_space(proc->cr3);
-    kfree((void *)(proc->cr3 & PTE_ADDR_MASK));
+    pmap_destroy(proc->cr3);
+    kmem_free((void *)(proc->cr3 & PTE_ADDR_MASK));
     proc->cr3 = 0;
     proc->owns_address_space = 0;
   }
 
   if (proc->kernel_stack) {
     void *kstack_base = (void *)(proc->kernel_stack - KERNEL_STACK_SIZE);
-    kfree(kstack_base);
+    kmem_free(kstack_base);
   }
 
   memset(proc, 0, sizeof(process_t));

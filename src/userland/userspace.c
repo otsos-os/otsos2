@@ -26,11 +26,10 @@
 
 #include <kernel/console.h>
 #include <kernel/gdt.h>
-#include <kernel/mmu.h>
+#include <mm/vm/pmap.h>
 #include <kernel/process.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
-#include <mlibc/memory.h>
 #include <userland/elf.h>
 #include <userland/userspace.h>
 
@@ -72,15 +71,15 @@ static u64 allocate_user_stack(void) {
               (int)stack_pages, (void *)stack_bottom);
 
   for (u64 i = 0; i < stack_pages; i++) {
-    void *page = kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+    void *page = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
     if (!page) {
       com1_printf("[USERSPACE] Error: Failed to allocate stack page\n");
       for (u64 j = 0; j < i; j++) {
         u64 vaddr = stack_bottom + (j * PAGE_SIZE);
-        u64 paddr = mmu_virt_to_phys(vaddr);
-        mmu_unmap_page(vaddr);
+        u64 paddr = pmap_extract(vaddr);
+        pmap_remove(vaddr);
         if (paddr) {
-          kfree((void *)paddr);
+          kmem_free((void *)paddr);
         }
       }
       return 0;
@@ -88,7 +87,7 @@ static u64 allocate_user_stack(void) {
     memset(page, 0, PAGE_SIZE);
 
     u64 vaddr = stack_bottom + (i * PAGE_SIZE);
-    mmu_map_page(vaddr, (u64)page, PTE_PRESENT | PTE_RW | PTE_USER | PTE_NX);
+    pmap_enter(vaddr, (u64)page, PTE_PRESENT | PTE_RW | PTE_USER | PTE_NX);
   }
 
   /* Return top of stack (stack grows downward) */
@@ -99,22 +98,22 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   com1_printf("[USERSPACE] Loading ELF process '%s' (%d bytes)\n", name,
               (int)elf_size);
 
-  u64 new_cr3 = mmu_create_address_space();
+  u64 new_cr3 = pmap_create();
   if (new_cr3 == 0) {
     com1_printf("[USERSPACE] Error: Failed to create address space\n");
     return NULL;
   }
 
-  u64 old_cr3 = mmu_read_cr3();
-  mmu_write_cr3(new_cr3);
+  u64 old_cr3 = pmap_get_cr3();
+  pmap_load(new_cr3);
 
   /* Validate and load ELF */
   u64 entry = elf_load(elf_data, elf_size);
   if (entry == 0) {
     com1_printf("[USERSPACE] Error: Failed to load ELF\n");
-    mmu_write_cr3(old_cr3);
-    mmu_free_user_space(new_cr3);
-    kfree((void *)(new_cr3 & PTE_ADDR_MASK));
+    pmap_load(old_cr3);
+    pmap_destroy(new_cr3);
+    kmem_free((void *)(new_cr3 & PTE_ADDR_MASK));
     return NULL;
   }
 
@@ -126,7 +125,7 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   }
 
   /* Allocate kernel stack */
-  u8 *kstack = (u8 *)kmalloc_aligned(KERNEL_STACK_SIZE, 16);
+  u8 *kstack = (u8 *)kmem_alloc_aligned(KERNEL_STACK_SIZE, 16);
   if (!kstack) {
     com1_printf("[USERSPACE] Error: Failed to allocate kernel stack\n");
     return NULL;
@@ -136,24 +135,24 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   /* Allocate user stack */
   u64 user_stack = allocate_user_stack();
   if (user_stack == 0) {
-    kfree(kstack);
-    mmu_write_cr3(old_cr3);
-    mmu_free_user_space(new_cr3);
-    kfree((void *)(new_cr3 & PTE_ADDR_MASK));
+    kmem_free(kstack);
+    pmap_load(old_cr3);
+    pmap_destroy(new_cr3);
+    kmem_free((void *)(new_cr3 & PTE_ADDR_MASK));
     return NULL;
   }
 
-  mmu_write_cr3(old_cr3);
+  pmap_load(old_cr3);
 
   /* Allocate a new process slot */
   process_t *new_proc = alloc_process();
 
   if (!new_proc) {
     com1_printf("[USERSPACE] Error: No free process slots\n");
-    kfree(kstack);
+    kmem_free(kstack);
     /* TODO: free user stack pages */
-    mmu_free_user_space(new_cr3);
-    kfree((void *)(new_cr3 & PTE_ADDR_MASK));
+    pmap_destroy(new_cr3);
+    kmem_free((void *)(new_cr3 & PTE_ADDR_MASK));
     return NULL;
   }
 
@@ -245,7 +244,7 @@ void userspace_jump(process_t *proc) {
 
   /* Set as current process */
   process_set_current(proc);
-  mmu_write_cr3(proc->cr3);
+  pmap_load(proc->cr3);
 
   /* Enter userspace via iretq */
   userspace_enter(proc->entry_point, proc->user_stack, proc->context.cs,

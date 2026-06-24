@@ -106,11 +106,11 @@ pub const elf_info_t = extern struct {
 };
 
 extern fn com1_printf(fmt: [*:0]const u8, ...) void;
-extern fn kmalloc_aligned(size: usize, alignment: usize) ?*anyopaque;
+extern fn kmem_alloc_aligned(size: usize, alignment: usize) ?*anyopaque;
 extern fn memset(s: *anyopaque, c: c_int, n: usize) *anyopaque;
-extern fn mmu_map_page(vaddr: u64, paddr: u64, flags: u64) void;
-extern fn mmu_virt_to_phys(vaddr: u64) u64;
-extern fn mmu_get_pte_flags(vaddr: u64) u64;
+extern fn pmap_enter(vaddr: u64, paddr: u64, flags: u64) void;
+extern fn pmap_extract(vaddr: u64) u64;
+extern fn pmap_extract_flags(vaddr: u64) u64;
 
 inline fn u64_to_usize(value: u64) usize {
     return @intCast(value);
@@ -264,28 +264,28 @@ pub export fn elf_load(data: *anyopaque, size: u64) u64 {
 
         var page = page_start;
         while (page < page_end) : (page += PAGE_SIZE) {
-            const existing_phys = mmu_virt_to_phys(page);
+            const existing_phys = pmap_extract(page);
             if (existing_phys != 0) {
-                const existing_flags = mmu_get_pte_flags(page);
+                const existing_flags = pmap_extract_flags(page);
                 if ((existing_flags & PTE_USER) != 0) {
                     var combined_flags = existing_flags | page_flags | PTE_USER | PTE_PRESENT;
                     const exec_ok = ((existing_flags & PTE_NX) == 0) or ((phdr.p_flags & PF_X) != 0);
                     if (exec_ok) {
                         combined_flags &= ~PTE_NX;
                     }
-                    mmu_map_page(page, existing_phys, combined_flags);
+                    pmap_enter(page, existing_phys, combined_flags);
                     continue;
                 }
             }
 
-            const phys_page = kmalloc_aligned(u64_to_usize(PAGE_SIZE), u64_to_usize(PAGE_SIZE));
+            const phys_page = kmem_alloc_aligned(u64_to_usize(PAGE_SIZE), u64_to_usize(PAGE_SIZE));
             if (phys_page == null) {
                 com1_printf("[ELF] Error: Failed to allocate page at %p\n", u64_to_ptr(page));
                 return 0;
             }
             _ = memset(phys_page.?, 0, u64_to_usize(PAGE_SIZE));
 
-            mmu_map_page(page, @as(u64, @intFromPtr(phys_page.?)), page_flags);
+            pmap_enter(page, @as(u64, @intFromPtr(phys_page.?)), page_flags);
         }
 
         const base = data_as_bytes(data);
@@ -304,11 +304,11 @@ pub export fn elf_load(data: *anyopaque, size: u64) u64 {
 
         page = page_start;
         while (page < page_end) : (page += PAGE_SIZE) {
-            const phys = mmu_virt_to_phys(page);
+            const phys = pmap_extract(page);
             if (phys == 0) {
                 continue;
             }
-            const existing_flags = mmu_get_pte_flags(page);
+            const existing_flags = pmap_extract_flags(page);
 
             var combined_flags = existing_flags | (page_flags & (PTE_PRESENT | PTE_USER | PTE_RW));
             const exec_ok = ((existing_flags & PTE_NX) == 0) or ((phdr.p_flags & PF_X) != 0);
@@ -317,7 +317,7 @@ pub export fn elf_load(data: *anyopaque, size: u64) u64 {
             } else {
                 combined_flags |= PTE_NX;
             }
-            mmu_map_page(page, phys, combined_flags);
+            pmap_enter(page, phys, combined_flags);
         }
     }
 

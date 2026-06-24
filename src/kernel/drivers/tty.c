@@ -30,7 +30,6 @@
 #include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/kms/console.h>
 #include <lib/com1.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
 #define TTY_COUNT 10
@@ -575,7 +574,7 @@ void tty_init(void) {
     ttys[i].ansi_param_count = 0;
     ttys[i].ansi_cur_param = 0;
     ttys[i].cells =
-        (u16 *)kcalloc((unsigned long)(width * height), sizeof(u16));
+        (u16 *)kmem_calloc((unsigned long)(width * height), sizeof(u16));
     if (ttys[i].cells) {
       u16 blank = ((u16)ttys[i].color << 8) | ' ';
       for (int j = 0; j < width * height; j++) {

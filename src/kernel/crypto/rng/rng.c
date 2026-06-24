@@ -28,7 +28,7 @@
 #include <kernel/crypto/hash/sha256.h>
 #include <kernel/crypto/util/crypto_util.h>
 #include <kernel/drivers/timer.h>
-#include <mlibc/memory.h>
+#include <mm/kmem.h>
 
 #define RNG_POOL_SIZE 128
 

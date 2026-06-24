@@ -5,7 +5,6 @@
 #include <drm/drm.h>
 #include <drm/gem.h>
 #include <lib/com1.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
 #define GEM_MAX_BUFFERS 128
@@ -37,7 +36,7 @@ drm_handle_t drm_gem_create(u64 size) {
 
   /* Page-aligned for mmap friendliness. */
   u64 aligned = (size + 4095) & ~4095ULL;
-  void *data = kmalloc_aligned(aligned, 4096);
+  void *data = kmem_alloc_aligned(aligned, 4096);
   if (!data) {
     com1_write_string("[GEM] alloc failed\n");
     return 0;
@@ -87,7 +86,7 @@ int drm_gem_close(drm_handle_t handle) {
     return DRM_OK;
   }
   if (buf->data) {
-    kfree(buf->data);
+    kmem_free(buf->data);
   }
   buf->data = NULL;
   buf->size = 0;

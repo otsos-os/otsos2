@@ -59,7 +59,7 @@ unsigned short inw(unsigned short port);
 void insw(unsigned short port, void *addr, unsigned long count);
 void outsw(unsigned short port, void *addr, unsigned long count);
 
-#include <mlibc/memory.h>
+#include <mm/kmem.h>
 #include <mlibc/stdlib.h>
 
 #endif

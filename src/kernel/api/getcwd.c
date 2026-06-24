@@ -27,7 +27,6 @@
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/api/api.h>
 #include <kernel/useraddr.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
 int api_fs_getcwd(char *buf, u32 size) {

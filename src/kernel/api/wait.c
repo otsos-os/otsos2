@@ -24,10 +24,10 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/mmu.h>
+#include <mm/vm/pmap.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
-#include <mlibc/memory.h>
+#include <mm/kmem.h>
 
 int api_proc_wait(int *status) {
   process_t *current = process_current();
@@ -49,15 +49,15 @@ int api_proc_wait(int *status) {
     }
 
     if (child->owns_address_space && child->cr3) {
-      mmu_free_user_space(child->cr3);
-      kfree((void *)(child->cr3 & PTE_ADDR_MASK));
+      pmap_destroy(child->cr3);
+      kmem_free((void *)(child->cr3 & PTE_ADDR_MASK));
       child->cr3 = 0;
       child->owns_address_space = 0;
     }
 
     if (child->kernel_stack) {
       u64 kstack_base = child->kernel_stack - KERNEL_STACK_SIZE;
-      kfree((void *)kstack_base);
+      kmem_free((void *)kstack_base);
     }
 
     int pid = (int)child->pid;

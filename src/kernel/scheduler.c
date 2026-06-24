@@ -25,7 +25,7 @@
  */
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
-#include <kernel/mmu.h>
+#include <mm/vm/pmap.h>
 #include <kernel/process.h>
 #include <kernel/scheduler.h>
 
@@ -79,8 +79,8 @@ void scheduler_tick(registers_t *regs) {
                 "rip=%p cs=0x%x cr3=%p phys=%p init_phys=%p\n",
                 proc ? proc->pid : -1, last_magic, g_chainfs.superblock.magic,
                 (void *)(regs ? regs->rip : 0), regs ? regs->cs : 0,
-                (void *)mmu_read_cr3(),
-                (void *)mmu_virt_to_phys((u64)&g_chainfs),
+                (void *)pmap_get_cr3(),
+                (void *)pmap_extract((u64)&g_chainfs),
                 (void *)g_chainfs_phys);
     last_magic = g_chainfs.superblock.magic;
   }
@@ -112,7 +112,7 @@ void scheduler_tick(registers_t *regs) {
 
   process_set_current(next);
   if (next->cr3 != current->cr3) {
-    mmu_write_cr3(next->cr3);
+    pmap_load(next->cr3);
   }
 
   load_context(next, regs);

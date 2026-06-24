@@ -26,7 +26,7 @@
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/api/errno.h>
-#include <kernel/mmu.h>
+#include <mm/vm/pmap.h>
 
 chainfs_t g_chainfs;
 u64 g_chainfs_phys = 0;
@@ -58,7 +58,7 @@ int chainfs_init(disk_t *disk) {
 
   // Set current directory to root
   g_chainfs.current_dir_block = g_chainfs.superblock.root_dir_block;
-  g_chainfs_phys = mmu_virt_to_phys((u64)&g_chainfs);
+  g_chainfs_phys = pmap_extract((u64)&g_chainfs);
   com1_printf("[CHAINFS] g_chainfs phys=%p\n", (void *)g_chainfs_phys);
 
   com1_printf("ChainFS: Initialized successfully\n");
@@ -472,7 +472,7 @@ int chainfs_write_file(const char *filename, const u8 *data, u32 size) {
     blocks_needed = 1;
   }
 
-  u32 *allocated_blocks = (u32 *)kmalloc(blocks_needed * sizeof(u32));
+  u32 *allocated_blocks = (u32 *)kmem_alloc(blocks_needed * sizeof(u32));
   if (!allocated_blocks) {
     com1_printf("ChainFS: Memory allocation failed\n");
     return -1;
@@ -480,7 +480,7 @@ int chainfs_write_file(const char *filename, const u8 *data, u32 size) {
 
   if (chainfs_find_free_blocks(blocks_needed, allocated_blocks) != 0) {
     com1_printf("ChainFS: Not enough free blocks\n");
-    kfree(allocated_blocks);
+    kmem_free(allocated_blocks);
     return -1;
   }
 
@@ -536,7 +536,7 @@ int chainfs_write_file(const char *filename, const u8 *data, u32 size) {
 
   disk_write(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
 
-  kfree(allocated_blocks);
+  kmem_free(allocated_blocks);
 
   com1_printf("ChainFS: Wrote %u bytes to '%s' using %u blocks\n", size,
               filename, blocks_needed);

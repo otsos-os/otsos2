@@ -29,7 +29,6 @@
 #include <kernel/crypto/crypto.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/toml.h>
 

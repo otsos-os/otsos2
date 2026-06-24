@@ -27,7 +27,6 @@
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/api/api.h>
 #include <kernel/useraddr.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
 #define LISTDIR_MAX_FILES 128

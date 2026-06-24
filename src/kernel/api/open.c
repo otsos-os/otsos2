@@ -29,7 +29,6 @@
 #include <kernel/other/restrict.h>
 #include <kernel/useraddr.h>
 #include <lib/com1.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
 static char *copy_user_path(const char *path) {
@@ -52,7 +51,7 @@ static char *copy_user_path(const char *path) {
   if (len == 255) {
     return NULL;
   }
-  char *buf = (char *)kcalloc(len + 1, 1);
+  char *buf = (char *)kmem_calloc(len + 1, 1);
   if (!buf) {
     return NULL;
   }
@@ -96,30 +95,30 @@ int api_data_open(const char *path, int flags) {
   char *kpath = copy_user_path(path);
   if (!kpath || kpath[0] == 0) {
     if (kpath) {
-      kfree(kpath);
+      kmem_free(kpath);
     }
     return -API_ERR_BAD_ADDR;
   }
 
   if (!api_flags_valid(flags)) {
-    kfree(kpath);
+    kmem_free(kpath);
     return -API_ERR_BAD_VALUE;
   }
 
   if (path_is_old_dev_namespace(kpath)) {
-    kfree(kpath);
+    kmem_free(kpath);
     return -API_ERR_NO_DEVICE;
   }
 
   if (restrict_kusr_check(kpath)) {
-    kfree(kpath);
+    kmem_free(kpath);
     return -API_ERR_PERM;
   }
 
   if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
     com1_printf("API OPEN: ChainFS not initialized or corrupted magic: %x\n",
                 g_chainfs.superblock.magic);
-    kfree(kpath);
+    kmem_free(kpath);
     return -API_ERR_IO;
   }
 
@@ -130,42 +129,42 @@ int api_data_open(const char *path, int flags) {
 
   if (!exists) {
     if (!(flags & API_OPEN_CREATE)) {
-      kfree(kpath);
+      kmem_free(kpath);
       return -API_ERR_NOT_FOUND;
     }
     if (chainfs_write_file(kpath, (const u8 *)"", 0) != 0) {
-      kfree(kpath);
+      kmem_free(kpath);
       return -API_ERR_IO;
     }
     exists =
         (chainfs_find_file(kpath, &entry, &entry_block, &entry_offset) == 0);
     if (!exists) {
-      kfree(kpath);
+      kmem_free(kpath);
       return -API_ERR_IO;
     }
   } else if (entry.type == CHAINFS_TYPE_DIR) {
-    kfree(kpath);
+    kmem_free(kpath);
     return -API_ERR_IS_DIR;
   } else if (flags & API_OPEN_TRUNC) {
     if (chainfs_write_file(kpath, (const u8 *)"", 0) != 0) {
-      kfree(kpath);
+      kmem_free(kpath);
       return -API_ERR_IO;
     }
     if (chainfs_find_file(kpath, &entry, &entry_block, &entry_offset) != 0) {
-      kfree(kpath);
+      kmem_free(kpath);
       return -API_ERR_IO;
     }
   }
 
   int handle = api_find_free_handle();
   if (handle < 0) {
-    kfree(kpath);
+    kmem_free(kpath);
     return handle;
   }
 
   int object_index = api_alloc_object();
   if (object_index < 0) {
-    kfree(kpath);
+    kmem_free(kpath);
     return object_index;
   }
 
@@ -178,7 +177,7 @@ int api_data_open(const char *path, int flags) {
     path_len = (int)sizeof(objects[object_index].path) - 1;
   }
   memcpy(objects[object_index].path, kpath, path_len);
-  kfree(kpath);
+  kmem_free(kpath);
 
   handles[handle].used = 1;
   handles[handle].flags = flags;

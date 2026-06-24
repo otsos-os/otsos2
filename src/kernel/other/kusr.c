@@ -31,7 +31,6 @@
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/tty.h>
 #include <lib/com1.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/toml.h>
 

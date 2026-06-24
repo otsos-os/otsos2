@@ -30,7 +30,6 @@
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <lib/com1.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
 static api_handle_t kernel_handles[MAX_HANDLES];
@@ -84,7 +83,7 @@ void api_release_object(int index) {
         }
       }
       if (p->readers == 0 && p->writers == 0) {
-        kfree(p);
+        kmem_free(p);
       }
     }
     memset(&api_objects[index], 0, sizeof(api_objects[index]));
@@ -214,7 +213,7 @@ int api_data_write(int handle, const void *buf, u32 count) {
   u32 end_pos = offset + count;
   u32 new_size = (end_pos > entry.size) ? end_pos : entry.size;
 
-  u8 *new_data = (u8 *)kcalloc(new_size, 1);
+  u8 *new_data = (u8 *)kmem_calloc(new_size, 1);
   if (!new_data) {
     return -API_ERR_NO_MEMORY;
   }
@@ -223,7 +222,7 @@ int api_data_write(int handle, const void *buf, u32 count) {
     u32 bytes_read = 0;
     if (chainfs_read_file(objects[object_index].path, new_data, entry.size,
                           &bytes_read) != 0) {
-      kfree(new_data);
+      kmem_free(new_data);
       return -API_ERR_IO;
     }
   }
@@ -231,7 +230,7 @@ int api_data_write(int handle, const void *buf, u32 count) {
   memcpy(new_data + offset, buf, count);
 
   int result = chainfs_write_file(objects[object_index].path, new_data, new_size);
-  kfree(new_data);
+  kmem_free(new_data);
 
   if (result == 0) {
     objects[object_index].offset = offset + count;

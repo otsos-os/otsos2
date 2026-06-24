@@ -72,11 +72,11 @@ static void kshell_sync_cells(void) {
   }
 
   if (kshell_cells) {
-    kfree(kshell_cells);
+    kmem_free(kshell_cells);
     kshell_cells = NULL;
   }
 
-  kshell_cells = (u16 *)kcalloc((unsigned long)(w * h), sizeof(u16));
+  kshell_cells = (u16 *)kmem_calloc((unsigned long)(w * h), sizeof(u16));
   kshell_cells_w = w;
   kshell_cells_h = h;
 

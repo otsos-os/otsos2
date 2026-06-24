@@ -5,20 +5,19 @@
 #include <drm/drm.h>
 #include <drm/object.h>
 #include <drm/kms/connector.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
 static drm_connector_t g_primary_connector;
 
 drm_id_t drm_connector_create(void) {
   drm_connector_t *c =
-      (drm_connector_t *)kcalloc(sizeof(drm_connector_t), 1);
+      (drm_connector_t *)kmem_calloc(sizeof(drm_connector_t), 1);
   if (!c) {
     return DRM_ID_NONE;
   }
   drm_id_t id = drm_object_register(DRM_OBJECT_CONNECTOR, c);
   if (id == DRM_ID_NONE) {
-    kfree(c);
+    kmem_free(c);
     return DRM_ID_NONE;
   }
   c->id = id;

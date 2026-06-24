@@ -24,11 +24,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/mmu.h>
+#include <mm/vm/pmap.h>
 #include <kernel/api/api.h>
 #include <kernel/process.h>
-#include <kernel/vma.h>
-#include <mlibc/memory.h>
+#include <mm/vm/vm_map.h>
+#include <mm/kmem.h>
 
 long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
   (void)ptid;
@@ -49,17 +49,17 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
 
   child->state = PROC_STATE_EMBRYO;
 
-  u64 child_cr3 = mmu_clone_user_space(parent->cr3);
+  u64 child_cr3 = pmap_clone(parent->cr3);
   if (!child_cr3) {
     memset(child, 0, sizeof(process_t));
     child->state = PROC_STATE_UNUSED;
     return -API_ERR_NO_MEMORY;
   }
 
-  u8 *kstack = (u8 *)kmalloc_aligned(KERNEL_STACK_SIZE, 16);
+  u8 *kstack = (u8 *)kmem_alloc_aligned(KERNEL_STACK_SIZE, 16);
   if (!kstack) {
-    mmu_free_user_space(child_cr3);
-    kfree((void *)(child_cr3 & PTE_ADDR_MASK));
+    pmap_destroy(child_cr3);
+    kmem_free((void *)(child_cr3 & PTE_ADDR_MASK));
     memset(child, 0, sizeof(process_t));
     child->state = PROC_STATE_UNUSED;
     return -API_ERR_NO_MEMORY;
@@ -94,7 +94,7 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
   child->exit_code = 0;
   child->owns_address_space = 1;
   child->mmap_base = parent->mmap_base;
-  vma_copy(child, parent);
+  vm_map_copy(child, parent);
   api_copy_handles(child, parent);
   child->next = NULL;
 

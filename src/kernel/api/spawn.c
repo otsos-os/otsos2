@@ -26,11 +26,10 @@
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/gdt.h>
-#include <kernel/mmu.h>
+#include <mm/vm/pmap.h>
 #include <kernel/api/api.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 #include <userland/elf.h>
 #include <userland/userspace.h>
@@ -62,7 +61,7 @@ static char *copy_user_string(const char *user, size_t max_len) {
     return NULL;
   }
 
-  char *out = (char *)kcalloc(len + 1, 1);
+  char *out = (char *)kmem_calloc(len + 1, 1);
   if (!out) {
     return NULL;
   }
@@ -82,7 +81,7 @@ static int copy_user_string_array(const char *const *user, char ***out,
     return -API_ERR_BAD_ADDR;
   }
 
-  char **arr = (char **)kcalloc(max_count + 1, sizeof(char *));
+  char **arr = (char **)kmem_calloc(max_count + 1, sizeof(char *));
   if (!arr) {
     return -API_ERR_NO_MEMORY;
   }
@@ -99,9 +98,9 @@ static int copy_user_string_array(const char *const *user, char ***out,
     char *copy = copy_user_string(ptr, SPAWN_MAX_STR);
     if (!copy) {
       for (int i = 0; i < count; i++) {
-        kfree(arr[i]);
+        kmem_free(arr[i]);
       }
-      kfree(arr);
+      kmem_free(arr);
       return -API_ERR_BAD_ADDR;
     }
     arr[count++] = copy;
@@ -110,9 +109,9 @@ static int copy_user_string_array(const char *const *user, char ***out,
   if (count == max_count) {
     if (is_user_address(&user[count], sizeof(char *)) && user[count] != NULL) {
       for (int i = 0; i < count; i++) {
-        kfree(arr[i]);
+        kmem_free(arr[i]);
       }
-      kfree(arr);
+      kmem_free(arr);
       return -API_ERR_TOO_BIG;
     }
   }
@@ -127,9 +126,9 @@ static void free_string_array(char **arr) {
     return;
   }
   for (int i = 0; arr[i]; i++) {
-    kfree(arr[i]);
+    kmem_free(arr[i]);
   }
-  kfree(arr);
+  kmem_free(arr);
 }
 
 static int read_file_into_buffer(const char *path, u8 **out_buf,
@@ -145,7 +144,7 @@ static int read_file_into_buffer(const char *path, u8 **out_buf,
     return -API_ERR_BAD_IMAGE;
   }
 
-  u8 *buf = (u8 *)kcalloc(size, 1);
+  u8 *buf = (u8 *)kmem_calloc(size, 1);
   if (!buf) {
     return -API_ERR_NO_MEMORY;
   }
@@ -153,7 +152,7 @@ static int read_file_into_buffer(const char *path, u8 **out_buf,
   u32 bytes_read = 0;
   if (chainfs_read_file(path, buf, size, &bytes_read) != 0 ||
       bytes_read != size) {
-    kfree(buf);
+    kmem_free(buf);
     return -API_ERR_IO;
   }
 
@@ -167,14 +166,14 @@ static u64 allocate_user_stack(void) {
   u64 stack_bottom = USER_STACK_TOP;
 
   for (u64 i = 0; i < stack_pages; i++) {
-    void *page = kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+    void *page = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
     if (!page) {
       for (u64 j = 0; j < i; j++) {
         u64 vaddr = stack_bottom + (j * PAGE_SIZE);
-        u64 paddr = mmu_virt_to_phys(vaddr);
-        mmu_unmap_page(vaddr);
+        u64 paddr = pmap_extract(vaddr);
+        pmap_remove(vaddr);
         if (paddr) {
-          kfree((void *)paddr);
+          kmem_free((void *)paddr);
         }
       }
       return 0;
@@ -182,7 +181,7 @@ static u64 allocate_user_stack(void) {
     memset(page, 0, PAGE_SIZE);
 
     u64 vaddr = stack_bottom + (i * PAGE_SIZE);
-    mmu_map_page(vaddr, (u64)page, PTE_PRESENT | PTE_RW | PTE_USER | PTE_NX);
+    pmap_enter(vaddr, (u64)page, PTE_PRESENT | PTE_RW | PTE_USER | PTE_NX);
   }
 
   return USER_STACK_BASE;
@@ -193,19 +192,19 @@ static int build_user_stack(char **argv, int argc, char **envp, int envc,
   u64 sp = USER_STACK_BASE & ~0xFULL;
   u64 stack_min = USER_STACK_TOP;
 
-  u64 *argv_ptrs = (u64 *)kcalloc(argc ? argc : 1, sizeof(u64));
-  u64 *envp_ptrs = (u64 *)kcalloc(envc ? envc : 1, sizeof(u64));
+  u64 *argv_ptrs = (u64 *)kmem_calloc(argc ? argc : 1, sizeof(u64));
+  u64 *envp_ptrs = (u64 *)kmem_calloc(envc ? envc : 1, sizeof(u64));
   if (!argv_ptrs || !envp_ptrs) {
-    kfree(argv_ptrs);
-    kfree(envp_ptrs);
+    kmem_free(argv_ptrs);
+    kmem_free(envp_ptrs);
     return -API_ERR_NO_MEMORY;
   }
 
   for (int i = envc - 1; i >= 0; i--) {
     size_t len = strlen(envp[i]) + 1;
     if (sp < stack_min + len) {
-      kfree(argv_ptrs);
-      kfree(envp_ptrs);
+      kmem_free(argv_ptrs);
+      kmem_free(envp_ptrs);
       return -API_ERR_TOO_BIG;
     }
     sp -= len;
@@ -216,8 +215,8 @@ static int build_user_stack(char **argv, int argc, char **envp, int envc,
   for (int i = argc - 1; i >= 0; i--) {
     size_t len = strlen(argv[i]) + 1;
     if (sp < stack_min + len) {
-      kfree(argv_ptrs);
-      kfree(envp_ptrs);
+      kmem_free(argv_ptrs);
+      kmem_free(envp_ptrs);
       return -API_ERR_TOO_BIG;
     }
     sp -= len;
@@ -228,8 +227,8 @@ static int build_user_stack(char **argv, int argc, char **envp, int envc,
   sp &= ~0xFULL;
 
   if (sp < stack_min + (u64)(8 * (argc + envc + 3))) {
-    kfree(argv_ptrs);
-    kfree(envp_ptrs);
+    kmem_free(argv_ptrs);
+    kmem_free(envp_ptrs);
     return -API_ERR_TOO_BIG;
   }
 
@@ -258,8 +257,8 @@ static int build_user_stack(char **argv, int argc, char **envp, int envc,
   *out_argv = argv_addr;
   *out_envp = envp_addr;
 
-  kfree(argv_ptrs);
-  kfree(envp_ptrs);
+  kmem_free(argv_ptrs);
+  kmem_free(envp_ptrs);
   return 0;
 }
 
@@ -281,8 +280,8 @@ static void free_spawn_cr3(u64 cr3) {
   if (!cr3) {
     return;
   }
-  mmu_free_user_space(cr3);
-  kfree((void *)(cr3 & PTE_ADDR_MASK));
+  pmap_destroy(cr3);
+  kmem_free((void *)(cr3 & PTE_ADDR_MASK));
 }
 
 int api_proc_spawn(const char *path, const char *const *argv,
@@ -316,14 +315,14 @@ int api_proc_spawn(const char *path, const char *const *argv,
   int argc = copy_user_string_array(argv, &kargv, SPAWN_MAX_ARGS);
   if (argc < 0) {
     com1_printf("[SPAWN] Error: failed to copy argv\n");
-    kfree(kpath);
+    kmem_free(kpath);
     return argc;
   }
   int envc = copy_user_string_array(envp, &kenvp, SPAWN_MAX_ENVP);
   if (envc < 0) {
     com1_printf("[SPAWN] Error: failed to copy envp\n");
     free_string_array(kargv);
-    kfree(kpath);
+    kmem_free(kpath);
     return envc;
   }
 
@@ -334,74 +333,74 @@ int api_proc_spawn(const char *path, const char *const *argv,
     com1_printf("[SPAWN] Error: failed to read file '%s'\n", kpath);
     free_string_array(kargv);
     free_string_array(kenvp);
-    kfree(kpath);
+    kmem_free(kpath);
     return err;
   }
 
   process_t *child = alloc_process();
   if (!child) {
-    kfree(elf_buf);
+    kmem_free(elf_buf);
     free_string_array(kargv);
     free_string_array(kenvp);
-    kfree(kpath);
+    kmem_free(kpath);
     return -API_ERR_RETRY;
   }
   child->state = PROC_STATE_EMBRYO;
 
-  u64 new_cr3 = mmu_create_address_space();
+  u64 new_cr3 = pmap_create();
   if (!new_cr3) {
     com1_printf("[SPAWN] Error: failed to create address space\n");
     memset(child, 0, sizeof(process_t));
     child->state = PROC_STATE_UNUSED;
-    kfree(elf_buf);
+    kmem_free(elf_buf);
     free_string_array(kargv);
     free_string_array(kenvp);
-    kfree(kpath);
+    kmem_free(kpath);
     return -API_ERR_NO_MEMORY;
   }
 
-  u8 *kstack = (u8 *)kmalloc_aligned(KERNEL_STACK_SIZE, 16);
+  u8 *kstack = (u8 *)kmem_alloc_aligned(KERNEL_STACK_SIZE, 16);
   if (!kstack) {
     free_spawn_cr3(new_cr3);
     memset(child, 0, sizeof(process_t));
     child->state = PROC_STATE_UNUSED;
-    kfree(elf_buf);
+    kmem_free(elf_buf);
     free_string_array(kargv);
     free_string_array(kenvp);
-    kfree(kpath);
+    kmem_free(kpath);
     return -API_ERR_NO_MEMORY;
   }
   memset(kstack, 0, KERNEL_STACK_SIZE);
 
-  u64 old_cr3 = mmu_read_cr3();
-  mmu_write_cr3(new_cr3);
+  u64 old_cr3 = pmap_get_cr3();
+  pmap_load(new_cr3);
 
   u64 entry = elf_load(elf_buf, elf_size);
-  kfree(elf_buf);
+  kmem_free(elf_buf);
   if (entry == 0) {
     com1_printf("[SPAWN] Error: elf_load failed for '%s'\n", kpath);
-    mmu_write_cr3(old_cr3);
+    pmap_load(old_cr3);
     free_spawn_cr3(new_cr3);
-    kfree(kstack);
+    kmem_free(kstack);
     memset(child, 0, sizeof(process_t));
     child->state = PROC_STATE_UNUSED;
     free_string_array(kargv);
     free_string_array(kenvp);
-    kfree(kpath);
+    kmem_free(kpath);
     return -API_ERR_BAD_IMAGE;
   }
 
   u64 user_stack = allocate_user_stack();
   if (user_stack == 0) {
     com1_printf("[SPAWN] Error: allocate_user_stack failed\n");
-    mmu_write_cr3(old_cr3);
+    pmap_load(old_cr3);
     free_spawn_cr3(new_cr3);
-    kfree(kstack);
+    kmem_free(kstack);
     memset(child, 0, sizeof(process_t));
     child->state = PROC_STATE_UNUSED;
     free_string_array(kargv);
     free_string_array(kenvp);
-    kfree(kpath);
+    kmem_free(kpath);
     return -API_ERR_NO_MEMORY;
   }
 
@@ -412,20 +411,20 @@ int api_proc_spawn(const char *path, const char *const *argv,
                          &envp_addr);
   if (err < 0) {
     com1_printf("[SPAWN] Error: build_user_stack failed\n");
-    mmu_write_cr3(old_cr3);
+    pmap_load(old_cr3);
     free_spawn_cr3(new_cr3);
-    kfree(kstack);
+    kmem_free(kstack);
     memset(child, 0, sizeof(process_t));
     child->state = PROC_STATE_UNUSED;
     free_string_array(kargv);
     free_string_array(kenvp);
-    kfree(kpath);
+    kmem_free(kpath);
     return err;
   }
 
   free_string_array(kargv);
   free_string_array(kenvp);
-  mmu_write_cr3(old_cr3);
+  pmap_load(old_cr3);
 
   u32 pid = next_pid++;
   memset(child, 0, sizeof(process_t));
@@ -463,7 +462,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
 
   com1_printf("[SPAWN] Created '%s' (PID %d) from '%s'\n", child->name,
               child->pid, kpath);
-  kfree(kpath);
+  kmem_free(kpath);
 
   return (int)pid;
 }

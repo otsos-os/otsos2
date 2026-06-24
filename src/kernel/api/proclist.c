@@ -27,7 +27,6 @@
 #include <kernel/api/api.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
 int api_proc_list(struct api_proc_info *buf, u32 max_entries) {

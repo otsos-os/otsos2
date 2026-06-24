@@ -31,7 +31,7 @@
 #include <kernel/syscall.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <lib/com1.h>
-#include <kernel/mmu.h>
+#include <mm/vm/pmap.h>
 
 #define MSR_EFER 0xC0000080
 #define MSR_STAR 0xC0000081
@@ -89,8 +89,8 @@ void syscall_handler(registers_t *regs) {
                 "rip=%p cs=0x%x cr3=%p phys=%p init_phys=%p\n",
                 proc ? proc->pid : -1, last_magic, g_chainfs.superblock.magic,
                 (void *)(regs ? regs->rip : 0), regs ? regs->cs : 0,
-                (void *)mmu_read_cr3(),
-                (void *)mmu_virt_to_phys((u64)&g_chainfs),
+                (void *)pmap_get_cr3(),
+                (void *)pmap_extract((u64)&g_chainfs),
                 (void *)g_chainfs_phys);
     last_magic = g_chainfs.superblock.magic;
   }

@@ -14,7 +14,6 @@
 #include <kernel/drivers/video/drm/kms/plane.h>
 #include <kernel/drivers/video/drm/rapi/rapi.h>
 #include <kernel/process.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
 static int drm_op_info(struct api_drm_info *out) {
@@ -91,7 +90,7 @@ static int drm_op_atomic_commit(struct api_drm_atomic_commit *arg) {
 
   /* Translate userspace array to kernel array. */
   drm_atomic_req_t *reqs =
-      (drm_atomic_req_t *)kmalloc(sizeof(drm_atomic_req_t) * arg->count);
+      (drm_atomic_req_t *)kmem_alloc(sizeof(drm_atomic_req_t) * arg->count);
   if (!reqs) return -API_ERR_NOMEM;
   for (u32 i = 0; i < arg->count; i++) {
     reqs[i].obj_id = arg->reqs[i].obj_id;
@@ -100,7 +99,7 @@ static int drm_op_atomic_commit(struct api_drm_atomic_commit *arg) {
   }
 
   int rc = drm_atomic_commit(reqs, arg->count, arg->flags);
-  kfree(reqs);
+  kmem_free(reqs);
 
   switch (rc) {
   case DRM_OK:         return 0;

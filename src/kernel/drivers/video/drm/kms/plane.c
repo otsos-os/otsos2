@@ -6,13 +6,12 @@
 #include <drm/object.h>
 #include <drm/kms/framebuffer.h>
 #include <drm/kms/plane.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
 static drm_plane_t g_primary_plane;
 
 drm_id_t drm_plane_create(u32 type) {
-  drm_plane_t *p = (drm_plane_t *)kcalloc(sizeof(drm_plane_t), 1);
+  drm_plane_t *p = (drm_plane_t *)kmem_calloc(sizeof(drm_plane_t), 1);
   if (!p) {
     return DRM_ID_NONE;
   }
@@ -21,7 +20,7 @@ drm_id_t drm_plane_create(u32 type) {
   p->crtc_id = DRM_ID_NONE;
   drm_id_t id = drm_object_register(DRM_OBJECT_PLANE, p);
   if (id == DRM_ID_NONE) {
-    kfree(p);
+    kmem_free(p);
     return DRM_ID_NONE;
   }
   p->id = id;

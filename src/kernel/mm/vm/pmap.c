@@ -24,23 +24,23 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/mmu.h>
+#include <mm/vm/pmap.h>
 #include <lib/com1.h>
-#include <mlibc/memory.h>
+#include <mm/kmem.h>
 
 #define MSR_EFER 0xC0000080
 #define EFER_NXE (1ULL << 11)
 
 static u64 g_kernel_cr3 = 0;
-static int mmu_initialized = 0;
+static int pmap_initialized = 0;
 
-static inline void mmu_wrmsr(u32 msr, u64 value) {
+static inline void pmap_wrmsr(u32 msr, u64 value) {
   u32 low = value & 0xFFFFFFFF;
   u32 high = value >> 32;
   __asm__ volatile("wrmsr" : : "c"(msr), "a"(low), "d"(high));
 }
 
-static inline u64 mmu_rdmsr(u32 msr) {
+static inline u64 pmap_rdmsr(u32 msr) {
   u32 low, high;
   __asm__ volatile("rdmsr" : "=a"(low), "=d"(high) : "c"(msr));
   return ((u64)high << 32) | low;
@@ -55,9 +55,9 @@ static u64 *split_huge_pde(u64 *pd, u16 pd_index, u64 flags) {
   u64 base = pde & PTE_ADDR_MASK;
   u64 pde_flags = pde & PTE_FLAGS_MASK;
 
-  u64 *pt = (u64 *)kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+  u64 *pt = (u64 *)kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
   if (!pt) {
-    com1_printf("[MMU] Error: Failed to split huge page\n");
+    com1_printf("[PMAP] Error: Failed to split huge page\n");
     return NULL;
   }
   memset(pt, 0, PAGE_SIZE);
@@ -78,24 +78,24 @@ static u64 *split_huge_pde(u64 *pd, u16 pd_index, u64 flags) {
   return pt;
 }
 
-void mmu_init() {
-  u64 efer = mmu_rdmsr(MSR_EFER);
+void pmap_init() {
+  u64 efer = pmap_rdmsr(MSR_EFER);
   if (!(efer & EFER_NXE)) {
-    mmu_wrmsr(MSR_EFER, efer | EFER_NXE);
+    pmap_wrmsr(MSR_EFER, efer | EFER_NXE);
   }
-  u64 cr3 = mmu_read_cr3();
+  u64 cr3 = pmap_get_cr3();
   if (g_kernel_cr3 == 0) {
     g_kernel_cr3 = cr3;
   }
-  com1_printf("[MMU] Initialized. Current CR3: %p\n", (void *)cr3);
-  mmu_initialized = 1;
+  com1_printf("[PMAP] Initialized. Current CR3: %p\n", (void *)cr3);
+  pmap_initialized = 1;
 }
 
-int mmu_is_initialized(void) {
-  if (!mmu_initialized) {
+int pmap_is_initialized(void) {
+  if (!pmap_initialized) {
     return 0;
   }
-  u64 efer = mmu_rdmsr(MSR_EFER);
+  u64 efer = pmap_rdmsr(MSR_EFER);
   if (!(efer & EFER_NXE)) {
     return 0;
   }
@@ -113,9 +113,9 @@ static u64 *get_next_level_from(u64 *current_table, u16 index, int alloc,
     if (flags & PTE_USER) {
       if (!(entry & PTE_USER)) {
         u64 *old_table = (u64 *)(entry & PTE_ADDR_MASK);
-        u64 *new_table = (u64 *)kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+        u64 *new_table = (u64 *)kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
         if (!new_table) {
-          com1_printf("[MMU] Error: Failed to allocate page table!\n");
+          com1_printf("[PMAP] Error: Failed to allocate page table!\n");
           return NULL;
         }
         memcpy(new_table, old_table, PAGE_SIZE);
@@ -134,9 +134,9 @@ static u64 *get_next_level_from(u64 *current_table, u16 index, int alloc,
     return NULL;
   }
 
-  u64 *new_table = (u64 *)kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+  u64 *new_table = (u64 *)kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
   if (!new_table) {
-    com1_printf("[MMU] Error: Failed to allocate page table!\n");
+    com1_printf("[PMAP] Error: Failed to allocate page table!\n");
     return NULL;
   }
 
@@ -151,13 +151,13 @@ static u64 *get_next_level_from(u64 *current_table, u16 index, int alloc,
   return new_table;
 }
 
-void mmu_map_page(u64 vaddr, u64 paddr, u64 flags) {
+void pmap_enter(u64 vaddr, u64 paddr, u64 flags) {
   u64 pml4_index = (vaddr >> 39) & 0x1FF;
   u64 pdpt_index = (vaddr >> 30) & 0x1FF;
   u64 pd_index = (vaddr >> 21) & 0x1FF;
   u64 pt_index = (vaddr >> 12) & 0x1FF;
 
-  u64 *pml4 = (u64 *)(mmu_read_cr3() & PTE_ADDR_MASK);
+  u64 *pml4 = (u64 *)(pmap_get_cr3() & PTE_ADDR_MASK);
 
   u64 *pdpt = get_next_level_from(pml4, pml4_index, 1, flags);
   if (!pdpt)
@@ -181,16 +181,16 @@ void mmu_map_page(u64 vaddr, u64 paddr, u64 flags) {
   pt[pt_index] =
       (paddr & PTE_ADDR_MASK) | (flags & PTE_FLAGS_MASK) | PTE_PRESENT;
 
-  mmu_invlpg(vaddr);
+  pmap_invlpg(vaddr);
 }
 
-void mmu_unmap_page(u64 vaddr) {
+void pmap_remove(u64 vaddr) {
   u64 pml4_index = (vaddr >> 39) & 0x1FF;
   u64 pdpt_index = (vaddr >> 30) & 0x1FF;
   u64 pd_index = (vaddr >> 21) & 0x1FF;
   u64 pt_index = (vaddr >> 12) & 0x1FF;
 
-  u64 *pml4 = (u64 *)(mmu_read_cr3() & PTE_ADDR_MASK);
+  u64 *pml4 = (u64 *)(pmap_get_cr3() & PTE_ADDR_MASK);
 
   u64 *pdpt = get_next_level_from(pml4, pml4_index, 0, 0);
   if (!pdpt)
@@ -205,16 +205,16 @@ void mmu_unmap_page(u64 vaddr) {
     return;
 
   pt[pt_index] = 0;
-  mmu_invlpg(vaddr);
+  pmap_invlpg(vaddr);
 }
 
-u64 mmu_virt_to_phys(u64 vaddr) {
+u64 pmap_extract(u64 vaddr) {
   u64 pml4_index = (vaddr >> 39) & 0x1FF;
   u64 pdpt_index = (vaddr >> 30) & 0x1FF;
   u64 pd_index = (vaddr >> 21) & 0x1FF;
   u64 pt_index = (vaddr >> 12) & 0x1FF;
 
-  u64 *pml4 = (u64 *)(mmu_read_cr3() & PTE_ADDR_MASK);
+  u64 *pml4 = (u64 *)(pmap_get_cr3() & PTE_ADDR_MASK);
 
   u64 *pdpt = get_next_level_from(pml4, pml4_index, 0, 0);
   if (!pdpt)
@@ -256,7 +256,7 @@ u64 mmu_virt_to_phys(u64 vaddr) {
   return (pte & PTE_ADDR_MASK) + (vaddr & 0xFFF);
 }
 
-void mmu_map_page_in(u64 *pml4, u64 vaddr, u64 paddr, u64 flags) {
+void pmap_enter_in(u64 *pml4, u64 vaddr, u64 paddr, u64 flags) {
   if (!pml4) {
     return;
   }
@@ -282,9 +282,9 @@ void mmu_map_page_in(u64 *pml4, u64 vaddr, u64 paddr, u64 flags) {
       (paddr & PTE_ADDR_MASK) | (flags & PTE_FLAGS_MASK) | PTE_PRESENT;
 }
 
-u64 mmu_create_address_space(void) {
-  u64 *src_pml4 = (u64 *)(mmu_kernel_cr3() & PTE_ADDR_MASK);
-  u64 *new_pml4 = (u64 *)kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+u64 pmap_create(void) {
+  u64 *src_pml4 = (u64 *)(pmap_kernel_cr3() & PTE_ADDR_MASK);
+  u64 *new_pml4 = (u64 *)kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
   if (!new_pml4) {
     return 0;
   }
@@ -301,15 +301,15 @@ u64 mmu_create_address_space(void) {
   return (u64)new_pml4;
 }
 
-u64 mmu_kernel_cr3(void) { return g_kernel_cr3; }
+u64 pmap_kernel_cr3(void) { return g_kernel_cr3; }
 
-u64 mmu_get_pte_flags(u64 vaddr) {
+u64 pmap_extract_flags(u64 vaddr) {
   u64 pml4_index = (vaddr >> 39) & 0x1FF;
   u64 pdpt_index = (vaddr >> 30) & 0x1FF;
   u64 pd_index = (vaddr >> 21) & 0x1FF;
   u64 pt_index = (vaddr >> 12) & 0x1FF;
 
-  u64 *pml4 = (u64 *)(mmu_read_cr3() & PTE_ADDR_MASK);
+  u64 *pml4 = (u64 *)(pmap_get_cr3() & PTE_ADDR_MASK);
 
   u64 pml4e = pml4[pml4_index];
   if (!(pml4e & PTE_PRESENT)) {
@@ -339,7 +339,7 @@ u64 mmu_get_pte_flags(u64 vaddr) {
   return pte & PTE_FLAGS_MASK;
 }
 
-void mmu_clear_user_range(u64 start, u64 end) {
+void pmap_clear_user_range(u64 start, u64 end) {
   if (end <= start) {
     return;
   }
@@ -351,7 +351,7 @@ void mmu_clear_user_range(u64 start, u64 end) {
     u64 pd_index = (vaddr >> 21) & 0x1FF;
     u64 pt_index = (vaddr >> 12) & 0x1FF;
 
-    u64 *pml4 = (u64 *)(mmu_read_cr3() & PTE_ADDR_MASK);
+    u64 *pml4 = (u64 *)(pmap_get_cr3() & PTE_ADDR_MASK);
     u64 pml4e = pml4[pml4_index];
     if (!(pml4e & PTE_PRESENT)) {
       continue;
@@ -389,12 +389,12 @@ void mmu_clear_user_range(u64 start, u64 end) {
     }
     if (*pte & PTE_USER) {
       *pte &= ~PTE_USER;
-      mmu_invlpg(vaddr);
+      pmap_invlpg(vaddr);
     }
   }
 }
 
-static int mmu_copy_user_pages(u64 *dst_pml4, u64 *src_pml4) {
+static int pmap_copy_user_pages(u64 *dst_pml4, u64 *src_pml4) {
   for (u64 i = 0; i < 512; i++) {
     u64 pml4e = src_pml4[i];
     if (!(pml4e & PTE_PRESENT)) {
@@ -406,7 +406,7 @@ static int mmu_copy_user_pages(u64 *dst_pml4, u64 *src_pml4) {
     }
 
     u64 *src_pdpt = (u64 *)(pml4e & PTE_ADDR_MASK);
-    u64 *dst_pdpt = (u64 *)kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+    u64 *dst_pdpt = (u64 *)kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
     if (!dst_pdpt) {
       return -1;
     }
@@ -425,7 +425,7 @@ static int mmu_copy_user_pages(u64 *dst_pml4, u64 *src_pml4) {
           dst_pdpt[j] = pdpte;
           continue;
         }
-        com1_printf("[MMU] 1GB huge pages not supported in clone\n");
+        com1_printf("[PMAP] 1GB huge pages not supported in clone\n");
         return -1;
       }
       if (!(pdpte & PTE_USER)) {
@@ -434,7 +434,7 @@ static int mmu_copy_user_pages(u64 *dst_pml4, u64 *src_pml4) {
       }
 
       u64 *src_pd = (u64 *)(pdpte & PTE_ADDR_MASK);
-      u64 *dst_pd = (u64 *)kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+      u64 *dst_pd = (u64 *)kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
       if (!dst_pd) {
         return -1;
       }
@@ -453,7 +453,7 @@ static int mmu_copy_user_pages(u64 *dst_pml4, u64 *src_pml4) {
             dst_pd[k] = pde;
             continue;
           }
-          u64 *dst_pt = (u64 *)kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+          u64 *dst_pt = (u64 *)kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
           if (!dst_pt) {
             return -1;
           }
@@ -464,12 +464,12 @@ static int mmu_copy_user_pages(u64 *dst_pml4, u64 *src_pml4) {
 
           for (u64 l = 0; l < 512; l++) {
             u64 vaddr = (i << 39) | (j << 30) | (k << 21) | (l << 12);
-            void *new_page = kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+            void *new_page = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
             if (!new_page) {
               return -1;
             }
             memcpy(new_page, (void *)vaddr, PAGE_SIZE);
-            u64 phys = mmu_virt_to_phys((u64)new_page);
+            u64 phys = pmap_extract((u64)new_page);
             u64 pte_flags = (pd_flags & PTE_FLAGS_MASK) | PTE_USER;
             dst_pt[l] = (phys & PTE_ADDR_MASK) | pte_flags | PTE_PRESENT;
           }
@@ -481,7 +481,7 @@ static int mmu_copy_user_pages(u64 *dst_pml4, u64 *src_pml4) {
         }
 
         u64 *src_pt = (u64 *)(pde & PTE_ADDR_MASK);
-        u64 *dst_pt = (u64 *)kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+        u64 *dst_pt = (u64 *)kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
         if (!dst_pt) {
           return -1;
         }
@@ -501,13 +501,13 @@ static int mmu_copy_user_pages(u64 *dst_pml4, u64 *src_pml4) {
           }
 
           u64 vaddr = (i << 39) | (j << 30) | (k << 21) | (l << 12);
-          void *new_page = kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+          void *new_page = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
           if (!new_page) {
             return -1;
           }
           memcpy(new_page, (void *)vaddr, PAGE_SIZE);
 
-          u64 phys = mmu_virt_to_phys((u64)new_page);
+          u64 phys = pmap_extract((u64)new_page);
           u64 pte_flags = pte & PTE_FLAGS_MASK;
           dst_pt[l] = (phys & PTE_ADDR_MASK) | pte_flags | PTE_PRESENT;
         }
@@ -518,22 +518,22 @@ static int mmu_copy_user_pages(u64 *dst_pml4, u64 *src_pml4) {
   return 0;
 }
 
-u64 mmu_clone_user_space(u64 src_cr3) {
+u64 pmap_clone(u64 src_cr3) {
   u64 *src_pml4 = (u64 *)(src_cr3 & PTE_ADDR_MASK);
-  u64 *dst_pml4 = (u64 *)mmu_create_address_space();
+  u64 *dst_pml4 = (u64 *)pmap_create();
   if (!dst_pml4) {
     return 0;
   }
 
-  if (mmu_copy_user_pages(dst_pml4, src_pml4) != 0) {
-    mmu_free_user_space((u64)dst_pml4);
+  if (pmap_copy_user_pages(dst_pml4, src_pml4) != 0) {
+    pmap_destroy((u64)dst_pml4);
     return 0;
   }
 
   return (u64)dst_pml4;
 }
 
-void mmu_free_user_space(u64 cr3) {
+void pmap_destroy(u64 cr3) {
   u64 *pml4 = (u64 *)(cr3 & PTE_ADDR_MASK);
   if (!pml4) {
     return;
@@ -586,25 +586,25 @@ void mmu_free_user_space(u64 cr3) {
             continue;
           }
           void *page = (void *)(pte & PTE_ADDR_MASK);
-          kfree(page);
+          kmem_free(page);
           pt[l] = 0;
         }
         if (pt_has_present) {
           pd_has_present = 1;
         } else {
-          kfree(pt);
+          kmem_free(pt);
           pd[k] = 0;
         }
       }
       if (pd_has_present) {
         pdpt_has_present = 1;
       } else {
-        kfree(pd);
+        kmem_free(pd);
         pdpt[j] = 0;
       }
     }
     if (!pdpt_has_present) {
-      kfree(pdpt);
+      kmem_free(pdpt);
       pml4[i] = 0;
     }
   }

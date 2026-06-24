@@ -8,7 +8,7 @@ QEMU_GUI_OPTS ?= -display gtk
 QEMU_NODISPLAY_OPTS ?= -display none
 
 TARGET_CFLAGS ?= --target=$(TARGET)
-CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fno-pic -fstack-protector-strong -g -O0 -fno-builtin -mno-red-zone -mcmodel=kernel -mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-80387 -I. -Ikernel/drivers/video
+CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fno-pic -fstack-protector-strong -g -O0 -fno-builtin -mno-red-zone -mcmodel=kernel -mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-80387 -I. -Ikernel -Ikernel/drivers/video
 LDFLAGS ?= -m elf_x86_64 -T linker.ld -Map=../bin/kernel.map
 NASM_FORMAT ?= elf64
 ZIG_TARGET ?= x86_64-freestanding
@@ -34,7 +34,6 @@ PIC_O = ../bin/pic_c.o
 HANDLERS_O = ../bin/handlers_c.o
 PANIC_O = ../bin/panic.o
 CONSOLE_O = ../bin/console.o
-MEMORY_O = ../bin/memory.o
 PATA_O = ../bin/pata.o
 DISK_O = ../bin/disk.o
 RAMDISK_O = ../bin/ramdisk.o
@@ -58,7 +57,12 @@ DRM_KMS_CONSOLE_O = ../bin/drm_kms_console.o
 DRM_RAPI_O = ../bin/drm_rapi.o
 TIMER_O = ../bin/timer.o
 STDLIB_O = ../bin/stdlib.o
-MMU_O = ../bin/mmu.o
+KMEM_O = ../bin/kmem.o
+UMA_O = ../bin/uma.o
+PMAP_O = ../bin/pmap.o
+VM_PAGE_O = ../bin/vm_page.o
+VM_MAP_O = ../bin/vm_map.o
+VM_OBJECT_O = ../bin/vm_object.o
 WRITE_O = ../bin/write.o
 READ_O = ../bin/read.o
 OPEN_O = ../bin/open.o
@@ -66,7 +70,7 @@ CLOSE_O = ../bin/close.o
 LSEEK_O = ../bin/lseek.o
 WAIT_O = ../bin/wait.o
 MMAP_O = ../bin/mmap.o
-VMA_O = ../bin/vma.o
+
 PIPE_O = ../bin/pipe.o
 CLONE_O = ../bin/clone.o
 SYSCALL_O = ../bin/syscall.o
@@ -115,7 +119,7 @@ CRYPTO_PBKDF2_O = ../bin/crypto_pbkdf2.o
 CRYPTO_RNG_O = ../bin/crypto_rng.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(MEMORY_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(DRM_KMS_CONSOLE_O) $(DRM_RAPI_O) $(TIMER_O) $(STDLIB_O) $(MMU_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(VMA_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
+      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(DRM_KMS_CONSOLE_O) $(DRM_RAPI_O) $(TIMER_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(UNAME_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
@@ -266,10 +270,6 @@ $(CONSOLE_O): kernel/console.c kernel/console.h kernel/drivers/tty.h kernel/driv
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(MEMORY_O): mlibc/memory.c
-	@echo "  CC      $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-
 $(PATA_O): kernel/drivers/disk/pata/pata.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
@@ -354,7 +354,27 @@ $(STDLIB_O): mlibc/stdlib.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(MMU_O): kernel/mmu.c
+$(KMEM_O): kernel/mm/kmem.c kernel/mm/kmem.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(UMA_O): kernel/mm/uma.c kernel/mm/uma.h kernel/mm/kmem.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(PMAP_O): kernel/mm/vm/pmap.c kernel/mm/vm/pmap.h kernel/mm/kmem.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(VM_PAGE_O): kernel/mm/vm/vm_page.c kernel/mm/vm/vm_page.h kernel/mm/kmem.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(VM_MAP_O): kernel/mm/vm/vm_map.c kernel/mm/vm/vm_map.h kernel/process.h kernel/api/api.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(VM_OBJECT_O): kernel/mm/vm/vm_object.c kernel/mm/vm/vm_object.h kernel/mm/kmem.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -386,11 +406,7 @@ $(WAIT_O): kernel/api/wait.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(MMAP_O): kernel/api/mmap.c kernel/api/api.h kernel/vma.h kernel/drivers/video/drm/gem.h
-	@echo "  CC      $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-
-$(VMA_O): kernel/vma.c kernel/vma.h kernel/process.h
+$(MMAP_O): kernel/api/mmap.c kernel/api/api.h kernel/mm/vm/vm_map.h kernel/drivers/video/drm/gem.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -446,7 +462,7 @@ $(USERADDR_O): kernel/useraddr.c kernel/useraddr.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(SCHEDULER_O): kernel/scheduler.c kernel/scheduler.h kernel/process.h kernel/mmu.h kernel/gdt.h kernel/interrupts/idt.h
+$(SCHEDULER_O): kernel/scheduler.c kernel/scheduler.h kernel/process.h kernel/mm/vm/pmap.h kernel/gdt.h kernel/interrupts/idt.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -454,7 +470,7 @@ $(ELF_O): userland/elf.zig
 	@echo "  ZIG     $<"
 	@$(ZIG) build-obj -femit-bin=$@ -target $(ZIG_TARGET) -mcmodel=kernel -O ReleaseSafe --dep panic -Melf=userland/elf.zig -Mpanic=kernel/panic.zig
 
-$(USERSPACE_O): userland/userspace.c userland/userspace.h kernel/process.h kernel/mmu.h kernel/gdt.h
+$(USERSPACE_O): userland/userspace.c userland/userspace.h kernel/process.h kernel/mm/vm/pmap.h kernel/gdt.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

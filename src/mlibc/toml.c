@@ -25,12 +25,11 @@
  */
 
 #include <mlibc/toml.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 
 toml_doc_t *toml_new(void) {
-  toml_doc_t *doc = (toml_doc_t *)kcalloc(1, sizeof(toml_doc_t));
+  toml_doc_t *doc = (toml_doc_t *)kmem_calloc(1, sizeof(toml_doc_t));
   return doc;
 }
 
@@ -52,32 +51,32 @@ void toml_set(toml_doc_t *doc, const char *section, const char *key,
 
   toml_entry_t *existing = toml_find_entry(doc, section, key);
   if (existing) {
-    if (existing->value) kfree(existing->value);
+    if (existing->value) kmem_free(existing->value);
     existing->value = NULL;
     if (value) {
       int vlen = strlen(value);
-      existing->value = (char *)kcalloc(vlen + 1, 1);
+      existing->value = (char *)kmem_calloc(vlen + 1, 1);
       if (existing->value) memcpy(existing->value, value, vlen);
     }
     return;
   }
 
-  toml_entry_t *e = (toml_entry_t *)kcalloc(1, sizeof(toml_entry_t));
+  toml_entry_t *e = (toml_entry_t *)kmem_calloc(1, sizeof(toml_entry_t));
   if (!e) return;
 
   int klen = strlen(key);
-  e->key = (char *)kcalloc(klen + 1, 1);
+  e->key = (char *)kmem_calloc(klen + 1, 1);
   if (e->key) memcpy(e->key, key, klen);
 
   if (section && section[0]) {
     int slen = strlen(section);
-    e->section = (char *)kcalloc(slen + 1, 1);
+    e->section = (char *)kmem_calloc(slen + 1, 1);
     if (e->section) memcpy(e->section, section, slen);
   }
 
   if (value) {
     int vlen = strlen(value);
-    e->value = (char *)kcalloc(vlen + 1, 1);
+    e->value = (char *)kmem_calloc(vlen + 1, 1);
     if (e->value) memcpy(e->value, value, vlen);
   }
 
@@ -111,8 +110,8 @@ static int toml_parse_line(toml_doc_t *doc, const char *line, u32 len,
     int sec_len = (int)(p - sec_start);
     if (sec_len <= 0) return -1;
 
-    if (*current_section) kfree((void *)*current_section);
-    char *sec = (char *)kcalloc(sec_len + 1, 1);
+    if (*current_section) kmem_free((void *)*current_section);
+    char *sec = (char *)kmem_calloc(sec_len + 1, 1);
     if (!sec) return -1;
     memcpy(sec, sec_start, sec_len);
     *current_section = sec;
@@ -129,13 +128,13 @@ static int toml_parse_line(toml_doc_t *doc, const char *line, u32 len,
   p++;
   skip_whitespace(&p, end);
 
-  char *key = (char *)kcalloc(key_len + 1, 1);
+  char *key = (char *)kmem_calloc(key_len + 1, 1);
   if (!key) return -1;
   memcpy(key, key_start, key_len);
 
   if (p >= end) {
     toml_set(doc, *current_section, key, "");
-    kfree(key);
+    kmem_free(key);
     return 0;
   }
 
@@ -144,29 +143,29 @@ static int toml_parse_line(toml_doc_t *doc, const char *line, u32 len,
     const char *val_start = p;
     while (p < end && *p != '"') p++;
     int val_len = (int)(p - val_start);
-    char *val = (char *)kcalloc(val_len + 1, 1);
+    char *val = (char *)kmem_calloc(val_len + 1, 1);
     if (val) {
       memcpy(val, val_start, val_len);
       toml_set(doc, *current_section, key, val);
-      kfree(val);
+      kmem_free(val);
     }
   } else {
     const char *val_start = p;
     while (p < end && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n' && *p != '#') p++;
     int val_len = (int)(p - val_start);
     if (val_len > 0) {
-      char *val = (char *)kcalloc(val_len + 1, 1);
+      char *val = (char *)kmem_calloc(val_len + 1, 1);
       if (val) {
         memcpy(val, val_start, val_len);
         toml_set(doc, *current_section, key, val);
-        kfree(val);
+        kmem_free(val);
       }
     } else {
       toml_set(doc, *current_section, key, "");
     }
   }
 
-  kfree(key);
+  kmem_free(key);
   return 0;
 }
 
@@ -187,7 +186,7 @@ toml_doc_t *toml_parse(const char *data, u32 len) {
     }
   }
 
-  if (current_section) kfree(current_section);
+  if (current_section) kmem_free(current_section);
   return doc;
 }
 
@@ -200,18 +199,18 @@ toml_doc_t *toml_parse_file(const char *path) {
   u32 size = entry.size;
   if (size == 0) return toml_new();
 
-  u8 *buf = (u8 *)kcalloc(size + 1, 1);
+  u8 *buf = (u8 *)kmem_calloc(size + 1, 1);
   if (!buf) return NULL;
 
   u32 bytes_read = 0;
   if (chainfs_read_file(path, buf, size, &bytes_read) != 0 || bytes_read != size) {
-    kfree(buf);
+    kmem_free(buf);
     return NULL;
   }
   buf[size] = '\0';
 
   toml_doc_t *doc = toml_parse((const char *)buf, size);
-  kfree(buf);
+  kmem_free(buf);
   return doc;
 }
 
@@ -230,7 +229,7 @@ char *toml_serialize(toml_doc_t *doc) {
 
   const char *last_section = NULL;
   int cap = toml_count_chars(doc);
-  char *out = (char *)kcalloc(cap, 1);
+  char *out = (char *)kmem_calloc(cap, 1);
   if (!out) return NULL;
   int pos = 0;
 
@@ -274,7 +273,7 @@ int toml_save(toml_doc_t *doc, const char *path) {
   if (!data) return -1;
   int len = strlen(data);
   int ret = chainfs_write_file(path, (const u8 *)data, (u32)len);
-  kfree(data);
+  kmem_free(data);
   return ret;
 }
 
@@ -283,11 +282,11 @@ void toml_free(toml_doc_t *doc) {
   toml_entry_t *e = doc->entries;
   while (e) {
     toml_entry_t *next = e->next;
-    if (e->section) kfree(e->section);
-    if (e->key) kfree(e->key);
-    if (e->value) kfree(e->value);
-    kfree(e);
+    if (e->section) kmem_free(e->section);
+    if (e->key) kmem_free(e->key);
+    if (e->value) kmem_free(e->value);
+    kmem_free(e);
     e = next;
   }
-  kfree(doc);
+  kmem_free(doc);
 }

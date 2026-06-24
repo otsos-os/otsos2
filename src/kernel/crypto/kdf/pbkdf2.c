@@ -83,7 +83,7 @@ int pbkdf2_verify(const u8 *password, u32 password_len,
   if (!password || !salt || !expected || iterations == 0 || expected_len == 0)
     return -1;
 
-  u8 *derived = (u8 *)kcalloc(expected_len, 1);
+  u8 *derived = (u8 *)kmem_calloc(expected_len, 1);
   if (!derived) return -1;
 
   pbkdf2_hmac_sha256(password, password_len,
@@ -94,7 +94,7 @@ int pbkdf2_verify(const u8 *password, u32 password_len,
   int result = crypto_constant_time_compare(derived, expected, expected_len);
 
   crypto_secure_wipe(derived, expected_len);
-  kfree(derived);
+  kmem_free(derived);
 
   return result;
 }

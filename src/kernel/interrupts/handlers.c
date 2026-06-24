@@ -31,7 +31,7 @@
 #include <kernel/drivers/tty.h>
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/interrupts/idt.h>
-#include <kernel/mmu.h>
+#include <mm/vm/pmap.h>
 #include <kernel/scheduler.h>
 #include <mlibc/mlibc.h>
 
@@ -76,7 +76,7 @@ void isr_handler(registers_t *regs) {
         com1_printf("[KERNEL] Segmentation Fault\n");
         com1_printf("[KERNEL] Page Fault: CR2=%p ERR=0x%x\n", (void *)cr2,
                     (unsigned)regs->err_code);
-        u64 pte_flags = mmu_get_pte_flags(cr2);
+        u64 pte_flags = pmap_extract_flags(cr2);
         com1_printf("[KERNEL] CR2 PTE flags: %p\n", (void *)pte_flags);
       } else if (regs->int_no == 6) {
         printf("\033[31m[KERNEL] Invalid Opcode\033[0m\n");

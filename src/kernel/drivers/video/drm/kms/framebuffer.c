@@ -22,7 +22,7 @@ drm_id_t drm_framebuffer_create(drm_handle_t gem, u32 width, u32 height,
   }
 
   drm_framebuffer_t *fb =
-      (drm_framebuffer_t *)kcalloc(sizeof(drm_framebuffer_t), 1);
+      (drm_framebuffer_t *)kmem_calloc(sizeof(drm_framebuffer_t), 1);
   if (!fb) {
     return DRM_ID_NONE;
   }
@@ -36,7 +36,7 @@ drm_id_t drm_framebuffer_create(drm_handle_t gem, u32 width, u32 height,
   drm_id_t id = drm_object_register(DRM_OBJECT_FRAMEBUFFER, fb);
   if (id == DRM_ID_NONE) {
     buf->refcount--;
-    kfree(fb);
+    kmem_free(fb);
     return DRM_ID_NONE;
   }
   fb->id = id;
@@ -60,6 +60,6 @@ int drm_framebuffer_destroy(drm_id_t id) {
     fb->gem->refcount--;
   }
   drm_object_unregister(id);
-  kfree(fb);
+  kmem_free(fb);
   return DRM_OK;
 }

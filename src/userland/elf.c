@@ -52,9 +52,9 @@
 
 
 
-#include <kernel/mmu.h>
+#include <mm/vm/pmap.h>
 #include <lib/com1.h>
-#include <mlibc/memory.h>
+#include <mm/kmem.h>
 #include <userland/elf.h>
 
 const char *elf_strerror(elf_result_t result) {
@@ -197,9 +197,9 @@ u64 elf_load(void *data, u64 size) {
     u64 page_end = (vaddr + memsz + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
 
     for (u64 page = page_start; page < page_end; page += PAGE_SIZE) {
-      u64 existing_phys = mmu_virt_to_phys(page);
+      u64 existing_phys = pmap_extract(page);
       if (existing_phys != 0) {
-        u64 existing_flags = mmu_get_pte_flags(page);
+        u64 existing_flags = pmap_extract_flags(page);
         if (existing_flags & PTE_USER) {
           u64 combined_flags =
               (existing_flags | page_flags | PTE_USER | PTE_PRESENT);
@@ -207,13 +207,13 @@ u64 elf_load(void *data, u64 size) {
           if (exec) {
             combined_flags &= ~PTE_NX;
           }
-          mmu_map_page(page, existing_phys, combined_flags);
+          pmap_enter(page, existing_phys, combined_flags);
           continue;
         }
       }
 
       /* Allocate physical page */
-      void *phys_page = kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+      void *phys_page = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
       if (!phys_page) {
         com1_printf("[ELF] Error: Failed to allocate page at %p\n",
                     (void *)page);
@@ -222,7 +222,7 @@ u64 elf_load(void *data, u64 size) {
       memset(phys_page, 0, PAGE_SIZE);
 
       /* Map virtual to physical */
-      mmu_map_page(page, (u64)phys_page, page_flags);
+      pmap_enter(page, (u64)phys_page, page_flags);
     }
 
     /* Copy segment data */
@@ -240,11 +240,11 @@ u64 elf_load(void *data, u64 size) {
     }
 
     for (u64 page = page_start; page < page_end; page += PAGE_SIZE) {
-      u64 phys = mmu_virt_to_phys(page);
+      u64 phys = pmap_extract(page);
       if (phys == 0) {
         continue;
       }
-      u64 existing_flags = mmu_get_pte_flags(page);
+      u64 existing_flags = pmap_extract_flags(page);
      
       u64 combined_flags =
           existing_flags | (page_flags & (PTE_PRESENT | PTE_USER | PTE_RW));
@@ -254,7 +254,7 @@ u64 elf_load(void *data, u64 size) {
       } else {
         combined_flags |= PTE_NX;
       }
-      mmu_map_page(page, phys, combined_flags);
+      pmap_enter(page, phys, combined_flags);
     }
   }
 

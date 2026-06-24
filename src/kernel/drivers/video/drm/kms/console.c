@@ -12,7 +12,6 @@
 #include <drm/kms/plane.h>
 #include <drm/rapi/rapi.h>
 #include <lib/com1.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
 #define FONT_W 8

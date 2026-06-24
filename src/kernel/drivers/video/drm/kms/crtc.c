@@ -7,7 +7,6 @@
 #include <drm/kms/crtc.h>
 #include <drm/kms/plane.h>
 #include <drm/kms/connector.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
 static drm_crtc_t g_primary_crtc;
@@ -32,13 +31,13 @@ u8 drm_crtc_get_bpp(void) { return g_mode_bpp; }
 u64 drm_crtc_get_hw_address(void) { return g_hw_address; }
 
 drm_id_t drm_crtc_create(void) {
-  drm_crtc_t *c = (drm_crtc_t *)kcalloc(sizeof(drm_crtc_t), 1);
+  drm_crtc_t *c = (drm_crtc_t *)kmem_calloc(sizeof(drm_crtc_t), 1);
   if (!c) {
     return DRM_ID_NONE;
   }
   drm_id_t id = drm_object_register(DRM_OBJECT_CRTC, c);
   if (id == DRM_ID_NONE) {
-    kfree(c);
+    kmem_free(c);
     return DRM_ID_NONE;
   }
   c->id = id;

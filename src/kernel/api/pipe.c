@@ -27,7 +27,7 @@
 #include <kernel/api/api.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
-#include <mlibc/memory.h>
+#include <mm/kmem.h>
 
 static int api_find_free_handle(void) {
   api_handle_t *handles = api_get_handle_table();
@@ -121,7 +121,7 @@ int api_data_pipe(int handles_out[2]) {
     return of_write;
   }
 
-  pipe_t *p = (pipe_t *)kmalloc(sizeof(pipe_t));
+  pipe_t *p = (pipe_t *)kmem_alloc(sizeof(pipe_t));
   if (!p) {
     api_release_object(of_read);
     api_release_object(of_write);

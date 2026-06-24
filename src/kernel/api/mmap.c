@@ -5,12 +5,11 @@
 #include <kernel/api/api.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/video/drm/gem.h>
-#include <kernel/mmu.h>
+#include <mm/vm/pmap.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
-#include <kernel/vma.h>
+#include <mm/vm/vm_map.h>
 #include <lib/com1.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
 #define PAGE_SIZE 4096
@@ -55,7 +54,7 @@ static u64 mmap_gem(process_t *proc, u32 gem_handle, u64 length, u32 prot,
       return (u64)(-API_ERR_BAD_VALUE);
     }
   } else {
-    addr = vma_find_free(proc, aligned);
+    addr = vm_map_find_free(proc, aligned);
     if (!addr) {
       return (u64)(-API_ERR_NO_MEMORY);
     }
@@ -64,16 +63,16 @@ static u64 mmap_gem(process_t *proc, u32 gem_handle, u64 length, u32 prot,
   u64 pflags = page_flags_for_prot(prot);
 
   /* Map each page of the GEM buffer into the process VA. The GEM buffer
-   * was allocated with kmalloc_aligned(4096), so its physical pages are
+   * was allocated with kmem_alloc_aligned(4096), so its physical pages are
    * contiguous and page-aligned. */
   u64 phys_base = (u64)buf->data;
   for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
-    mmu_map_page(addr + off, phys_base + off, pflags);
+    pmap_enter(addr + off, phys_base + off, pflags);
   }
 
-  if (vma_add(proc, addr, addr + aligned, prot, flags, gem_handle) != 0) {
+  if (vm_map_insert(proc, addr, addr + aligned, prot, flags, gem_handle) != 0) {
     for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
-      mmu_unmap_page(addr + off);
+      pmap_remove(addr + off);
     }
     return (u64)(-API_ERR_NO_MEMORY);
   }
@@ -91,7 +90,7 @@ static u64 mmap_anon(process_t *proc, u64 length, u32 prot, u32 flags,
       return (u64)(-API_ERR_BAD_VALUE);
     }
   } else {
-    addr = vma_find_free(proc, aligned);
+    addr = vm_map_find_free(proc, aligned);
     if (!addr) {
       return (u64)(-API_ERR_NO_MEMORY);
     }
@@ -100,23 +99,23 @@ static u64 mmap_anon(process_t *proc, u64 length, u32 prot, u32 flags,
   u64 pflags = page_flags_for_prot(prot);
 
   for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
-    void *page = kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+    void *page = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
     if (!page) {
       for (u64 rollback = 0; rollback < off; rollback += PAGE_SIZE) {
-        mmu_unmap_page(addr + rollback);
+        pmap_remove(addr + rollback);
         /* Pages were identity-mapped, so phys == virt. */
-        kfree((void *)(addr + rollback));
+        kmem_free((void *)(addr + rollback));
       }
       return (u64)(-API_ERR_NO_MEMORY);
     }
     memset(page, 0, PAGE_SIZE);
-    mmu_map_page(addr + off, (u64)page, pflags);
+    pmap_enter(addr + off, (u64)page, pflags);
   }
 
-  if (vma_add(proc, addr, addr + aligned, prot, flags, 0) != 0) {
+  if (vm_map_insert(proc, addr, addr + aligned, prot, flags, 0) != 0) {
     for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
-      mmu_unmap_page(addr + off);
-      kfree((void *)(addr + off));
+      pmap_remove(addr + off);
+      kmem_free((void *)(addr + off));
     }
     return (u64)(-API_ERR_NO_MEMORY);
   }
@@ -156,7 +155,7 @@ static u64 mmap_file(process_t *proc, u64 length, u32 prot, u32 flags,
       return (u64)(-API_ERR_BAD_VALUE);
     }
   } else {
-    addr = vma_find_free(proc, aligned);
+    addr = vm_map_find_free(proc, aligned);
     if (!addr) {
       return (u64)(-API_ERR_NO_MEMORY);
     }
@@ -165,11 +164,11 @@ static u64 mmap_file(process_t *proc, u64 length, u32 prot, u32 flags,
   u64 pflags = page_flags_for_prot(prot);
 
   for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
-    void *page = kmalloc_aligned(PAGE_SIZE, PAGE_SIZE);
+    void *page = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
     if (!page) {
       for (u64 rollback = 0; rollback < off; rollback += PAGE_SIZE) {
-        mmu_unmap_page(addr + rollback);
-        kfree((void *)(addr + rollback));
+        pmap_remove(addr + rollback);
+        kmem_free((void *)(addr + rollback));
       }
       return (u64)(-API_ERR_NO_MEMORY);
     }
@@ -184,13 +183,13 @@ static u64 mmap_file(process_t *proc, u64 length, u32 prot, u32 flags,
                               (u32)file_off, &bytes_read);
     }
 
-    mmu_map_page(addr + off, (u64)page, pflags);
+    pmap_enter(addr + off, (u64)page, pflags);
   }
 
-  if (vma_add(proc, addr, addr + aligned, prot, flags, 0) != 0) {
+  if (vm_map_insert(proc, addr, addr + aligned, prot, flags, 0) != 0) {
     for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
-      mmu_unmap_page(addr + off);
-      kfree((void *)(addr + off));
+      pmap_remove(addr + off);
+      kmem_free((void *)(addr + off));
     }
     return (u64)(-API_ERR_NO_MEMORY);
   }
@@ -246,7 +245,7 @@ int api_mem_unmap(void *addr, u64 length) {
     return -API_ERR_BAD_ADDR;
   }
 
-  vma_t *vma = vma_find(proc, vaddr);
+  vma_t *vma = vm_map_lookup(proc, vaddr);
   if (!vma) {
     return -API_ERR_NOT_FOUND;
   }
@@ -259,14 +258,14 @@ int api_mem_unmap(void *addr, u64 length) {
   for (u64 off = 0; off < aligned && vaddr + off < vma->end; off += PAGE_SIZE) {
     u64 va = vaddr + off;
     if (!(vma->flags & API_MAP_GEM)) {
-      u64 phys = mmu_virt_to_phys(va);
+      u64 phys = pmap_extract(va);
       if (phys) {
-        kfree((void *)phys);
+        kmem_free((void *)phys);
       }
     }
-    mmu_unmap_page(va);
+    pmap_remove(va);
   }
 
-  vma_remove(proc, vaddr);
+  vm_map_remove(proc, vaddr);
   return 0;
 }

@@ -5,9 +5,8 @@
 #include <drm/drm.h>
 #include <drm/fbdev.h>
 #include <drm/kms/crtc.h>
-#include <kernel/mmu.h>
+#include <mm/vm/pmap.h>
 #include <lib/com1.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
 #define PAGE_SIZE 4096
@@ -33,7 +32,7 @@ static int fbdev_probe(const void *boot_info) {
 static void fbdev_map_hw(u64 addr, u64 size) {
   u64 pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
   for (u64 i = 0; i < pages; i++) {
-    mmu_map_page(addr + i * PAGE_SIZE, addr + i * PAGE_SIZE,
+    pmap_enter(addr + i * PAGE_SIZE, addr + i * PAGE_SIZE,
                  PTE_PRESENT | PTE_RW);
   }
 }

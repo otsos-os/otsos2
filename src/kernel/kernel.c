@@ -38,7 +38,8 @@
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/console.h>
-#include <kernel/mmu.h>
+#include <mm/vm/pmap.h>
+#include <mm/mm.h>
 #include <kernel/multiboot.h>
 #include <kernel/multiboot2.h>
 #include <kernel/panic.h>
@@ -237,10 +238,12 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
 
   com1_init();
   com1_set_mirror_callback(tty_com1_mirror);
-  init_heap();
+  kmem_init();
   init_idt();
   timer_init(1000);
-  mmu_init();
+  pmap_init();
+  vm_object_init();
+  uma_init();
   enable_sse();
   __asm__ volatile("sti");
 
@@ -254,7 +257,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   // kernel/bootstack)
   ramdisk_init((void *)0x4000000, 4 * 1024 * 1024);
 
-  mmu_clear_user_range((u64)&start, (u64)&kernel_end);
+  pmap_clear_user_range((u64)&start, (u64)&kernel_end);
 
   boot_magic = (u32)magic;
 
@@ -340,10 +343,10 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
     power_acpi_enable();
   }
 
-  int heap_ok = kheap_is_initialized() && kget_free_memory() > 0;
+  int heap_ok = kmem_is_initialized() && kmem_free_bytes() > 0;
   int idt_ok = idt_is_loaded();
   int timer_ok = timer_sanity_check();
-  int mmu_ok = mmu_is_initialized() && mmu_read_cr3() != 0;
+  int pmap_ok = pmap_is_initialized() && pmap_get_cr3() != 0;
   int syscall_ok = syscall_is_initialized();
   int disk_ok = disk_manager_is_initialized();
   int pata_ok = disk_has_type(DISK_TYPE_PATA);
@@ -355,10 +358,10 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   int pci_ok = pci_is_initialized();
   int watchdog_ok = watchdog_is_initialized() && watchdog_device_count() > 0;
 
-  status_line("heap", heap_ok);
+  status_line("kmem heap", heap_ok);
   status_line("idt", idt_ok);
   status_line("timer", timer_ok);
-  status_line("mmu", mmu_ok);
+  status_line("pmap", pmap_ok);
   status_line("syscall", syscall_ok);
   status_line("disk manager", disk_ok);
   status_line("pata identify", pata_ok);

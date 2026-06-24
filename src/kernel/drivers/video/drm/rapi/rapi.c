@@ -4,7 +4,6 @@
 
 #include <drm/drm.h>
 #include <drm/rapi/rapi.h>
-#include <mlibc/memory.h>
 #include <mlibc/mlibc.h>
 
 static inline void store_pixel(u8 *base, u32 pitch, u8 bpp, u32 x, u32 y,

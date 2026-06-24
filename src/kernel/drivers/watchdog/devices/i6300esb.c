@@ -25,7 +25,7 @@
  */
 
 #include <kernel/drivers/watchdog/watchdog.h>
-#include <kernel/mmu.h>
+#include <mm/vm/pmap.h>
 #include <kernel/pci/utils/bar.h>
 #include <kernel/pci/utils/io.h>
 #include <lib/com1.h>
@@ -57,7 +57,7 @@ static void i6300esb_mmio_map(u64 base, u64 size) {
   u64 end = (base + size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
 
   for (u64 addr = start; addr < end; addr += PAGE_SIZE) {
-    mmu_map_page(addr, addr, PTE_RW | PTE_PCD | PTE_PWT);
+    pmap_enter(addr, addr, PTE_RW | PTE_PCD | PTE_PWT);
   }
 }
 

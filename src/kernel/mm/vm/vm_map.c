@@ -2,9 +2,9 @@
  * Copyright (c) 2026, otsos team
  */
 
-#include <kernel/vma.h>
+#include <mm/vm/vm_map.h>
 #include <kernel/api/api.h>
-#include <mlibc/memory.h>
+#include <mm/kmem.h>
 #include <mlibc/mlibc.h>
 
 #define PAGE_SIZE 4096
@@ -13,7 +13,7 @@ static u64 align_up(u64 val, u64 align) {
   return (val + align - 1) & ~(align - 1);
 }
 
-u64 vma_find_free(process_t *proc, u64 length) {
+u64 vm_map_find_free(process_t *proc, u64 length) {
   u64 aligned = align_up(length, PAGE_SIZE);
   if (aligned == 0) return 0;
 
@@ -69,9 +69,9 @@ u64 vma_find_free(process_t *proc, u64 length) {
   return 0;
 }
 
-int vma_add(process_t *proc, u64 start, u64 end, u32 prot, u32 flags,
+int vm_map_insert(process_t *proc, u64 start, u64 end, u32 prot, u32 flags,
             u32 gem_handle) {
-  vma_t *vma = (vma_t *)kcalloc(sizeof(vma_t), 1);
+  vma_t *vma = (vma_t *)kmem_calloc(sizeof(vma_t), 1);
   if (!vma) return -1;
 
   vma->start = start;
@@ -91,13 +91,13 @@ int vma_add(process_t *proc, u64 start, u64 end, u32 prot, u32 flags,
   return 0;
 }
 
-int vma_remove(process_t *proc, u64 addr) {
+int vm_map_remove(process_t *proc, u64 addr) {
   vma_t **pp = &proc->vma_list;
   while (*pp) {
     if (addr >= (*pp)->start && addr < (*pp)->end) {
       vma_t *v = *pp;
       *pp = v->next;
-      kfree(v);
+      kmem_free(v);
       return 0;
     }
     pp = &(*pp)->next;
@@ -105,7 +105,7 @@ int vma_remove(process_t *proc, u64 addr) {
   return -1;
 }
 
-vma_t *vma_find(process_t *proc, u64 addr) {
+vma_t *vm_map_lookup(process_t *proc, u64 addr) {
   for (vma_t *v = proc->vma_list; v; v = v->next) {
     if (addr >= v->start && addr < v->end) {
       return v;
@@ -114,24 +114,24 @@ vma_t *vma_find(process_t *proc, u64 addr) {
   return NULL;
 }
 
-void vma_free_all(process_t *proc) {
+void vm_map_free_all(process_t *proc) {
   vma_t *v = proc->vma_list;
   while (v) {
     vma_t *next = v->next;
-    kfree(v);
+    kmem_free(v);
     v = next;
   }
   proc->vma_list = NULL;
 }
 
-int vma_copy(process_t *dst, const process_t *src) {
+int vm_map_copy(process_t *dst, const process_t *src) {
   dst->vma_list = NULL;
   vma_t **tail = &dst->vma_list;
 
   for (vma_t *v = src->vma_list; v; v = v->next) {
-    vma_t *copy = (vma_t *)kcalloc(sizeof(vma_t), 1);
+    vma_t *copy = (vma_t *)kmem_calloc(sizeof(vma_t), 1);
     if (!copy) {
-      vma_free_all(dst);
+      vm_map_free_all(dst);
       return -1;
     }
     copy->start = v->start;
