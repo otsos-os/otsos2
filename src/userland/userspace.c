@@ -28,6 +28,7 @@
 #include <kernel/gdt.h>
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_page.h>
+#include <kernel/api/posix/posix.h>
 #include <kernel/process.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
@@ -185,6 +186,8 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   new_proc->owns_address_space = 1;
   new_proc->mmap_base = MMAP_BASE;
   api_init_process(new_proc);
+  posix_init_process(new_proc);
+  new_proc->personality = PERSONALITY_OTSOS;
   new_proc->next = NULL;
 
   new_proc->state = PROC_STATE_RUNNABLE;

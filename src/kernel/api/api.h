@@ -309,5 +309,7 @@ api_handle_t *api_get_handle_table(void);
 api_object_t *api_get_object_table(void);
 int api_alloc_object(void);
 void api_release_object(int index);
+int api_proc_getpid(void);
+int api_proc_getppid(void);
 
 #endif

@@ -27,10 +27,12 @@
 #include <kernel/gdt.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/api/api.h>
+#include <kernel/api/posix/posix.h>
 #include <kernel/event/event.h>
 #include <kernel/process.h>
 #include <kernel/syscall.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/drivers/fs/vfs/vfs.h>
 #include <lib/com1.h>
 #include <mm/vm/pmap.h>
 
@@ -100,6 +102,31 @@ void syscall_handler(registers_t *regs) {
   u64 arg1 = regs->rdi;
   u64 arg2 = regs->rsi;
   u64 arg3 = regs->rdx;
+
+  if (syscall_number == CALL_PERSONALITY) {
+    process_t *proc = process_current();
+    if (!proc) {
+      regs->rax = (u64)(-API_ERR_BAD_VALUE);
+      return;
+    }
+    u64 old_personality = (u64)proc->personality;
+    u64 new_personality = arg1;
+    if (new_personality <= 1) {
+      proc->personality = (int)new_personality;
+      com1_printf("[SYSCALL] PID %d personality: %d -> %d\n",
+                  proc->pid, (int)old_personality,
+                  (int)new_personality);
+    }
+    regs->rax = old_personality;
+    return;
+  }
+
+  process_t *cur_proc = process_current();
+  if (cur_proc && cur_proc->personality == PERSONALITY_POSIX) {
+    posix_signal_deliver(cur_proc, regs);
+    posix_syscall_handler(regs);
+    return;
+  }
 
   switch (syscall_number) {
   case CALL_TERM_READ:
@@ -204,6 +231,12 @@ void syscall_handler(registers_t *regs) {
   }
   case CALL_EVENT_CLOSE:
     regs->rax = (u64)kqueue_destroy((int)arg1);
+    break;
+  case CALL_PROC_GETPID:
+    regs->rax = (u64)api_proc_getpid();
+    break;
+  case CALL_PROC_GETPPID:
+    regs->rax = (u64)api_proc_getppid();
     break;
   default:
     com1_printf("Unknown syscall: %d\n", syscall_number);

@@ -34,6 +34,8 @@
 #include <lib/com1.h>
 #include <mm/kmem.h>
 
+#include <kernel/api/posix/posix.h>
+
 process_t process_table[MAX_PROCESSES];
 u32 next_pid = 1;
 static process_t *current_process = NULL;
@@ -100,6 +102,8 @@ process_t *process_create_kernel(const char *name, void (*entry)(void)) {
   proc->owns_address_space = 0;
   proc->mmap_base = MMAP_BASE;
   api_init_process(proc);
+  posix_init_process(proc);
+  proc->personality = PERSONALITY_OTSOS;
   proc->next = NULL;
 
   proc->state = PROC_STATE_RUNNABLE;
@@ -151,6 +155,24 @@ void process_exit(int code) {
   com1_printf("[PROC] Process '%s' (PID %d) exited with code %d\n",
               current_process->name, current_process->pid, code);
 
+  if (current_process->pid == 1) {
+    panic("Init process terminated! (PID 1 exited with code %d)", code);
+  }
+
+  current_process->exit_code = code;
+  current_process->state = PROC_STATE_ZOMBIE;
+  api_release_handles(current_process);
+  posix_cleanup_process(current_process);
+  if (current_process->owns_address_space) {
+    u64 old_cr3 = current_process->cr3;
+    vm_map_free_all(current_process);
+    pmap_load(pmap_kernel_cr3());
+    pmap_destroy(old_cr3);
+    current_process->cr3 = 0;
+    current_process->owns_address_space = 0;
+  }
+  current_process->mmap_base = MMAP_BASE;
+
   event_notify_proc_exit(current_process->pid, code);
   event_cleanup_process(current_process);
 
@@ -161,23 +183,6 @@ void process_exit(int code) {
       proc_wakeup((void *)parent);
     }
   }
-
-  if (current_process->pid == 1) {
-    panic("Init process terminated! (PID 1 exited with code %d)", code);
-  }
-
-  current_process->exit_code = code;
-  current_process->state = PROC_STATE_ZOMBIE;
-  api_release_handles(current_process);
-  if (current_process->owns_address_space) {
-    u64 old_cr3 = current_process->cr3;
-    vm_map_free_all(current_process);
-    pmap_load(pmap_kernel_cr3());
-    pmap_destroy(old_cr3);
-    current_process->cr3 = 0;
-    current_process->owns_address_space = 0;
-  }
-  current_process->mmap_base = MMAP_BASE;
 
   __asm__ volatile("sti");
   while (1) {
@@ -256,6 +261,7 @@ int process_kill(u32 pid) {
   }
 
   api_release_handles(proc);
+  posix_cleanup_process(proc);
   if (proc->owns_address_space) {
     u64 old_cr3 = pmap_get_cr3();
     pmap_load(proc->cr3);

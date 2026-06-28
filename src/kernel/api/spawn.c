@@ -29,6 +29,9 @@
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_page.h>
 #include <kernel/api/api.h>
+#include <kernel/api/posix/posix.h>
+#include <kernel/drivers/fs/vfs/vfs.h>
+#include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
@@ -458,6 +461,10 @@ int api_proc_spawn(const char *path, const char *const *argv,
    * if it needs elevated access (e.g. to display anything on screen). */
   child->kusr_auth = 0;
   api_copy_handles(child, parent);
+  posix_init_process(child);
+  posix_copy_fds(child, parent);
+  child->personality = PERSONALITY_POSIX;
+  posix_setup_stdio(child);
   child->next = NULL;
 
   com1_printf("[SPAWN] Created '%s' (PID %d) from '%s'\n", child->name,

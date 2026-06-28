@@ -28,9 +28,13 @@
 #define PROCESS_H
 
 #include <kernel/api/api.h>
+#include <kernel/api/posix/posix.h>
 #include <mlibc/mlibc.h>
 
 struct vm_object;
+
+#define PERSONALITY_OTSOS	0
+#define PERSONALITY_POSIX	1
 
 #define MAX_PROCESSES 64
 #define PROCESS_NAME_LEN 32
@@ -103,6 +107,16 @@ typedef struct process {
 
   /* File descriptors */
   api_handle_t handles[MAX_HANDLES];
+
+  /* POSIX personality state */
+  int		personality;
+  posix_fd_t	posix_fds[MAX_POSIX_FDS];
+  posix_sigaction_t	sigaction[MAX_POSIX_SIGS];
+  u64		sigmask;
+  u64		sigpending;
+  cpu_context_t	saved_context;
+  u64		saved_sigmask;
+  u64		brk;
 
   /* Sleep / wait channel for event system */
   void *wait_channel;   /* channel the process is sleeping on, NULL if running */

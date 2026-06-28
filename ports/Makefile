@@ -18,7 +18,10 @@ FETCH_OBJS = fetch.o
 SHELL_BIN = sh
 SHELL_OBJS = shell.o
 
-all: $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN)
+POSIX_HELLO_BIN = posix_hello
+POSIX_HELLO_OBJS = posix_hello.o
+
+all: $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN)
 
 $(YES_BIN): $(YES_OBJS)
 	@echo "  LLD      $@"
@@ -38,11 +41,17 @@ $(SHELL_BIN): $(SHELL_OBJS)
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
+$(POSIX_HELLO_BIN): $(POSIX_HELLO_OBJS)
+	@echo "  LLD      $@"
+	@$(LD) $(LDFLAGS) $(POSIX_HELLO_OBJS) -o $@
+	@echo "  SIZE    $@"
+	@$(SIZE) $@
+
 %.o: %.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN)
+	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN) $(POSIX_HELLO_OBJS) $(POSIX_HELLO_BIN)
 
 .PHONY: all clean

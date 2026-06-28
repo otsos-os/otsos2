@@ -21,6 +21,7 @@ PORTS_DIR = ../ports
 YES_BIN = $(PORTS_DIR)/yes
 FETCH_BIN = $(PORTS_DIR)/fetch
 SHELL_BIN = $(PORTS_DIR)/sh
+POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
 # object files
 BOOT_O = ../bin/boot.o
 KERNEL_O = ../bin/kernel.o
@@ -134,6 +135,16 @@ EVENT_PROC_O = ../bin/event_proc.o
 EVENT_SIGNAL_O = ../bin/event_signal.o
 EVENT_USER_O = ../bin/event_user.o
 
+VFS_O = ../bin/vfs.o
+DEVFS_O = ../bin/devfs.o
+POSIX_O = ../bin/posix.o
+POSIX_IO_O = ../bin/posix_io.o
+POSIX_PROC_O = ../bin/posix_proc.o
+POSIX_FS_O = ../bin/posix_fs.o
+POSIX_MEM_O = ../bin/posix_mem.o
+POSIX_SIGNAL_O = ../bin/posix_signal.o
+PROC_PID_O = ../bin/proc_pid.o
+
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
       $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O) $(VM_PAGER_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(DRM_KMS_CONSOLE_O) $(DRM_RAPI_O) $(TIMER_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
@@ -146,7 +157,11 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(BOOT
       $(CRYPTO_UTIL_O) $(CRYPTO_SHA256_O) $(CRYPTO_HMAC_O) $(CRYPTO_PBKDF2_O) $(CRYPTO_RNG_O) \
       $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O) \
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
-      $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O)
+      $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
+      $(VFS_O) $(DEVFS_O) \
+      $(POSIX_O) $(POSIX_IO_O) $(POSIX_PROC_O) $(POSIX_FS_O) \
+      $(POSIX_MEM_O) $(POSIX_SIGNAL_O) \
+      $(PROC_PID_O)
 
 .PHONY: all ask_version check_build_tools check_run_tools
 
@@ -228,16 +243,22 @@ $(YES_BIN):
 
 .PHONY: $(SHELL_BIN)
 $(SHELL_BIN):
-	@echo "  MAKE    ports/shell"
+	@echo "  MAKE    ports/sh"
 	@$(MAKE) -C $(PORTS_DIR)
 
-$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN)
+.PHONY: $(POSIX_HELLO_BIN)
+$(POSIX_HELLO_BIN):
+	@echo "  MAKE    ports/posix_hello"
+	@$(MAKE) -C $(PORTS_DIR)
+
+$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
 	@cp $(INIT_BIN) $(ISODIR)/boot/init
 	@cp $(YES_BIN) $(ISODIR)/boot/yes
 	@cp $(FETCH_BIN) $(ISODIR)/boot/fetch
 	@cp $(SHELL_BIN) $(ISODIR)/boot/sh
+	@cp $(POSIX_HELLO_BIN) $(ISODIR)/boot/posix_hello
 	@echo 'set timeout=4' > $(ISODIR)/boot/grub/grub.cfg
 	@echo 'set default=0' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo 'insmod all_video' >> $(ISODIR)/boot/grub/grub.cfg
@@ -248,6 +269,7 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 	@echo '    module2 /boot/yes yes' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    module2 /boot/fetch fetch' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    module2 /boot/sh sh' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '    module2 /boot/posix_hello posix_hello' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    boot' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '}' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo "  ISO     $(ISO_IMAGE)"
@@ -658,6 +680,42 @@ $(EVENT_SIGNAL_O): kernel/event/filter_signal.c kernel/event/event.h
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(EVENT_USER_O): kernel/event/filter_user.c kernel/event/event.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(VFS_O): kernel/drivers/fs/vfs/vfs.c kernel/drivers/fs/vfs/vfs.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DEVFS_O): kernel/drivers/fs/devfs/devfs.c kernel/drivers/fs/devfs/devfs.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(POSIX_O): kernel/api/posix/posix.c kernel/api/posix/posix.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(POSIX_IO_O): kernel/api/posix/posix_io.c kernel/api/posix/posix.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(POSIX_PROC_O): kernel/api/posix/posix_proc.c kernel/api/posix/posix.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(POSIX_FS_O): kernel/api/posix/posix_fs.c kernel/api/posix/posix.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(POSIX_MEM_O): kernel/api/posix/posix_mem.c kernel/api/posix/posix.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(POSIX_SIGNAL_O): kernel/api/posix/posix_signal.c kernel/api/posix/posix.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(PROC_PID_O): kernel/api/proc_pid.c kernel/api/api.h kernel/process.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

@@ -65,6 +65,8 @@ $space %export kmain
 #include <kernel/drivers/disk/pata/pata.h>
 #include <kernel/drivers/disk/ramdisk/ramdisk.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/drivers/fs/vfs/vfs.h>
+#include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/power/power.h>
 #include <kernel/drivers/timer.h>
@@ -329,6 +331,8 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 	u32		format_blocks;
 	void		*init_mod, *yes_mod, *fetch_mod, *sh_mod;
 	u32		init_sz, yes_sz, fetch_sz, sh_sz;
+	void		*posix_hello_mod;
+	u32		posix_hello_sz;
 	int		res;
 
 	safe_mode = (boot_option == 1);
@@ -544,11 +548,16 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 			format_blocks =
 			    selected_disk->total_sectors;
 		}
-		fmt_ok = (chainfs_format(format_blocks, 8) == 0);
+		fmt_ok = (chainfs_format(format_blocks, 128) == 0);
 		status_line("chainfs format", fmt_ok);
 		fs_ok = fmt_ok;
 	}
 	status_line("chainfs ready", fs_ok);
+
+	if (fs_ok) {
+		vfs_init();
+		status_line("vfs", vfs_is_initialized());
+	}
 	if (!fs_ok) {
 		com1_printf("[CHAINFS] filesystem unavailable, "
 		    "skipping userspace startup\n");
@@ -569,6 +578,8 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 		fetch_sz = 0;
 		sh_mod = NULL;
 		sh_sz = 0;
+		posix_hello_mod = NULL;
+		posix_hello_sz = 0;
 
 		if (boot_magic ==
 		    MULTIBOOT2_BOOTLOADER_MAGIC) {
@@ -582,6 +593,8 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 			    &fetch_mod, &fetch_sz);
 			mb2_find_module(mboot2_ptr, "sh",
 			    &sh_mod, &sh_sz);
+			mb2_find_module(mboot2_ptr, "posix_hello",
+			    &posix_hello_mod, &posix_hello_sz);
 		}
 
 		api_init();
@@ -626,6 +639,21 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 			} else {
 				com1_printf("[KERNEL] Failed to "
 				    "install /bin/sh from "
+				    "module\n");
+			}
+		}
+
+		if (posix_hello_mod && posix_hello_sz > 0) {
+			res = chainfs_write_file("/bin/posix_hello",
+			    (const u8 *)posix_hello_mod,
+			    posix_hello_sz);
+			if (res == 0) {
+				com1_printf("[KERNEL] Installed "
+				    "/bin/posix_hello from module "
+				    "(%u bytes)\n", posix_hello_sz);
+			} else {
+				com1_printf("[KERNEL] Failed to "
+				    "install /bin/posix_hello from "
 				    "module\n");
 			}
 		}

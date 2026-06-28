@@ -32,6 +32,8 @@
 #include <lib/com1.h>
 #include <mm/kmem.h>
 
+extern void pmap_destroy_page_tables_only(u64 cr3);
+
 int api_proc_wait(int *status) {
   process_t *current = process_current();
   if (!current) {

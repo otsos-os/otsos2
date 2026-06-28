@@ -93,6 +93,7 @@ vm_page_queue_remove(vm_page_t *page)
 
     page->queue_next = NULL;
     page->queue_prev = NULL;
+    page->queue = PQ_NONE;
 }
 
 void
@@ -349,6 +350,20 @@ vm_page_count_free(void)
     for (p = queue_head[PQ_FREE]; p != NULL; p = p->queue_next)
         count++;
     for (p = queue_head[PQ_CACHE]; p != NULL; p = p->queue_next)
+        count++;
+    return count;
+}
+
+u64
+vm_page_queue_count(int qid)
+{
+    u64 count;
+    vm_page_t *p;
+
+    count = 0;
+    if (qid < 0 || qid >= PQ_COUNT)
+        return 0;
+    for (p = queue_head[qid]; p != NULL; p = p->queue_next)
         count++;
     return count;
 }

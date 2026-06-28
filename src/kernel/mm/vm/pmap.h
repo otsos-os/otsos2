@@ -37,6 +37,7 @@ u64  pmap_extract_flags(u64 vaddr);
 u64  pmap_create(void);
 u64  pmap_clone(u64 src_cr3);
 void pmap_destroy(u64 cr3);
+void pmap_destroy_page_tables_only(u64 cr3);
 void pmap_enter_in(u64 *pml4, u64 vaddr, u64 paddr, u64 flags);
 
 u64  pmap_kernel_cr3(void);

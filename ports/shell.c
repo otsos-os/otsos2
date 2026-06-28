@@ -26,6 +26,8 @@
 #define CALL_SYS_MEMINFO 0x501
 #define CALL_SYS_KMEMINFO 0x502
 
+#define CALL_PERSONALITY 0xFFFF
+
 #define API_OPEN_READ   0x0001
 
 /* Kernel error codes (mirror of kernel/api/errno.h).
@@ -947,6 +949,7 @@ static int exec_line(int argc, char **argv) {
 void _start(long argc, char **argv, char **envp) {
   (void)argc;
   (void)argv;
+  syscall1(CALL_PERSONALITY, 0);
   g_envp = envp;
 
   println("otsos2 shell (sh) - type 'help' for commands");

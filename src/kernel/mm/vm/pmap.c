@@ -615,3 +615,37 @@ void pmap_destroy(u64 cr3) {
   }
   pmap_free_phys_page((u64)pml4);
 }
+
+void pmap_destroy_page_tables_only(u64 cr3) {
+  u64 *pml4 = (u64 *)(cr3 & PTE_ADDR_MASK);
+  if (!pml4 || (cr3 & PTE_ADDR_MASK) == (g_kernel_cr3 & PTE_ADDR_MASK)) {
+    return;
+  }
+
+  for (u64 i = 0; i < 512; i++) {
+    u64 pml4e = pml4[i];
+    if (!(pml4e & PTE_PRESENT) || !(pml4e & PTE_USER)) {
+      continue;
+    }
+    u64 *pdpt = (u64 *)(pml4e & PTE_ADDR_MASK);
+    for (u64 j = 0; j < 512; j++) {
+      u64 pdpte = pdpt[j];
+      if (!(pdpte & PTE_PRESENT) || !(pdpte & PTE_USER) ||
+          (pdpte & PTE_HUGE)) {
+        continue;
+      }
+      u64 *pd = (u64 *)(pdpte & PTE_ADDR_MASK);
+      for (u64 k = 0; k < 512; k++) {
+        u64 pde = pd[k];
+        if (!(pde & PTE_PRESENT) || !(pde & PTE_USER) ||
+            (pde & PTE_HUGE)) {
+          continue;
+        }
+        pmap_free_phys_page((u64)(u64 *)(pde & PTE_ADDR_MASK));
+      }
+      pmap_free_phys_page((u64)pd);
+    }
+    pmap_free_phys_page((u64)pdpt);
+  }
+  pmap_free_phys_page((u64)pml4);
+}

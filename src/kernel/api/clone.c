@@ -26,6 +26,7 @@
 
 #include <mm/vm/pmap.h>
 #include <kernel/api/api.h>
+#include <kernel/api/posix/posix.h>
 #include <kernel/process.h>
 #include <mm/vm/vm_map.h>
 #include <mm/kmem.h>
@@ -95,6 +96,7 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
   child->mmap_base = parent->mmap_base;
   vm_map_fork(parent, child);
   api_copy_handles(child, parent);
+  posix_copy_fds(child, parent);
   child->next = NULL;
 
   return (long)child->pid;

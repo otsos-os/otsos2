@@ -1,6 +1,7 @@
 #define CALL_TERM_WRITE 0x101
 #define CALL_PROC_EXIT 0x403
 #define CALL_SYS_INFO 0x500
+#define CALL_PERSONALITY 0xFFFF
 
 struct api_sysinfo {
   char sysname[65];
@@ -41,6 +42,7 @@ static void print(const char *s) {
 }
 
 void _start(void) {
+  syscall1(CALL_PERSONALITY, 0);
   struct api_sysinfo name;
   if (syscall1(CALL_SYS_INFO, (long)&name) == 0) {
     print(

@@ -748,8 +748,6 @@ event_cleanup_process(struct process *proc)
 				if (ops && ops->detach) {
 					ops->detach(kn);
 				}
-				knote_remove_from_ready(kq, kn);
-				memset(kn, 0, sizeof(knote_t));
 			}
 		}
 	}

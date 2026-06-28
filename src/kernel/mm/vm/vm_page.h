@@ -48,6 +48,7 @@ void vm_page_cache_insert(vm_page_t *page);
 
 u64 vm_page_count_free(void);
 u64 vm_page_count_total(void);
+u64 vm_page_queue_count(int qid);
 void vm_page_queue_counts(u64 *active, u64 *inactive, u64 *cache, u64 *wired);
 vm_page_t *vm_page_lookup(u64 phys_addr);
 

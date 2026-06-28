@@ -6,6 +6,7 @@
 
 #define CALL_TERM_WRITE 0x101
 #define CALL_PROC_EXIT 0x403
+#define CALL_PERSONALITY 0xFFFF
 
 typedef unsigned long usize;
 
@@ -92,6 +93,7 @@ static void yes_write_buffered(int argc, char **argv) {
 
 void _start(long argc, char **argv, char **envp) {
   (void)envp;
+  syscall1(CALL_PERSONALITY, 0);
 
   if (argc <= 1 || !argv) {
     const char *msg = "y\n";
