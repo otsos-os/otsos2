@@ -37,6 +37,10 @@ typedef struct {
 /* Get the singleton kernel console. Initializes it on first call. */
 kms_console_t *kms_kernel_console(void);
 
+/* Reset the singleton kernel console (shuts it down and clears the ready
+ * flag so the next kms_kernel_console() call re-initialises it). */
+void kms_kernel_console_reset(void);
+
 /* Bring up / tear down a console instance. */
 int kms_console_init(kms_console_t *con);
 void kms_console_shutdown(kms_console_t *con);

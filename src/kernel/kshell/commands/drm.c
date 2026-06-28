@@ -1,4 +1,5 @@
 #include <kernel/drivers/video/drm/drm.h>
+#include <kernel/drivers/tty.h>
 #include <kernel/kshell/kshell.h>
 
 static int parse_nonneg_int(const char *s, int *ok) {
@@ -35,10 +36,34 @@ int kshell_drm_switch_command(int argc, char *argv[]) {
     return -1;
   }
 
-  if (drm_driver_switch_by_id(id) != 0) {
-    kshell_console_write("drm_switch: failed to switch drm driver\n");
+  const drm_driver_t *drv = drm_driver_get_by_index((u32)id);
+  if (!drv) {
+    kshell_console_write("drm_switch: no driver with id ");
+    kshell_console_write_int(id);
+    kshell_console_write("\n");
     return -1;
   }
+
+  if (drv == drm_driver_get_selected()) {
+    kshell_console_write("drm_switch: already active: ");
+    kshell_console_write(drv->name ? drv->name : "unnamed");
+    kshell_console_write("\n");
+    return 0;
+  }
+
+  kshell_console_write("drm_switch: switching to ");
+  kshell_console_write(drv->name ? drv->name : "unnamed");
+  kshell_console_write("...\n");
+
+  int rc = drm_reinit(drv, NULL);
+  if (rc != 0) {
+    kshell_console_write("drm_switch: failed (error ");
+    kshell_console_write_int(rc);
+    kshell_console_write(")\n");
+    return -1;
+  }
+
+  tty_reinit();
 
   kshell_console_write("drm_switch: active driver: ");
   kshell_console_write(drm_driver_get_selected_name());

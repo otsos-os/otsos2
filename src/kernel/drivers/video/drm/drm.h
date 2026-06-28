@@ -122,6 +122,7 @@ struct drm_driver {
 
 /* Lifecycle. */
 int drm_init(const drm_driver_t *driver, const void *boot_info);
+int drm_reinit(const drm_driver_t *new_driver, const void *boot_info);
 int drm_is_ready(void);
 const char *drm_get_driver_name(void);
 

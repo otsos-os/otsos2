@@ -24,23 +24,36 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef TTY_H
-#define TTY_H
+/*
+ * virtio-gpu DRM driver — public API.
+ *
+ * This driver implements the drm_driver_t interface and bridges the
+ * virtio-gpu PCI device to the DRM subsystem. It operates in 2D-only
+ * mode (no VIRGL/3D). The driver is registered as a PCI driver for
+ * auto-discovery, and exposes a DRM driver struct for the DRM core
+ * to select at boot or after PCI enumeration.
+ */
 
-#include <mlibc/mlibc.h>
+#ifndef DRM_VIRTIO_GPU_H
+#define DRM_VIRTIO_GPU_H
 
-int tty_read(void *buf, u32 count);
-int tty_write(const void *buf, u32 count);
-void tty_init(void);
-int tty_is_initialized(void);
-void tty_reinit(void);
-void tty_putc_from_kernel(char c);
-void tty_flush_kernel(void);
-void tty_set_color(u8 color);
-void tty_clear_active(void);
-void tty_com1_mirror(char c);
-void tty_set_active(int index);
-void tty_restore_active_display(void);
-void tty_update(void);
+#include <drm/drm.h>
+
+/* Return the DRM driver struct for virtio-gpu. */
+const drm_driver_t *drm_virtio_gpu_driver_get(void);
+
+/* Register the virtio-gpu PCI driver (call before pci_init). */
+int drm_virtio_gpu_pci_register(void);
+
+/* Check if the virtio-gpu hardware has been probed and initialised. */
+int drm_virtio_gpu_is_ready(void);
+
+/* Initialise the virtio-gpu display (called by DRM init or reinit).
+ * Returns 0 on success. This sets up the resource, backing store, and
+ * scanout, and publishes the display geometry to the DRM CRTC layer. */
+int drm_virtio_gpu_display_init(void);
+
+/* Shut down the virtio-gpu display. */
+void drm_virtio_gpu_display_shutdown(void);
 
 #endif

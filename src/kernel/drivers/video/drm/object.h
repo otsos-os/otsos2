@@ -10,5 +10,6 @@
 drm_id_t drm_object_register(drm_object_type_t type, void *ptr);
 void *drm_object_get(drm_id_t id, drm_object_type_t type);
 int drm_object_unregister(drm_id_t id);
+void drm_object_reset_all(void);
 
 #endif

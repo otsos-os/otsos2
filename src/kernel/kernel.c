@@ -35,6 +35,7 @@
 #include <kernel/drivers/tty.h>
 #include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/init.h>
+#include <kernel/drivers/video/card/virtio-gpu/virtio-gpu.h>
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/console.h>
@@ -336,6 +337,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   }
 
   power_init();
+  drm_virtio_gpu_pci_register();
   pci_init();
   watchdog_init();
   if (watchdog_device_count() > 0) {

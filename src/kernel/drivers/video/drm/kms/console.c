@@ -37,6 +37,14 @@ kms_console_t *kms_kernel_console(void) {
   return &g_kernel_con;
 }
 
+void kms_kernel_console_reset(void) {
+  if (g_kernel_con_ready) {
+    kms_console_shutdown(&g_kernel_con);
+  }
+  g_kernel_con_ready = 0;
+  memset(&g_kernel_con, 0, sizeof(g_kernel_con));
+}
+
 /* Dirty-rect tracking: each drawing call extends the dirty region. On flush,
  * only the dirty sub-rectangle is blitted to hardware via present_rect,
  * avoiding a full-framebuffer copy (which can be ~3 MB per flush). */

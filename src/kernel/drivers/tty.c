@@ -590,6 +590,70 @@ void tty_init(void) {
 
 int tty_is_initialized(void) { return tty_initialized; }
 
+void tty_reinit(void) {
+  if (!tty_initialized) {
+    tty_init();
+    return;
+  }
+
+  /* Force the kernel console to re-initialise with the new display geometry. */
+  kms_kernel_console_reset();
+  g_con = NULL;
+  g_con = kms_kernel_console();
+  if (!g_con) {
+    return;
+  }
+
+  int new_w = (int)g_con->cols;
+  int new_h = (int)g_con->rows;
+  if (new_w <= 0) new_w = 80;
+  if (new_h <= 0) new_h = 25;
+
+  for (int i = 0; i < TTY_COUNT; i++) {
+    int old_w = ttys[i].width;
+    int old_h = ttys[i].height;
+    u16 *old_cells = ttys[i].cells;
+
+    ttys[i].width = new_w;
+    ttys[i].height = new_h;
+    ttys[i].cells =
+        (u16 *)kmem_calloc((unsigned long)(new_w * new_h), sizeof(u16));
+    if (ttys[i].cells) {
+      u16 blank = ((u16)ttys[i].color << 8) | ' ';
+      for (int j = 0; j < new_w * new_h; j++) {
+        ttys[i].cells[j] = blank;
+      }
+      /* Copy as much old content as fits into the new buffer. */
+      if (old_cells) {
+        int copy_w = old_w < new_w ? old_w : new_w;
+        int copy_h = old_h < new_h ? old_h : new_h;
+        for (int y = 0; y < copy_h; y++) {
+          memcpy(&ttys[i].cells[y * new_w], &old_cells[y * old_w],
+                 (unsigned long)copy_w * sizeof(u16));
+        }
+        kmem_free(old_cells);
+      }
+    } else if (old_cells) {
+      kmem_free(old_cells);
+    }
+
+    /* Clamp cursor to new bounds. */
+    if (ttys[i].cursor_x >= new_w) ttys[i].cursor_x = 0;
+    if (ttys[i].cursor_y >= new_h) ttys[i].cursor_y = 0;
+  }
+
+  /* Redraw all ttys so each one is ready when the user switches to it. */
+  for (int i = 0; i < TTY_COUNT; i++) {
+    tty_redraw(&ttys[i]);
+  }
+
+  /* Draw the indicator on the active tty. */
+  tty_indicator_end_time = timer_get_ticks() + timer_get_frequency();
+  tty_indicator_active = 1;
+  if (g_con) kms_console_flush(g_con);
+  tty_draw_indicator(tty_active);
+}
+
 void tty_set_color(u8 color) {
   if (!tty_initialized) {
     return;

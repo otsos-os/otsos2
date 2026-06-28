@@ -162,8 +162,16 @@ static int parse_expr(const char *expr, int *ok) {
 static int print_kernel_var(const char *name) {
   if (strcmp(name, "videoM") == 0) {
     if (drm_is_ready()) {
-      kshell_console_write("linear fb, address: ");
+      const char *drv = drm_driver_get_selected_name();
+      kshell_console_write(drv ? drv : "unknown");
+      kshell_console_write(", address: ");
       kshell_console_write_ptr((void *)(u64)drm_crtc_get_hw_address());
+      kshell_console_write(", ");
+      kshell_console_write_int((int)drm_crtc_get_width());
+      kshell_console_write("x");
+      kshell_console_write_int((int)drm_crtc_get_height());
+      kshell_console_write("x");
+      kshell_console_write_int((int)drm_crtc_get_bpp());
       kshell_console_write(", multiboot");
       kshell_console_write_int(g_kshell_is_multiboot2 ? 2 : 1);
       kshell_console_write("\n");

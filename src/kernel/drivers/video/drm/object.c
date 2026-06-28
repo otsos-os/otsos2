@@ -67,3 +67,8 @@ int drm_object_unregister(drm_id_t id) {
   e->ptr = NULL;
   return DRM_OK;
 }
+
+void drm_object_reset_all(void) {
+  memset(g_obj_table, 0, sizeof(g_obj_table));
+  g_obj_next = 0;
+}

@@ -12,6 +12,13 @@
 static drm_fbdev_boot_t g_boot;
 static int g_boot_ready;
 
+const void *drm_fbdev_get_boot_info(void) {
+  if (!g_boot_ready) {
+    return NULL;
+  }
+  return &g_boot;
+}
+
 static int boot_init_common(const drm_fbdev_boot_t *boot,
                             const char *preferred) {
   if (!boot) {

@@ -6,6 +6,7 @@
 #include <drm/auth.h>
 #include <drm/object.h>
 #include <drm/gem.h>
+#include <drm/init.h>
 #include <drm/kms/atomic.h>
 #include <drm/kms/connector.h>
 #include <drm/kms/crtc.h>
@@ -21,10 +22,15 @@ static const drm_driver_t *g_known_drivers[8];
 static u32 g_known_count;
 
 extern const drm_driver_t *drm_fbdev_driver_get(void);
+extern const drm_driver_t *drm_virtio_gpu_driver_get(void);
 
 static void build_driver_list(void) {
   if (g_known_count > 0) {
     return;
+  }
+  const drm_driver_t *vgpu = drm_virtio_gpu_driver_get();
+  if (vgpu && g_known_count < 8) {
+    g_known_drivers[g_known_count++] = vgpu;
   }
   const drm_driver_t *fbdev = drm_fbdev_driver_get();
   if (fbdev && g_known_count < 8) {
@@ -150,5 +156,54 @@ int drm_init(const drm_driver_t *driver, const void *boot_info) {
 
   g_ready = 1;
   com1_printf("[DRM] ready, driver '%s'\n", driver->name ? driver->name : "?");
+  return DRM_OK;
+}
+
+extern void drm_object_reset_all(void);
+extern void kms_kernel_console_reset(void);
+
+/* The fbdev boot_info is stored by drm_boot_init so we can re-initialise
+ * fbdev if a driver switch fails. */
+extern int drm_init(const drm_driver_t *driver, const void *boot_info);
+
+int drm_reinit(const drm_driver_t *new_driver, const void *boot_info) {
+  if (!new_driver || !new_driver->init) {
+    return DRM_ERR_INVAL;
+  }
+
+  const drm_driver_t *old_driver = g_selected_driver;
+
+  com1_write_string("[DRM] reinit: trying new driver '");
+  com1_write_string(new_driver->name ? new_driver->name : "?");
+  com1_write_string("'\n");
+
+  /* Try the new driver's init FIRST, before tearing anything down.
+   * This way if it fails, the old display is still active. */
+  if (new_driver->init(boot_info) != 0) {
+    com1_write_string("[DRM] reinit: new driver init failed, keeping old\n");
+    return DRM_ERR_NODEV;
+  }
+
+  com1_write_string("[DRM] reinit: new driver init OK, switching\n");
+
+  /* New driver initialised successfully — now safe to tear down old state. */
+  kms_kernel_console_reset();
+  drm_object_reset_all();
+  g_ready = 0;
+
+  /* Shut down the old driver if it has a shutdown callback. */
+  if (old_driver && old_driver->shutdown) {
+    old_driver->shutdown();
+  }
+
+  /* Install the new driver and rebuild KMS topology. */
+  g_selected_driver = new_driver;
+  drm_auth_init();
+  drm_auth_acquire();
+  drm_kms_init();
+
+  g_ready = 1;
+  com1_printf("[DRM] reinit complete, driver '%s'\n",
+              new_driver->name ? new_driver->name : "?");
   return DRM_OK;
 }
