@@ -23,6 +23,8 @@
 #define CALL_PROC_LIST  0x406
 #define CALL_KUSR_AUTH  0x407
 #define CALL_SYS_INFO   0x500
+#define CALL_SYS_MEMINFO 0x501
+#define CALL_SYS_KMEMINFO 0x502
 
 #define API_OPEN_READ   0x0001
 
@@ -92,7 +94,31 @@ struct api_sysinfo {
   char domainname[65];
 };
 
+struct api_meminfo {
+  u64 ram_total_kb;
+  u64 ram_free_kb;
+  u64 pages_total;
+  u64 pages_free;
+  u64 pages_active;
+  u64 pages_inactive;
+  u64 pages_cache;
+  u64 pages_wired;
+  u64 user_heap_base;
+  u64 user_heap_size_kb;
+  u64 mmap_base;
+  u64 mmap_limit;
+};
+
+struct api_kmeminfo {
+  u64 kmem_heap_total_kb;
+  u64 kmem_heap_used_kb;
+  u64 kmem_heap_free_kb;
+  u64 bootmem_free_kb;
+  u64 kmem_heap_addr;
+};
+
 static char **g_envp;
+static int g_kusr_authed = 0;
 /* ------------------------------------------------------------------ */
 /*  raw syscall wrappers                                              */
 /* ------------------------------------------------------------------ */
@@ -150,6 +176,14 @@ static long proc_list(struct api_proc_info *buf, u32 max) {
 
 static long kusr_auth(const char *password) {
   return syscall3(CALL_KUSR_AUTH, (long)password, 0, 0);
+}
+
+static long sys_meminfo(struct api_meminfo *buf) {
+  return syscall1(CALL_SYS_MEMINFO, (long)buf);
+}
+
+static long sys_kmeminfo(struct api_kmeminfo *buf) {
+  return syscall1(CALL_SYS_KMEMINFO, (long)buf);
 }
 
 static long data_open(const char *path, int flags) {
@@ -444,6 +478,7 @@ static void cmd_help(void) {
   println("  cd <path>          change directory");
   println("  ls [path]          list directory");
   println("  ps                 list processes");
+  println("  mem                show memory info");
   println("  cat <file>         print file contents");
   println("  clear              clear screen");
   println("  color <hex>        set text color (e.g. FF0000)");
@@ -532,7 +567,126 @@ static void cmd_ls(int argc, char **argv) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  built-in: ps                                                      */
+/*  built-in: mem                                                      */
+/* ------------------------------------------------------------------ */
+
+static void print_u64(u64 v) {
+  char tmp[24];
+  int t = 0;
+  if (v == 0) {
+    print("0");
+    return;
+  }
+  while (v > 0) {
+    tmp[t++] = '0' + (int)(v % 10);
+    v /= 10;
+  }
+  while (t > 0) printc(tmp[--t]);
+}
+
+static void cmd_mem(void) {
+  struct api_meminfo mi;
+  long ret = sys_meminfo(&mi);
+  if (ret < 0) {
+    print_err("mem", ret);
+    return;
+  }
+
+  println("=== Memory Info ===");
+
+  print("RAM total      : ");
+  print_u64(mi.ram_total_kb);
+  println(" KB");
+
+  print("RAM free       : ");
+  print_u64(mi.ram_free_kb);
+  println(" KB");
+
+  println("");
+  print("Pages total    : ");
+  print_u64(mi.pages_total);
+  printc('\n');
+
+  print("Pages free     : ");
+  print_u64(mi.pages_free);
+  printc('\n');
+
+  print("Pages active   : ");
+  print_u64(mi.pages_active);
+  printc('\n');
+
+  print("Pages inactive : ");
+  print_u64(mi.pages_inactive);
+  printc('\n');
+
+  print("Pages cache    : ");
+  print_u64(mi.pages_cache);
+  printc('\n');
+
+  print("Pages wired    : ");
+  print_u64(mi.pages_wired);
+  printc('\n');
+
+  println("");
+  print("User mmap base : 0x");
+  {
+    u64 v = mi.mmap_base;
+    char hex[17];
+    int h = 0;
+    if (v == 0) { hex[h++] = '0'; }
+    while (v > 0) { int d = (int)(v % 16); hex[h++] = d < 10 ? '0'+d : 'A'+d-10; v /= 16; }
+    while (h > 0) printc(hex[--h]);
+  }
+  printc('\n');
+
+  print("User mmap limit: 0x");
+  {
+    u64 v = mi.mmap_limit;
+    char hex[17];
+    int h = 0;
+    if (v == 0) { hex[h++] = '0'; }
+    while (v > 0) { int d = (int)(v % 16); hex[h++] = d < 10 ? '0'+d : 'A'+d-10; v /= 16; }
+    while (h > 0) printc(hex[--h]);
+  }
+  printc('\n');
+
+  print("User heap size : ");
+  print_u64(mi.user_heap_size_kb / 1024);
+  println(" MB");
+
+  if (g_kusr_authed) {
+    struct api_kmeminfo ki;
+    long kr = sys_kmeminfo(&ki);
+    if (kr < 0) {
+      println("");
+      print("kmem info: permission denied");
+      printc('\n');
+      return;
+    }
+
+    println("");
+    println("=== Kernel Memory (kusr) ===");
+
+    print("Kmem heap total: ");
+    print_u64(ki.kmem_heap_total_kb);
+    println(" KB");
+
+    print("Kmem heap used : ");
+    print_u64(ki.kmem_heap_used_kb);
+    println(" KB");
+
+    print("Kmem heap free : ");
+    print_u64(ki.kmem_heap_free_kb);
+    println(" KB");
+
+    print("Bootmem free   : ");
+    print_u64(ki.bootmem_free_kb);
+    println(" KB");
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  built-in: ps                                                       */
 /* ------------------------------------------------------------------ */
 
 static const char *state_name(u32 s) {
@@ -710,6 +864,7 @@ static void cmd_kusr(void) {
   for (int i = 0; i < pos; i++) pass[i] = 0;
 
   if (ret == 0) {
+    g_kusr_authed = 1;
     println("kusr: authenticated");
   } else if (ret == -ERR_PERM) {
     println("kusr: wrong password");
@@ -746,6 +901,7 @@ static int exec_builtin(int argc, char **argv) {
   if (strcmp_s(cmd, "cd") == 0)     { cmd_cd(argc, argv); return 0; }
   if (strcmp_s(cmd, "ls") == 0)     { cmd_ls(argc, argv); return 0; }
   if (strcmp_s(cmd, "ps") == 0)     { cmd_ps(); return 0; }
+  if (strcmp_s(cmd, "mem") == 0)    { cmd_mem(); return 0; }
   if (strcmp_s(cmd, "cat") == 0)    { cmd_cat(argc, argv); return 0; }
   if (strcmp_s(cmd, "clear") == 0)  { cmd_clear(); return 0; }
   if (strcmp_s(cmd, "color") == 0)  { cmd_color(argc, argv); return 0; }

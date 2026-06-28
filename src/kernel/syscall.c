@@ -169,6 +169,12 @@ void syscall_handler(registers_t *regs) {
   case CALL_SYS_INFO:
     regs->rax = (u64)api_info((struct api_sysinfo *)arg1);
     break;
+  case CALL_SYS_MEMINFO:
+    regs->rax = (u64)api_meminfo((struct api_meminfo *)arg1);
+    break;
+  case CALL_SYS_KMEMINFO:
+    regs->rax = (u64)api_kmeminfo((struct api_kmeminfo *)arg1);
+    break;
   case CALL_DRM_CALL:
     regs->rax = (u64)api_drm_call(arg1, (void *)arg2);
     break;

@@ -121,7 +121,7 @@ end_tag:
 multiboot2_header_end:
 
 
-.section .bss
+.section .boot.bss, "aw", @nobits
 .align 4096
 
 p4_table:
@@ -136,13 +136,17 @@ p2_table_2:
     .skip 4096
 p2_table_3:
     .skip 4096
+p3_table_high:
+    .skip 4096
+p2_table_high:
+    .skip 4096
 
 stack_bottom:
     .skip 65536
 stack_top:
 
 
-.section .data
+.section .boot.data, "aw"
 .align 8
 
 multiboot_info_ptr:
@@ -185,7 +189,7 @@ fb_cursor_x:
 fb_cursor_y:
     .long 0                     
 
-.section .rodata
+.section .boot.rodata, "a"
 
 gdt64:
     .quad 0                                             /* Null descriptor */
@@ -445,7 +449,7 @@ font_8x8:
     .byte 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
 
 
-.section .text
+.section .boot.text, "ax"
 .code32
 .global start
 
@@ -1412,8 +1416,9 @@ start_boot_sequence:
 
 setup_page_tables:
     
+    /* Identity map: PML4[0] -> p3_table */
     mov eax, offset p3_table
-    or eax, 0b11                
+    or eax, 0b11
     mov [p4_table], eax
 
     mov eax, offset p2_table
@@ -1432,16 +1437,37 @@ setup_page_tables:
     or eax, 0b11
     mov [p3_table + 24], eax
 
+    /* Fill identity-map PD tables: 2MB huge pages, 0-4GB */
     mov ecx, 0
 .Lmap_p2:
-    mov eax, 0x200000           
+    mov eax, 0x200000
     mul ecx
-    or eax, 0b10000011          
+    or eax, 0b10000011
     mov [p2_table + ecx * 8], eax
-    
     inc ecx
-    cmp ecx, 2048               
+    cmp ecx, 2048
     jne .Lmap_p2
+
+    /* Higher-half map: PML4[511] -> p3_table_high */
+    mov eax, offset p3_table_high
+    or eax, 0b11
+    mov [p4_table + 511 * 8], eax
+
+    /* p3_table_high[510] -> p2_table_high, covers VA 0xFFFFFFFF80000000+ */
+    mov eax, offset p2_table_high
+    or eax, 0b11
+    mov [p3_table_high + 510 * 8], eax
+
+    /* Fill p2_table_high: 2MB huge pages mapping VA 0xFFFFFFFF80000000+ -> PA 0+ */
+    mov ecx, 0
+.Lmap_p2_high:
+    mov eax, 0x200000
+    mul ecx
+    or eax, 0b10000011
+    mov [p2_table_high + ecx * 8], eax
+    inc ecx
+    cmp ecx, 512
+    jne .Lmap_p2_high
     
     ret
 
@@ -1486,7 +1512,8 @@ start64:
     mov edx, [selected_item]
 
     .extern kmain
-    call kmain
+    mov rax, offset kmain
+    jmp rax
 
     cli
     hlt

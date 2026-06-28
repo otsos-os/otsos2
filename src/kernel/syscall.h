@@ -52,6 +52,8 @@
 #define CALL_PROC_LIST 0x406
 #define CALL_KUSR_AUTH 0x407
 #define CALL_SYS_INFO 0x500
+#define CALL_SYS_MEMINFO 0x501
+#define CALL_SYS_KMEMINFO 0x502
 #define CALL_DRM_CALL 0x600
 
 void syscall_init(void);

@@ -5,7 +5,7 @@
  * modification, are permitted provided that the following conditions are met:
  *
  * 1. Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimer.
+ * this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
@@ -37,7 +37,9 @@ static vm_page_t bootstrap_pages[VM_PAGE_MAX];
 static vm_page_t *pages = bootstrap_pages;
 static u64 page_capacity = VM_PAGE_MAX;
 static u64 page_count;
-static vm_page_t *free_list;
+
+static vm_page_t *queue_head[PQ_COUNT];
+static vm_page_t *queue_tail[PQ_COUNT];
 
 static u64
 round_page(u64 value)
@@ -57,6 +59,42 @@ atop(u64 bytes)
     return bytes / PAGE_SIZE;
 }
 
+static void
+vm_page_queue_insert(vm_page_t *page, u8 qid)
+{
+    page->queue = qid;
+    page->queue_next = NULL;
+    page->queue_prev = queue_tail[qid];
+    if (queue_tail[qid] != NULL)
+        queue_tail[qid]->queue_next = page;
+    else
+        queue_head[qid] = page;
+    queue_tail[qid] = page;
+}
+
+static void
+vm_page_queue_remove(vm_page_t *page)
+{
+    u8 qid;
+
+    qid = page->queue;
+    if (qid == PQ_NONE || qid >= PQ_COUNT)
+        return;
+
+    if (page->queue_prev != NULL)
+        page->queue_prev->queue_next = page->queue_next;
+    else
+        queue_head[qid] = page->queue_next;
+
+    if (page->queue_next != NULL)
+        page->queue_next->queue_prev = page->queue_prev;
+    else
+        queue_tail[qid] = page->queue_prev;
+
+    page->queue_next = NULL;
+    page->queue_prev = NULL;
+}
+
 void
 vm_page_init(u64 available_start, u64 available_end)
 {
@@ -69,17 +107,23 @@ vm_page_init(u64 available_start, u64 available_end)
     page_capacity = VM_PAGE_MAX;
     memset(pages, 0, sizeof(bootstrap_pages));
 
+    for (i = 0; i < PQ_COUNT; i++) {
+        queue_head[i] = NULL;
+        queue_tail[i] = NULL;
+    }
+
     start = round_page(available_start + PAGE_SIZE - 1);
     end = trunc_page(available_end);
 
     page_count = 0;
-    free_list = NULL;
 
     for (i = 0; i < page_capacity; i++) {
         pages[i].phys_addr = 0;
         pages[i].state = VM_PAGE_RESERVED;
         pages[i].ref_count = 0;
-        pages[i].next = NULL;
+        pages[i].queue = PQ_NONE;
+        pages[i].queue_next = NULL;
+        pages[i].queue_prev = NULL;
     }
 
     addr = start;
@@ -87,8 +131,7 @@ vm_page_init(u64 available_start, u64 available_end)
         pages[i].phys_addr = addr;
         pages[i].state = VM_PAGE_FREE;
         pages[i].ref_count = 0;
-        pages[i].next = free_list;
-        free_list = &pages[i];
+        vm_page_queue_insert(&pages[i], PQ_FREE);
         addr += PAGE_SIZE;
         page_count++;
     }
@@ -129,15 +172,20 @@ vm_page_init_from_bootmem(void)
     }
 
     memset(pages, 0, metadata_bytes);
+    for (i = 0; i < PQ_COUNT; i++) {
+        queue_head[i] = NULL;
+        queue_tail[i] = NULL;
+    }
     for (i = 0; i < page_capacity; i++) {
         pages[i].phys_addr = 0;
         pages[i].state = VM_PAGE_RESERVED;
         pages[i].ref_count = 0;
-        pages[i].next = NULL;
+        pages[i].queue = PQ_NONE;
+        pages[i].queue_next = NULL;
+        pages[i].queue_prev = NULL;
     }
 
     page_count = 0;
-    free_list = NULL;
     ranges = bootmem_ranges();
     range_count = bootmem_range_count();
 
@@ -149,8 +197,7 @@ vm_page_init_from_bootmem(void)
             pages[page_count].phys_addr = addr;
             pages[page_count].state = VM_PAGE_FREE;
             pages[page_count].ref_count = 0;
-            pages[page_count].next = free_list;
-            free_list = &pages[page_count];
+            vm_page_queue_insert(&pages[page_count], PQ_FREE);
             page_count++;
             addr += PAGE_SIZE;
         }
@@ -165,11 +212,14 @@ vm_page_alloc(u32 flags)
 {
     vm_page_t *page;
 
-    if (free_list == NULL)
+    if (queue_head[PQ_FREE] != NULL)
+        page = queue_head[PQ_FREE];
+    else if (queue_head[PQ_CACHE] != NULL)
+        page = queue_head[PQ_CACHE];
+    else
         return NULL;
 
-    page = free_list;
-    free_list = page->next;
+    vm_page_queue_remove(page);
 
     if (flags & VM_PAGE_WIRED)
         page->state = VM_PAGE_USED | VM_PAGE_WIRED;
@@ -177,7 +227,9 @@ vm_page_alloc(u32 flags)
         page->state = VM_PAGE_USED;
 
     page->ref_count = 1;
-    page->next = NULL;
+
+    if (!(flags & VM_PAGE_WIRED))
+        vm_page_queue_insert(page, PQ_ACTIVE);
 
     return page;
 }
@@ -188,10 +240,10 @@ vm_page_free(vm_page_t *page)
     if (page == NULL)
         return;
 
+    vm_page_queue_remove(page);
     page->state = VM_PAGE_FREE;
     page->ref_count = 0;
-    page->next = free_list;
-    free_list = page;
+    vm_page_queue_insert(page, PQ_FREE);
 }
 
 u64
@@ -209,6 +261,10 @@ vm_page_free_phys(u64 phys_addr)
     vm_page_t *page = vm_page_lookup(phys_addr & ~((u64)PAGE_SIZE - 1));
     if (page == NULL)
         return -1;
+    if (page->ref_count > 1) {
+        page->ref_count--;
+        return 0;
+    }
     vm_page_free(page);
     return 0;
 }
@@ -230,17 +286,70 @@ vm_page_unref(vm_page_t *page)
         page->ref_count--;
 }
 
+void
+vm_page_ref_phys(u64 phys_addr)
+{
+    vm_page_t *page = vm_page_lookup(phys_addr & ~((u64)PAGE_SIZE - 1));
+    if (page == NULL)
+        return;
+    vm_page_ref(page);
+}
+
+u32
+vm_page_ref_count(u64 phys_addr)
+{
+    vm_page_t *page = vm_page_lookup(phys_addr & ~((u64)PAGE_SIZE - 1));
+    if (page == NULL)
+        return 0;
+    return page->ref_count;
+}
+
+void
+vm_page_activate(vm_page_t *page)
+{
+    if (page == NULL)
+        return;
+    if (page->state & VM_PAGE_WIRED)
+        return;
+    vm_page_queue_remove(page);
+    vm_page_queue_insert(page, PQ_ACTIVE);
+}
+
+void
+vm_page_deactivate(vm_page_t *page)
+{
+    if (page == NULL)
+        return;
+    if (page->state & VM_PAGE_WIRED)
+        return;
+    vm_page_queue_remove(page);
+    vm_page_queue_insert(page, PQ_INACTIVE);
+}
+
+void
+vm_page_cache_insert(vm_page_t *page)
+{
+    if (page == NULL)
+        return;
+    if (page->state & VM_PAGE_WIRED)
+        return;
+    vm_page_queue_remove(page);
+    page->state = VM_PAGE_FREE;
+    page->ref_count = 0;
+    vm_page_queue_insert(page, PQ_CACHE);
+}
+
 u64
 vm_page_count_free(void)
 {
     u64 count;
-    u64 i;
+    vm_page_t *p;
 
     count = 0;
-    for (i = 0; i < page_count; i++) {
-        if (pages[i].state == VM_PAGE_FREE)
-            count++;
-    }
+    for (p = queue_head[PQ_FREE]; p != NULL; p = p->queue_next)
+        count++;
+    for (p = queue_head[PQ_CACHE]; p != NULL; p = p->queue_next)
+        count++;
     return count;
 }
 
@@ -248,6 +357,34 @@ u64
 vm_page_count_total(void)
 {
     return page_count;
+}
+
+void
+vm_page_queue_counts(u64 *active, u64 *inactive, u64 *cache, u64 *wired)
+{
+    u64 act, inact, cach, wir;
+    vm_page_t *p;
+    u64 i;
+
+    act = 0;
+    for (p = queue_head[PQ_ACTIVE]; p != NULL; p = p->queue_next)
+        act++;
+    inact = 0;
+    for (p = queue_head[PQ_INACTIVE]; p != NULL; p = p->queue_next)
+        inact++;
+    cach = 0;
+    for (p = queue_head[PQ_CACHE]; p != NULL; p = p->queue_next)
+        cach++;
+    wir = 0;
+    for (i = 0; i < page_count; i++) {
+        if (pages[i].state & VM_PAGE_WIRED)
+            wir++;
+    }
+
+    if (active) *active = act;
+    if (inactive) *inactive = inact;
+    if (cache) *cache = cach;
+    if (wired) *wired = wir;
 }
 
 vm_page_t *
@@ -265,33 +402,36 @@ vm_page_lookup(u64 phys_addr)
 void
 vm_page_dump(void)
 {
-    u64 free_count;
-    u64 used_count;
+    u64 qcount[PQ_COUNT];
     u64 reserved_count;
     u64 wired_count;
     u64 i;
+    vm_page_t *p;
+    const char *qnames[] = {"NONE", "FREE", "CACHE", "ACTIVE",
+                            "INACTIVE", "LAUNDRY"};
 
-    free_count = 0;
-    used_count = 0;
+    for (i = 0; i < PQ_COUNT; i++) {
+        qcount[i] = 0;
+        for (p = queue_head[i]; p != NULL; p = p->queue_next)
+            qcount[i]++;
+    }
+
     reserved_count = 0;
     wired_count = 0;
-
     for (i = 0; i < page_count; i++) {
-        if (pages[i].state == VM_PAGE_FREE)
-            free_count++;
-        else if (pages[i].state == VM_PAGE_RESERVED)
+        if (pages[i].state == VM_PAGE_RESERVED)
             reserved_count++;
         else if (pages[i].state & VM_PAGE_WIRED)
             wired_count++;
-        else
-            used_count++;
     }
 
     com1_printf("--- vm_page dump ---\n");
     com1_printf("total pages : %u\n", (u32)page_count);
-    com1_printf("free pages  : %u\n", (u32)free_count);
-    com1_printf("used pages  : %u\n", (u32)used_count);
-    com1_printf("wired pages : %u\n", (u32)wired_count);
+    for (i = 0; i < PQ_COUNT; i++) {
+        if (i == PQ_NONE) continue;
+        com1_printf("%-10s  : %u\n", qnames[i], (u32)qcount[i]);
+    }
+    com1_printf("wired       : %u\n", (u32)wired_count);
     com1_printf("reserved    : %u\n", (u32)reserved_count);
     com1_printf("--------------------\n");
 }

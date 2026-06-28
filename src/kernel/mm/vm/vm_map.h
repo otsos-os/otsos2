@@ -20,16 +20,14 @@
 #define VM_MAP_ANON    0x20
 #define VM_MAP_GEM     0x40
 
-/* The vma_t structure is still defined in process.h for now.
- * These functions operate on the vma_list inside process_t. */
-
 u64 vm_map_find_free(process_t *proc, u64 length);
 int vm_map_insert(process_t *proc, u64 start, u64 end, u32 prot, u32 flags,
                   u32 gem_handle, vm_object_t *object, u64 object_offset);
 int vm_map_remove(process_t *proc, u64 addr);
 vma_t *vm_map_lookup(process_t *proc, u64 addr);
 void vm_map_free_all(process_t *proc);
-int vm_map_copy(process_t *dst, const process_t *src);
+int vm_map_fork(process_t *parent, process_t *child);
 int vm_map_fault(process_t *proc, u64 addr, u64 err_code);
+int vm_cow_fault(u64 addr, u64 err_code);
 
 #endif

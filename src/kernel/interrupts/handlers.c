@@ -73,6 +73,9 @@ void isr_handler(registers_t *regs) {
         if (proc && vm_map_fault(proc, cr2, regs->err_code) == 0) {
           return;
         }
+        if (vm_cow_fault(cr2, regs->err_code) == 0) {
+          return;
+        }
         printf("\033[31m[KERNEL] Segmentation Fault (Page Fault) CR2=%p "
                "ERR=0x%x\033[0m\n",
                (void *)cr2, (unsigned)regs->err_code);

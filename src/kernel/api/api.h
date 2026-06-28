@@ -100,6 +100,29 @@ struct api_sysinfo {
   char domainname[65];
 };
 
+struct api_meminfo {
+  u64 ram_total_kb;
+  u64 ram_free_kb;
+  u64 pages_total;
+  u64 pages_free;
+  u64 pages_active;
+  u64 pages_inactive;
+  u64 pages_cache;
+  u64 pages_wired;
+  u64 user_heap_base;
+  u64 user_heap_size_kb;
+  u64 mmap_base;
+  u64 mmap_limit;
+};
+
+struct api_kmeminfo {
+  u64 kmem_heap_total_kb;
+  u64 kmem_heap_used_kb;
+  u64 kmem_heap_free_kb;
+  u64 bootmem_free_kb;
+  u64 kmem_heap_addr;
+};
+
 struct api_dirent {
   char name[32];
   u8 type;
@@ -254,6 +277,8 @@ int api_term_read(void *buf, u32 count);
 int api_term_write(const void *buf, u32 count);
 int api_data_read(int handle, void *buf, u32 count);
 int api_info(struct api_sysinfo *buf);
+int api_meminfo(struct api_meminfo *buf);
+int api_kmeminfo(struct api_kmeminfo *buf);
 void api_info_fill(struct api_sysinfo *buf);
 int api_data_write(int handle, const void *buf, u32 count);
 int api_data_open(const char *path, int flags);

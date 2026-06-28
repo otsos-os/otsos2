@@ -312,6 +312,8 @@ u64 pmap_create(void) {
     return 0;
   }
   for (int i = 0; i < 512; i++) {
+    if (i > 0 && i < 256)
+      continue;
     u64 entry = src_pml4[i];
     if (!(entry & PTE_PRESENT)) {
       continue;
@@ -415,7 +417,7 @@ void pmap_clear_user_range(u64 start, u64 end) {
   }
 }
 
-static int pmap_copy_user_pages(u64 *dst_pml4, u64 *src_pml4) {
+static int pmap_share_user_pages_cow(u64 *dst_pml4, u64 *src_pml4) {
   for (u64 i = 0; i < 512; i++) {
     u64 pml4e = src_pml4[i];
     if (!(pml4e & PTE_PRESENT)) {
@@ -470,24 +472,13 @@ static int pmap_copy_user_pages(u64 *dst_pml4, u64 *src_pml4) {
             dst_pd[k] = pde;
             continue;
           }
-          u64 *dst_pt = pmap_alloc_table();
-          if (!dst_pt) {
+          if (!split_huge_pde(src_pd, k, pde & PTE_FLAGS_MASK)) {
             return -1;
           }
-          u64 pd_flags = pde & PTE_FLAGS_MASK;
-          dst_pd[k] = ((u64)dst_pt) | (pd_flags & ~PTE_HUGE) | PTE_PRESENT;
-
-          for (u64 l = 0; l < 512; l++) {
-            u64 vaddr = (i << 39) | (j << 30) | (k << 21) | (l << 12);
-            u64 phys = pmap_alloc_zeroed_page();
-            if (!phys) {
-              return -1;
-            }
-            memcpy((void *)phys, (void *)vaddr, PAGE_SIZE);
-            u64 pte_flags = (pd_flags & PTE_FLAGS_MASK) | PTE_USER;
-            dst_pt[l] = (phys & PTE_ADDR_MASK) | pte_flags | PTE_PRESENT;
+          pde = src_pd[k];
+          if (!(pde & PTE_PRESENT) || (pde & PTE_HUGE)) {
+            continue;
           }
-          continue;
         }
         if (!(pde & PTE_USER)) {
           dst_pd[k] = pde;
@@ -500,7 +491,7 @@ static int pmap_copy_user_pages(u64 *dst_pml4, u64 *src_pml4) {
           return -1;
         }
         u64 pd_flags = pde & PTE_FLAGS_MASK;
-        dst_pd[k] = ((u64)dst_pt) | pd_flags | PTE_PRESENT;
+        dst_pd[k] = ((u64)dst_pt) | (pd_flags & ~PTE_HUGE) | PTE_PRESENT;
 
         for (u64 l = 0; l < 512; l++) {
           u64 pte = src_pt[l];
@@ -512,14 +503,19 @@ static int pmap_copy_user_pages(u64 *dst_pml4, u64 *src_pml4) {
             continue;
           }
 
+          u64 phys = pte & PTE_ADDR_MASK;
+          vm_page_ref_phys(phys);
+
+          u64 ro_flags = (pte & PTE_FLAGS_MASK) & ~PTE_RW;
+          if (pte & PTE_RW)
+            ro_flags |= PTE_COW;
+
+          dst_pt[l] = (phys & PTE_ADDR_MASK) | ro_flags | PTE_PRESENT;
+
+          src_pt[l] = (phys & PTE_ADDR_MASK) | ro_flags | PTE_PRESENT;
+
           u64 vaddr = (i << 39) | (j << 30) | (k << 21) | (l << 12);
-          u64 phys = pmap_alloc_zeroed_page();
-          if (!phys) {
-            return -1;
-          }
-          memcpy((void *)phys, (void *)vaddr, PAGE_SIZE);
-          u64 pte_flags = pte & PTE_FLAGS_MASK;
-          dst_pt[l] = (phys & PTE_ADDR_MASK) | pte_flags | PTE_PRESENT;
+          pmap_invlpg(vaddr);
         }
       }
     }
@@ -535,7 +531,7 @@ u64 pmap_clone(u64 src_cr3) {
     return 0;
   }
 
-  if (pmap_copy_user_pages(dst_pml4, src_pml4) != 0) {
+  if (pmap_share_user_pages_cow(dst_pml4, src_pml4) != 0) {
     pmap_destroy((u64)dst_pml4);
     return 0;
   }

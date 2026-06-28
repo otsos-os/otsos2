@@ -203,7 +203,7 @@ void *bootmem_alloc(u64 size, u64 align) {
       free_ranges[i] = free_ranges[free_count - 1];
       free_count--;
     }
-    return (void *)addr;
+    return (void *)(addr + KERNEL_VMA);
   }
 
   return NULL;

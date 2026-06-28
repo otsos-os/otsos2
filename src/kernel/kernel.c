@@ -239,7 +239,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
 
   com1_init();
   com1_set_mirror_callback(tty_com1_mirror);
-  bootmem_init(magic, addr, (u64)&start, (u64)&kernel_end);
+  bootmem_init(magic, addr, 0x100000, (u64)&kernel_end - KERNEL_VMA);
   kmem_init();
   void *ramdisk_mem = bootmem_alloc(4 * 1024 * 1024, PAGE_SIZE);
   init_idt();
@@ -262,8 +262,6 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   } else {
     com1_printf("[RAMDISK] bootmem allocation failed\n");
   }
-
-  pmap_clear_user_range((u64)&start, (u64)&kernel_end);
 
   boot_magic = (u32)magic;
 

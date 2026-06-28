@@ -20,6 +20,7 @@
 #define PTE_DIRTY      0x40
 #define PTE_HUGE       0x80
 #define PTE_GLOBAL     0x100
+#define PTE_COW        0x200  /* bit 9: software marker for copy-on-write */
 #define PTE_NX         (1ULL << 63)
 
 #define PTE_ADDR_MASK  0x000FFFFFFFFFF000ULL

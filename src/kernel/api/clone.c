@@ -93,7 +93,7 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
   child->exit_code = 0;
   child->owns_address_space = 1;
   child->mmap_base = parent->mmap_base;
-  vm_map_copy(child, parent);
+  vm_map_fork(parent, child);
   api_copy_handles(child, parent);
   child->next = NULL;
 

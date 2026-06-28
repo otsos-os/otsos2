@@ -24,9 +24,9 @@
  */
 
 #include <mm/vm/vm_object.h>
-#include <kernel/drivers/fs/chainFS/chainfs.h>
-#include <mm/kmem.h>
+#include <mm/vm/vm_pager.h>
 #include <mm/vm/vm_page.h>
+#include <mm/kmem.h>
 #include <mlibc/mlibc.h>
 #include <lib/com1.h>
 
@@ -53,19 +53,68 @@ vm_object_create(u32 type, u64 size, void *backing)
     obj->type = type;
     obj->ref_count = 1;
     obj->size = size;
-    obj->backing = backing;
-    if (type == VM_OBJ_FILE && backing != NULL) {
-        const char *path = (const char *)backing;
-        u32 i;
-        for (i = 0; i < VM_OBJECT_BACKING_MAX - 1 && path[i]; i++)
-            obj->backing_path[i] = path[i];
-        obj->backing_path[i] = '\0';
-        obj->backing = obj->backing_path;
+    obj->shadow = NULL;
+
+    switch (type) {
+    case VM_OBJ_ANON:
+        obj->pager = vm_pager_create_default(size);
+        break;
+    case VM_OBJ_FILE:
+        obj->pager = vm_pager_create_vnode((const char *)backing, size);
+        break;
+    case VM_OBJ_GEM:
+        obj->pager = vm_pager_create_device(backing, size);
+        break;
+    default:
+        obj->pager = NULL;
+        break;
     }
+
+    if (type != VM_OBJ_SHADOW && obj->pager == NULL) {
+        kmem_free(obj);
+        return NULL;
+    }
+
     obj->page_count = (size + PAGE_SIZE - 1) / PAGE_SIZE;
     if (obj->page_count != 0) {
         obj->pages = kmem_calloc(obj->page_count, sizeof(u64));
         if (obj->pages == NULL) {
+            if (obj->pager)
+                vm_pager_destroy(obj->pager);
+            kmem_free(obj);
+            return NULL;
+        }
+    }
+    obj->next = vm_object_list;
+    vm_object_list = obj;
+
+    return obj;
+}
+
+vm_object_t *
+vm_object_create_shadow(vm_object_t *backing)
+{
+    vm_object_t *obj;
+
+    if (backing == NULL)
+        return NULL;
+
+    obj = kmem_calloc(1, sizeof(vm_object_t));
+    if (obj == NULL)
+        return NULL;
+
+    obj->type = VM_OBJ_SHADOW;
+    obj->ref_count = 1;
+    obj->size = backing->size;
+    obj->shadow = backing;
+    obj->pager = NULL;
+    vm_object_ref(backing);
+
+    obj->page_count = backing->page_count;
+    if (obj->page_count != 0) {
+        obj->pages = kmem_calloc(obj->page_count, sizeof(u64));
+        if (obj->pages == NULL) {
+            vm_object_unref(backing);
             kmem_free(obj);
             return NULL;
         }
@@ -120,6 +169,12 @@ vm_object_unref(vm_object_t *obj)
         kmem_free(obj->pages);
     }
 
+    if (obj->shadow != NULL)
+        vm_object_unref(obj->shadow);
+
+    if (obj->pager != NULL)
+        vm_pager_destroy(obj->pager);
+
     kmem_free(obj);
 }
 
@@ -139,6 +194,17 @@ vm_object_page(vm_object_t *obj, u64 index)
     return obj->pages[index];
 }
 
+u64
+vm_object_find_page(vm_object_t *obj, u64 index)
+{
+    while (obj != NULL) {
+        if (index < obj->page_count && obj->pages[index] != 0)
+            return obj->pages[index];
+        obj = obj->shadow;
+    }
+    return 0;
+}
+
 int
 vm_object_set_page(vm_object_t *obj, u64 index, u64 phys)
 {
@@ -151,29 +217,26 @@ vm_object_set_page(vm_object_t *obj, u64 index, u64 phys)
 u64
 vm_object_get_page(vm_object_t *obj, u64 index, u64 file_offset)
 {
+    vm_object_t *p;
     u64 phys;
+    u64 page_phys;
 
-    if (obj == NULL || index >= obj->page_count)
+    phys = vm_object_find_page(obj, index);
+    if (phys != 0)
+        return phys;
+
+    p = obj;
+    while (p != NULL && p->pager == NULL)
+        p = p->shadow;
+
+    if (p == NULL || p->pager == NULL)
         return 0;
 
-    if (obj->pages[index] != 0)
-        return obj->pages[index];
-
-    if (obj->type == VM_OBJ_GEM)
+    if (p->pager->getpage(p->pager, file_offset, &page_phys) != 0)
         return 0;
 
-    phys = vm_page_alloc_phys(0);
-    if (phys == 0)
-        return 0;
+    if (index < p->page_count)
+        p->pages[index] = page_phys;
 
-    memset((void *)phys, 0, PAGE_SIZE);
-
-    if (obj->type == VM_OBJ_FILE && obj->backing != NULL) {
-        u32 bytes_read = 0;
-        chainfs_read_file_range((const char *)obj->backing, (u8 *)phys,
-                                PAGE_SIZE, (u32)file_offset, &bytes_read);
-    }
-
-    obj->pages[index] = phys;
-    return phys;
+    return page_phys;
 }

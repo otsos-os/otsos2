@@ -1,22 +1,51 @@
 ENTRY(start)
 OUTPUT_FORMAT(elf64-x86-64)
 
+KERNEL_VMA = 0xFFFFFFFF80000000;
+
 SECTIONS
 {
-    . = 1M;
+    . = 0x100000;
 
-    .text :
-    {
+    .boot : AT(0x100000) {
         *(.multiboot)
-        *(.text)
+        *(.boot.text)
+        *(.boot.text.*)
+        *(.boot.rodata)
+        *(.boot.rodata.*)
+        *(.boot.data)
+        *(.boot.data.*)
+        *(.boot.bss)
+        *(.boot.bss.*)
     }
+    . = ALIGN(4096);
+    boot_section_end = .;
 
-    .rodata : { *(.rodata) }
-    .data   : { *(.data) }
-    .bss    : { 
-        *(.bss*) 
-        *(COMMON) 
+    . = KERNEL_VMA + boot_section_end;
+
+    .text : AT(ADDR(.text) - KERNEL_VMA) {
+        *(.text)
+        *(.text.*)
+    }
+    .rodata : AT(ADDR(.rodata) - KERNEL_VMA) {
+        *(.rodata)
+        *(.rodata.*)
+    }
+    .data : AT(ADDR(.data) - KERNEL_VMA) {
+        *(.data)
+        *(.data.*)
+    }
+    .bss : AT(ADDR(.bss) - KERNEL_VMA) {
+        *(.bss)
+        *(.bss.*)
+        *(COMMON)
     }
     . = ALIGN(65536);
     kernel_end = .;
+
+    /DISCARD/ : {
+        *(.comment)
+        *(.note*)
+        *(.eh_frame*)
+    }
 }
