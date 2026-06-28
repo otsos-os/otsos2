@@ -161,7 +161,6 @@ void process_exit(int code) {
     u64 old_cr3 = current_process->cr3;
     pmap_load(pmap_kernel_cr3());
     pmap_destroy(old_cr3);
-    kmem_free((void *)(old_cr3 & PTE_ADDR_MASK));
     current_process->cr3 = 0;
     current_process->owns_address_space = 0;
   }
@@ -247,7 +246,6 @@ int process_kill(u32 pid) {
   api_release_handles(proc);
   if (proc->owns_address_space) {
     pmap_destroy(proc->cr3);
-    kmem_free((void *)(proc->cr3 & PTE_ADDR_MASK));
     proc->cr3 = 0;
     proc->owns_address_space = 0;
   }

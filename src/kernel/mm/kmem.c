@@ -25,10 +25,10 @@
  */
 
 #include <lib/com1.h>
+#include <kernel/bootmem.h>
 #include <mm/kmem.h>
 #include <mlibc/mlibc.h>
 
-extern char kernel_end;
 #define KMEM_HEAP_SIZE_VAL (8 * 1024 * 1024)
 #define KMEM_MAGIC 0x48454150
 #define KMEM_REDZONE_SZ 16
@@ -101,8 +101,11 @@ static header_t *coalesce(header_t *block) {
 }
 
 void kmem_init_internal() {
-  kmem_heap_start = (char *)&kernel_end;
-  kmem_heap_start = (char *)align16((unsigned long)kmem_heap_start);
+  kmem_heap_start = (char *)bootmem_alloc(KMEM_HEAP_SIZE_VAL, 4096);
+  if (!kmem_heap_start) {
+    com1_printf("KMEM: bootmem failed to allocate heap\n");
+    return;
+  }
   kmem_heap_end = kmem_heap_start + KMEM_HEAP_SIZE_VAL;
 
   kmem_heap_head = (header_t *)kmem_heap_start;

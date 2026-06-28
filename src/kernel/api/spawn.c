@@ -27,6 +27,7 @@
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/gdt.h>
 #include <mm/vm/pmap.h>
+#include <mm/vm/vm_page.h>
 #include <kernel/api/api.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
@@ -166,22 +167,22 @@ static u64 allocate_user_stack(void) {
   u64 stack_bottom = USER_STACK_TOP;
 
   for (u64 i = 0; i < stack_pages; i++) {
-    void *page = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
+    u64 page = vm_page_alloc_phys(0);
     if (!page) {
       for (u64 j = 0; j < i; j++) {
         u64 vaddr = stack_bottom + (j * PAGE_SIZE);
         u64 paddr = pmap_extract(vaddr);
         pmap_remove(vaddr);
         if (paddr) {
-          kmem_free((void *)paddr);
+          vm_page_free_phys(paddr);
         }
       }
       return 0;
     }
-    memset(page, 0, PAGE_SIZE);
+    memset((void *)page, 0, PAGE_SIZE);
 
     u64 vaddr = stack_bottom + (i * PAGE_SIZE);
-    pmap_enter(vaddr, (u64)page, PTE_PRESENT | PTE_RW | PTE_USER | PTE_NX);
+    pmap_enter(vaddr, page, PTE_PRESENT | PTE_RW | PTE_USER | PTE_NX);
   }
 
   return USER_STACK_BASE;
@@ -281,7 +282,6 @@ static void free_spawn_cr3(u64 cr3) {
     return;
   }
   pmap_destroy(cr3);
-  kmem_free((void *)(cr3 & PTE_ADDR_MASK));
 }
 
 int api_proc_spawn(const char *path, const char *const *argv,

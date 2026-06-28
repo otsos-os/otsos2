@@ -50,7 +50,6 @@ int api_proc_wait(int *status) {
 
     if (child->owns_address_space && child->cr3) {
       pmap_destroy(child->cr3);
-      kmem_free((void *)(child->cr3 & PTE_ADDR_MASK));
       child->cr3 = 0;
       child->owns_address_space = 0;
     }

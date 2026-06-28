@@ -59,7 +59,6 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
   u8 *kstack = (u8 *)kmem_alloc_aligned(KERNEL_STACK_SIZE, 16);
   if (!kstack) {
     pmap_destroy(child_cr3);
-    kmem_free((void *)(child_cr3 & PTE_ADDR_MASK));
     memset(child, 0, sizeof(process_t));
     child->state = PROC_STATE_UNUSED;
     return -API_ERR_NO_MEMORY;

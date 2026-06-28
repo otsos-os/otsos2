@@ -27,6 +27,7 @@
 #include <kernel/console.h>
 #include <kernel/gdt.h>
 #include <mm/vm/pmap.h>
+#include <mm/vm/vm_page.h>
 #include <kernel/process.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
@@ -71,7 +72,7 @@ static u64 allocate_user_stack(void) {
               (int)stack_pages, (void *)stack_bottom);
 
   for (u64 i = 0; i < stack_pages; i++) {
-    void *page = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
+    u64 page = vm_page_alloc_phys(0);
     if (!page) {
       com1_printf("[USERSPACE] Error: Failed to allocate stack page\n");
       for (u64 j = 0; j < i; j++) {
@@ -79,15 +80,15 @@ static u64 allocate_user_stack(void) {
         u64 paddr = pmap_extract(vaddr);
         pmap_remove(vaddr);
         if (paddr) {
-          kmem_free((void *)paddr);
+          vm_page_free_phys(paddr);
         }
       }
       return 0;
     }
-    memset(page, 0, PAGE_SIZE);
+    memset((void *)page, 0, PAGE_SIZE);
 
     u64 vaddr = stack_bottom + (i * PAGE_SIZE);
-    pmap_enter(vaddr, (u64)page, PTE_PRESENT | PTE_RW | PTE_USER | PTE_NX);
+    pmap_enter(vaddr, page, PTE_PRESENT | PTE_RW | PTE_USER | PTE_NX);
   }
 
   /* Return top of stack (stack grows downward) */
@@ -113,7 +114,6 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
     com1_printf("[USERSPACE] Error: Failed to load ELF\n");
     pmap_load(old_cr3);
     pmap_destroy(new_cr3);
-    kmem_free((void *)(new_cr3 & PTE_ADDR_MASK));
     return NULL;
   }
 
@@ -138,7 +138,6 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
     kmem_free(kstack);
     pmap_load(old_cr3);
     pmap_destroy(new_cr3);
-    kmem_free((void *)(new_cr3 & PTE_ADDR_MASK));
     return NULL;
   }
 
@@ -150,9 +149,7 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   if (!new_proc) {
     com1_printf("[USERSPACE] Error: No free process slots\n");
     kmem_free(kstack);
-    /* TODO: free user stack pages */
     pmap_destroy(new_cr3);
-    kmem_free((void *)(new_cr3 & PTE_ADDR_MASK));
     return NULL;
   }
 

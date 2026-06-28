@@ -45,6 +45,7 @@
 #include <kernel/panic.h>
 #include <kernel/pci/pci.h>
 #include <kernel/api/api.h>
+#include <kernel/bootmem.h>
 #include <kernel/kshell/kshell.h>
 #include <kernel/other/kusr.h>
 #include <kernel/syscall.h>
@@ -238,10 +239,13 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
 
   com1_init();
   com1_set_mirror_callback(tty_com1_mirror);
+  bootmem_init(magic, addr, (u64)&start, (u64)&kernel_end);
   kmem_init();
+  void *ramdisk_mem = bootmem_alloc(4 * 1024 * 1024, PAGE_SIZE);
   init_idt();
   timer_init(1000);
   pmap_init();
+  vm_page_init_from_bootmem();
   vm_object_init();
   uma_init();
   enable_sse();
@@ -253,9 +257,11 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
   disk_manager_init();
   pata_identify(NULL);
 
-  // Create a 4MB ramdisk at 0x4000000 (ensure this doesn't overlap
-  // kernel/bootstack)
-  ramdisk_init((void *)0x4000000, 4 * 1024 * 1024);
+  if (ramdisk_mem) {
+    ramdisk_init(ramdisk_mem, 4 * 1024 * 1024);
+  } else {
+    com1_printf("[RAMDISK] bootmem allocation failed\n");
+  }
 
   pmap_clear_user_range((u64)&start, (u64)&kernel_end);
 

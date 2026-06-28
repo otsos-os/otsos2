@@ -4,8 +4,8 @@ ENTRY(_start)
 
 SECTIONS
 {
-    /* Load above kernel heap end (~9.5 MB) to avoid virtual alias bug */
-    . = 0x1000000;
+    /* User virtual text base. Physical placement is owned by the kernel VM. */
+    . = 0x400000;
 
     .text : {
         *(.text)

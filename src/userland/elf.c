@@ -53,6 +53,7 @@
 
 
 #include <mm/vm/pmap.h>
+#include <mm/vm/vm_page.h>
 #include <lib/com1.h>
 #include <mm/kmem.h>
 #include <userland/elf.h>
@@ -213,16 +214,16 @@ u64 elf_load(void *data, u64 size) {
       }
 
       /* Allocate physical page */
-      void *phys_page = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
+      u64 phys_page = vm_page_alloc_phys(0);
       if (!phys_page) {
         com1_printf("[ELF] Error: Failed to allocate page at %p\n",
                     (void *)page);
         return 0;
       }
-      memset(phys_page, 0, PAGE_SIZE);
+      memset((void *)phys_page, 0, PAGE_SIZE);
 
       /* Map virtual to physical */
-      pmap_enter(page, (u64)phys_page, page_flags);
+      pmap_enter(page, phys_page, page_flags);
     }
 
     /* Copy segment data */

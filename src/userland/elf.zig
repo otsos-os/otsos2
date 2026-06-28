@@ -106,7 +106,7 @@ pub const elf_info_t = extern struct {
 };
 
 extern fn com1_printf(fmt: [*:0]const u8, ...) void;
-extern fn kmem_alloc_aligned(size: usize, alignment: usize) ?*anyopaque;
+extern fn vm_page_alloc_phys(flags: u32) u64;
 extern fn memset(s: *anyopaque, c: c_int, n: usize) *anyopaque;
 extern fn pmap_enter(vaddr: u64, paddr: u64, flags: u64) void;
 extern fn pmap_extract(vaddr: u64) u64;
@@ -278,14 +278,14 @@ pub export fn elf_load(data: *anyopaque, size: u64) u64 {
                 }
             }
 
-            const phys_page = kmem_alloc_aligned(u64_to_usize(PAGE_SIZE), u64_to_usize(PAGE_SIZE));
-            if (phys_page == null) {
+            const phys_page = vm_page_alloc_phys(0);
+            if (phys_page == 0) {
                 com1_printf("[ELF] Error: Failed to allocate page at %p\n", u64_to_ptr(page));
                 return 0;
             }
-            _ = memset(phys_page.?, 0, u64_to_usize(PAGE_SIZE));
+            _ = memset(u64_to_ptr(phys_page), 0, u64_to_usize(PAGE_SIZE));
 
-            pmap_enter(page, @as(u64, @intFromPtr(phys_page.?)), page_flags);
+            pmap_enter(page, phys_page, page_flags);
         }
 
         const base = data_as_bytes(data);

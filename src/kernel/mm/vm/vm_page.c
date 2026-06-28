@@ -25,6 +25,7 @@
  */
 
 #include <mm/vm/vm_page.h>
+#include <kernel/bootmem.h>
 #include <mm/kmem.h>
 #include <mlibc/mlibc.h>
 #include <lib/com1.h>
@@ -32,9 +33,29 @@
 #define PAGE_SIZE 4096
 #define VM_PAGE_MAX 4096
 
-static vm_page_t pages[VM_PAGE_MAX];
+static vm_page_t bootstrap_pages[VM_PAGE_MAX];
+static vm_page_t *pages = bootstrap_pages;
+static u64 page_capacity = VM_PAGE_MAX;
 static u64 page_count;
 static vm_page_t *free_list;
+
+static u64
+round_page(u64 value)
+{
+    return value & ~((u64)(PAGE_SIZE - 1));
+}
+
+static u64
+trunc_page(u64 value)
+{
+    return value & ~((u64)(PAGE_SIZE - 1));
+}
+
+static u64
+atop(u64 bytes)
+{
+    return bytes / PAGE_SIZE;
+}
 
 void
 vm_page_init(u64 available_start, u64 available_end)
@@ -44,15 +65,17 @@ vm_page_init(u64 available_start, u64 available_end)
     u64 addr;
     u64 i;
 
-    memset(pages, 0, sizeof(pages));
+    pages = bootstrap_pages;
+    page_capacity = VM_PAGE_MAX;
+    memset(pages, 0, sizeof(bootstrap_pages));
 
-    start = (available_start + PAGE_SIZE - 1) & ~((u64)(PAGE_SIZE - 1));
-    end = available_end & ~((u64)(PAGE_SIZE - 1));
+    start = round_page(available_start + PAGE_SIZE - 1);
+    end = trunc_page(available_end);
 
     page_count = 0;
     free_list = NULL;
 
-    for (i = 0; i < VM_PAGE_MAX; i++) {
+    for (i = 0; i < page_capacity; i++) {
         pages[i].phys_addr = 0;
         pages[i].state = VM_PAGE_RESERVED;
         pages[i].ref_count = 0;
@@ -60,7 +83,7 @@ vm_page_init(u64 available_start, u64 available_end)
     }
 
     addr = start;
-    for (i = 0; i < VM_PAGE_MAX && addr < end; i++) {
+    for (i = 0; i < page_capacity && addr < end; i++) {
         pages[i].phys_addr = addr;
         pages[i].state = VM_PAGE_FREE;
         pages[i].ref_count = 0;
@@ -69,6 +92,72 @@ vm_page_init(u64 available_start, u64 available_end)
         addr += PAGE_SIZE;
         page_count++;
     }
+}
+
+void
+vm_page_init_from_bootmem(void)
+{
+    const bootmem_range_t *ranges;
+    u32 range_count;
+    u64 metadata_bytes;
+    u64 managed_pages;
+    u64 i;
+
+    ranges = bootmem_ranges();
+    range_count = bootmem_range_count();
+    managed_pages = 0;
+
+    for (u32 r = 0; r < range_count; r++) {
+        u64 start = (ranges[r].start + PAGE_SIZE - 1) & ~((u64)(PAGE_SIZE - 1));
+        u64 end = ranges[r].end & ~((u64)(PAGE_SIZE - 1));
+        if (end > start)
+            managed_pages += atop(end - start);
+    }
+
+    metadata_bytes = managed_pages * sizeof(vm_page_t);
+    pages = NULL;
+    if (metadata_bytes != 0)
+        pages = (vm_page_t *)bootmem_alloc(metadata_bytes, PAGE_SIZE);
+    if (pages == NULL) {
+        pages = bootstrap_pages;
+        page_capacity = VM_PAGE_MAX;
+        metadata_bytes = sizeof(bootstrap_pages);
+        com1_printf("[VM_PAGE] metadata bootmem allocation failed, using %u pages\n",
+                    (u32)page_capacity);
+    } else {
+        page_capacity = managed_pages;
+    }
+
+    memset(pages, 0, metadata_bytes);
+    for (i = 0; i < page_capacity; i++) {
+        pages[i].phys_addr = 0;
+        pages[i].state = VM_PAGE_RESERVED;
+        pages[i].ref_count = 0;
+        pages[i].next = NULL;
+    }
+
+    page_count = 0;
+    free_list = NULL;
+    ranges = bootmem_ranges();
+    range_count = bootmem_range_count();
+
+    for (u32 r = 0; r < range_count; r++) {
+        u64 addr = (ranges[r].start + PAGE_SIZE - 1) & ~((u64)(PAGE_SIZE - 1));
+        u64 end = ranges[r].end & ~((u64)(PAGE_SIZE - 1));
+
+        while (addr < end && page_count < page_capacity) {
+            pages[page_count].phys_addr = addr;
+            pages[page_count].state = VM_PAGE_FREE;
+            pages[page_count].ref_count = 0;
+            pages[page_count].next = free_list;
+            free_list = &pages[page_count];
+            page_count++;
+            addr += PAGE_SIZE;
+        }
+    }
+
+    com1_printf("[VM_PAGE] initialized: %u pages from bootmem (%u KB metadata)\n",
+                (u32)page_count, (u32)(metadata_bytes / 1024));
 }
 
 vm_page_t *
@@ -103,6 +192,25 @@ vm_page_free(vm_page_t *page)
     page->ref_count = 0;
     page->next = free_list;
     free_list = page;
+}
+
+u64
+vm_page_alloc_phys(u32 flags)
+{
+    vm_page_t *page = vm_page_alloc(flags);
+    if (page == NULL)
+        return 0;
+    return page->phys_addr;
+}
+
+int
+vm_page_free_phys(u64 phys_addr)
+{
+    vm_page_t *page = vm_page_lookup(phys_addr & ~((u64)PAGE_SIZE - 1));
+    if (page == NULL)
+        return -1;
+    vm_page_free(page);
+    return 0;
 }
 
 void
