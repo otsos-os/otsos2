@@ -24,13 +24,29 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * power.c — Power management: shutdown, reboot, ACPI enable.
- *
- * Uses ACPI FADT to obtain PM1a/PM1b control registers and the reset
- * register.  Falls back to PS/2 keyboard controller reset or triple-fault
- * if ACPI is unavailable.
- */
+/* !DEFINES!
+
+$define %type u16 as 16 bit unsigned
+$define %type int as 32 bit signed
+$define %type power_info_t as struct with PM register info and flags
+
+$define %func power_init as function with args void
+$define %func power_shutdown as procedure with args void
+$define %func power_reboot as procedure with args void
+$define %func power_acpi_enable as function with args void
+$define %func power_get_info as function with args void
+$define %func power_is_initialized as function with args void
+$define %func parse_s5_from_dsdt as function with args acpi_fadt_t *
+
+*/
+
+/* !SPACE!
+
+$space %export power_init, power_shutdown, power_reboot
+$space %export power_acpi_enable, power_get_info, power_is_initialized
+$space %internal parse_s5_from_dsdt
+
+*/
 
 #include <kernel/drivers/acpi/acpi.h>
 #include <kernel/drivers/power/pbutton.h>
@@ -39,287 +55,292 @@
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
-/* ── PM1 control register bits ───────────────────────────────────────── */
+#define	PM1_SLP_EN	(1 << 13)
+#define	PM1_SLP_TYP_MASK	(7 << 10)
 
-/*
- * SLP_EN is bit 13 in PM1_CNT.
- * SLP_TYP is bits [12:10] in PM1_CNT.
- */
-#define PM1_SLP_EN (1 << 13)
-#define PM1_SLP_TYP_MASK (7 << 10)
+#define	KB_CTRL_PORT	0x64
+#define	KB_RESET_CMD	0xFE
 
-/* ── PS/2 keyboard controller reset ──────────────────────────────────── */
-#define KB_CTRL_PORT 0x64
-#define KB_RESET_CMD 0xFE
+static power_info_t	g_power;
 
-/* ── internal state ──────────────────────────────────────────────────── */
+static int
+parse_s5_from_dsdt(acpi_fadt_t *fadt)
+{
+	acpi_sdt_header_t	*dsdt;
+	u8			*aml, *s5_ptr;
+	u64			dsdt_addr;
+	u32			aml_length, i;
 
-static power_info_t g_power = {0};
+	if (!fadt) {
+		return (-1);
+	}
 
-/* ── DSDT S5 object parsing ──────────────────────────────────────────── */
+	dsdt_addr = 0;
+	if (acpi_get_revision() >= 2 && fadt->x_dsdt) {
+		dsdt_addr = fadt->x_dsdt;
+	} else {
+		dsdt_addr = (u64)fadt->dsdt;
+	}
 
-/*
- * Try to find the \_S5 object in the DSDT to determine the SLP_TYP values
- * for S5 (soft-off).  This is a simplified byte-pattern search, not a
- * full AML interpreter.
- *
- * The \_S5_ object typically looks like:
- *   08 5F 53 35 5F 12 ...   (NameOp, _S5_, PackageOp, ...)
- *
- * The SLP_TYP values follow the PackageOp header.
- */
-static int parse_s5_from_dsdt(acpi_fadt_t *fadt) {
-  if (!fadt)
-    return -1;
+	if (!dsdt_addr) {
+		com1_printf("[POWER] no DSDT found\n");
+		return (-1);
+	}
 
-  /* Get DSDT address (prefer extended if ACPI 2.0+) */
-  u64 dsdt_addr = 0;
-  if (acpi_get_revision() >= 2 && fadt->x_dsdt) {
-    dsdt_addr = fadt->x_dsdt;
-  } else {
-    dsdt_addr = (u64)fadt->dsdt;
-  }
+	dsdt = (acpi_sdt_header_t *)dsdt_addr;
 
-  if (!dsdt_addr) {
-    com1_printf("[POWER] no DSDT found\n");
-    return -1;
-  }
+	if (dsdt->signature[0] != 'D' || dsdt->signature[1] != 'S' ||
+	    dsdt->signature[2] != 'D' || dsdt->signature[3] != 'T') {
+		com1_printf("[POWER] invalid DSDT signature\n");
+		return (-1);
+	}
 
-  acpi_sdt_header_t *dsdt = (acpi_sdt_header_t *)dsdt_addr;
+	com1_printf("[POWER] DSDT at %p, length %u\n", (void *)dsdt_addr,
+	    dsdt->length);
 
-  /* Validate DSDT signature */
-  if (dsdt->signature[0] != 'D' || dsdt->signature[1] != 'S' ||
-      dsdt->signature[2] != 'D' || dsdt->signature[3] != 'T') {
-    com1_printf("[POWER] invalid DSDT signature\n");
-    return -1;
-  }
+	aml = (u8 *)dsdt + sizeof(acpi_sdt_header_t);
+	aml_length = dsdt->length - sizeof(acpi_sdt_header_t);
 
-  com1_printf("[POWER] DSDT at %p, length %u\n", (void *)dsdt_addr,
-              dsdt->length);
+	for (i = 0; i < aml_length - 4; i++) {
+		if (aml[i] == '_' && aml[i + 1] == 'S' &&
+		    aml[i + 2] == '5' && aml[i + 3] == '_') {
+			com1_printf("[POWER] found _S5_ at DSDT "
+			    "offset %u\n", i);
 
-  /*
-   * Search for the byte sequence: "_S5_"
-   * In AML: 0x5F 0x53 0x35 0x5F
-   */
-  u8 *aml = (u8 *)dsdt + sizeof(acpi_sdt_header_t);
-  u32 aml_length = dsdt->length - sizeof(acpi_sdt_header_t);
+			s5_ptr = aml + i + 4;
 
-  for (u32 i = 0; i < aml_length - 4; i++) {
-    if (aml[i] == '_' && aml[i + 1] == 'S' && aml[i + 2] == '5' &&
-        aml[i + 3] == '_') {
+			if (*s5_ptr == 0x12) {
+				u8	pkg_len;
 
-      com1_printf("[POWER] found _S5_ at DSDT offset %u\n", i);
+				s5_ptr++;
+				pkg_len = *s5_ptr;
+				s5_ptr++;
+				s5_ptr++;
 
-      /*
-       * The preceding byte should be NameOp (0x08) or it could be
-       * part of a scope path.  Skip to the Package data.
-       *
-       * Typical encoding after _S5_:
-       *   12 0A 04 0A <SLP_TYPa> 0A <SLP_TYPb> ...
-       *   (PackageOp, PkgLength, NumElements, BytePrefix, value, ...)
-       */
-      u8 *s5_ptr = aml + i + 4; /* skip past "_S5_" */
+				if (*s5_ptr == 0x0A) {
+					s5_ptr++;
+				}
+				g_power.slp_typa_s5 = *s5_ptr;
+				s5_ptr++;
 
-      /* Check for PackageOp (0x12) */
-      if (*s5_ptr == 0x12) {
-        s5_ptr++;
+				if (*s5_ptr == 0x0A) {
+					s5_ptr++;
+				}
+				g_power.slp_typb_s5 = *s5_ptr;
 
-        /* Skip package length (simplified: assume single-byte PkgLength) */
-        u8 pkg_len = *s5_ptr;
-        s5_ptr++;
+				com1_printf("[POWER] S5 SLP_TYP: a=%u, "
+				    "b=%u\n", g_power.slp_typa_s5,
+				    g_power.slp_typb_s5);
+				(void)pkg_len;
+				return (0);
+			}
+		}
+	}
 
-        /* Skip number of elements */
-        s5_ptr++;
-
-        /* Read SLP_TYPa: may be a BytePrefix (0x0A) followed by value,
-         * or a raw byte if the encoding is compact */
-        if (*s5_ptr == 0x0A) {
-          s5_ptr++;
-        }
-        g_power.slp_typa_s5 = *s5_ptr;
-        s5_ptr++;
-
-        /* Read SLP_TYPb */
-        if (*s5_ptr == 0x0A) {
-          s5_ptr++;
-        }
-        g_power.slp_typb_s5 = *s5_ptr;
-
-        com1_printf("[POWER] S5 SLP_TYP: a=%u, b=%u\n", g_power.slp_typa_s5,
-                    g_power.slp_typb_s5);
-        (void)pkg_len;
-        return 0;
-      }
-    }
-  }
-
-  com1_printf("[POWER] _S5_ object not found in DSDT\n");
-  return -1;
+	com1_printf("[POWER] _S5_ object not found in DSDT\n");
+	return (-1);
 }
 
-/* ── Public API ──────────────────────────────────────────────────────── */
+int
+power_init(void)
+{
+	acpi_fadt_t	*fadt;
 
-int power_init(void) {
-  memset(&g_power, 0, sizeof(g_power));
+	memset(&g_power, 0, sizeof(g_power));
 
-  if (!acpi_is_initialized()) {
-    com1_printf("[POWER] ACPI not available, limited power management\n");
-    g_power.initialized = 1;
-    return -1;
-  }
+	if (!acpi_is_initialized()) {
+		com1_printf("[POWER] ACPI not available, "
+		    "limited power management\n");
+		g_power.initialized = 1;
+		return (-1);
+	}
 
-  acpi_fadt_t *fadt = acpi_get_fadt();
-  if (!fadt) {
-    com1_printf("[POWER] FADT not found, limited power management\n");
-    g_power.initialized = 1;
-    return -1;
-  }
+	fadt = acpi_get_fadt();
+	if (!fadt) {
+		com1_printf("[POWER] FADT not found, "
+		    "limited power management\n");
+		g_power.initialized = 1;
+		return (-1);
+	}
 
-  /* Extract PM register addresses from FADT */
-  g_power.pm1a_control = (u16)fadt->pm1a_control_block;
-  g_power.pm1b_control = (u16)fadt->pm1b_control_block;
-  g_power.smi_command_port = fadt->smi_command_port;
-  g_power.acpi_enable_value = fadt->acpi_enable;
-  g_power.acpi_available = 1;
+	g_power.pm1a_control = (u16)fadt->pm1a_control_block;
+	g_power.pm1b_control = (u16)fadt->pm1b_control_block;
+	g_power.smi_command_port = fadt->smi_command_port;
+	g_power.acpi_enable_value = fadt->acpi_enable;
+	g_power.acpi_available = 1;
 
-  /* Check if FADT reset register is supported */
-  if (fadt->flags & ACPI_FADT_RESET_REG_SUP) {
-    g_power.reset_reg_available = 1;
-    com1_printf("[POWER] ACPI reset register available at 0x%x\n",
-                (u32)fadt->reset_reg.address);
-  }
+	if (fadt->flags & ACPI_FADT_RESET_REG_SUP) {
+		g_power.reset_reg_available = 1;
+		com1_printf("[POWER] ACPI reset register available "
+		    "at 0x%x\n",
+		    (u32)fadt->reset_reg.address);
+	}
 
-  /* Parse DSDT to find S5 sleep type values for shutdown */
-  parse_s5_from_dsdt(fadt);
+	parse_s5_from_dsdt(fadt);
 
-  g_power.initialized = 1;
+	g_power.initialized = 1;
 
-  com1_printf("[POWER] initialized: PM1a=0x%x PM1b=0x%x SLP_TYP_S5=%u/%u\n",
-              g_power.pm1a_control, g_power.pm1b_control, g_power.slp_typa_s5,
-              g_power.slp_typb_s5);
+	com1_printf("[POWER] initialized: PM1a=0x%x PM1b=0x%x "
+	    "SLP_TYP_S5=%u/%u\n",
+	    g_power.pm1a_control, g_power.pm1b_control,
+	    g_power.slp_typa_s5, g_power.slp_typb_s5);
 
-  (void)power_button_init();
+	(void)power_button_init();
 
-  return 0;
+	return (0);
 }
 
-void power_shutdown(void) {
-  com1_printf("[POWER] shutting down...\n");
+void
+power_shutdown(void)
+{
+	u16	slp_typa;
 
-  __asm__ volatile("cli"); /* disable interrupts for safety */
+	com1_printf("[POWER] shutting down...\n");
 
-  /* Method 1: ACPI S5 soft-off via PM1 control registers */
-  if (g_power.acpi_available && g_power.pm1a_control) {
-    u16 slp_typa = (g_power.slp_typa_s5 << 10) | PM1_SLP_EN;
-    com1_printf("[POWER] writing 0x%x to PM1a control (0x%x)\n", slp_typa,
-                g_power.pm1a_control);
-    outw(g_power.pm1a_control, slp_typa);
+	__asm__ volatile("cli");
 
-    if (g_power.pm1b_control) {
-      u16 slp_typb = (g_power.slp_typb_s5 << 10) | PM1_SLP_EN;
-      outw(g_power.pm1b_control, slp_typb);
-    }
+	if (g_power.acpi_available && g_power.pm1a_control) {
+		volatile int	i;
 
-    /* If we reach here, ACPI shutdown didn't work immediately.
-     * Give it a moment. */
-    for (volatile int i = 0; i < 10000000; i++) {
-      __asm__ volatile("pause");
-    }
-  }
+		slp_typa = (g_power.slp_typa_s5 << 10) | PM1_SLP_EN;
+		com1_printf("[POWER] writing 0x%x to PM1a control "
+		    "(0x%x)\n", slp_typa, g_power.pm1a_control);
+		outw(g_power.pm1a_control, slp_typa);
 
-  panic("[POWER] ACPI S5 shutdown failed, system cannot power off and please sent the logs com1 (or tty0) issue in github\n");
+		if (g_power.pm1b_control) {
+			u16	slp_typb;
+
+			slp_typb = (g_power.slp_typb_s5 << 10) |
+			    PM1_SLP_EN;
+			outw(g_power.pm1b_control, slp_typb);
+		}
+
+		for (i = 0; i < 10000000; i++) {
+			__asm__ volatile("pause");
+		}
+	}
+
+	panic("[POWER] ACPI S5 shutdown failed, system cannot "
+	    "power off\n");
 }
 
-void power_reboot(void) {
-  com1_printf("[POWER] rebooting...\n");
+void
+power_reboot(void)
+{
+	volatile int	i;
+	u8		good;
 
-  __asm__ volatile("cli");
+	com1_printf("[POWER] rebooting...\n");
 
-  /* Method 1: ACPI reset register (if available) */
-  if (g_power.acpi_available && g_power.reset_reg_available) {
-    acpi_fadt_t *fadt = acpi_get_fadt();
-    if (fadt) {
-      if (fadt->reset_reg.address_space == ACPI_GAS_SYSTEM_IO) {
-        com1_printf("[POWER] ACPI reset via I/O port 0x%x = 0x%x\n",
-                    (u32)fadt->reset_reg.address, fadt->reset_value);
-        outb((u16)fadt->reset_reg.address, fadt->reset_value);
-      } else if (fadt->reset_reg.address_space == ACPI_GAS_SYSTEM_MEMORY) {
-        com1_printf("[POWER] ACPI reset via MMIO 0x%x = 0x%x\n",
-                    (u32)fadt->reset_reg.address, fadt->reset_value);
-        volatile u8 *reg = (volatile u8 *)fadt->reset_reg.address;
-        *reg = fadt->reset_value;
-      }
+	__asm__ volatile("cli");
 
-      /* Wait a bit for the reset to take effect */
-      for (volatile int i = 0; i < 10000000; i++) {
-        __asm__ volatile("pause");
-      }
-    }
-  }
+	if (g_power.acpi_available && g_power.reset_reg_available) {
+		acpi_fadt_t	*fadt;
 
-  /* Method 2: PS/2 keyboard controller reset (pulse CPU reset line) */
-  com1_printf("[POWER] trying PS/2 keyboard controller reset\n");
+		fadt = acpi_get_fadt();
+		if (fadt) {
+			if (fadt->reset_reg.address_space ==
+			    ACPI_GAS_SYSTEM_IO) {
+				com1_printf("[POWER] ACPI reset via "
+				    "I/O port 0x%x = 0x%x\n",
+				    (u32)fadt->reset_reg.address,
+				    fadt->reset_value);
+				outb((u16)fadt->reset_reg.address,
+				    fadt->reset_value);
+			} else if (fadt->reset_reg.address_space ==
+			    ACPI_GAS_SYSTEM_MEMORY) {
+				volatile u8	*reg;
 
-  /* Wait for the keyboard controller input buffer to be clear */
-  u8 good = 0x02;
-  while (good & 0x02) {
-    good = inb(KB_CTRL_PORT);
-  }
-  outb(KB_CTRL_PORT, KB_RESET_CMD);
+				com1_printf("[POWER] ACPI reset via "
+				    "MMIO 0x%x = 0x%x\n",
+				    (u32)fadt->reset_reg.address,
+				    fadt->reset_value);
+				reg = (volatile u8 *)
+				    fadt->reset_reg.address;
+				*reg = fadt->reset_value;
+			}
 
-  /* Wait a bit */
-  for (volatile int i = 0; i < 10000000; i++) {
-    __asm__ volatile("pause");
-  }
+			for (i = 0; i < 10000000; i++) {
+				__asm__ volatile("pause");
+			}
+		}
+	}
 
-  /* Method 3: Triple-fault — load a zero-length IDT and trigger interrupt */
-  com1_printf("[POWER] triple-faulting...\n");
-  struct {
-    u16 limit;
-    u64 base;
-  } __attribute__((packed)) null_idt = {0, 0};
-  __asm__ volatile("lidt %0" : : "m"(null_idt));
-  __asm__ volatile("int $0x03");
+	com1_printf("[POWER] trying PS/2 keyboard controller "
+	    "reset\n");
 
-  /* Should never reach here */
-  while (1) {
-    __asm__ volatile("hlt");
-  }
+	good = 0x02;
+	while (good & 0x02) {
+		good = inb(KB_CTRL_PORT);
+	}
+	outb(KB_CTRL_PORT, KB_RESET_CMD);
+
+	for (i = 0; i < 10000000; i++) {
+		__asm__ volatile("pause");
+	}
+
+	com1_printf("[POWER] triple-faulting...\n");
+	struct {
+		u16	limit;
+		u64	base;
+	} __attribute__((packed)) null_idt = {0, 0};
+	__asm__ volatile("lidt %0" : : "m"(null_idt));
+	__asm__ volatile("int $0x03");
+
+	while (1) {
+		__asm__ volatile("hlt");
+	}
 }
 
-int power_acpi_enable(void) {
-  if (!g_power.acpi_available || !g_power.smi_command_port) {
-    com1_printf("[POWER] SMI command port not available\n");
-    return -1;
-  }
+int
+power_acpi_enable(void)
+{
+	u16	pm1a;
+	int	i;
 
-  /* Check if ACPI is already enabled by reading PM1a control */
-  u16 pm1a = inw(g_power.pm1a_control);
-  if (pm1a & 1) { /* SCI_EN bit = bit 0 */
-    com1_printf("[POWER] ACPI already enabled\n");
-    return 0;
-  }
+	if (!g_power.acpi_available || !g_power.smi_command_port) {
+		com1_printf("[POWER] SMI command port not "
+		    "available\n");
+		return (-1);
+	}
 
-  com1_printf("[POWER] enabling ACPI via SMI cmd port 0x%x, value 0x%x\n",
-              g_power.smi_command_port, g_power.acpi_enable_value);
-  outb((u16)g_power.smi_command_port, g_power.acpi_enable_value);
+	pm1a = inw(g_power.pm1a_control);
+	if (pm1a & 1) {
+		com1_printf("[POWER] ACPI already enabled\n");
+		return (0);
+	}
 
-  /* Poll for SCI_EN bit to be set (with timeout) */
-  for (int i = 0; i < 3000; i++) {
-    pm1a = inw(g_power.pm1a_control);
-    if (pm1a & 1) {
-      com1_printf("[POWER] ACPI mode enabled successfully\n");
-      return 0;
-    }
-    /* Simple delay */
-    for (volatile int j = 0; j < 10000; j++) {
-      __asm__ volatile("pause");
-    }
-  }
+	com1_printf("[POWER] enabling ACPI via SMI cmd port "
+	    "0x%x, value 0x%x\n",
+	    g_power.smi_command_port, g_power.acpi_enable_value);
+	outb((u16)g_power.smi_command_port, g_power.acpi_enable_value);
 
-  panic("[POWER] failed to enable ACPI mode (timeout)\n");
-  return -1;
+	for (i = 0; i < 3000; i++) {
+		volatile int	j;
+
+		pm1a = inw(g_power.pm1a_control);
+		if (pm1a & 1) {
+			com1_printf("[POWER] ACPI mode enabled "
+			    "successfully\n");
+			return (0);
+		}
+		for (j = 0; j < 10000; j++) {
+			__asm__ volatile("pause");
+		}
+	}
+
+	panic("[POWER] failed to enable ACPI mode (timeout)\n");
+	return (-1);
 }
 
-power_info_t power_get_info(void) { return g_power; }
-int power_is_initialized(void) { return g_power.initialized; }
+power_info_t
+power_get_info(void)
+{
+	return (g_power);
+}
+
+int
+power_is_initialized(void)
+{
+	return (g_power.initialized);
+}

@@ -24,11 +24,28 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type int as 32 bit signed
+
+$define %func power_button_init as function with args void
+$define %func power_button_poll as procedure with args void
+$define %func power_button_is_initialized as function with args void
+
+*/
+
+/* !SPACE!
+
+$space %export power_button_init, power_button_poll
+$space %export power_button_is_initialized
+
+*/
+
 #ifndef POWER_PBUTTON_H
 #define POWER_PBUTTON_H
 
-int power_button_init(void);
-void power_button_poll(void);
-int power_button_is_initialized(void);
+int	power_button_init(void);
+void	power_button_poll(void);
+int	power_button_is_initialized(void);
 
 #endif

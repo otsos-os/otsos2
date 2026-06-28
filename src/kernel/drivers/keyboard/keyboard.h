@@ -24,36 +24,69 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u8 as 8 bit unsigned
+$define %type int as 32 bit signed
+$define %type char as 8 bit signed
+$define %type keyboard_driver_t as struct with driver name and function pointers
+$define %type keyboard_scancode_callback_t as function pointer for raw scancode events
+
+$define %func keyboard_manager_init as procedure with args void
+$define %func keyboard_getchar as function with args void
+$define %func keyboard_getchar_blocking as function with args void
+$define %func keyboard_common_handler as procedure with args void
+$define %func keyboard_poll as procedure with args void
+$define %func keyboard_reset_state as procedure with args void
+$define %func scanf as function with args const char *, ...
+$define %func keyboard_set_scancode_callback as procedure with args keyboard_scancode_callback_t
+$define %func keyboard_handle_scancode as procedure with args u8, int, int
+$define %func keyboard_get_driver_name as function with args void
+
+*/
+
+/* !SPACE!
+
+$space %export keyboard_manager_init, keyboard_getchar
+$space %export keyboard_getchar_blocking, keyboard_common_handler
+$space %export keyboard_poll, keyboard_reset_state, scanf
+$space %export keyboard_set_scancode_callback, keyboard_handle_scancode
+$space %export keyboard_get_driver_name
+
+*/
+
 #ifndef KEYBOARD_H
 #define KEYBOARD_H
 
 #include <mlibc/mlibc.h>
 
-typedef int (*keyboard_init_fn)();
-typedef char (*keyboard_getchar_fn)();
-typedef void (*keyboard_handler_fn)();
-typedef void (*keyboard_poll_fn)();
+typedef int	(*keyboard_init_fn)(void);
+typedef char	(*keyboard_getchar_fn)(void);
+typedef void	(*keyboard_handler_fn)(void);
+typedef void	(*keyboard_poll_fn)(void);
 
 typedef struct {
-  const char *name;
-  keyboard_init_fn init;
-  keyboard_getchar_fn getchar;
-  keyboard_handler_fn handler;
-  keyboard_poll_fn poll;
+	const char		*name;
+	keyboard_init_fn	 init;
+	keyboard_getchar_fn	 getchar;
+	keyboard_handler_fn	 handler;
+	keyboard_poll_fn	 poll;
 } keyboard_driver_t;
 
 typedef void (*keyboard_scancode_callback_t)(u8 scancode, int released,
-                                             int extended);
+    int extended);
 
-void keyboard_manager_init();
-char keyboard_getchar();
-char keyboard_getchar_blocking();
-void keyboard_common_handler();
-void keyboard_poll();
-void keyboard_reset_state(void);
-int scanf(const char *format, ...);
-void keyboard_set_scancode_callback(keyboard_scancode_callback_t cb);
-void keyboard_handle_scancode(u8 scancode, int released, int extended);
-const char *keyboard_get_driver_name(void);
+void		keyboard_manager_init(void);
+char		keyboard_getchar(void);
+char		keyboard_getchar_blocking(void);
+void		keyboard_common_handler(void);
+void		keyboard_poll(void);
+void		keyboard_reset_state(void);
+int		scanf(const char *format, ...);
+void		keyboard_set_scancode_callback(
+		    keyboard_scancode_callback_t cb);
+void		keyboard_handle_scancode(u8 scancode, int released,
+		    int extended);
+const char	*keyboard_get_driver_name(void);
 
 #endif

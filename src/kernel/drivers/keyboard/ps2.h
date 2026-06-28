@@ -24,14 +24,36 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type char as 8 bit signed
+$define %type int as 32 bit signed
+
+$define %func ps2_keyboard_init as function with args void
+$define %func ps2_keyboard_handler as procedure with args void
+$define %func ps2_keyboard_getchar as function with args void
+$define %func ps2_keyboard_poll as procedure with args void
+$define %func ps2_keyboard_reset_state as procedure with args void
+$define %func ps2Scanf as function with args const char *, ...
+
+*/
+
+/* !SPACE!
+
+$space %export ps2_keyboard_init, ps2_keyboard_handler
+$space %export ps2_keyboard_getchar, ps2_keyboard_poll
+$space %export ps2_keyboard_reset_state, ps2Scanf
+
+*/
+
 #ifndef PS2_H
 #define PS2_H
 
-int ps2_keyboard_init();
-void ps2_keyboard_handler();
-char ps2_keyboard_getchar();
-void ps2_keyboard_poll();
-void ps2_keyboard_reset_state(void);
-int ps2Scanf(const char *format, ...);
+int	ps2_keyboard_init(void);
+void	ps2_keyboard_handler(void);
+char	ps2_keyboard_getchar(void);
+void	ps2_keyboard_poll(void);
+void	ps2_keyboard_reset_state(void);
+int	ps2Scanf(const char *format, ...);
 
 #endif

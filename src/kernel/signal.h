@@ -24,10 +24,22 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type int as 32 bit signed
+
+*/
+
+/* !SPACE!
+
+$space %export SIGKILL, SIGTERM
+
+*/
+
 #ifndef SIGNAL_H
 #define SIGNAL_H
 
-#define SIGKILL 9
-#define SIGTERM 15
+#define	SIGKILL	9
+#define	SIGTERM	15
 
 #endif

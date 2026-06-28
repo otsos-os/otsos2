@@ -24,24 +24,57 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u32 as 32 bit unsigned
+$define %type u8 as 8 bit unsigned
+$define %type int as 32 bit signed
+
+$define %func tty_read as function with args void *, u32
+$define %func tty_write as function with args const void *, u32
+$define %func tty_init as procedure with args void
+$define %func tty_is_initialized as function with args void
+$define %func tty_reinit as procedure with args void
+$define %func tty_putc_from_kernel as procedure with args char
+$define %func tty_flush_kernel as procedure with args void
+$define %func tty_set_color as procedure with args u8
+$define %func tty_clear_active as procedure with args void
+$define %func tty_com1_mirror as procedure with args char
+$define %func tty_set_active as procedure with args int
+$define %func tty_restore_active_display as procedure with args void
+$define %func tty_update as procedure with args void
+$define %func tty_get_input_channel as function with args void
+
+*/
+
+/* !SPACE!
+
+$space %export tty_read, tty_write, tty_init, tty_is_initialized
+$space %export tty_reinit, tty_putc_from_kernel, tty_flush_kernel
+$space %export tty_set_color, tty_clear_active, tty_com1_mirror
+$space %export tty_set_active, tty_restore_active_display
+$space %export tty_update, tty_get_input_channel
+
+*/
+
 #ifndef TTY_H
 #define TTY_H
 
 #include <mlibc/mlibc.h>
 
-int tty_read(void *buf, u32 count);
-int tty_write(const void *buf, u32 count);
-void tty_init(void);
-int tty_is_initialized(void);
-void tty_reinit(void);
-void tty_putc_from_kernel(char c);
-void tty_flush_kernel(void);
-void tty_set_color(u8 color);
-void tty_clear_active(void);
-void tty_com1_mirror(char c);
-void tty_set_active(int index);
-void tty_restore_active_display(void);
-void tty_update(void);
-void *tty_get_input_channel(void);
+int	tty_read(void *buf, u32 count);
+int	tty_write(const void *buf, u32 count);
+void	tty_init(void);
+int	tty_is_initialized(void);
+void	tty_reinit(void);
+void	tty_putc_from_kernel(char c);
+void	tty_flush_kernel(void);
+void	tty_set_color(u8 color);
+void	tty_clear_active(void);
+void	tty_com1_mirror(char c);
+void	tty_set_active(int index);
+void	tty_restore_active_display(void);
+void	tty_update(void);
+void	*tty_get_input_channel(void);
 
 #endif

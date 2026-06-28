@@ -24,11 +24,25 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type registers_t as struct with CPU register snapshot
+
+$define %func scheduler_tick as procedure with args registers_t *
+
+*/
+
+/* !SPACE!
+
+$space %export scheduler_tick
+
+*/
+
 #ifndef SCHEDULER_H
 #define SCHEDULER_H
 
 #include <kernel/interrupts/idt.h>
 
-void scheduler_tick(registers_t *regs);
+void	scheduler_tick(registers_t *regs);
 
 #endif

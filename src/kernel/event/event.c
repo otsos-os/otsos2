@@ -24,6 +24,63 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type u64 as 64 bit unsigned
+$define %type s16 as 16 bit signed
+$define %type s64 as 64 bit signed
+$define %type int as 32 bit signed
+$define %type kqueue_t as struct with event queue, knote pool, ready list
+$define %type knote_t as struct with registered event state
+$define %type filter_ops_t as struct with filter callbacks vtable
+$define %type process_t as struct with process control block
+$define %type pipe_t as struct with pipe ring buffer
+$define %type api_object_t as struct with object table entry
+
+$define %func filter_index as function with args s16
+$define %func filter_register as procedure with args const filter_ops_t *
+$define %func filter_lookup as function with args s16
+$define %func proc_sleep as procedure with args void *
+$define %func proc_wakeup as procedure with args void *
+$define %func proc_wakeup_one as procedure with args void *
+$define %func event_init as procedure with args void
+$define %func kqueue_create as function with args void
+$define %func kqueue_destroy as function with args int
+$define %func kqueue_get as function with args int
+$define %func knote_find as function with args kqueue_t *, u64, s16
+$define %func knote_alloc as function with args kqueue_t *
+$define %func knote_add_to_ready as procedure with args kqueue_t *, knote_t *
+$define %func knote_remove_from_ready as procedure with args kqueue_t *, knote_t *
+$define %func knote_ready as procedure with args knote_t *
+$define %func kqueue_wakeup as procedure with args kqueue_t *
+$define %func knote_notify_all as procedure with args s16, u64, u32, s64
+$define %func process_change as function with args kqueue_t *, struct kevent *
+$define %func collect_events as function with args kqueue_t *, struct kevent *, int
+$define %func kevent_process as function with args int, struct kevent *, int, struct kevent *, int, s64
+$define %func event_timer_tick as procedure with args void
+$define %func event_cleanup_process as procedure with args struct process *
+$define %func event_fork_process as procedure with args struct process *, struct process *
+$define %func event_notify_pipe_change as procedure with args pipe_t *
+
+*/
+
+/* !SPACE!
+
+$space %internal filter_index, knote_find, knote_alloc
+$space %internal knote_add_to_ready, knote_remove_from_ready
+$space %internal process_change, collect_events
+$space %export filter_register, filter_lookup
+$space %export proc_sleep, proc_wakeup, proc_wakeup_one
+$space %export event_init, kqueue_create, kqueue_destroy
+$space %export kqueue_get, knote_ready, kqueue_wakeup
+$space %export knote_notify_all, kevent_process
+$space %export event_timer_tick, event_cleanup_process
+$space %export event_fork_process, event_notify_pipe_change
+
+*/
+
 #include <kernel/event/event.h>
 #include <kernel/api/api.h>
 #include <kernel/drivers/timer.h>
@@ -33,679 +90,726 @@
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
-/* ── Static pool of kqueue objects ────────────────────────────────── */
+static kqueue_t			kqueue_pool[MAX_KQUEUES];
+static int			event_initialized;
+static const filter_ops_t	*filter_table[EVFILT_SYSCOUNT];
 
-static kqueue_t kqueue_pool[MAX_KQUEUES];
-static int event_initialized = 0;
+static int
+filter_index(s16 filter)
+{
+	int	idx;
 
-/* ── Filter registry ──────────────────────────────────────────────── */
-
-static const filter_ops_t *filter_table[EVFILT_SYSCOUNT];
-
-/* Convert negative filter id to array index: EVFILT_READ(-1) -> 0 */
-static int filter_index(s16 filter) {
-  int idx = -filter - 1;
-  if (idx < 0 || idx >= EVFILT_SYSCOUNT) {
-    return -1;
-  }
-  return idx;
+	idx = -filter - 1;
+	if (idx < 0 || idx >= EVFILT_SYSCOUNT) {
+		return (-1);
+	}
+	return (idx);
 }
 
-void filter_register(const filter_ops_t *ops) {
-  int idx = filter_index(ops->filter);
-  if (idx < 0) {
-    com1_printf("[EVENT] filter_register: invalid filter %d\n", ops->filter);
-    return;
-  }
-  filter_table[idx] = ops;
-  com1_printf("[EVENT] registered filter '%s' (id=%d)\n", ops->name,
-              ops->filter);
+void
+filter_register(const filter_ops_t *ops)
+{
+	int	idx;
+
+	idx = filter_index(ops->filter);
+	if (idx < 0) {
+		com1_printf("[EVENT] filter_register: invalid "
+		    "filter %d\n", ops->filter);
+		return;
+	}
+	filter_table[idx] = ops;
+	com1_printf("[EVENT] registered filter '%s' "
+	    "(id=%d)\n", ops->name, ops->filter);
 }
 
-const filter_ops_t *filter_lookup(s16 filter) {
-  int idx = filter_index(filter);
-  if (idx < 0) {
-    return NULL;
-  }
-  return filter_table[idx];
+const filter_ops_t *
+filter_lookup(s16 filter)
+{
+	int	idx;
+
+	idx = filter_index(filter);
+	if (idx < 0) {
+		return (NULL);
+	}
+	return (filter_table[idx]);
 }
 
-/* ── Sleep / wake infrastructure ──────────────────────────────────── */
+void
+proc_sleep(void *channel)
+{
+	process_t	*proc;
 
-/*
- * Put the current process to sleep on a wait channel.
- * The process will not run until wakeup() is called on the same channel.
- * Must be called with interrupts enabled (or about to be enabled).
- */
-void proc_sleep(void *channel) {
-  process_t *proc = process_current();
-  if (!proc) {
-    return;
-  }
+	proc = process_current();
+	if (!proc) {
+		return;
+	}
 
-  proc->wait_channel = channel;
-  proc->state = PROC_STATE_SLEEPING;
- // com1_printf("[EVENT] proc_sleep: pid=%d ch=%p\n", proc->pid, channel); commented because it spam to the uart
+	proc->wait_channel = channel;
+	proc->state = PROC_STATE_SLEEPING;
 
-  /*
-   * Halt with interrupts enabled. hlt wakes on ANY interrupt
-   * (timer, keyboard, etc). After waking, check if we were
-   * actually woken by proc_wakeup (wait_channel cleared) or
-   * just by a spurious timer tick. If not woken, go back to sleep.
-   */
-  __asm__ volatile("sti");
-  while (proc->wait_channel != NULL) {
-    __asm__ volatile("hlt");
-  }
-  __asm__ volatile("cli");
+	__asm__ volatile("sti");
+	while (proc->wait_channel != NULL) {
+		__asm__ volatile("hlt");
+	}
 
-  proc->state = PROC_STATE_RUNNING;
+	proc->state = PROC_STATE_RUNNING;
 }
 
-/*
- * Wake all processes sleeping on the given wait channel.
- */
-void proc_wakeup(void *channel) {
-  for (int i = 0; i < MAX_PROCESSES; i++) {
-    process_t *p = &process_table[i];
-    if (p->state == PROC_STATE_SLEEPING && p->wait_channel == channel) {
-      p->state = PROC_STATE_RUNNABLE;
-      p->wait_channel = NULL;
-     // com1_printf("[EVENT] proc_wakeup: pid=%d\n", p->pid); commented because it spam to the uart
-    }
-  }
+void
+proc_wakeup(void *channel)
+{
+	int		i;
+	process_t	*p;
+
+	for (i = 0; i < MAX_PROCESSES; i++) {
+		p = &process_table[i];
+		if (p->state == PROC_STATE_SLEEPING &&
+		    p->wait_channel == channel) {
+			p->state = PROC_STATE_RUNNABLE;
+			p->wait_channel = NULL;
+		}
+	}
 }
 
-/*
- * Wake one process sleeping on the given wait channel (highest priority:
- * first found in process table order).
- */
-void proc_wakeup_one(void *channel) {
-  for (int i = 0; i < MAX_PROCESSES; i++) {
-    process_t *p = &process_table[i];
-    if (p->state == PROC_STATE_SLEEPING && p->wait_channel == channel) {
-      p->state = PROC_STATE_RUNNABLE;
-      p->wait_channel = NULL;
-      com1_printf("[EVENT] proc_wakeup_one: pid=%d\n", p->pid);
-      return;
-    }
-  }
+void
+proc_wakeup_one(void *channel)
+{
+	int		i;
+	process_t	*p;
+
+	for (i = 0; i < MAX_PROCESSES; i++) {
+		p = &process_table[i];
+		if (p->state == PROC_STATE_SLEEPING &&
+		    p->wait_channel == channel) {
+			p->state = PROC_STATE_RUNNABLE;
+			p->wait_channel = NULL;
+			return;
+		}
+	}
 }
 
-/* ── kqueue lifecycle ─────────────────────────────────────────────── */
+void
+event_init(void)
+{
+	com1_printf("[EVENT] Initializing event subsystem...\n");
 
-void event_init(void) {
-  com1_printf("[EVENT] Initializing event subsystem...\n");
+	memset(kqueue_pool, 0, sizeof(kqueue_pool));
+	memset(filter_table, 0, sizeof(filter_table));
 
-  memset(kqueue_pool, 0, sizeof(kqueue_pool));
-  memset(filter_table, 0, sizeof(filter_table));
+	{
+		extern const filter_ops_t filter_read_ops;
+		extern const filter_ops_t filter_write_ops;
+		extern const filter_ops_t filter_timer_ops;
+		extern const filter_ops_t filter_proc_ops;
+		extern const filter_ops_t filter_signal_ops;
+		extern const filter_ops_t filter_user_ops;
 
-  /* Register all built-in filters */
-  extern const filter_ops_t filter_read_ops;
-  extern const filter_ops_t filter_write_ops;
-  extern const filter_ops_t filter_timer_ops;
-  extern const filter_ops_t filter_proc_ops;
-  extern const filter_ops_t filter_signal_ops;
-  extern const filter_ops_t filter_user_ops;
+		filter_register(&filter_read_ops);
+		filter_register(&filter_write_ops);
+		filter_register(&filter_timer_ops);
+		filter_register(&filter_proc_ops);
+		filter_register(&filter_signal_ops);
+		filter_register(&filter_user_ops);
+	}
 
-  filter_register(&filter_read_ops);
-  filter_register(&filter_write_ops);
-  filter_register(&filter_timer_ops);
-  filter_register(&filter_proc_ops);
-  filter_register(&filter_signal_ops);
-  filter_register(&filter_user_ops);
-
-  event_initialized = 1;
-  com1_printf("[EVENT] Event subsystem initialized (%d kqueue slots)\n",
-              MAX_KQUEUES);
+	event_initialized = 1;
+	com1_printf("[EVENT] Event subsystem initialized "
+	    "(%d kqueue slots)\n", MAX_KQUEUES);
 }
 
-int kqueue_create(void) {
-  if (!event_initialized) {
-    return -1;
-  }
+int
+kqueue_create(void)
+{
+	int	i;
 
-  for (int i = 0; i < MAX_KQUEUES; i++) {
-    if (!kqueue_pool[i].used) {
-      memset(&kqueue_pool[i], 0, sizeof(kqueue_t));
-      kqueue_pool[i].used = 1;
-      kqueue_pool[i].owner = process_current();
-      kqueue_pool[i].wait_channel = &kqueue_pool[i];
-      com1_printf("[EVENT] Created kqueue idx=%d owner_pid=%d\n", i,
-                  process_current() ? (int)process_current()->pid : 0);
-      return i;
-    }
-  }
+	if (!event_initialized) {
+		return (-1);
+	}
 
-  com1_printf("[EVENT] kqueue_create: no free slots\n");
-  return -1;
+	for (i = 0; i < MAX_KQUEUES; i++) {
+		if (!kqueue_pool[i].used) {
+			memset(&kqueue_pool[i], 0,
+			    sizeof(kqueue_t));
+			kqueue_pool[i].used = 1;
+			kqueue_pool[i].owner =
+			    process_current();
+			kqueue_pool[i].wait_channel =
+			    &kqueue_pool[i];
+			com1_printf("[EVENT] Created kqueue idx=%d "
+			    "owner_pid=%d\n", i,
+			    process_current() ?
+			    (int)process_current()->pid : 0);
+			return (i);
+		}
+	}
+
+	com1_printf("[EVENT] kqueue_create: no free slots\n");
+	return (-1);
 }
 
-int kqueue_destroy(int kq_idx) {
-  if (kq_idx < 0 || kq_idx >= MAX_KQUEUES) {
-    return -1;
-  }
+int
+kqueue_destroy(int kq_idx)
+{
+	kqueue_t		*kq;
+	int			i;
+	const filter_ops_t	*ops;
 
-  kqueue_t *kq = &kqueue_pool[kq_idx];
-  if (!kq->used) {
-    return -1;
-  }
+	if (kq_idx < 0 || kq_idx >= MAX_KQUEUES) {
+		return (-1);
+	}
 
-  /* Detach all knotes */
-  for (int i = 0; i < MAX_KNOTES; i++) {
-    knote_t *kn = &kq->knotes[i];
-    if (!kn->used) {
-      continue;
-    }
+	kq = &kqueue_pool[kq_idx];
+	if (!kq->used) {
+		return (-1);
+	}
 
-    const filter_ops_t *ops = filter_lookup(kn->filter);
-    if (ops && ops->detach) {
-      ops->detach(kn);
-    }
+	for (i = 0; i < MAX_KNOTES; i++) {
+		knote_t	*kn;
 
-    memset(kn, 0, sizeof(knote_t));
-  }
+		kn = &kq->knotes[i];
+		if (!kn->used) {
+			continue;
+		}
 
-  /* Wake anyone blocked on this kqueue */
-  proc_wakeup(kq->wait_channel);
+		ops = filter_lookup(kn->filter);
+		if (ops && ops->detach) {
+			ops->detach(kn);
+		}
+		memset(kn, 0, sizeof(knote_t));
+	}
 
-  memset(kq, 0, sizeof(kqueue_t));
-  com1_printf("[EVENT] Destroyed kqueue idx=%d\n", kq_idx);
-  return 0;
+	proc_wakeup(kq->wait_channel);
+
+	memset(kq, 0, sizeof(kqueue_t));
+	com1_printf("[EVENT] Destroyed kqueue idx=%d\n", kq_idx);
+	return (0);
 }
 
-kqueue_t *kqueue_get(int kq_idx) {
-  if (kq_idx < 0 || kq_idx >= MAX_KQUEUES) {
-    return NULL;
-  }
-  if (!kqueue_pool[kq_idx].used) {
-    return NULL;
-  }
-  return &kqueue_pool[kq_idx];
+kqueue_t *
+kqueue_get(int kq_idx)
+{
+	if (kq_idx < 0 || kq_idx >= MAX_KQUEUES) {
+		return (NULL);
+	}
+	if (!kqueue_pool[kq_idx].used) {
+		return (NULL);
+	}
+	return (&kqueue_pool[kq_idx]);
 }
 
-/* ── knote management ─────────────────────────────────────────────── */
+static knote_t *
+knote_find(kqueue_t *kq, u64 ident, s16 filter)
+{
+	int	i;
 
-static knote_t *knote_find(kqueue_t *kq, u64 ident, s16 filter) {
-  for (int i = 0; i < MAX_KNOTES; i++) {
-    knote_t *kn = &kq->knotes[i];
-    if (kn->used && kn->ident == ident && kn->filter == filter) {
-      return kn;
-    }
-  }
-  return NULL;
+	for (i = 0; i < MAX_KNOTES; i++) {
+		knote_t	*kn;
+
+		kn = &kq->knotes[i];
+		if (kn->used && kn->ident == ident &&
+		    kn->filter == filter) {
+			return (kn);
+		}
+	}
+	return (NULL);
 }
 
-static knote_t *knote_alloc(kqueue_t *kq) {
-  for (int i = 0; i < MAX_KNOTES; i++) {
-    if (!kq->knotes[i].used) {
-      return &kq->knotes[i];
-    }
-  }
-  return NULL;
+static knote_t *
+knote_alloc(kqueue_t *kq)
+{
+	int	i;
+
+	for (i = 0; i < MAX_KNOTES; i++) {
+		if (!kq->knotes[i].used) {
+			return (&kq->knotes[i]);
+		}
+	}
+	return (NULL);
 }
 
-static void knote_add_to_ready(kqueue_t *kq, knote_t *kn) {
-  if (kn->pending) {
-    return;
-  }
+static void
+knote_add_to_ready(kqueue_t *kq, knote_t *kn)
+{
+	if (kn->pending) {
+		return;
+	}
 
-  kn->pending = 1;
-  kn->next = NULL;
+	kn->pending = 1;
+	kn->next = NULL;
 
-  if (kq->ready_tail) {
-    kq->ready_tail->next = kn;
-    kq->ready_tail = kn;
-  } else {
-    kq->ready_head = kn;
-    kq->ready_tail = kn;
-  }
-  kq->ready_count++;
+	if (kq->ready_tail) {
+		kq->ready_tail->next = kn;
+		kq->ready_tail = kn;
+	} else {
+		kq->ready_head = kn;
+		kq->ready_tail = kn;
+	}
+	kq->ready_count++;
 }
 
-static void knote_remove_from_ready(kqueue_t *kq, knote_t *kn) {
-  if (!kn->pending) {
-    return;
-  }
+static void
+knote_remove_from_ready(kqueue_t *kq, knote_t *kn)
+{
+	knote_t	*prev, *cur;
 
-  /* Linear scan to unlink */
-  knote_t *prev = NULL;
-  knote_t *cur = kq->ready_head;
-  while (cur) {
-    if (cur == kn) {
-      if (prev) {
-        prev->next = kn->next;
-      } else {
-        kq->ready_head = kn->next;
-      }
-      if (kq->ready_tail == kn) {
-        kq->ready_tail = prev;
-      }
-      kn->next = NULL;
-      kn->pending = 0;
-      kq->ready_count--;
-      return;
-    }
-    prev = cur;
-    cur = cur->next;
-  }
+	if (!kn->pending) {
+		return;
+	}
+
+	prev = NULL;
+	cur = kq->ready_head;
+	while (cur) {
+		if (cur == kn) {
+			if (prev) {
+				prev->next = kn->next;
+			} else {
+				kq->ready_head = kn->next;
+			}
+			if (kq->ready_tail == kn) {
+				kq->ready_tail = prev;
+			}
+			kn->next = NULL;
+			kn->pending = 0;
+			kq->ready_count--;
+			return;
+		}
+		prev = cur;
+		cur = cur->next;
+	}
 }
 
-void knote_ready(knote_t *kn) {
-  if (!kn || !kn->used || kn->disabled) {
-    return;
-  }
+void
+knote_ready(knote_t *kn)
+{
+	kqueue_t	*kq;
 
-  kqueue_t *kq = kn->kq;
-  if (!kq || !kq->used) {
-    return;
-  }
+	if (!kn || !kn->used || kn->disabled) {
+		return;
+	}
 
-  knote_add_to_ready(kq, kn);
-  kqueue_wakeup(kq);
+	kq = kn->kq;
+	if (!kq || !kq->used) {
+		return;
+	}
+
+	knote_add_to_ready(kq, kn);
+	kqueue_wakeup(kq);
 }
 
-void kqueue_wakeup(kqueue_t *kq) {
-  if (kq && kq->used) {
-    proc_wakeup_one(kq->wait_channel);
-  }
+void
+kqueue_wakeup(kqueue_t *kq)
+{
+	if (kq && kq->used) {
+		proc_wakeup_one(kq->wait_channel);
+	}
 }
 
-/*
- * Notify all knotes across all kqueues that match (filter, ident).
- * This is called by kernel subsystems (pipe, tty, proc, etc.) when
- * a state change occurs.
- */
-void knote_notify_all(s16 filter, u64 ident, u32 fflags, s64 data) {
-  for (int i = 0; i < MAX_KQUEUES; i++) {
-    kqueue_t *kq = &kqueue_pool[i];
-    if (!kq->used) {
-      continue;
-    }
+void
+knote_notify_all(s16 filter, u64 ident, u32 fflags, s64 data)
+{
+	int	i, j;
 
-    for (int j = 0; j < MAX_KNOTES; j++) {
-      knote_t *kn = &kq->knotes[j];
-      if (!kn->used || kn->filter != filter || kn->ident != ident) {
-        continue;
-      }
+	for (i = 0; i < MAX_KQUEUES; i++) {
+		kqueue_t	*kq;
+		knote_t		*kn;
 
-      /* Update knote data from the notification */
-      if (fflags) {
-        kn->fflags |= fflags;
-      }
-      if (data) {
-        kn->data = data;
-      }
+		kq = &kqueue_pool[i];
+		if (!kq->used) {
+			continue;
+		}
 
-      knote_ready(kn);
-    }
-  }
+		for (j = 0; j < MAX_KNOTES; j++) {
+			kn = &kq->knotes[j];
+			if (!kn->used ||
+			    kn->filter != filter ||
+			    kn->ident != ident) {
+				continue;
+			}
+
+			if (fflags) {
+				kn->fflags |= fflags;
+			}
+			if (data) {
+				kn->data = data;
+			}
+
+			knote_ready(kn);
+		}
+	}
 }
 
-/* ── kevent processing ────────────────────────────────────────────── */
+static int
+process_change(kqueue_t *kq, struct kevent *kev)
+{
+	const filter_ops_t	*ops;
+	knote_t			*kn;
+	int			ret, pending;
 
-static int process_change(kqueue_t *kq, struct kevent *kev) {
-  const filter_ops_t *ops = filter_lookup(kev->filter);
-  if (!ops) {
-    com1_printf("[EVENT] unknown filter %d\n", kev->filter);
-    return -API_ERR_INVAL;
-  }
+	ops = filter_lookup(kev->filter);
+	if (!ops) {
+		com1_printf("[EVENT] unknown filter %d\n",
+		    kev->filter);
+		return (-API_ERR_INVAL);
+	}
 
-  /* Handle EV_DELETE */
-  if (kev->flags & EV_DELETE) {
-    knote_t *kn = knote_find(kq, kev->ident, kev->filter);
-    if (!kn) {
-      return -API_ERR_NOT_FOUND;
-    }
+	if (kev->flags & EV_DELETE) {
+		kn = knote_find(kq, kev->ident, kev->filter);
+		if (!kn) {
+			return (-API_ERR_NOT_FOUND);
+		}
+		if (ops->detach) {
+			ops->detach(kn);
+		}
+		knote_remove_from_ready(kq, kn);
+		memset(kn, 0, sizeof(knote_t));
+		return (0);
+	}
 
-    if (ops->detach) {
-      ops->detach(kn);
-    }
-    knote_remove_from_ready(kq, kn);
-    memset(kn, 0, sizeof(knote_t));
-    return 0;
-  }
+	kn = knote_find(kq, kev->ident, kev->filter);
 
-  /* Handle EV_ADD or modify existing */
-  knote_t *kn = knote_find(kq, kev->ident, kev->filter);
+	if (kev->flags & EV_ADD) {
+		if (kn) {
+			kn->fflags = kev->fflags;
+			kn->data = kev->data;
+			if (!(kev->flags & EV_KEEPUDATA)) {
+				kn->udata = kev->udata;
+			}
+			if (ops->touch) {
+				ops->touch(kn, kev);
+			}
+			if (kev->flags & EV_DISABLE) {
+				kn->disabled = 1;
+				knote_remove_from_ready(kq, kn);
+			} else if (kev->flags & EV_ENABLE) {
+				kn->disabled = 0;
+			}
+		} else {
+			kn = knote_alloc(kq);
+			if (!kn) {
+				com1_printf("[EVENT] no free knote "
+				    "slots\n");
+				return (-API_ERR_NO_MEMORY);
+			}
 
-  if (kev->flags & EV_ADD) {
-    if (kn) {
-      /* Re-add: modify existing knote */
-      kn->fflags = kev->fflags;
-      kn->data = kev->data;
-      if (!(kev->flags & EV_KEEPUDATA)) {
-        kn->udata = kev->udata;
-      }
-      if (ops->touch) {
-        ops->touch(kn, kev);
-      }
-      if (kev->flags & EV_DISABLE) {
-        kn->disabled = 1;
-        knote_remove_from_ready(kq, kn);
-      } else if (kev->flags & EV_ENABLE) {
-        kn->disabled = 0;
-      }
-    } else {
-      /* Allocate new knote */
-      kn = knote_alloc(kq);
-      if (!kn) {
-        com1_printf("[EVENT] no free knote slots\n");
-        return -API_ERR_NO_MEMORY;
-      }
+			memset(kn, 0, sizeof(knote_t));
+			kn->used = 1;
+			kn->ident = kev->ident;
+			kn->filter = kev->filter;
+			kn->flags = kev->flags;
+			kn->fflags = kev->fflags;
+			kn->data = kev->data;
+			kn->udata = kev->udata;
+			kn->kq = kq;
 
-      memset(kn, 0, sizeof(knote_t));
-      kn->used = 1;
-      kn->ident = kev->ident;
-      kn->filter = kev->filter;
-      kn->flags = kev->flags;
-      kn->fflags = kev->fflags;
-      kn->data = kev->data;
-      kn->udata = kev->udata;
-      kn->kq = kq;
+			if (kev->flags & EV_DISABLE) {
+				kn->disabled = 1;
+			}
 
-      if (kev->flags & EV_DISABLE) {
-        kn->disabled = 1;
-      }
+			if (ops->attach) {
+				ret = ops->attach(kn);
+				if (ret != 0) {
+					memset(kn, 0,
+					    sizeof(knote_t));
+					com1_printf("[EVENT] filter "
+					    "attach failed: %d\n",
+					    ret);
+					return (ret);
+				}
+			}
 
-      /* Call filter attach */
-      if (ops->attach) {
-        int ret = ops->attach(kn);
-        if (ret != 0) {
-          memset(kn, 0, sizeof(knote_t));
-          com1_printf("[EVENT] filter attach failed: %d\n", ret);
-          return ret;
-        }
-      }
+			com1_printf("[EVENT] added knote "
+			    "ident=%llu filter=%d\n",
+			    kev->ident, kev->filter);
 
-      com1_printf("[EVENT] added knote ident=%llu filter=%d\n",
-                  kev->ident, kev->filter);
+			if (!kn->disabled && ops->event) {
+				pending = ops->event(kn, 0);
+				if (pending > 0) {
+					knote_ready(kn);
+				}
+			}
+		}
+		return (0);
+	}
 
-      /* Check if condition is already true */
-      if (!kn->disabled && ops->event) {
-        int pending = ops->event(kn, 0);
-        if (pending > 0) {
-          knote_ready(kn);
-        }
-      }
-    }
-    return 0;
-  }
+	if (kev->flags & EV_ENABLE) {
+		if (!kn) {
+			return (-API_ERR_NOT_FOUND);
+		}
+		kn->disabled = 0;
+		if (ops->event) {
+			pending = ops->event(kn, 0);
+			if (pending > 0) {
+				knote_ready(kn);
+			}
+		}
+	}
 
-  /* Handle EV_ENABLE / EV_DISABLE on existing knote */
-  if (kev->flags & EV_ENABLE) {
-    if (!kn) {
-      return -API_ERR_NOT_FOUND;
-    }
-    kn->disabled = 0;
-    if (ops->event) {
-      int pending = ops->event(kn, 0);
-      if (pending > 0) {
-        knote_ready(kn);
-      }
-    }
-  }
+	if (kev->flags & EV_DISABLE) {
+		if (!kn) {
+			return (-API_ERR_NOT_FOUND);
+		}
+		kn->disabled = 1;
+		knote_remove_from_ready(kq, kn);
+	}
 
-  if (kev->flags & EV_DISABLE) {
-    if (!kn) {
-      return -API_ERR_NOT_FOUND;
-    }
-    kn->disabled = 1;
-    knote_remove_from_ready(kq, kn);
-  }
-
-  return 0;
+	return (0);
 }
 
-static int collect_events(kqueue_t *kq, struct kevent *eventlist,
-                          int nevents) {
-  int count = 0;
+static int
+collect_events(kqueue_t *kq, struct kevent *eventlist, int nevents)
+{
+	int			count;
+	knote_t			*kn;
+	const filter_ops_t	*ops;
+	int			result;
 
-  while (kq->ready_head && count < nevents) {
-    knote_t *kn = kq->ready_head;
+	count = 0;
 
-    const filter_ops_t *ops = filter_lookup(kn->filter);
-    if (ops && ops->event) {
-      /* Ask filter if the condition still holds */
-      int result = ops->event(kn, 1);
-      if (result <= 0) {
-        /* Condition no longer true — remove from ready list */
-        knote_remove_from_ready(kq, kn);
-        continue;
-      }
-    }
+	while (kq->ready_head && count < nevents) {
+		kn = kq->ready_head;
 
-    /* Fill the eventlist entry */
-    eventlist[count].ident = kn->ident;
-    eventlist[count].filter = kn->filter;
-    eventlist[count].flags = kn->flags;
-    eventlist[count].fflags = kn->fflags;
-    eventlist[count].data = kn->data;
-    eventlist[count].udata = kn->udata;
+		ops = filter_lookup(kn->filter);
+		if (ops && ops->event) {
+			result = ops->event(kn, 1);
+			if (result <= 0) {
+				knote_remove_from_ready(kq, kn);
+				continue;
+			}
+		}
 
-    /* Preserve EOF flag if set by filter */
-    if (kn->fflags & 0x80000000) {
-      eventlist[count].flags |= EV_EOF;
-    }
+		eventlist[count].ident = kn->ident;
+		eventlist[count].filter = kn->filter;
+		eventlist[count].flags = kn->flags;
+		eventlist[count].fflags = kn->fflags;
+		eventlist[count].data = kn->data;
+		eventlist[count].udata = kn->udata;
 
-    count++;
+		if (kn->fflags & 0x80000000) {
+			eventlist[count].flags |= EV_EOF;
+		}
 
-    /* Handle EV_ONESHOT — delete after delivery */
-    if (kn->flags & EV_ONESHOT) {
-      if (ops && ops->detach) {
-        ops->detach(kn);
-      }
-      knote_remove_from_ready(kq, kn);
-      memset(kn, 0, sizeof(knote_t));
-      continue;
-    }
+		count++;
 
-    /* Handle EV_CLEAR — reset state after retrieval */
-    if (kn->flags & EV_CLEAR) {
-      kn->fflags = 0;
-      kn->data = 0;
-    }
+		if (kn->flags & EV_ONESHOT) {
+			if (ops && ops->detach) {
+				ops->detach(kn);
+			}
+			knote_remove_from_ready(kq, kn);
+			memset(kn, 0, sizeof(knote_t));
+			continue;
+		}
 
-    /* Handle EV_DISPATCH — disable after delivery */
-    if (kn->flags & EV_DISPATCH) {
-      kn->disabled = 1;
-    }
+		if (kn->flags & EV_CLEAR) {
+			kn->fflags = 0;
+			kn->data = 0;
+		}
 
-    knote_remove_from_ready(kq, kn);
-  }
+		if (kn->flags & EV_DISPATCH) {
+			kn->disabled = 1;
+		}
 
-  return count;
+		knote_remove_from_ready(kq, kn);
+	}
+
+	return (count);
 }
 
-int kevent_process(int kq_idx, struct kevent *changelist, int nchanges,
-                   struct kevent *eventlist, int nevents, s64 timeout_ms) {
-  if (!event_initialized) {
-    return -API_ERR_NOT_SUPPORTED;
-  }
+int
+kevent_process(int kq_idx, struct kevent *changelist,
+    int nchanges, struct kevent *eventlist, int nevents,
+    s64 timeout_ms)
+{
+	kqueue_t	*kq;
+	int		i, count, ret;
+	u64		start_ticks, timeout_ticks, elapsed;
 
-  kqueue_t *kq = kqueue_get(kq_idx);
-  if (!kq) {
-    return -API_ERR_BAD_HANDLE;
-  }
+	if (!event_initialized) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
 
-  /* Process changelist first */
-  for (int i = 0; i < nchanges; i++) {
-    struct kevent *kev = &changelist[i];
-    int ret = process_change(kq, kev);
+	kq = kqueue_get(kq_idx);
+	if (!kq) {
+		return (-API_ERR_BAD_HANDLE);
+	}
 
-    if (kev->flags & EV_RECEIPT) {
-      /* EV_RECEIPT: put result in eventlist if space */
-      if (nevents > 0 && eventlist) {
-        eventlist[0].ident = kev->ident;
-        eventlist[0].filter = kev->filter;
-        eventlist[0].flags = EV_ERROR;
-        eventlist[0].data = ret;
-        eventlist++;
-        nevents--;
-      }
-    } else if (ret != 0 && (kev->flags & EV_ADD)) {
-      /* Error on add: report it in eventlist if space */
-      if (nevents > 0 && eventlist) {
-        eventlist[0].ident = kev->ident;
-        eventlist[0].filter = kev->filter;
-        eventlist[0].flags = EV_ERROR;
-        eventlist[0].data = ret;
-        eventlist++;
-        nevents--;
-      }
-    }
-  }
+	for (i = 0; i < nchanges; i++) {
+		struct kevent	*kev;
 
-  /* If no events requested, just return 0 */
-  if (nevents <= 0) {
-    return 0;
-  }
+		kev = &changelist[i];
+		ret = process_change(kq, kev);
 
-  /* Try to collect pending events */
-  int count = collect_events(kq, eventlist, nevents);
-  if (count > 0) {
-    return count;
-  }
+		if (kev->flags & EV_RECEIPT) {
+			if (nevents > 0 && eventlist) {
+				eventlist[0].ident = kev->ident;
+				eventlist[0].filter = kev->filter;
+				eventlist[0].flags = EV_ERROR;
+				eventlist[0].data = ret;
+				eventlist++;
+				nevents--;
+			}
+		} else if (ret != 0 && (kev->flags & EV_ADD)) {
+			if (nevents > 0 && eventlist) {
+				eventlist[0].ident = kev->ident;
+				eventlist[0].filter = kev->filter;
+				eventlist[0].flags = EV_ERROR;
+				eventlist[0].data = ret;
+				eventlist++;
+				nevents--;
+			}
+		}
+	}
 
-  /* No pending events — block if timeout allows */
-  if (timeout_ms == 0) {
-    /* Poll mode — return immediately */
-    return 0;
-  }
+	if (nevents <= 0) {
+		return (0);
+	}
 
-  /* Block until events arrive or timeout */
-  u64 start_ticks = timer_get_ticks();
-  u64 timeout_ticks = 0;
-  if (timeout_ms > 0) {
-    timeout_ticks = (u64)timeout_ms * timer_get_frequency() / 1000;
-  }
+	count = collect_events(kq, eventlist, nevents);
+	if (count > 0) {
+		return (count);
+	}
 
-  while (1) {
-    /* Check if we have events now */
-    if (kq->ready_count > 0) {
-      return collect_events(kq, eventlist, nevents);
-    }
+	if (timeout_ms == 0) {
+		return (0);
+	}
 
-    /* Check timeout */
-    if (timeout_ms > 0) {
-      u64 elapsed = timer_get_ticks() - start_ticks;
-      if (elapsed >= timeout_ticks) {
-        return 0; /* timeout expired */
-      }
-    }
+	start_ticks = timer_get_ticks();
+	timeout_ticks = 0;
+	if (timeout_ms > 0) {
+		timeout_ticks = (u64)timeout_ms *
+		    timer_get_frequency() / 1000;
+	}
 
-    /* Sleep on the kqueue's wait channel */
-    proc_sleep(kq->wait_channel);
-  }
+	while (1) {
+		if (kq->ready_count > 0) {
+			return (collect_events(kq, eventlist,
+			    nevents));
+		}
 
-  return 0; /* unreachable */
+		if (timeout_ms > 0) {
+			elapsed = timer_get_ticks() - start_ticks;
+			if (elapsed >= timeout_ticks) {
+				return (0);
+			}
+		}
+
+		proc_sleep(kq->wait_channel);
+	}
+
+	return (0);
 }
 
-/* ── Timer tick handler ───────────────────────────────────────────── */
+void
+event_timer_tick(void)
+{
+	if (!event_initialized) {
+		return;
+	}
 
-void event_timer_tick(void) {
-  if (!event_initialized) {
-    return;
-  }
-
-  /* Let the timer filter check all timer knotes */
-  extern void filter_timer_tick(void);
-  filter_timer_tick();
+	{
+		extern void filter_timer_tick(void);
+		filter_timer_tick();
+	}
 }
 
-/* ── Process cleanup ──────────────────────────────────────────────── */
+void
+event_cleanup_process(struct process *proc)
+{
+	int		i, j;
+	kqueue_t	*kq;
 
-void event_cleanup_process(struct process *proc) {
-  if (!proc || !event_initialized) {
-    return;
-  }
+	if (!proc || !event_initialized) {
+		return;
+	}
 
-  for (int i = 0; i < MAX_KQUEUES; i++) {
-    kqueue_t *kq = &kqueue_pool[i];
-    if (kq->used && kq->owner == proc) {
-      kqueue_destroy(i);
-    }
-  }
+	for (i = 0; i < MAX_KQUEUES; i++) {
+		kq = &kqueue_pool[i];
+		if (kq->used && kq->owner == proc) {
+			kqueue_destroy(i);
+		}
+	}
 
-  /* Also remove any knotes on other kqueues that reference this PID */
-  if (proc->pid != 0) {
-    for (int i = 0; i < MAX_KQUEUES; i++) {
-      kqueue_t *kq = &kqueue_pool[i];
-      if (!kq->used) {
-        continue;
-      }
-      for (int j = 0; j < MAX_KNOTES; j++) {
-        knote_t *kn = &kq->knotes[j];
-        if (kn->used && kn->filter == EVFILT_PROC && kn->ident == proc->pid) {
-          const filter_ops_t *ops = filter_lookup(kn->filter);
-          if (ops && ops->detach) {
-            ops->detach(kn);
-          }
-          knote_remove_from_ready(kq, kn);
-          memset(kn, 0, sizeof(knote_t));
-        }
-      }
-    }
-  }
+	if (proc->pid != 0) {
+		for (i = 0; i < MAX_KQUEUES; i++) {
+			kq = &kqueue_pool[i];
+			if (!kq->used) {
+				continue;
+			}
+			for (j = 0; j < MAX_KNOTES; j++) {
+				knote_t			*kn;
+				const filter_ops_t	*ops;
+
+				kn = &kq->knotes[j];
+				if (!kn->used ||
+				    kn->filter != EVFILT_PROC ||
+				    kn->ident != proc->pid) {
+					continue;
+				}
+				ops = filter_lookup(kn->filter);
+				if (ops && ops->detach) {
+					ops->detach(kn);
+				}
+				knote_remove_from_ready(kq, kn);
+				memset(kn, 0, sizeof(knote_t));
+			}
+		}
+	}
 }
 
-void event_fork_process(struct process *parent, struct process *child) {
-  if (!parent || !child || !event_initialized) {
-    return;
-  }
+void
+event_fork_process(struct process *parent, struct process *child)
+{
+	if (!parent || !child || !event_initialized) {
+		return;
+	}
 
-  /*
-   * FreeBSD behaviour: kqueues are NOT inherited by fork by default.
-   * The child gets an empty set. The parent retains all kqueues.
-   * This matches the default (no KQUEUE_CPONFORK) behavior.
-   */
-  (void)parent;
-  (void)child;
+	(void)parent;
+	(void)child;
 }
 
-/* ── Pipe change notification ─────────────────────────────────────── */
+void
+event_notify_pipe_change(pipe_t *p)
+{
+	api_object_t	*objects;
+	int		obj_idx, pid_slot, fd;
 
-/*
- * Called when a pipe's state changes (data written or read).
- * Finds all EVFILT_READ/EVFILT_WRITE knotes whose ident is a handle
- * pointing to the given pipe, and marks them as ready.
- */
-void event_notify_pipe_change(pipe_t *p) {
-  if (!event_initialized || !p) {
-    return;
-  }
+	if (!event_initialized || !p) {
+		return;
+	}
 
-  api_object_t *objects = api_get_object_table();
-  if (!objects) {
-    return;
-  }
+	objects = api_get_object_table();
+	if (!objects) {
+		return;
+	}
 
-  /* Find object indices that reference this pipe */
-  for (int obj_idx = 0; obj_idx < MAX_DATA_OBJECTS; obj_idx++) {
-    if (!objects[obj_idx].used || objects[obj_idx].type != API_OBJECT_PIPE) {
-      continue;
-    }
-    if (objects[obj_idx].pipe != p) {
-      continue;
-    }
+	for (obj_idx = 0; obj_idx < MAX_DATA_OBJECTS; obj_idx++) {
+		if (!objects[obj_idx].used ||
+		    objects[obj_idx].type != API_OBJECT_PIPE) {
+			continue;
+		}
+		if (objects[obj_idx].pipe != p) {
+			continue;
+		}
 
-    /* Find handles pointing to this object */
-    for (int pid_slot = 0; pid_slot < MAX_PROCESSES; pid_slot++) {
-      process_t *proc = &process_table[pid_slot];
-      if (proc->state == PROC_STATE_UNUSED) {
-        continue;
-      }
+		for (pid_slot = 0; pid_slot < MAX_PROCESSES;
+		    pid_slot++) {
+			process_t	*proc;
 
-      for (int fd = 0; fd < MAX_HANDLES; fd++) {
-        if (!proc->handles[fd].used ||
-            proc->handles[fd].object_index != obj_idx) {
-          continue;
-        }
+			proc = &process_table[pid_slot];
+			if (proc->state == PROC_STATE_UNUSED) {
+				continue;
+			}
 
-        /* Notify both READ and WRITE filters for this fd */
-        knote_notify_all(EVFILT_READ, (u64)fd, 0, 0);
-        knote_notify_all(EVFILT_WRITE, (u64)fd, 0, 0);
-      }
-    }
-  }
+			for (fd = 0; fd < MAX_HANDLES; fd++) {
+				if (!proc->handles[fd].used ||
+				    proc->handles[fd].object_index
+				    != obj_idx) {
+					continue;
+				}
+				knote_notify_all(EVFILT_READ,
+				    (u64)fd, 0, 0);
+				knote_notify_all(EVFILT_WRITE,
+				    (u64)fd, 0, 0);
+			}
+		}
+	}
 }

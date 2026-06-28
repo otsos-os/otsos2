@@ -24,39 +24,72 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u64 as 64 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type u8 as 8 bit unsigned
+$define %type int as 32 bit signed
+
+$define %func timer_handler as procedure with args void
+$define %func timer_init as procedure with args u32
+$define %func timer_get_ticks as function with args void
+$define %func timer_is_initialized as function with args void
+$define %func timer_get_frequency as function with args void
+
+*/
+
+/* !SPACE!
+
+$space %export timer_handler, timer_init, timer_get_ticks
+$space %export timer_is_initialized, timer_get_frequency
+
+*/
+
 #include <kernel/drivers/timer.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
+static u64	timer_ticks;
+static u32	timer_frequency;
+static int	timer_initialized;
+void
+timer_handler(void)
+{
+	timer_ticks++;
+}
+void
+timer_init(u32 frequency)
+{
+	u32	divisor;
+	u8	l, h;
+	divisor = 1193182 / frequency;
+	outb(0x43, 0x36);
+	l = (u8)(divisor & 0xFF);
+	h = (u8)((divisor >> 8) & 0xFF);
+	outb(0x40, l);
+	outb(0x40, h);
+	com1_write_string("[TIMER] initialized ");
+	com1_write_dec(frequency);
+	com1_write_string(" Hz\n");
 
-static u64 timer_ticks = 0;
-static int timer_initialized = 0;
-static u32 timer_frequency = 0;
-
-void timer_handler() {
-  timer_ticks++;
+	timer_frequency = frequency;
+	timer_initialized = 1;
 }
 
-void timer_init(u32 frequency) {
-
-  u32 divisor = 1193182 / frequency;
-
-  outb(0x43, 0x36);
-
-  u8 l = (u8)(divisor & 0xFF);
-  u8 h = (u8)((divisor >> 8) & 0xFF);
-
-  outb(0x40, l);
-  outb(0x40, h);
-
-  com1_write_string("[TIMER] initialized ");
-  com1_write_dec(frequency);
-  com1_write_string(" Hz\n");
-  timer_frequency = frequency;
-  timer_initialized = 1;
+u64
+timer_get_ticks(void)
+{
+	return (timer_ticks);
 }
 
-u64 timer_get_ticks() { return timer_ticks; }
+int
+timer_is_initialized(void)
+{
+	return (timer_initialized);
+}
 
-int timer_is_initialized(void) { return timer_initialized; }
-
-u32 timer_get_frequency(void) { return timer_frequency; }
+u32
+timer_get_frequency(void)
+{
+	return (timer_frequency);
+}

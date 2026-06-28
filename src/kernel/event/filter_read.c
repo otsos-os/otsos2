@@ -24,125 +24,146 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u32 as 32 bit unsigned
+$define %type u64 as 64 bit unsigned
+$define %type int as 32 bit signed
+$define %type char as 8 bit signed
+$define %type knote_t as struct with registered event state
+$define %type kevent as struct with event ident, filter, flags, fflags, data, udata
+$define %type filter_ops_t as struct with filter callbacks vtable
+$define %type api_handle_t as struct with handle table entry
+$define %type api_object_t as struct with object table entry
+$define %type pipe_t as struct with pipe ring buffer
+
+$define %func filt_read_attach as function with args knote_t *
+$define %func filt_read_detach as procedure with args knote_t *
+$define %func filt_read_event as function with args knote_t *, u32
+$define %func filt_read_touch as procedure with args knote_t *, struct kevent *
+
+*/
+
+/* !SPACE!
+
+$space %internal filt_read_attach, filt_read_detach
+$space %internal filt_read_event, filt_read_touch
+$space %export filter_read_ops
+
+*/
+
 #include <kernel/event/event.h>
 #include <kernel/api/api.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
-/*
- * EVFILT_READ — returns when data is available to read.
- *
- * Supported ident types:
- *   - File descriptors (handles): pipes and files
- *   - Handle 0 (stdin/tty): keyboard input available
- */
+static int
+filt_read_attach(knote_t *kn)
+{
+	int			fd;
+	api_handle_t		*handles;
 
-static int filt_read_attach(knote_t *kn) {
-  int fd = (int)kn->ident;
+	fd = (int)kn->ident;
 
-  /* fd 0 (stdin/tty) is always valid — it's implicit, not in the
-   * handle table. api_term_read handles it directly. */
-  if (fd == 0) {
-    return 0;
-  }
+	if (fd == 0) {
+		return (0);
+	}
 
-  /* Validate that the ident is a valid handle */
-  api_handle_t *handles = api_get_handle_table();
-  if (!handles) {
-    return -API_ERR_BAD_HANDLE;
-  }
+	handles = api_get_handle_table();
+	if (!handles) {
+		return (-API_ERR_BAD_HANDLE);
+	}
 
-  if (fd < 0 || fd >= MAX_HANDLES || !handles[fd].used) {
-    com1_printf("[EVFILT_READ] attach: bad fd %d\n", fd);
-    return -API_ERR_BAD_HANDLE;
-  }
+	if (fd < 0 || fd >= MAX_HANDLES || !handles[fd].used) {
+		com1_printf("[EVFILT_READ] attach: bad fd %d\n",
+		    fd);
+		return (-API_ERR_BAD_HANDLE);
+	}
 
-  return 0;
+	return (0);
 }
 
-static void filt_read_detach(knote_t *kn) {
-  /* Nothing to clean up beyond the knote itself */
-  (void)kn;
+static void
+filt_read_detach(knote_t *kn)
+{
+	(void)kn;
 }
 
-static int filt_read_event(knote_t *kn, u32 nevents) {
-  int fd = (int)kn->ident;
+static int
+filt_read_event(knote_t *kn, u32 nevents)
+{
+	int			fd;
+	api_handle_t		*handles;
+	api_object_t		*objects;
+	int			obj_idx;
+	api_object_t		*obj;
+	pipe_t			*p;
+	char			c;
 
-  /* Handle 0 (stdin) — check keyboard buffer */
-  if (fd == 0) {
-    char c = keyboard_getchar();
-    if (c) {
-      /* Put it back — we're just checking, not consuming */
-      /* keyboard_getchar pops from buffer, so we need a different approach.
-       * For now, report data=1 if the keyboard buffer is non-empty.
-       * The actual read will happen via api_term_read. */
-      /* Since we can't peek without consuming, we'll use a simple heuristic:
-       * the keyboard poll path in IRQ0 will call knote_notify_all for
-       * EVFILT_READ with ident=0 when keys are available. */
-      kn->data = 1;
-      return 1;
-    }
-    return 0;
-  }
+	fd = (int)kn->ident;
 
-  /* File descriptor — check if it's a pipe or file */
-  api_handle_t *handles = api_get_handle_table();
-  if (!handles || fd < 0 || fd >= MAX_HANDLES || !handles[fd].used) {
-    return 0;
-  }
+	if (fd == 0) {
+		c = keyboard_getchar();
+		if (c) {
+			kn->data = 1;
+			return (1);
+		}
+		return (0);
+	}
 
-  api_object_t *objects = api_get_object_table();
-  int obj_idx = handles[fd].object_index;
-  if (obj_idx < 0 || obj_idx >= MAX_DATA_OBJECTS || !objects[obj_idx].used) {
-    return 0;
-  }
+	handles = api_get_handle_table();
+	if (!handles || fd < 0 || fd >= MAX_HANDLES ||
+	    !handles[fd].used) {
+		return (0);
+	}
 
-  api_object_t *obj = &objects[obj_idx];
+	objects = api_get_object_table();
+	obj_idx = handles[fd].object_index;
+	if (obj_idx < 0 || obj_idx >= MAX_DATA_OBJECTS ||
+	    !objects[obj_idx].used) {
+		return (0);
+	}
 
-  if (obj->type == API_OBJECT_PIPE) {
-    pipe_t *p = (pipe_t *)obj->pipe;
-    if (!p) {
-      return 0;
-    }
+	obj = &objects[obj_idx];
 
-    if (p->size > 0) {
-      kn->data = p->size;
-      return 1;
-    }
+	if (obj->type == API_OBJECT_PIPE) {
+		p = (pipe_t *)obj->pipe;
+		if (!p) {
+			return (0);
+		}
+		if (p->size > 0) {
+			kn->data = p->size;
+			return (1);
+		}
+		if (p->writers == 0) {
+			kn->flags |= EV_EOF;
+			kn->data = 0;
+			return (1);
+		}
+		return (0);
+	}
 
-    /* EOF: no writers left */
-    if (p->writers == 0) {
-      kn->flags |= EV_EOF;
-      kn->data = 0;
-      return 1;
-    }
+	if (obj->type == API_OBJECT_FILE) {
+		kn->data = 1;
+		return (1);
+	}
 
-    return 0;
-  }
-
-  /* Regular file — check if there's data beyond current offset */
-  if (obj->type == API_OBJECT_FILE) {
-    /* For files, we report readable if offset < file size.
-     * ChainFS doesn't easily expose file size, so we report 1
-     * to indicate the file is readable. */
-    kn->data = 1;
-    return 1;
-  }
-
-  return 0;
+	return (0);
 }
 
-static void filt_read_touch(knote_t *kn, struct kevent *kev) {
-  (void)kn;
-  (void)kev;
+static void
+filt_read_touch(knote_t *kn, struct kevent *kev)
+{
+	(void)kn;
+	(void)kev;
 }
 
 const filter_ops_t filter_read_ops = {
-  .filter = EVFILT_READ,
-  .name   = "read",
-  .attach = filt_read_attach,
-  .detach = filt_read_detach,
-  .event  = filt_read_event,
-  .touch  = filt_read_touch,
+	.filter	= EVFILT_READ,
+	.name	= "read",
+	.attach	= filt_read_attach,
+	.detach	= filt_read_detach,
+	.event	= filt_read_event,
+	.touch	= filt_read_touch,
 };

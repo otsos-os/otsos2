@@ -24,51 +24,90 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u32 as 32 bit unsigned
+$define %type u8 as 8 bit unsigned
+$define %type int as 32 bit signed
+$define %type disk_t as struct with name, type, sector_size, sectors, ops
+
+$define %func ramdisk_read_sector as procedure with args disk_t *, u32, u8 *
+$define %func ramdisk_write_sector as procedure with args disk_t *, u32, u8 *
+$define %func ramdisk_init as procedure with args void *, u32
+
+*/
+
+/* !SPACE!
+
+$space %internal ramdisk_read_sector, ramdisk_write_sector
+$space %export ramdisk_init
+
+*/
+
 #include "ramdisk.h"
 #include "../disk.h"
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
-static void ramdisk_read_sector(disk_t *self, u32 lba, u8 *buffer) {
-  if (!self->private_data)
-    return;
-  u8 *ram_start = (u8 *)self->private_data;
-  u32 offset = lba * self->sector_size;
+static void
+ramdisk_read_sector(disk_t *self, u32 lba, u8 *buffer)
+{
+	u8	*ram_start;
+	u32	offset;
 
-  if (offset + self->sector_size > self->total_sectors * self->sector_size) {
-    com1_printf("[RAMDISK] Read out of bounds: lba=%u\n", lba);
-    return;
-  }
+	if (!self->private_data) {
+		return;
+	}
+	ram_start = (u8 *)self->private_data;
+	offset = lba * self->sector_size;
 
-  memcpy(buffer, ram_start + offset, self->sector_size);
+	if (offset + self->sector_size >
+	    self->total_sectors * self->sector_size) {
+		com1_printf("[RAMDISK] Read out of bounds: "
+		    "lba=%u\n", lba);
+		return;
+	}
+
+	memcpy(buffer, ram_start + offset, self->sector_size);
 }
 
-static void ramdisk_write_sector(disk_t *self, u32 lba, u8 *buffer) {
-  if (!self->private_data)
-    return;
-  u8 *ram_start = (u8 *)self->private_data;
-  u32 offset = lba * self->sector_size;
+static void
+ramdisk_write_sector(disk_t *self, u32 lba, u8 *buffer)
+{
+	u8	*ram_start;
+	u32	offset;
 
-  if (offset + self->sector_size > self->total_sectors * self->sector_size) {
-    com1_printf("[RAMDISK] Write out of bounds: lba=%u\n", lba);
-    return;
-  }
+	if (!self->private_data) {
+		return;
+	}
+	ram_start = (u8 *)self->private_data;
+	offset = lba * self->sector_size;
 
-  memcpy(ram_start + offset, buffer, self->sector_size);
+	if (offset + self->sector_size >
+	    self->total_sectors * self->sector_size) {
+		com1_printf("[RAMDISK] Write out of bounds: "
+		    "lba=%u\n", lba);
+		return;
+	}
+
+	memcpy(ram_start + offset, buffer, self->sector_size);
 }
 
-static disk_t ram_disk;
+static disk_t	ram_disk;
 
-void ramdisk_init(void *location, u32 size) {
-  com1_printf("[RAMDISK] Initializing at %p, size %u bytes\n", location, size);
+void
+ramdisk_init(void *location, u32 size)
+{
+	com1_printf("[RAMDISK] Initializing at %p, size %u "
+	    "bytes\n", location, size);
 
-  strcpy(ram_disk.name, "ramdisk0");
-  ram_disk.type = DISK_TYPE_RAM;
-  ram_disk.sector_size = 512;
-  ram_disk.total_sectors = size / 512;
-  ram_disk.private_data = location;
-  ram_disk.read_sector = ramdisk_read_sector;
-  ram_disk.write_sector = ramdisk_write_sector;
+	strcpy(ram_disk.name, "ramdisk0");
+	ram_disk.type = DISK_TYPE_RAM;
+	ram_disk.sector_size = 512;
+	ram_disk.total_sectors = size / 512;
+	ram_disk.private_data = location;
+	ram_disk.read_sector = ramdisk_read_sector;
+	ram_disk.write_sector = ramdisk_write_sector;
 
-  disk_register(&ram_disk);
+	disk_register(&ram_disk);
 }

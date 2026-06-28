@@ -1,35 +1,33 @@
 /*
  * Copyright (c) 2026, otsos team
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the documentation
- *    and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * [.BSD-2-clause license text...]
  */
+
+/* !DEFINES!
+
+$define %type u8 as 8 bit unsigned
+$define %type pci_device_t as struct with PCI device info
+$define %type pci_bar_t as struct with BAR info
+
+$define %func pci_get_bar_count as function with args const pci_device_t *
+$define %func pci_read_bar as function with args const pci_device_t *, u8, pci_bar_t *
+
+*/
+
+/* !SPACE!
+
+$space %export pci_get_bar_count, pci_read_bar
+
+*/
 
 #ifndef PCI_BAR_H
 #define PCI_BAR_H
 
 #include <kernel/pci/pci.h>
 
-int pci_get_bar_count(const pci_device_t *dev);
-int pci_read_bar(const pci_device_t *dev, u8 index, pci_bar_t *out);
+int	pci_get_bar_count(const pci_device_t *dev);
+int	pci_read_bar(const pci_device_t *dev, u8 index,
+    pci_bar_t *out);
 
 #endif

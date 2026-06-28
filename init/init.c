@@ -24,231 +24,295 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * init — First userspace process (PID 1)
- *
- * Event-driven using kqueue/kevent. Watches stdin (EVFILT_READ) for
- * user commands and child processes (EVFILT_PROC) for exit notifications.
- * No busy-loops — the kernel wakes init when events occur.
- */
+/* !DEFINES!
 
-#define CALL_TERM_READ  0x100
-#define CALL_TERM_WRITE 0x101
-#define CALL_PROC_SPAWN 0x402
-#define CALL_PROC_WAIT  0x404
-#define CALL_PROC_EXIT  0x403
-#define CALL_EVENT_KQUEUE 0x700
-#define CALL_EVENT_KEVENT 0x701
-#define CALL_EVENT_CLOSE  0x702
+$define %type char as 8 bit signed
+$define %type int as 32 bit signed
+$define %type long as 64 bit signed
+$define %type unsigned long as 64 bit unsigned
+$define %type short as 16 bit signed
+$define %type unsigned short as 16 bit unsigned
+$define %type unsigned int as 32 bit unsigned
+$define %type long long as 64 bit signed
+$define %type unsigned long long as 64 bit unsigned
+$define %type kevent as struct with event ident, filter, flags, fflags, data, udata
+$define %type kevent_args as struct with kq_idx, changelist, nchanges, eventlist, nevents, timeout_ms
 
-/* Event system constants — must match kernel/event/event.h */
-#define EVFILT_READ   (-1)
-#define EVFILT_TIMER  (-3)
-#define EVFILT_PROC   (-4)
+$define %func _start as start with args void
+$define %func syscall1 as function with args long, long
+$define %func syscall3 as function with args long, long, long, long
+$define %func termWrite as function with args const void *, unsigned long
+$define %func termRead as function with args void *, unsigned long
+$define %func procSpawn as function with args const char *, char *const *, char *const *
+$define %func procWait as function with args int *
+$define %func kqueue_create as function with args void
+$define %func kqueue_close as function with args int
+$define %func kevent as function with args int, struct kevent *, int, struct kevent *, int, long long
+$define %func strlen as function with args const char *
+$define %func print as procedure with args const char *
+$define %func trim_newline as procedure with args char *
+$define %func strcmp as function with args const char *, const char *
 
-#define EV_ADD     0x0001
-#define EV_DELETE  0x0002
-#define EV_ENABLE  0x0004
-#define EV_ONESHOT 0x0010
-#define EV_CLEAR   0x0020
-#define EV_EOF     0x8000
+*/
 
-#define NOTE_EXIT  0x80000000U
+/* !SPACE!
+
+$space %export _start
+$space %internal syscall1, syscall3, termWrite, termRead, procSpawn
+$space %internal procWait, kqueue_create, kqueue_close, kevent
+$space %internal strlen, print, trim_newline, strcmp
+
+*/
+
+#define	CALL_TERM_READ		0x100
+#define	CALL_TERM_WRITE		0x101
+#define	CALL_PROC_SPAWN		0x402
+#define	CALL_PROC_WAIT		0x404
+#define	CALL_PROC_EXIT		0x403
+#define	CALL_EVENT_KQUEUE	0x700
+#define	CALL_EVENT_KEVENT	0x701
+#define	CALL_EVENT_CLOSE	0x702
+
+#define	EVFILT_READ	(-1)
+#define	EVFILT_TIMER	(-3)
+#define	EVFILT_PROC	(-4)
+
+#define	EV_ADD		0x0001
+#define	EV_DELETE	0x0002
+#define	EV_ENABLE	0x0004
+#define	EV_ONESHOT	0x0010
+#define	EV_CLEAR	0x0020
+#define	EV_EOF		0x8000
+
+#define	NOTE_EXIT	0x80000000U
 
 struct kevent {
-  unsigned long long ident;
-  short filter;
-  unsigned short flags;
-  unsigned int fflags;
-  long long data;
-  unsigned long long udata;
+	unsigned long long	ident;
+	short			filter;
+	unsigned short		flags;
+	unsigned int		fflags;
+	long long		data;
+	unsigned long long	udata;
 };
 
 struct kevent_args {
-  int kq_idx;
-  struct kevent *changelist;
-  int nchanges;
-  struct kevent *eventlist;
-  int nevents;
-  long long timeout_ms;
+	int			kq_idx;
+	struct kevent		*changelist;
+	int			nchanges;
+	struct kevent		*eventlist;
+	int			nevents;
+	long long		timeout_ms;
 };
 
-static long syscall1(long num, long arg1) {
-  long ret;
-  __asm__ volatile("syscall"
-                   : "=a"(ret)
-                   : "a"(num), "D"(arg1)
-                   : "rcx", "r11", "memory");
-  return ret;
+static long
+syscall1(long num, long arg1)
+{
+	long	ret;
+
+	__asm__ volatile("syscall"
+	    : "=a"(ret)
+	    : "a"(num), "D"(arg1)
+	    : "rcx", "r11", "memory");
+	return (ret);
 }
 
-static long syscall3(long num, long arg1, long arg2, long arg3) {
-  long ret;
-  __asm__ volatile("syscall"
-                   : "=a"(ret)
-                   : "a"(num), "D"(arg1), "S"(arg2), "d"(arg3)
-                   : "rcx", "r11", "memory");
-  return ret;
+static long
+syscall3(long num, long arg1, long arg2, long arg3)
+{
+	long	ret;
+
+	__asm__ volatile("syscall"
+	    : "=a"(ret)
+	    : "a"(num), "D"(arg1), "S"(arg2), "d"(arg3)
+	    : "rcx", "r11", "memory");
+	return (ret);
 }
 
-static long termWrite(const void *buf, unsigned long count) {
-  return syscall3(CALL_TERM_WRITE, (long)buf, count, 0);
+static long
+termWrite(const void *buf, unsigned long count)
+{
+	return (syscall3(CALL_TERM_WRITE, (long)buf, (long)count, 0));
 }
 
-static long termRead(void *buf, unsigned long count) {
-  return syscall3(CALL_TERM_READ, (long)buf, count, 0);
+static long
+termRead(void *buf, unsigned long count)
+{
+	return (syscall3(CALL_TERM_READ, (long)buf, (long)count, 0));
 }
 
-static long procSpawn(const char *path, char *const argv[],
-                      char *const envp[]) {
-  return syscall3(CALL_PROC_SPAWN, (long)path, (long)argv, (long)envp);
+static long
+procSpawn(const char *path, char *const argv[], char *const envp[])
+{
+	return (syscall3(CALL_PROC_SPAWN, (long)path,
+	    (long)argv, (long)envp));
 }
 
-static long procWait(int *status) {
-  return syscall1(CALL_PROC_WAIT, (long)status);
+static long
+procWait(int *status)
+{
+	return (syscall1(CALL_PROC_WAIT, (long)status));
 }
 
-static int kqueue_create(void) {
-  return (int)syscall1(CALL_EVENT_KQUEUE, 0);
+static int
+kqueue_create(void)
+{
+	return ((int)syscall1(CALL_EVENT_KQUEUE, 0));
 }
 
-static int kqueue_close(int kq) {
-  return (int)syscall1(CALL_EVENT_CLOSE, (long)kq);
+static int
+kqueue_close(int kq)
+{
+	return ((int)syscall1(CALL_EVENT_CLOSE, (long)kq));
 }
 
-static int kevent(int kq, struct kevent *changes, int nchanges,
-                  struct kevent *events, int nevents,
-                  long long timeout_ms) {
-  struct kevent_args args;
-  args.kq_idx = kq;
-  args.changelist = changes;
-  args.nchanges = nchanges;
-  args.eventlist = events;
-  args.nevents = nevents;
-  args.timeout_ms = timeout_ms;
-  return (int)syscall3(CALL_EVENT_KEVENT, 0, (long)&args, 0);
+static int
+kevent(int kq, struct kevent *changes, int nchanges,
+    struct kevent *events, int nevents, long long timeout_ms)
+{
+	struct kevent_args	args;
+
+	args.kq_idx = kq;
+	args.changelist = changes;
+	args.nchanges = nchanges;
+	args.eventlist = events;
+	args.nevents = nevents;
+	args.timeout_ms = timeout_ms;
+	return ((int)syscall3(CALL_EVENT_KEVENT, 0, (long)&args, 0));
 }
 
-static unsigned long strlen(const char *s) {
-  unsigned long len = 0;
-  while (s[len])
-    len++;
-  return len;
+static unsigned long
+strlen(const char *s)
+{
+	unsigned long	len;
+
+	len = 0;
+	while (s[len]) {
+		len++;
+	}
+	return (len);
 }
 
-static void print(const char *s) { termWrite(s, strlen(s)); }
-
-static void trim_newline(char *s) {
-  unsigned long i = 0;
-  while (s[i]) {
-    if (s[i] == '\n' || s[i] == '\r') {
-      s[i] = 0;
-      return;
-    }
-    i++;
-  }
+static void
+print(const char *s)
+{
+	termWrite(s, strlen(s));
 }
 
-static int strcmp(const char *a, const char *b) {
-  while (*a && *b && *a == *b) {
-    a++;
-    b++;
-  }
-  return *a - *b;
+static void
+trim_newline(char *s)
+{
+	unsigned long	i;
+
+	i = 0;
+	while (s[i]) {
+		if (s[i] == '\n' || s[i] == '\r') {
+			s[i] = 0;
+			return;
+		}
+		i++;
+	}
 }
 
-void _start(void) {
-  print("\n");
-  print("Hello init (event-driven)\n");
+static int
+strcmp(const char *a, const char *b)
+{
+	while (*a && *b && *a == *b) {
+		a++;
+		b++;
+	}
+	return (*a - *b);
+}
 
-  int kq = kqueue_create();
-  if (kq < 0) {
-    print("init: kqueue_create failed, falling back to polling\n");
-    kq = -1;
-  }
+void
+_start(void)
+{
+	struct kevent	changes[2];
+	struct kevent	events[8];
+	char		*argv[2];
+	char		path[128];
+	long		bytes, pid;
+	int		kq, child_pid, n, status, i;
 
-  /* Watch stdin (fd 0) for readable events */
-  struct kevent changes[2];
-  struct kevent events[8];
+	print("\n");
+	print("Hello init (event-driven)\n");
 
-  if (kq >= 0) {
-    changes[0].ident = 0;           /* fd 0 = stdin */
-    changes[0].filter = EVFILT_READ;
-    changes[0].flags = EV_ADD | EV_CLEAR;
-    changes[0].fflags = 0;
-    changes[0].data = 0;
-    changes[0].udata = 0;
+	kq = kqueue_create();
+	if (kq < 0) {
+		print("init: kqueue_create failed, "
+		    "falling back to polling\n");
+		kq = -1;
+	}
 
-    kevent(kq, changes, 1, 0, 0, -1);
-  }
+	if (kq >= 0) {
+		changes[0].ident = 0;
+		changes[0].filter = EVFILT_READ;
+		changes[0].flags = EV_ADD | EV_CLEAR;
+		changes[0].fflags = 0;
+		changes[0].data = 0;
+		changes[0].udata = 0;
+		kevent(kq, changes, 1, 0, 0, -1);
+	}
 
-  int child_pid = -1;
+	child_pid = -1;
 
-  while (1) {
-    char path[128];
-    print("Enter program path (relative, e.g. hello): ");
+	while (1) {
+		print("Enter program path (relative, e.g. hello): ");
+		bytes = termRead(path, 120);
+		if (bytes <= 0) {
+			continue;
+		}
+		if (bytes >= 120) {
+			bytes = 119;
+		}
+		path[bytes] = 0;
+		trim_newline(path);
 
-    long bytes = termRead(path, 120);
-    if (bytes <= 0) {
-      continue;
-    }
-    if (bytes >= 120) {
-      bytes = 119;
-    }
-    path[bytes] = 0;
-    trim_newline(path);
+		if (path[0] == 0) {
+			print("empty path\n");
+			continue;
+		}
 
-    if (path[0] == 0) {
-      print("empty path\n");
-      continue;
-    }
+		argv[0] = path;
+		argv[1] = 0;
 
-    char *argv[2];
-    argv[0] = path;
-    argv[1] = 0;
+		pid = procSpawn(path, argv, 0);
+		if (pid < 0) {
+			print("procSpawn failed\n");
+			continue;
+		}
 
-    long pid = procSpawn(path, argv, 0);
-    if (pid < 0) {
-      print("procSpawn failed\n");
-      continue;
-    }
+		print("child running\n");
+		child_pid = (int)pid;
 
-    print("child running\n");
-    child_pid = (int)pid;
+		if (kq >= 0) {
+			changes[0].ident =
+			    (unsigned long long)child_pid;
+			changes[0].filter = EVFILT_PROC;
+			changes[0].flags = EV_ADD | EV_ONESHOT;
+			changes[0].fflags = NOTE_EXIT;
+			changes[0].data = 0;
+			changes[0].udata =
+			    (unsigned long long)child_pid;
+			kevent(kq, changes, 1, 0, 0, -1);
 
-    /* Register EVFILT_PROC to watch for child exit */
-    if (kq >= 0) {
-      changes[0].ident = (unsigned long long)child_pid;
-      changes[0].filter = EVFILT_PROC;
-      changes[0].flags = EV_ADD | EV_ONESHOT;
-      changes[0].fflags = NOTE_EXIT;
-      changes[0].data = 0;
-      changes[0].udata = (unsigned long long)child_pid;
+			n = kevent(kq, 0, 0, events, 8, -1);
+			if (n > 0) {
+				for (i = 0; i < n; i++) {
+					if (events[i].filter ==
+					    EVFILT_PROC &&
+					    events[i].fflags & NOTE_EXIT) {
+						print("child exited\n");
+					}
+				}
+			}
+		} else {
+			status = 0;
+			while (procWait(&status) < 0) {
+			}
+		}
 
-      kevent(kq, changes, 1, 0, 0, -1);
-
-      /* Block until child exits — no busy loop! */
-      int n = kevent(kq, 0, 0, events, 8, -1);
-      if (n > 0) {
-        for (int i = 0; i < n; i++) {
-          if (events[i].filter == EVFILT_PROC &&
-              events[i].fflags & NOTE_EXIT) {
-            int exit_code = (int)events[i].data;
-            print("child exited\n");
-            (void)exit_code;
-          }
-        }
-      }
-    } else {
-      /* Fallback: busy-wait on procWait */
-      int status = 0;
-      while (procWait(&status) < 0) {
-      }
-    }
-
-    /* Reap the zombie */
-    int status = 0;
-    procWait(&status);
-    child_pid = -1;
-  }
+		status = 0;
+		procWait(&status);
+		child_pid = -1;
+	}
 }

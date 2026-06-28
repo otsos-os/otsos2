@@ -24,917 +24,1140 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u8 as 8 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type u64 as 64 bit unsigned
+$define %type int as 32 bit signed
+$define %type char as 8 bit signed
+$define %type chainfs_superblock_t as packed struct with magic, block counts, root dir
+$define %type chainfs_file_entry_t as packed struct with status, type, name, size, blocks
+$define %type chainfs_t as struct with superblock, data area, dir, sector buffer, disk
+$define %type disk_t as struct with name, type, sector_size, sectors, ops
+
+$define %func chainfs_init as function with args disk_t *
+$define %func chainfs_format as function with args u32, u32
+$define %func chainfs_find_file as function with args const char *, chainfs_file_entry_t *, u32 *, u32 *
+$define %func chainfs_find_free_file_entry as function with args u32 *, u32 *
+$define %func chainfs_read_block_map_entry as function with args u32, u32 *
+$define %func chainfs_write_block_map_entry as function with args u32, u32
+$define %func chainfs_find_free_blocks as function with args u32, u32 *
+$define %func chainfs_free_block_chain as procedure with args u32
+$define %func chainfs_read_file as function with args const char *, u8 *, u32, u32 *
+$define %func chainfs_read_file_range as function with args const char *, u8 *, u32, u32, u32 *
+$define %func chainfs_write_file as function with args const char *, const u8 *, u32
+$define %func chainfs_delete_file as function with args const char *
+$define %func chainfs_get_file_list as function with args chainfs_file_entry_t *, u32, u32 *
+$define %func read_entry_by_index as function with args u32, chainfs_file_entry_t *, u32 *, u32 *
+$define %func split_path as function with args const char *, char[][32], int
+$define %func chainfs_find_in_directory as function with args u32, const char *, chainfs_file_entry_t *, u32 *, u32 *
+$define %func chainfs_resolve_path as function with args const char *, chainfs_file_entry_t *, u32 *, u32 *
+$define %func chainfs_mkdir as function with args const char *
+$define %func chainfs_chdir as function with args const char *
+$define %func chainfs_list_dir as function with args const char *, chainfs_file_entry_t *, u32, u32 *
+$define %func chainfs_get_current_path as function with args char *, u32
+$define %func chainfs_rmdir as function with args const char *
+
+*/
+
+/* !SPACE!
+
+$space %internal read_entry_by_index, split_path
+$space %export chainfs_init, chainfs_format, chainfs_find_file
+$space %export chainfs_find_free_file_entry, chainfs_read_block_map_entry
+$space %export chainfs_write_block_map_entry, chainfs_find_free_blocks
+$space %export chainfs_free_block_chain, chainfs_read_file
+$space %export chainfs_read_file_range, chainfs_write_file
+$space %export chainfs_delete_file, chainfs_get_file_list
+$space %export chainfs_find_in_directory, chainfs_resolve_path
+$space %export chainfs_mkdir, chainfs_chdir, chainfs_list_dir
+$space %export chainfs_get_current_path, chainfs_rmdir
+$space %export g_chainfs, g_chainfs_phys
+
+*/
+
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/api/errno.h>
 #include <mm/vm/pmap.h>
 
-chainfs_t g_chainfs;
-u64 g_chainfs_phys = 0;
-#define ENTRIES_PER_BLOCK (CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t))
+chainfs_t	g_chainfs;
+u64		g_chainfs_phys;
 
-int chainfs_init(disk_t *disk) {
-  if (!disk) {
-    com1_printf("ChainFS: init failed, disk is NULL\n");
-    return -1;
-  }
-  g_chainfs.disk = disk;
-  com1_printf("ChainFS: Initializing... (g_chainfs at %p, disk: %s)\n",
-              &g_chainfs, disk ? disk->name : "NULL");
+#define	ENTRIES_PER_BLOCK \
+    (CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t))
 
-  disk_read(g_chainfs.disk, 0, g_chainfs.sector_buffer);
+int
+chainfs_init(disk_t *disk)
+{
+	chainfs_superblock_t	*sb;
 
-  chainfs_superblock_t *sb = (chainfs_superblock_t *)g_chainfs.sector_buffer;
+	if (!disk) {
+		com1_printf("ChainFS: init failed, disk is NULL\n");
+		return (-1);
+	}
+	g_chainfs.disk = disk;
+	com1_printf("ChainFS: Initializing... "
+	    "(g_chainfs at %p, disk: %s)\n",
+	    &g_chainfs, disk ? disk->name : "NULL");
 
-  if (sb->magic != CHAINFS_MAGIC) {
-    com1_printf("ChainFS: Invalid magic number 0x%x, expected 0x%x\n",
-                sb->magic, CHAINFS_MAGIC);
-    return -1;
-  }
+	disk_read(g_chainfs.disk, 0, g_chainfs.sector_buffer);
 
-  g_chainfs.superblock = *sb;
+	sb = (chainfs_superblock_t *)g_chainfs.sector_buffer;
 
-  g_chainfs.data_area_start = 1 + g_chainfs.superblock.file_table_block_count +
-                              g_chainfs.superblock.block_map_block_count;
+	if (sb->magic != CHAINFS_MAGIC) {
+		com1_printf("ChainFS: Invalid magic number "
+		    "0x%x, expected 0x%x\n",
+		    sb->magic, CHAINFS_MAGIC);
+		return (-1);
+	}
 
-  // Set current directory to root
-  g_chainfs.current_dir_block = g_chainfs.superblock.root_dir_block;
-  g_chainfs_phys = pmap_extract((u64)&g_chainfs);
-  com1_printf("[CHAINFS] g_chainfs phys=%p\n", (void *)g_chainfs_phys);
+	g_chainfs.superblock = *sb;
 
-  com1_printf("ChainFS: Initialized successfully\n");
-  com1_printf("  Total blocks: %u\n", g_chainfs.superblock.block_count);
-  com1_printf("  File table blocks: %u\n",
-              g_chainfs.superblock.file_table_block_count);
-  com1_printf("  Block map blocks: %u\n",
-              g_chainfs.superblock.block_map_block_count);
-  com1_printf("  Data area start: %u\n", g_chainfs.data_area_start);
-  com1_printf("  Root directory block: %u\n",
-              g_chainfs.superblock.root_dir_block);
+	g_chainfs.data_area_start = 1 +
+	    g_chainfs.superblock.file_table_block_count +
+	    g_chainfs.superblock.block_map_block_count;
 
-  return 0;
+	g_chainfs.current_dir_block =
+	    g_chainfs.superblock.root_dir_block;
+	g_chainfs_phys = pmap_extract((u64)&g_chainfs);
+	com1_printf("[CHAINFS] g_chainfs phys=%p\n",
+	    (void *)g_chainfs_phys);
+
+	com1_printf("ChainFS: Initialized successfully\n");
+	com1_printf("  Total blocks: %u\n",
+	    g_chainfs.superblock.block_count);
+	com1_printf("  File table blocks: %u\n",
+	    g_chainfs.superblock.file_table_block_count);
+	com1_printf("  Block map blocks: %u\n",
+	    g_chainfs.superblock.block_map_block_count);
+	com1_printf("  Data area start: %u\n",
+	    g_chainfs.data_area_start);
+	com1_printf("  Root directory block: %u\n",
+	    g_chainfs.superblock.root_dir_block);
+
+	return (0);
 }
 
-int chainfs_format(u32 total_blocks, u32 max_files) {
-  if (!g_chainfs.disk) {
-    com1_printf("ChainFS: format failed, disk is NULL\n");
-    return -1;
-  }
-  if (total_blocks < 8 || max_files == 0) {
-    com1_printf("ChainFS: format failed, invalid params blocks=%u files=%u\n",
-                total_blocks, max_files);
-    return -1;
-  }
+int
+chainfs_format(u32 total_blocks, u32 max_files)
+{
+	u32	entries_per_block, file_table_blocks;
+	u32	data_blocks, map_entries_per_block;
+	u32	block_map_blocks;
+	chainfs_superblock_t	sb;
+	chainfs_file_entry_t	*entries;
+	u32	*block_map;
+	int	i;
+	u32	block;
 
-  com1_printf("ChainFS: Formatting disk with %u blocks, %u max files\n",
-              total_blocks, max_files);
+	if (!g_chainfs.disk) {
+		com1_printf("ChainFS: format failed, disk is NULL\n");
+		return (-1);
+	}
+	if (total_blocks < 8 || max_files == 0) {
+		com1_printf("ChainFS: format failed, invalid params "
+		    "blocks=%u files=%u\n", total_blocks, max_files);
+		return (-1);
+	}
 
-  u32 entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t);
-  u32 file_table_blocks =
-      (max_files + entries_per_block - 1) / entries_per_block;
-  if (file_table_blocks >= (total_blocks - 2)) {
-    com1_printf("ChainFS: format failed, file table too large (%u blocks)\n",
-                file_table_blocks);
-    return -1;
-  }
+	com1_printf("ChainFS: Formatting disk with %u blocks, "
+	    "%u max files\n", total_blocks, max_files);
 
-  u32 data_blocks = total_blocks - 1 - file_table_blocks;
-  u32 map_entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(u32);
-  u32 block_map_blocks =
-      (data_blocks + map_entries_per_block - 1) / map_entries_per_block;
-  if (1 + file_table_blocks + block_map_blocks >= total_blocks) {
-    com1_printf("ChainFS: format failed, no data area left\n");
-    return -1;
-  }
+	entries_per_block =
+	    CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t);
+	file_table_blocks =
+	    (max_files + entries_per_block - 1) / entries_per_block;
+	if (file_table_blocks >= (total_blocks - 2)) {
+		com1_printf("ChainFS: format failed, file table too "
+		    "large (%u blocks)\n", file_table_blocks);
+		return (-1);
+	}
 
-  data_blocks = total_blocks - 1 - file_table_blocks - block_map_blocks;
+	data_blocks = total_blocks - 1 - file_table_blocks;
+	map_entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(u32);
+	block_map_blocks =
+	    (data_blocks + map_entries_per_block - 1) /
+	    map_entries_per_block;
+	if (1 + file_table_blocks + block_map_blocks >=
+	    total_blocks) {
+		com1_printf("ChainFS: format failed, no data area "
+		    "left\n");
+		return (-1);
+	}
 
-  chainfs_superblock_t sb = {0};
-  sb.magic = CHAINFS_MAGIC;
-  sb.block_count = total_blocks;
-  sb.file_table_block_count = file_table_blocks;
-  sb.block_map_block_count = block_map_blocks;
-  sb.total_files = max_files;
-  sb.root_dir_block = 0;
+	data_blocks = total_blocks - 1 - file_table_blocks -
+	    block_map_blocks;
 
-  for (int i = 0; i < CHAINFS_BLOCK_SIZE; i++) {
-    g_chainfs.sector_buffer[i] = 0;
-  }
-  *((chainfs_superblock_t *)g_chainfs.sector_buffer) = sb;
-  disk_write(g_chainfs.disk, 0, g_chainfs.sector_buffer);
+	memset(&sb, 0, sizeof(sb));
+	sb.magic = CHAINFS_MAGIC;
+	sb.block_count = total_blocks;
+	sb.file_table_block_count = file_table_blocks;
+	sb.block_map_block_count = block_map_blocks;
+	sb.total_files = max_files;
+	sb.root_dir_block = 0;
 
-  // Clear file table
-  for (int i = 0; i < CHAINFS_BLOCK_SIZE; i++) {
-    g_chainfs.sector_buffer[i] = 0;
-  }
+	for (i = 0; i < CHAINFS_BLOCK_SIZE; i++) {
+		g_chainfs.sector_buffer[i] = 0;
+	}
+	*((chainfs_superblock_t *)g_chainfs.sector_buffer) = sb;
+	disk_write(g_chainfs.disk, 0, g_chainfs.sector_buffer);
 
-  // Create root directory entry in first file table block
-  chainfs_file_entry_t *entries =
-      (chainfs_file_entry_t *)g_chainfs.sector_buffer;
-  entries[0].status = 1;
-  entries[0].type = CHAINFS_TYPE_DIR;
-  entries[0].name[0] = '/';
-  entries[0].name[1] = 0;
-  entries[0].size = 0;
-  entries[0].start_block = 0; // Root directory doesn't need data blocks
-  entries[0].parent_block = 0xFFFFFFFF; // Root has no parent
+	for (i = 0; i < CHAINFS_BLOCK_SIZE; i++) {
+		g_chainfs.sector_buffer[i] = 0;
+	}
 
-  disk_write(g_chainfs.disk, 1, g_chainfs.sector_buffer);
+	entries = (chainfs_file_entry_t *)g_chainfs.sector_buffer;
+	entries[0].status = 1;
+	entries[0].type = CHAINFS_TYPE_DIR;
+	entries[0].name[0] = '/';
+	entries[0].name[1] = 0;
+	entries[0].size = 0;
+	entries[0].start_block = 0;
+	entries[0].parent_block = 0xFFFFFFFF;
 
-  // Clear remaining file table blocks
-  for (int i = 0; i < CHAINFS_BLOCK_SIZE; i++) {
-    g_chainfs.sector_buffer[i] = 0;
-  }
+	disk_write(g_chainfs.disk, 1, g_chainfs.sector_buffer);
 
-  for (u32 block = 2; block < 1 + file_table_blocks; block++) {
-    disk_write(g_chainfs.disk, block, g_chainfs.sector_buffer);
-  }
+	for (i = 0; i < CHAINFS_BLOCK_SIZE; i++) {
+		g_chainfs.sector_buffer[i] = 0;
+	}
 
-  // Initialize block map
-  u32 *block_map = (u32 *)g_chainfs.sector_buffer;
-  for (u32 i = 0; i < map_entries_per_block; i++) {
-    block_map[i] = CHAINFS_FREE_BLOCK;
-  }
+	for (block = 2; block < 1 + file_table_blocks; block++) {
+		disk_write(g_chainfs.disk, block,
+		    g_chainfs.sector_buffer);
+	}
 
-  for (u32 block = 1 + file_table_blocks;
-       block < 1 + file_table_blocks + block_map_blocks; block++) {
-    disk_write(g_chainfs.disk, block, g_chainfs.sector_buffer);
-  }
+	block_map = (u32 *)g_chainfs.sector_buffer;
+	for (i = 0; i < (int)map_entries_per_block; i++) {
+		block_map[i] = CHAINFS_FREE_BLOCK;
+	}
 
-  com1_printf("ChainFS: Format complete\n");
+	for (block = 1 + file_table_blocks;
+	    block < 1 + file_table_blocks + block_map_blocks;
+	    block++) {
+		disk_write(g_chainfs.disk, block,
+		    g_chainfs.sector_buffer);
+	}
 
-  return chainfs_init(g_chainfs.disk);
+	com1_printf("ChainFS: Format complete\n");
+
+	return (chainfs_init(g_chainfs.disk));
 }
 
-int chainfs_find_file(const char *filename, chainfs_file_entry_t *entry,
-                      u32 *entry_block, u32 *entry_offset) {
-  // If filename contains path separators, use path resolution
-  if (strchr(filename, '/') != 0) {
-    return chainfs_resolve_path(filename, entry, entry_block, entry_offset);
-  }
+int
+chainfs_find_file(const char *filename, chainfs_file_entry_t *entry,
+    u32 *entry_block, u32 *entry_offset)
+{
+	if (strchr(filename, '/') != 0) {
+		return (chainfs_resolve_path(filename, entry,
+		    entry_block, entry_offset));
+	}
 
-  // Simple filename - search in current directory
-  return chainfs_find_in_directory(g_chainfs.current_dir_block, filename, entry,
-                                   entry_block, entry_offset);
+	return (chainfs_find_in_directory(
+	    g_chainfs.current_dir_block, filename, entry,
+	    entry_block, entry_offset));
 }
 
-int chainfs_find_free_file_entry(u32 *entry_block, u32 *entry_offset) {
-  if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
-    return -2; // Special error code for uninitialized FS
-  }
-  u32 entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t);
+int
+chainfs_find_free_file_entry(u32 *entry_block, u32 *entry_offset)
+{
+	u32			entries_per_block, block, i;
+	chainfs_file_entry_t	*entries;
 
-  for (u32 block = 1; block < 1 + g_chainfs.superblock.file_table_block_count;
-       block++) {
-    disk_read(g_chainfs.disk, block, g_chainfs.sector_buffer);
-    chainfs_file_entry_t *entries =
-        (chainfs_file_entry_t *)g_chainfs.sector_buffer;
+	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+		return (-2);
+	}
+	entries_per_block =
+	    CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t);
 
-    for (u32 i = 0; i < entries_per_block; i++) {
-      if (entries[i].status == 0) {
-        *entry_block = block;
-        *entry_offset = i;
-        return 0;
-      }
-    }
-  }
+	for (block = 1;
+	    block < 1 + g_chainfs.superblock.file_table_block_count;
+	    block++) {
+		disk_read(g_chainfs.disk, block,
+		    g_chainfs.sector_buffer);
+		entries = (chainfs_file_entry_t *)
+		    g_chainfs.sector_buffer;
 
-  return -1;
+		for (i = 0; i < entries_per_block; i++) {
+			if (entries[i].status == 0) {
+				*entry_block = block;
+				*entry_offset = i;
+				return (0);
+			}
+		}
+	}
+
+	return (-1);
 }
 
-int chainfs_read_block_map_entry(u32 block_index, u32 *next_block) {
-  u32 entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(u32);
-  u32 map_block = block_index / entries_per_block;
-  u32 map_offset = block_index % entries_per_block;
+int
+chainfs_read_block_map_entry(u32 block_index, u32 *next_block)
+{
+	u32	entries_per_block, map_block, map_offset, sector;
+	u32	*map_entries;
 
-  if (map_block >= g_chainfs.superblock.block_map_block_count) {
-    return -1;
-  }
+	entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(u32);
+	map_block = block_index / entries_per_block;
+	map_offset = block_index % entries_per_block;
 
-  u32 sector = 1 + g_chainfs.superblock.file_table_block_count + map_block;
-  disk_read(g_chainfs.disk, sector, g_chainfs.sector_buffer);
+	if (map_block >=
+	    g_chainfs.superblock.block_map_block_count) {
+		return (-1);
+	}
 
-  u32 *map_entries = (u32 *)g_chainfs.sector_buffer;
-  *next_block = map_entries[map_offset];
+	sector = 1 + g_chainfs.superblock.file_table_block_count +
+	    map_block;
+	disk_read(g_chainfs.disk, sector, g_chainfs.sector_buffer);
 
-  return 0;
+	map_entries = (u32 *)g_chainfs.sector_buffer;
+	*next_block = map_entries[map_offset];
+
+	return (0);
 }
 
-int chainfs_write_block_map_entry(u32 block_index, u32 next_block) {
-  u32 entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(u32);
-  u32 map_block = block_index / entries_per_block;
-  u32 map_offset = block_index % entries_per_block;
+int
+chainfs_write_block_map_entry(u32 block_index, u32 next_block)
+{
+	u32	entries_per_block, map_block, map_offset, sector;
+	u32	*map_entries;
 
-  if (map_block >= g_chainfs.superblock.block_map_block_count) {
-    return -1;
-  }
+	entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(u32);
+	map_block = block_index / entries_per_block;
+	map_offset = block_index % entries_per_block;
 
-  u32 sector = 1 + g_chainfs.superblock.file_table_block_count + map_block;
-  disk_read(g_chainfs.disk, sector, g_chainfs.sector_buffer);
+	if (map_block >=
+	    g_chainfs.superblock.block_map_block_count) {
+		return (-1);
+	}
 
-  u32 *map_entries = (u32 *)g_chainfs.sector_buffer;
-  map_entries[map_offset] = next_block;
+	sector = 1 + g_chainfs.superblock.file_table_block_count +
+	    map_block;
+	disk_read(g_chainfs.disk, sector, g_chainfs.sector_buffer);
 
-  disk_write(g_chainfs.disk, sector, g_chainfs.sector_buffer);
+	map_entries = (u32 *)g_chainfs.sector_buffer;
+	map_entries[map_offset] = next_block;
 
-  return 0;
+	disk_write(g_chainfs.disk, sector,
+	    g_chainfs.sector_buffer);
+
+	return (0);
 }
 
-int chainfs_find_free_blocks(u32 count, u32 *blocks) {
-  u32 found = 0;
-  u32 entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(u32);
-  u32 total_data_blocks =
-      g_chainfs.superblock.block_count - g_chainfs.data_area_start;
+int
+chainfs_find_free_blocks(u32 count, u32 *blocks)
+{
+	u32	found, entries_per_block, total_data_blocks;
+	u32	i, next_block;
 
-  for (u32 i = 0; i < total_data_blocks && found < count; i++) {
-    u32 next_block;
-    if (chainfs_read_block_map_entry(i, &next_block) == 0) {
-      if (next_block == CHAINFS_FREE_BLOCK) {
-        blocks[found++] = i;
-      }
-    }
-  }
+	found = 0;
+	entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(u32);
+	total_data_blocks = g_chainfs.superblock.block_count -
+	    g_chainfs.data_area_start;
 
-  return (found == count) ? 0 : -1;
+	for (i = 0; i < total_data_blocks && found < count; i++) {
+		if (chainfs_read_block_map_entry(i, &next_block)
+		    == 0) {
+			if (next_block == CHAINFS_FREE_BLOCK) {
+				blocks[found++] = i;
+			}
+		}
+	}
+
+	return (found == count) ? 0 : -1;
 }
 
-void chainfs_free_block_chain(u32 start_block) {
-  u32 current_block = start_block;
+void
+chainfs_free_block_chain(u32 start_block)
+{
+	u32	current_block, next_block;
 
-  while (current_block != CHAINFS_EOF_MARKER) {
-    u32 next_block;
-    if (chainfs_read_block_map_entry(current_block, &next_block) != 0) {
-      break;
-    }
+	current_block = start_block;
 
-    chainfs_write_block_map_entry(current_block, CHAINFS_FREE_BLOCK);
-    current_block = next_block;
-  }
+	while (current_block != CHAINFS_EOF_MARKER) {
+		if (chainfs_read_block_map_entry(current_block,
+		    &next_block) != 0) {
+			break;
+		}
+
+		chainfs_write_block_map_entry(current_block,
+		    CHAINFS_FREE_BLOCK);
+		current_block = next_block;
+	}
 }
 
-int chainfs_read_file(const char *filename, u8 *buffer, u32 buffer_size,
-                      u32 *bytes_read) {
-  chainfs_file_entry_t entry;
-  u32 entry_block, entry_offset;
+int
+chainfs_read_file(const char *filename, u8 *buffer, u32 buffer_size,
+    u32 *bytes_read)
+{
+	chainfs_file_entry_t	entry;
+	u32			entry_block, entry_offset;
+	u32			remaining, copied, current_block;
+	u32			real_sector, to_copy, next_block, i;
 
-  if (chainfs_find_file(filename, &entry, &entry_block, &entry_offset) != 0) {
-    com1_printf("ChainFS: File '%s' not found\n", filename);
-    return -1;
-  }
+	if (chainfs_find_file(filename, &entry, &entry_block,
+	    &entry_offset) != 0) {
+		com1_printf("ChainFS: File '%s' not found\n",
+		    filename);
+		return (-1);
+	}
 
-  u32 remaining = entry.size;
-  u32 copied = 0;
-  u32 current_block = entry.start_block;
+	remaining = entry.size;
+	copied = 0;
+	current_block = entry.start_block;
 
-  while (remaining > 0 && current_block != CHAINFS_EOF_MARKER &&
-         copied < buffer_size) {
-    u32 real_sector = g_chainfs.data_area_start + current_block;
-    disk_read(g_chainfs.disk, real_sector, g_chainfs.sector_buffer);
+	while (remaining > 0 && current_block != CHAINFS_EOF_MARKER &&
+	    copied < buffer_size) {
+		real_sector = g_chainfs.data_area_start +
+		    current_block;
+		disk_read(g_chainfs.disk, real_sector,
+		    g_chainfs.sector_buffer);
 
-    u32 to_copy = remaining;
-    if (to_copy > CHAINFS_BLOCK_SIZE) {
-      to_copy = CHAINFS_BLOCK_SIZE;
-    }
-    if (copied + to_copy > buffer_size) {
-      to_copy = buffer_size - copied;
-    }
+		to_copy = remaining;
+		if (to_copy > CHAINFS_BLOCK_SIZE) {
+			to_copy = CHAINFS_BLOCK_SIZE;
+		}
+		if (copied + to_copy > buffer_size) {
+			to_copy = buffer_size - copied;
+		}
 
-    for (u32 i = 0; i < to_copy; i++) {
-      buffer[copied + i] = g_chainfs.sector_buffer[i];
-    }
+		for (i = 0; i < to_copy; i++) {
+			buffer[copied + i] =
+			    g_chainfs.sector_buffer[i];
+		}
 
-    copied += to_copy;
-    remaining -= to_copy;
+		copied += to_copy;
+		remaining -= to_copy;
 
-    if (remaining > 0) {
-      u32 next_block;
-      if (chainfs_read_block_map_entry(current_block, &next_block) != 0) {
-        break;
-      }
-      current_block = next_block;
-    }
-  }
+		if (remaining > 0) {
+			if (chainfs_read_block_map_entry(
+			    current_block, &next_block) != 0) {
+				break;
+			}
+			current_block = next_block;
+		}
+	}
 
-  *bytes_read = copied;
-  com1_printf("ChainFS: Read %u bytes from '%s'\n", copied, filename);
-  return 0;
+	*bytes_read = copied;
+	com1_printf("ChainFS: Read %u bytes from '%s'\n",
+	    copied, filename);
+	return (0);
 }
 
-int chainfs_read_file_range(const char *filename, u8 *buffer, u32 buffer_size,
-                            u32 offset, u32 *bytes_read) {
-  if (bytes_read == NULL || buffer == NULL) {
-    return -1;
-  }
+int
+chainfs_read_file_range(const char *filename, u8 *buffer,
+    u32 buffer_size, u32 offset, u32 *bytes_read)
+{
+	chainfs_file_entry_t	entry;
+	u32			entry_block, entry_offset;
+	u32			remaining, block_skip, intra_offset;
+	u32			current_block, copied, real_sector;
+	u32			to_copy, next_block, i;
 
-  chainfs_file_entry_t entry;
-  u32 entry_block, entry_offset;
-  if (chainfs_find_file(filename, &entry, &entry_block, &entry_offset) != 0) {
-    return -1;
-  }
+	if (bytes_read == NULL || buffer == NULL) {
+		return (-1);
+	}
 
-  if (offset >= entry.size) {
-    *bytes_read = 0;
-    return 0;
-  }
+	if (chainfs_find_file(filename, &entry, &entry_block,
+	    &entry_offset) != 0) {
+		return (-1);
+	}
 
-  u32 remaining = entry.size - offset;
-  if (remaining > buffer_size) {
-    remaining = buffer_size;
-  }
+	if (offset >= entry.size) {
+		*bytes_read = 0;
+		return (0);
+	}
 
-  u32 block_skip = offset / CHAINFS_BLOCK_SIZE;
-  u32 intra_offset = offset % CHAINFS_BLOCK_SIZE;
-  u32 current_block = entry.start_block;
+	remaining = entry.size - offset;
+	if (remaining > buffer_size) {
+		remaining = buffer_size;
+	}
 
-  for (u32 i = 0; i < block_skip; i++) {
-    u32 next_block;
-    if (chainfs_read_block_map_entry(current_block, &next_block) != 0) {
-      return -1;
-    }
-    if (next_block == CHAINFS_EOF_MARKER) {
-      *bytes_read = 0;
-      return 0;
-    }
-    current_block = next_block;
-  }
+	block_skip = offset / CHAINFS_BLOCK_SIZE;
+	intra_offset = offset % CHAINFS_BLOCK_SIZE;
+	current_block = entry.start_block;
 
-  u32 copied = 0;
-  while (remaining > 0) {
-    u32 real_sector = g_chainfs.data_area_start + current_block;
-    disk_read(g_chainfs.disk, real_sector, g_chainfs.sector_buffer);
+	for (i = 0; i < block_skip; i++) {
+		if (chainfs_read_block_map_entry(current_block,
+		    &next_block) != 0) {
+			return (-1);
+		}
+		if (next_block == CHAINFS_EOF_MARKER) {
+			*bytes_read = 0;
+			return (0);
+		}
+		current_block = next_block;
+	}
 
-    u32 to_copy = CHAINFS_BLOCK_SIZE - intra_offset;
-    if (to_copy > remaining) {
-      to_copy = remaining;
-    }
+	copied = 0;
+	while (remaining > 0) {
+		real_sector = g_chainfs.data_area_start +
+		    current_block;
+		disk_read(g_chainfs.disk, real_sector,
+		    g_chainfs.sector_buffer);
 
-    for (u32 i = 0; i < to_copy; i++) {
-      buffer[copied + i] = g_chainfs.sector_buffer[intra_offset + i];
-    }
+		to_copy = CHAINFS_BLOCK_SIZE - intra_offset;
+		if (to_copy > remaining) {
+			to_copy = remaining;
+		}
 
-    copied += to_copy;
-    remaining -= to_copy;
-    intra_offset = 0;
+		for (i = 0; i < to_copy; i++) {
+			buffer[copied + i] =
+			    g_chainfs.sector_buffer[intra_offset + i];
+		}
 
-    if (remaining == 0) {
-      break;
-    }
+		copied += to_copy;
+		remaining -= to_copy;
+		intra_offset = 0;
 
-    u32 next_block;
-    if (chainfs_read_block_map_entry(current_block, &next_block) != 0) {
-      return -1;
-    }
-    if (next_block == CHAINFS_EOF_MARKER) {
-      break;
-    }
-    current_block = next_block;
-  }
+		if (remaining == 0) {
+			break;
+		}
 
-  *bytes_read = copied;
-  com1_printf("ChainFS: Read %u bytes from '%s' (offset %u)\n", copied,
-              filename, offset);
-  return 0;
+		if (chainfs_read_block_map_entry(current_block,
+		    &next_block) != 0) {
+			return (-1);
+		}
+		if (next_block == CHAINFS_EOF_MARKER) {
+			break;
+		}
+		current_block = next_block;
+	}
+
+	*bytes_read = copied;
+	com1_printf("ChainFS: Read %u bytes from '%s' "
+	    "(offset %u)\n", copied, filename, offset);
+	return (0);
 }
 
-int chainfs_write_file(const char *filename, const u8 *data, u32 size) {
-  if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
-    com1_printf("ChainFS: write failed, filesystem not initialized\n");
-    return -1;
-  }
+int
+chainfs_write_file(const char *filename, const u8 *data, u32 size)
+{
+	chainfs_file_entry_t	entry, parent_entry;
+	u32			entry_block, entry_offset;
+	u32			parent_entry_block, parent_entry_offset;
+	u32			parent_block, blocks_needed;
+	u32			*allocated_blocks, remaining, data_offset;
+	u32			real_sector, next_block, to_copy;
+	u32			name_len, i, j;
+	char			file_name[32];
+	char			parent_path[CHAINFS_MAX_PATH];
+	int			path_len, last_slash;
+	int			file_exists;
+	chainfs_file_entry_t	*entries;
 
-  chainfs_file_entry_t entry;
-  u32 entry_block, entry_offset;
-  int file_exists =
-      (chainfs_find_file(filename, &entry, &entry_block, &entry_offset) == 0);
+	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+		com1_printf("ChainFS: write failed, filesystem "
+		    "not initialized\n");
+		return (-1);
+	}
 
-  u32 parent_block = g_chainfs.current_dir_block;
-  char file_name[32];
+	file_exists = (chainfs_find_file(filename, &entry,
+	    &entry_block, &entry_offset) == 0);
 
-  // Extract directory and filename
-  if (strchr(filename, '/') != 0) {
-    // Path contains directories
-    char parent_path[CHAINFS_MAX_PATH];
-    int path_len = strlen(filename);
-    int last_slash = -1;
+	parent_block = g_chainfs.current_dir_block;
 
-    for (int i = path_len - 1; i >= 0; i--) {
-      if (filename[i] == '/') {
-        last_slash = i;
-        break;
-      }
-    }
+	if (strchr(filename, '/') != 0) {
+		path_len = strlen(filename);
+		last_slash = -1;
 
-    if (last_slash == -1) {
-      strcpy(file_name, filename);
-    } else if (last_slash == 0) {
-      parent_block = g_chainfs.superblock.root_dir_block;
-      strcpy(file_name, filename + 1);
-    } else {
-      for (int i = 0; i < last_slash; i++) {
-        parent_path[i] = filename[i];
-      }
-      parent_path[last_slash] = 0;
-      strcpy(file_name, filename + last_slash + 1);
+		for (i = path_len - 1; i > 0; i--) {
+			if (filename[i] == '/') {
+				last_slash = (int)i;
+				break;
+			}
+		}
 
-      chainfs_file_entry_t parent_entry;
-      u32 parent_entry_block, parent_entry_offset;
-      if (chainfs_resolve_path(parent_path, &parent_entry, &parent_entry_block,
-                               &parent_entry_offset) != 0) {
-        com1_printf("ChainFS: Parent directory not found: %s\n", parent_path);
-        return -1;
-      }
-      if (parent_entry.type != CHAINFS_TYPE_DIR) {
-        com1_printf("ChainFS: Parent is not a directory: %s\n", parent_path);
-        return -1;
-      }
-      parent_block = (parent_entry_block - 1) * ENTRIES_PER_BLOCK +
-                     parent_entry_offset;
-    }
-  } else {
-    strcpy(file_name, filename);
-  }
+		if (last_slash == -1) {
+			strcpy(file_name, filename);
+		} else if (last_slash == 0) {
+			parent_block =
+			    g_chainfs.superblock.root_dir_block;
+			strcpy(file_name, filename + 1);
+		} else {
+			for (i = 0; i < (u32)last_slash; i++) {
+				parent_path[i] = filename[i];
+			}
+			parent_path[last_slash] = 0;
+			strcpy(file_name, filename + last_slash + 1);
 
-  if (file_exists) {
-    chainfs_free_block_chain(entry.start_block);
-  } else {
-    int res = chainfs_find_free_file_entry(&entry_block, &entry_offset);
-    if (res == -2) {
-      com1_printf("ChainFS: Filesystem not initialized! Please run 'format'\n");
-      return -2;
-    } else if (res != 0) {
-      com1_printf(
-          "ChainFS: No free file entries (disk full or too many files)\n");
-      return -1;
-    }
-  }
+			if (chainfs_resolve_path(parent_path,
+			    &parent_entry, &parent_entry_block,
+			    &parent_entry_offset) != 0) {
+				com1_printf("ChainFS: Parent directory "
+				    "not found: %s\n", parent_path);
+				return (-1);
+			}
+			if (parent_entry.type != CHAINFS_TYPE_DIR) {
+				com1_printf("ChainFS: Parent is not "
+				    "a directory: %s\n",
+				    parent_path);
+				return (-1);
+			}
+			parent_block =
+			    (parent_entry_block - 1) *
+			    ENTRIES_PER_BLOCK +
+			    parent_entry_offset;
+		}
+	} else {
+		strcpy(file_name, filename);
+	}
 
-  u32 blocks_needed = (size + CHAINFS_BLOCK_SIZE - 1) / CHAINFS_BLOCK_SIZE;
-  if (blocks_needed == 0) {
-    blocks_needed = 1;
-  }
+	if (file_exists) {
+		chainfs_free_block_chain(entry.start_block);
+	} else {
+		int	res;
 
-  u32 *allocated_blocks = (u32 *)kmem_alloc(blocks_needed * sizeof(u32));
-  if (!allocated_blocks) {
-    com1_printf("ChainFS: Memory allocation failed\n");
-    return -1;
-  }
+		res = chainfs_find_free_file_entry(&entry_block,
+		    &entry_offset);
+		if (res == -2) {
+			com1_printf("ChainFS: Filesystem not "
+			    "initialized!\n");
+			return (-2);
+		} else if (res != 0) {
+			com1_printf("ChainFS: No free file entries "
+			    "(disk full or too many files)\n");
+			return (-1);
+		}
+	}
 
-  if (chainfs_find_free_blocks(blocks_needed, allocated_blocks) != 0) {
-    com1_printf("ChainFS: Not enough free blocks\n");
-    kmem_free(allocated_blocks);
-    return -1;
-  }
+	blocks_needed = (size + CHAINFS_BLOCK_SIZE - 1) /
+	    CHAINFS_BLOCK_SIZE;
+	if (blocks_needed == 0) {
+		blocks_needed = 1;
+	}
 
-  u32 remaining = size;
-  u32 data_offset = 0;
+	allocated_blocks = (u32 *)kmem_alloc(
+	    blocks_needed * sizeof(u32));
+	if (!allocated_blocks) {
+		com1_printf("ChainFS: Memory allocation failed\n");
+		return (-1);
+	}
 
-  for (u32 i = 0; i < blocks_needed; i++) {
-    for (int j = 0; j < CHAINFS_BLOCK_SIZE; j++) {
-      g_chainfs.sector_buffer[j] = 0;
-    }
+	if (chainfs_find_free_blocks(blocks_needed,
+	    allocated_blocks) != 0) {
+		com1_printf("ChainFS: Not enough free blocks\n");
+		kmem_free(allocated_blocks);
+		return (-1);
+	}
 
-    u32 to_copy = remaining;
-    if (to_copy > CHAINFS_BLOCK_SIZE) {
-      to_copy = CHAINFS_BLOCK_SIZE;
-    }
+	remaining = size;
+	data_offset = 0;
 
-    for (u32 j = 0; j < to_copy; j++) {
-      g_chainfs.sector_buffer[j] = data[data_offset + j];
-    }
+	for (i = 0; i < blocks_needed; i++) {
+		for (j = 0; j < CHAINFS_BLOCK_SIZE; j++) {
+			g_chainfs.sector_buffer[j] = 0;
+		}
 
-    u32 real_sector = g_chainfs.data_area_start + allocated_blocks[i];
-    disk_write(g_chainfs.disk, real_sector, g_chainfs.sector_buffer);
+		to_copy = remaining;
+		if (to_copy > CHAINFS_BLOCK_SIZE) {
+			to_copy = CHAINFS_BLOCK_SIZE;
+		}
 
-    u32 next_block =
-        (i + 1 < blocks_needed) ? allocated_blocks[i + 1] : CHAINFS_EOF_MARKER;
-    chainfs_write_block_map_entry(allocated_blocks[i], next_block);
+		for (j = 0; j < to_copy; j++) {
+			g_chainfs.sector_buffer[j] =
+			    data[data_offset + j];
+		}
 
-    remaining -= to_copy;
-    data_offset += to_copy;
-  }
+		real_sector = g_chainfs.data_area_start +
+		    allocated_blocks[i];
+		disk_write(g_chainfs.disk, real_sector,
+		    g_chainfs.sector_buffer);
 
-  disk_read(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
-  chainfs_file_entry_t *entries =
-      (chainfs_file_entry_t *)g_chainfs.sector_buffer;
+		next_block = (i + 1 < blocks_needed) ?
+		    allocated_blocks[i + 1] : CHAINFS_EOF_MARKER;
+		chainfs_write_block_map_entry(allocated_blocks[i],
+		    next_block);
 
-  entries[entry_offset].status = 1;
-  entries[entry_offset].type = CHAINFS_TYPE_FILE;
-  for (int i = 0; i < 30; i++) {
-    entries[entry_offset].name[i] = 0;
-  }
+		remaining -= to_copy;
+		data_offset += to_copy;
+	}
 
-  int name_len = strlen(file_name);
-  if (name_len > 29) {
-    name_len = 29;
-  }
-  for (int i = 0; i < name_len; i++) {
-    entries[entry_offset].name[i] = file_name[i];
-  }
+	disk_read(g_chainfs.disk, entry_block,
+	    g_chainfs.sector_buffer);
+	entries = (chainfs_file_entry_t *)
+	    g_chainfs.sector_buffer;
 
-  entries[entry_offset].size = size;
-  entries[entry_offset].start_block = allocated_blocks[0];
-  entries[entry_offset].parent_block = parent_block;
+	entries[entry_offset].status = 1;
+	entries[entry_offset].type = CHAINFS_TYPE_FILE;
+	for (i = 0; i < 30; i++) {
+		entries[entry_offset].name[i] = 0;
+	}
 
-  disk_write(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
+	name_len = strlen(file_name);
+	if (name_len > 29) {
+		name_len = 29;
+	}
+	for (i = 0; i < name_len; i++) {
+		entries[entry_offset].name[i] = file_name[i];
+	}
 
-  kmem_free(allocated_blocks);
+	entries[entry_offset].size = size;
+	entries[entry_offset].start_block = allocated_blocks[0];
+	entries[entry_offset].parent_block = parent_block;
 
-  com1_printf("ChainFS: Wrote %u bytes to '%s' using %u blocks\n", size,
-              filename, blocks_needed);
-  return 0;
+	disk_write(g_chainfs.disk, entry_block,
+	    g_chainfs.sector_buffer);
+
+	kmem_free(allocated_blocks);
+
+	com1_printf("ChainFS: Wrote %u bytes to '%s' using "
+	    "%u blocks\n", size, filename, blocks_needed);
+	return (0);
 }
 
-int chainfs_delete_file(const char *filename) {
-  chainfs_file_entry_t entry;
-  u32 entry_block, entry_offset;
+int
+chainfs_delete_file(const char *filename)
+{
+	chainfs_file_entry_t	entry;
+	u32			entry_block, entry_offset;
+	chainfs_file_entry_t	*entries;
 
-  if (chainfs_find_file(filename, &entry, &entry_block, &entry_offset) != 0) {
-    com1_printf("ChainFS: File '%s' not found\n", filename);
-    return -1;
-  }
+	if (chainfs_find_file(filename, &entry, &entry_block,
+	    &entry_offset) != 0) {
+		com1_printf("ChainFS: File '%s' not found\n",
+		    filename);
+		return (-1);
+	}
 
-  chainfs_free_block_chain(entry.start_block);
+	chainfs_free_block_chain(entry.start_block);
 
-  disk_read(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
-  chainfs_file_entry_t *entries =
-      (chainfs_file_entry_t *)g_chainfs.sector_buffer;
-  entries[entry_offset].status = 0;
-  disk_write(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
+	disk_read(g_chainfs.disk, entry_block,
+	    g_chainfs.sector_buffer);
+	entries = (chainfs_file_entry_t *)
+	    g_chainfs.sector_buffer;
+	entries[entry_offset].status = 0;
+	disk_write(g_chainfs.disk, entry_block,
+	    g_chainfs.sector_buffer);
 
-  com1_printf("ChainFS: Deleted file '%s'\n", filename);
-  return 0;
+	com1_printf("ChainFS: Deleted file '%s'\n", filename);
+	return (0);
 }
 
-int chainfs_get_file_list(chainfs_file_entry_t *files, u32 max_files,
-                          u32 *file_count) {
-  return chainfs_list_dir("", files, max_files, file_count);
+int
+chainfs_get_file_list(chainfs_file_entry_t *files, u32 max_files,
+    u32 *file_count)
+{
+	return (chainfs_list_dir("", files, max_files,
+	    file_count));
 }
 
-static int read_entry_by_index(u32 index, chainfs_file_entry_t *entry,
-                               u32 *block, u32 *offset) {
-  if (index >= g_chainfs.superblock.total_files)
-    return -1;
+static int
+read_entry_by_index(u32 index, chainfs_file_entry_t *entry,
+    u32 *block, u32 *offset)
+{
+	u32			b, o;
+	chainfs_file_entry_t	*entries;
 
-  u32 b = 1 + (index / ENTRIES_PER_BLOCK);
-  u32 o = index % ENTRIES_PER_BLOCK;
+	if (index >= g_chainfs.superblock.total_files) {
+		return (-1);
+	}
 
-  disk_read(g_chainfs.disk, b, g_chainfs.sector_buffer);
-  chainfs_file_entry_t *entries =
-      (chainfs_file_entry_t *)g_chainfs.sector_buffer;
-  *entry = entries[o];
-  if (block)
-    *block = b;
-  if (offset)
-    *offset = o;
-  return 0;
+	b = 1 + (index / ENTRIES_PER_BLOCK);
+	o = index % ENTRIES_PER_BLOCK;
+
+	disk_read(g_chainfs.disk, b, g_chainfs.sector_buffer);
+	entries = (chainfs_file_entry_t *)
+	    g_chainfs.sector_buffer;
+	*entry = entries[o];
+	if (block) {
+		*block = b;
+	}
+	if (offset) {
+		*offset = o;
+	}
+	return (0);
 }
 
-// Helper function to split path into components
-static int split_path(const char *path, char components[][32],
-                      int max_components) {
-  int count = 0;
-  int start = 0;
-  int len = strlen(path);
+static int
+split_path(const char *path, char components[][32], int max_components)
+{
+	int	count, start, len, i, j;
 
-  // Skip leading slash
-  if (len > 0 && path[0] == '/') {
-    start = 1;
-  }
+	count = 0;
+	start = 0;
+	len = strlen(path);
 
-  for (int i = start; i <= len && count < max_components; i++) {
-    if (path[i] == '/' || path[i] == 0) {
-      int comp_len = i - start;
-      if (comp_len > 0 && comp_len < 31) {
-        for (int j = 0; j < comp_len; j++) {
-          components[count][j] = path[start + j];
-        }
-        components[count][comp_len] = 0;
-        count++;
-      }
-      start = i + 1;
-    }
-  }
+	if (len > 0 && path[0] == '/') {
+		start = 1;
+	}
 
-  return count;
+	for (i = start; i <= len && count < max_components; i++) {
+		if (path[i] == '/' || path[i] == 0) {
+			int	comp_len;
+
+			comp_len = i - start;
+			if (comp_len > 0 && comp_len < 31) {
+				for (j = 0; j < comp_len; j++) {
+					components[count][j] =
+					    path[start + j];
+				}
+				components[count][comp_len] = 0;
+				count++;
+			}
+			start = i + 1;
+		}
+	}
+
+	return (count);
 }
 
-// Find entry in specific directory
-int chainfs_find_in_directory(u32 dir_block, const char *name,
-                              chainfs_file_entry_t *entry, u32 *entry_block,
-                              u32 *entry_offset) {
-  u32 entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t);
+int
+chainfs_find_in_directory(u32 dir_block, const char *name,
+    chainfs_file_entry_t *entry, u32 *entry_block, u32 *entry_offset)
+{
+	u32			entries_per_block, block, i;
+	chainfs_file_entry_t	*entries;
 
-  for (u32 block = 1; block < 1 + g_chainfs.superblock.file_table_block_count;
-       block++) {
-    disk_read(g_chainfs.disk, block, g_chainfs.sector_buffer);
-    chainfs_file_entry_t *entries =
-        (chainfs_file_entry_t *)g_chainfs.sector_buffer;
+	entries_per_block =
+	    CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t);
 
-    for (u32 i = 0; i < entries_per_block; i++) {
-      if (entries[i].status == 1 && entries[i].parent_block == dir_block &&
-          strcmp(entries[i].name, name) == 0) {
-        *entry = entries[i];
-        *entry_block = block;
-        *entry_offset = i;
-        return 0;
-      }
-    }
-  }
+	for (block = 1;
+	    block < 1 + g_chainfs.superblock.file_table_block_count;
+	    block++) {
+		disk_read(g_chainfs.disk, block,
+		    g_chainfs.sector_buffer);
+		entries = (chainfs_file_entry_t *)
+		    g_chainfs.sector_buffer;
 
-  return -1;
+		for (i = 0; i < entries_per_block; i++) {
+			if (entries[i].status == 1 &&
+			    entries[i].parent_block == dir_block &&
+			    strcmp(entries[i].name, name) == 0) {
+				*entry = entries[i];
+				*entry_block = block;
+				*entry_offset = i;
+				return (0);
+			}
+		}
+	}
+
+	return (-1);
 }
 
-// Resolve full path to file/directory entry
-int chainfs_resolve_path(const char *path, chainfs_file_entry_t *entry,
-                         u32 *entry_block, u32 *entry_offset) {
-  char components[16][32];
-  int comp_count = split_path(path, components, 16);
+int
+chainfs_resolve_path(const char *path, chainfs_file_entry_t *entry,
+    u32 *entry_block, u32 *entry_offset)
+{
+	char	components[16][32];
+	int	comp_count, i;
+	u32	current_block, root_idx, root_block, root_offset;
+	u32	found_block, found_offset;
+	chainfs_file_entry_t	found_entry;
+	chainfs_file_entry_t	*entries;
 
-  // Start from root or current directory
-  u32 current_block = (path[0] == '/') ? g_chainfs.superblock.root_dir_block
-                                       : g_chainfs.current_dir_block;
+	comp_count = split_path(path, components, 16);
 
-  // If path is just "/" return root directory
-  if (comp_count == 0 && path[0] == '/') {
-    u32 root_idx = g_chainfs.superblock.root_dir_block;
-    u32 root_block = 1 + (root_idx / ENTRIES_PER_BLOCK);
-    u32 root_offset = root_idx % ENTRIES_PER_BLOCK;
-    disk_read(g_chainfs.disk, root_block, g_chainfs.sector_buffer);
-    chainfs_file_entry_t *entries =
-        (chainfs_file_entry_t *)g_chainfs.sector_buffer;
-    *entry = entries[root_offset];
-    *entry_block = root_block;
-    *entry_offset = root_offset;
-    return 0;
-  }
+	current_block = (path[0] == '/') ?
+	    g_chainfs.superblock.root_dir_block :
+	    g_chainfs.current_dir_block;
 
-  // Traverse path components
-  for (int i = 0; i < comp_count; i++) {
-    chainfs_file_entry_t found_entry;
-    u32 found_block, found_offset;
+	if (comp_count == 0 && path[0] == '/') {
+		root_idx = g_chainfs.superblock.root_dir_block;
+		root_block = 1 + (root_idx / ENTRIES_PER_BLOCK);
+		root_offset = root_idx % ENTRIES_PER_BLOCK;
+		disk_read(g_chainfs.disk, root_block,
+		    g_chainfs.sector_buffer);
+		entries = (chainfs_file_entry_t *)
+		    g_chainfs.sector_buffer;
+		*entry = entries[root_offset];
+		*entry_block = root_block;
+		*entry_offset = root_offset;
+		return (0);
+	}
 
-    if (chainfs_find_in_directory(current_block, components[i], &found_entry,
-                                  &found_block, &found_offset) != 0) {
-      return -1; // Component not found
-    }
+	for (i = 0; i < comp_count; i++) {
+		if (chainfs_find_in_directory(current_block,
+		    components[i], &found_entry, &found_block,
+		    &found_offset) != 0) {
+			return (-1);
+		}
 
-    if (i == comp_count - 1) {
-      // Last component - return it
-      *entry = found_entry;
-      *entry_block = found_block;
-      *entry_offset = found_offset;
-      return 0;
-    } else {
-      // Intermediate component - must be directory
-      if (found_entry.type != CHAINFS_TYPE_DIR) {
-        return -1; // Not a directory
-      }
-      current_block = (found_block - 1) * ENTRIES_PER_BLOCK + found_offset;
-    }
-  }
+		if (i == comp_count - 1) {
+			*entry = found_entry;
+			*entry_block = found_block;
+			*entry_offset = found_offset;
+			return (0);
+		} else {
+			if (found_entry.type != CHAINFS_TYPE_DIR) {
+				return (-1);
+			}
+			current_block = (found_block - 1) *
+			    ENTRIES_PER_BLOCK + found_offset;
+		}
+	}
 
-  return -1;
+	return (-1);
 }
 
-// Create directory
-int chainfs_mkdir(const char *path) {
-  if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
-    com1_printf("ChainFS: mkdir failed, filesystem not initialized\n");
-    return -1;
-  }
+int
+chainfs_mkdir(const char *path)
+{
+	char			parent_path[CHAINFS_MAX_PATH];
+	char			dir_name[32];
+	int			path_len, last_slash, i;
+	chainfs_file_entry_t	parent_entry, existing_entry;
+	u32			parent_block, parent_offset;
+	u32			existing_block, existing_offset;
+	u32			entry_block, entry_offset;
+	chainfs_file_entry_t	*entries;
 
-  // Find parent directory
-  char parent_path[CHAINFS_MAX_PATH];
-  char dir_name[32];
+	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+		com1_printf("ChainFS: mkdir failed, filesystem "
+		    "not initialized\n");
+		return (-1);
+	}
 
-  // Extract parent path and directory name
-  int path_len = strlen(path);
-  int last_slash = -1;
+	path_len = strlen(path);
+	last_slash = -1;
 
-  for (int i = path_len - 1; i >= 0; i--) {
-    if (path[i] == '/') {
-      last_slash = i;
-      break;
-    }
-  }
+	for (i = path_len - 1; i >= 0; i--) {
+		if (path[i] == '/') {
+			last_slash = i;
+			break;
+		}
+	}
 
-  if (last_slash == -1) {
-    // No slash - create in current directory
-    parent_path[0] = 0;
-    strcpy(dir_name, path);
-  } else if (last_slash == 0) {
-    // Root directory
-    parent_path[0] = '/';
-    parent_path[1] = 0;
-    strcpy(dir_name, path + 1);
-  } else {
-    // Copy parent path
-    for (int i = 0; i < last_slash; i++) {
-      parent_path[i] = path[i];
-    }
-    parent_path[last_slash] = 0;
-    strcpy(dir_name, path + last_slash + 1);
-  }
+	if (last_slash == -1) {
+		parent_path[0] = 0;
+		strcpy(dir_name, path);
+	} else if (last_slash == 0) {
+		parent_path[0] = '/';
+		parent_path[1] = 0;
+		strcpy(dir_name, path + 1);
+	} else {
+		for (i = 0; i < last_slash; i++) {
+			parent_path[i] = path[i];
+		}
+		parent_path[last_slash] = 0;
+		strcpy(dir_name, path + last_slash + 1);
+	}
 
-  // Find parent directory
-  chainfs_file_entry_t parent_entry;
-  u32 parent_block, parent_offset;
+	if (parent_path[0] == 0) {
+		parent_block = g_chainfs.current_dir_block;
+	} else {
+		if (chainfs_resolve_path(parent_path,
+		    &parent_entry, &parent_block,
+		    &parent_offset) != 0) {
+			com1_printf("ChainFS: Parent directory "
+			    "not found: %s\n", parent_path);
+			return (-1);
+		}
+		if (parent_entry.type != CHAINFS_TYPE_DIR) {
+			com1_printf("ChainFS: Parent is not "
+			    "a directory: %s\n", parent_path);
+			return (-1);
+		}
+		parent_block = (parent_block - 1) *
+		    ENTRIES_PER_BLOCK + parent_offset;
+	}
 
-  if (parent_path[0] == 0) {
-    // Use current directory
-    parent_block = g_chainfs.current_dir_block;
-  } else {
-    if (chainfs_resolve_path(parent_path, &parent_entry, &parent_block,
-                             &parent_offset) != 0) {
-      com1_printf("ChainFS: Parent directory not found: %s\n", parent_path);
-      return -1;
-    }
-    if (parent_entry.type != CHAINFS_TYPE_DIR) {
-      com1_printf("ChainFS: Parent is not a directory: %s\n", parent_path);
-      return -1;
-    }
-    parent_block =
-        (parent_block - 1) * ENTRIES_PER_BLOCK + parent_offset;
-  }
+	if (chainfs_find_in_directory(parent_block, dir_name,
+	    &existing_entry, &existing_block,
+	    &existing_offset) == 0) {
+		com1_printf("ChainFS: Directory already exists: "
+		    "%s\n", path);
+		return (-1);
+	}
 
-  // Check if directory already exists
-  chainfs_file_entry_t existing_entry;
-  u32 existing_block, existing_offset;
-  if (chainfs_find_in_directory(parent_block, dir_name, &existing_entry,
-                                &existing_block, &existing_offset) == 0) {
-    com1_printf("ChainFS: Directory already exists: %s\n", path);
-    return -1;
-  }
+	if (chainfs_find_free_file_entry(&entry_block,
+	    &entry_offset) != 0) {
+		com1_printf("ChainFS: No free file entries\n");
+		return (-1);
+	}
 
-  // Find free file entry
-  u32 entry_block, entry_offset;
-  if (chainfs_find_free_file_entry(&entry_block, &entry_offset) != 0) {
-    com1_printf("ChainFS: No free file entries\n");
-    return -1;
-  }
+	disk_read(g_chainfs.disk, entry_block,
+	    g_chainfs.sector_buffer);
+	entries = (chainfs_file_entry_t *)
+	    g_chainfs.sector_buffer;
 
-  // Create directory entry
-  disk_read(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
-  chainfs_file_entry_t *entries =
-      (chainfs_file_entry_t *)g_chainfs.sector_buffer;
+	entries[entry_offset].status = 1;
+	entries[entry_offset].type = CHAINFS_TYPE_DIR;
+	strcpy(entries[entry_offset].name, dir_name);
+	entries[entry_offset].size = 0;
+	entries[entry_offset].start_block = 0;
+	entries[entry_offset].parent_block = parent_block;
 
-  entries[entry_offset].status = 1;
-  entries[entry_offset].type = CHAINFS_TYPE_DIR;
-  strcpy(entries[entry_offset].name, dir_name);
-  entries[entry_offset].size = 0;
-  entries[entry_offset].start_block = 0; // Directories don't need data blocks
-  entries[entry_offset].parent_block = parent_block;
+	disk_write(g_chainfs.disk, entry_block,
+	    g_chainfs.sector_buffer);
 
-  disk_write(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
-
-  com1_printf("ChainFS: Created directory: %s\n", path);
-  return 0;
+	com1_printf("ChainFS: Created directory: %s\n", path);
+	return (0);
 }
 
-// Change directory
-int chainfs_chdir(const char *path) {
-  chainfs_file_entry_t entry;
-  u32 entry_block, entry_offset;
+int
+chainfs_chdir(const char *path)
+{
+	chainfs_file_entry_t	entry;
+	u32			entry_block, entry_offset;
 
-  if (chainfs_resolve_path(path, &entry, &entry_block, &entry_offset) != 0) {
-    com1_printf("ChainFS: Directory not found: %s\n", path);
-    return -API_ERR_NOT_FOUND;
-  }
+	if (chainfs_resolve_path(path, &entry, &entry_block,
+	    &entry_offset) != 0) {
+		com1_printf("ChainFS: Directory not found: %s\n",
+		    path);
+		return (-API_ERR_NOT_FOUND);
+	}
 
-  if (entry.type != CHAINFS_TYPE_DIR) {
-    com1_printf("ChainFS: Not a directory: %s\n", path);
-    return -API_ERR_NOT_DIR;
-  }
+	if (entry.type != CHAINFS_TYPE_DIR) {
+		com1_printf("ChainFS: Not a directory: %s\n",
+		    path);
+		return (-API_ERR_NOT_DIR);
+	}
 
-  g_chainfs.current_dir_block =
-      (entry_block - 1) * ENTRIES_PER_BLOCK + entry_offset;
-  com1_printf("ChainFS: Changed directory to: %s\n", path);
-  return 0;
+	g_chainfs.current_dir_block =
+	    (entry_block - 1) * ENTRIES_PER_BLOCK +
+	    entry_offset;
+	com1_printf("ChainFS: Changed directory to: %s\n",
+	    path);
+	return (0);
 }
 
-// List directory contents
-int chainfs_list_dir(const char *path, chainfs_file_entry_t *files,
-                     u32 max_files, u32 *file_count) {
-  chainfs_file_entry_t dir_entry;
-  u32 dir_block, dir_offset;
+int
+chainfs_list_dir(const char *path, chainfs_file_entry_t *files,
+    u32 max_files, u32 *file_count)
+{
+	chainfs_file_entry_t	dir_entry;
+	u32			dir_block, dir_offset, entries_per_block;
+	u32			found, block, i;
+	chainfs_file_entry_t	*entries;
 
-  // If path is empty, use current directory
-  if (path[0] == 0) {
-    dir_block = g_chainfs.current_dir_block;
-  } else {
-    if (chainfs_resolve_path(path, &dir_entry, &dir_block, &dir_offset) != 0) {
-      com1_printf("ChainFS: Directory not found: %s\n", path);
-      return -API_ERR_NOT_FOUND;
-    }
+	if (path[0] == 0) {
+		dir_block = g_chainfs.current_dir_block;
+	} else {
+		if (chainfs_resolve_path(path, &dir_entry,
+		    &dir_block, &dir_offset) != 0) {
+			com1_printf("ChainFS: Directory not "
+			    "found: %s\n", path);
+			return (-API_ERR_NOT_FOUND);
+		}
 
-    if (dir_entry.type != CHAINFS_TYPE_DIR) {
-      com1_printf("ChainFS: Not a directory: %s\n", path);
-      return -API_ERR_NOT_DIR;
-    }
-    dir_block = (dir_block - 1) * ENTRIES_PER_BLOCK + dir_offset;
-  }
+		if (dir_entry.type != CHAINFS_TYPE_DIR) {
+			com1_printf("ChainFS: Not a directory: "
+			    "%s\n", path);
+			return (-API_ERR_NOT_DIR);
+		}
+		dir_block = (dir_block - 1) *
+		    ENTRIES_PER_BLOCK + dir_offset;
+	}
 
-  // Find all entries with this directory as parent
-  u32 entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t);
-  u32 found = 0;
+	entries_per_block =
+	    CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t);
+	found = 0;
 
-  for (u32 block = 1; block < 1 + g_chainfs.superblock.file_table_block_count &&
-                      found < max_files;
-       block++) {
-    disk_read(g_chainfs.disk, block, g_chainfs.sector_buffer);
-    chainfs_file_entry_t *entries =
-        (chainfs_file_entry_t *)g_chainfs.sector_buffer;
+	for (block = 1;
+	    block < 1 + g_chainfs.superblock.file_table_block_count &&
+	    found < max_files;
+	    block++) {
+		disk_read(g_chainfs.disk, block,
+		    g_chainfs.sector_buffer);
+		entries = (chainfs_file_entry_t *)
+		    g_chainfs.sector_buffer;
 
-    for (u32 i = 0; i < entries_per_block && found < max_files; i++) {
-      if (entries[i].status == 1 && entries[i].parent_block == dir_block) {
-        files[found] = entries[i];
-        found++;
-      }
-    }
-  }
+		for (i = 0; i < entries_per_block && found < max_files;
+		    i++) {
+			if (entries[i].status == 1 &&
+			    entries[i].parent_block == dir_block) {
+				files[found] = entries[i];
+				found++;
+			}
+		}
+	}
 
-  *file_count = found;
-  return 0;
+	*file_count = found;
+	return (0);
 }
 
-// Get current path as string
-char *chainfs_get_current_path(char *buffer, u32 buffer_size) {
-  if (g_chainfs.current_dir_block == g_chainfs.superblock.root_dir_block) {
-    if (buffer_size >= 2) {
-      buffer[0] = '/';
-      buffer[1] = 0;
-      return buffer;
-    }
-    return 0;
-  }
+char *
+chainfs_get_current_path(char *buffer, u32 buffer_size)
+{
+	char	temp_path[CHAINFS_MAX_PATH];
+	u32	current_idx;
+	chainfs_file_entry_t	entry;
 
-  // Build path by traversing up to root
-  char temp_path[CHAINFS_MAX_PATH];
-  temp_path[0] = 0;
+	if (g_chainfs.current_dir_block ==
+	    g_chainfs.superblock.root_dir_block) {
+		if (buffer_size >= 2) {
+			buffer[0] = '/';
+			buffer[1] = 0;
+			return (buffer);
+		}
+		return (0);
+	}
 
-  u32 current_idx = g_chainfs.current_dir_block;
+	temp_path[0] = 0;
+	current_idx = g_chainfs.current_dir_block;
 
-  while (current_idx != g_chainfs.superblock.root_dir_block &&
-         current_idx != 0xFFFFFFFF) {
-    chainfs_file_entry_t entry;
-    if (read_entry_by_index(current_idx, &entry, NULL, NULL) != 0)
-      break;
+	while (current_idx !=
+	    g_chainfs.superblock.root_dir_block &&
+	    current_idx != 0xFFFFFFFF) {
+		char	new_name[CHAINFS_MAX_PATH];
 
-    char new_name[CHAINFS_MAX_PATH];
-    new_name[0] = '/';
-    strcpy(new_name + 1, entry.name);
-    strcat(new_name, temp_path);
-    strcpy(temp_path, new_name);
+		if (read_entry_by_index(current_idx, &entry,
+		    NULL, NULL) != 0) {
+			break;
+		}
 
-    current_idx = entry.parent_block;
-  }
+		new_name[0] = '/';
+		strcpy(new_name + 1, entry.name);
+		strcat(new_name, temp_path);
+		strcpy(temp_path, new_name);
 
-  if (strlen(temp_path) == 0) {
-    strcpy(temp_path, "/");
-  }
+		current_idx = entry.parent_block;
+	}
 
-  if (strlen(temp_path) < buffer_size) {
-    strcpy(buffer, temp_path);
-    return buffer;
-  }
+	if (strlen(temp_path) == 0) {
+		strcpy(temp_path, "/");
+	}
 
-  return 0;
+	if (strlen(temp_path) < buffer_size) {
+		strcpy(buffer, temp_path);
+		return (buffer);
+	}
+
+	return (0);
 }
 
-// Remove directory (must be empty)
-int chainfs_rmdir(const char *path) {
-  chainfs_file_entry_t entry;
-  u32 entry_block, entry_offset;
+int
+chainfs_rmdir(const char *path)
+{
+	chainfs_file_entry_t	entry, files[1];
+	u32			entry_block, entry_offset, file_count;
+	chainfs_file_entry_t	*entries;
 
-  if (chainfs_resolve_path(path, &entry, &entry_block, &entry_offset) != 0) {
-    com1_printf("ChainFS: Directory not found: %s\n", path);
-    return -1;
-  }
+	if (chainfs_resolve_path(path, &entry, &entry_block,
+	    &entry_offset) != 0) {
+		com1_printf("ChainFS: Directory not found: %s\n",
+		    path);
+		return (-1);
+	}
 
-  if (entry.type != CHAINFS_TYPE_DIR) {
-    com1_printf("ChainFS: Not a directory: %s\n", path);
-    return -1;
-  }
+	if (entry.type != CHAINFS_TYPE_DIR) {
+		com1_printf("ChainFS: Not a directory: %s\n",
+		    path);
+		return (-1);
+	}
 
-  if (entry_block == g_chainfs.superblock.root_dir_block) {
-    com1_printf("ChainFS: Cannot remove root directory\n");
-    return -1;
-  }
+	if (entry_block ==
+	    g_chainfs.superblock.root_dir_block) {
+		com1_printf("ChainFS: Cannot remove root "
+		    "directory\n");
+		return (-1);
+	}
 
-  // Check if directory is empty
-  chainfs_file_entry_t files[1];
-  u32 file_count;
-  if (chainfs_list_dir(path, files, 1, &file_count) == 0 && file_count > 0) {
-    com1_printf("ChainFS: Directory not empty: %s\n", path);
-    return -1;
-  }
+	if (chainfs_list_dir(path, files, 1, &file_count) == 0 &&
+	    file_count > 0) {
+		com1_printf("ChainFS: Directory not empty: %s\n",
+		    path);
+		return (-1);
+	}
 
-  // Remove directory entry
-  disk_read(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
-  chainfs_file_entry_t *entries =
-      (chainfs_file_entry_t *)g_chainfs.sector_buffer;
-  entries[entry_offset].status = 0;
-  disk_write(g_chainfs.disk, entry_block, g_chainfs.sector_buffer);
+	disk_read(g_chainfs.disk, entry_block,
+	    g_chainfs.sector_buffer);
+	entries = (chainfs_file_entry_t *)
+	    g_chainfs.sector_buffer;
+	entries[entry_offset].status = 0;
+	disk_write(g_chainfs.disk, entry_block,
+	    g_chainfs.sector_buffer);
 
-  com1_printf("ChainFS: Removed directory: %s\n", path);
-  return 0;
+	com1_printf("ChainFS: Removed directory: %s\n", path);
+	return (0);
 }

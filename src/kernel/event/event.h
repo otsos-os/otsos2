@@ -24,235 +24,193 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type u64 as 64 bit unsigned
+$define %type s16 as 16 bit signed
+$define %type s64 as 64 bit signed
+$define %type int as 32 bit signed
+$define %type kevent as struct with ident, filter, flags, fflags, data, udata
+$define %type filter_ops_t as struct with filter callbacks vtable
+$define %type knote_t as struct with registered event state
+$define %type kqueue_t as struct with event queue, knote pool, ready list
+$define %type process as struct with process control block
+$define %type pipe as struct with pipe ring buffer
+
+$define %func event_init as procedure with args void
+$define %func kqueue_create as function with args void
+$define %func kqueue_destroy as function with args int
+$define %func kqueue_get as function with args int
+$define %func kevent_process as function with args int, struct kevent *, int, struct kevent *, int, s64
+$define %func knote_ready as procedure with args knote_t *
+$define %func knote_notify_all as procedure with args s16, u64, u32, s64
+$define %func kqueue_wakeup as procedure with args kqueue_t *
+$define %func filter_register as procedure with args const filter_ops_t *
+$define %func filter_lookup as function with args s16
+$define %func event_timer_tick as procedure with args void
+$define %func event_cleanup_process as procedure with args struct process *
+$define %func event_fork_process as procedure with args struct process *, struct process *
+$define %func event_notify_proc_exit as procedure with args u32, int
+$define %func event_notify_proc_fork as procedure with args u32, u32
+$define %func event_notify_signal as procedure with args u32, int
+$define %func event_notify_pipe_change as procedure with args struct pipe *
+
+*/
+
+/* !SPACE!
+
+$space %export event_init, kqueue_create, kqueue_destroy
+$space %export kqueue_get, kevent_process, knote_ready
+$space %export knote_notify_all, kqueue_wakeup
+$space %export filter_register, filter_lookup
+$space %export event_timer_tick, event_cleanup_process
+$space %export event_fork_process
+$space %export event_notify_proc_exit, event_notify_proc_fork
+$space %export event_notify_signal, event_notify_pipe_change
+
+*/
+
 #ifndef KERNEL_EVENT_H
 #define KERNEL_EVENT_H
 
 #include <kernel/interrupts/idt.h>
 #include <mlibc/mlibc.h>
 
-/*
- * Event system — FreeBSD kqueue/kevent-inspired kernel event notification.
- *
- * A kqueue is a kernel object that collects events from registered filters.
- * Each registered event is a knote (kernel note) identified by the
- * (ident, filter) pair. When a filter detects that its condition is true,
- * the knote is marked as pending and placed on the kqueue's ready list.
- * The user retrieves pending events via kevent().
- */
+#define	EVFILT_READ	(-1)
+#define	EVFILT_WRITE	(-2)
+#define	EVFILT_TIMER	(-3)
+#define	EVFILT_PROC	(-4)
+#define	EVFILT_SIGNAL	(-5)
+#define	EVFILT_USER	(-6)
 
-/* ── Filters ──────────────────────────────────────────────────────── */
+#define	EVFILT_SYSCOUNT	6
 
-#define EVFILT_READ    (-1)   /* file descriptor readable              */
-#define EVFILT_WRITE   (-2)   /* file descriptor writable              */
-#define EVFILT_TIMER   (-3)   /* periodic / one-shot timer             */
-#define EVFILT_PROC    (-4)   /* process exit / fork / exec            */
-#define EVFILT_SIGNAL  (-5)   /* signal delivered to process           */
-#define EVFILT_USER    (-6)   /* user-triggered event                  */
+#define	EV_ADD		0x0001
+#define	EV_DELETE	0x0002
+#define	EV_ENABLE	0x0004
+#define	EV_DISABLE	0x0008
+#define	EV_ONESHOT	0x0010
+#define	EV_CLEAR	0x0020
+#define	EV_RECEIPT	0x0040
+#define	EV_DISPATCH	0x0080
+#define	EV_EOF		0x8000
+#define	EV_ERROR	0x4000
+#define	EV_KEEPUDATA	0x2000
 
-#define EVFILT_SYSCOUNT 6     /* number of system filters              */
+#define	NOTE_EXIT	0x80000000
+#define	NOTE_FORK	0x40000000
+#define	NOTE_EXEC	0x20000000
+#define	NOTE_TRACK	0x00000001
+#define	NOTE_CHILD	0x00000002
+#define	NOTE_TRACKERR	0x00000004
 
-/* ── Action flags (kevent.flags) ──────────────────────────────────── */
+#define	NOTE_SECONDS	0x00000001
+#define	NOTE_MSECONDS	0x00000002
+#define	NOTE_USECONDS	0x00000004
+#define	NOTE_NSECONDS	0x00000008
 
-#define EV_ADD       0x0001   /* add event to kqueue                   */
-#define EV_DELETE    0x0002   /* remove event from kqueue              */
-#define EV_ENABLE    0x0004   /* permit event to be returned           */
-#define EV_DISABLE   0x0008   /* disable event (not returned)          */
-#define EV_ONESHOT   0x0010   /* delete after first delivery           */
-#define EV_CLEAR     0x0020   /* reset state after retrieval           */
-#define EV_RECEIPT   0x0040   /* force EV_ERROR on every change        */
-#define EV_DISPATCH  0x0080   /* disable after delivery                */
-#define EV_EOF       0x8000   /* filter-specific EOF condition         */
-#define EV_ERROR     0x4000   /* error occurred (returned in eventlist)*/
-#define EV_KEEPUDATA 0x2000   /* preserve existing udata on modify     */
+#define	NOTE_FFNOP	0x00000000
+#define	NOTE_FFAND	0x40000000
+#define	NOTE_FFOR	0x80000000
+#define	NOTE_FFCOPY	0xC0000000
+#define	NOTE_FFCTRLMASK	0xC0000000
+#define	NOTE_FFLAGSMASK	0x00FFFFFF
+#define	NOTE_TRIGGER	0x01000000
 
-/* ── NOTE_* flags for EVFILT_PROC ─────────────────────────────────── */
+#define	NOTE_LOWAT	0x00000001
 
-#define NOTE_EXIT    0x80000000   /* process exited                  */
-#define NOTE_FORK    0x40000000   /* process called fork             */
-#define NOTE_EXEC    0x20000000   /* process called exec             */
-#define NOTE_TRACK   0x00000001   /* follow process across fork      */
-#define NOTE_CHILD   0x00000002   /* child event (returned to parent)*/
-#define NOTE_TRACKERR 0x00000004  /* tracking error                  */
-
-/* ── NOTE_* flags for EVFILT_TIMER ────────────────────────────────── */
-
-#define NOTE_SECONDS  0x00000001   /* data in seconds               */
-#define NOTE_MSECONDS 0x00000002   /* data in milliseconds          */
-#define NOTE_USECONDS 0x00000004   /* data in microseconds          */
-#define NOTE_NSECONDS 0x00000008   /* data in nanoseconds           */
-
-/* ── NOTE_* flags for EVFILT_USER ─────────────────────────────────── */
-
-#define NOTE_FFNOP      0x00000000   /* ignore input fflags         */
-#define NOTE_FFAND      0x40000000   /* bitwise AND fflags          */
-#define NOTE_FFOR       0x80000000   /* bitwise OR  fflags          */
-#define NOTE_FFCOPY     0xC0000000   /* copy fflags                 */
-#define NOTE_FFCTRLMASK 0xC0000000   /* control mask                */
-#define NOTE_FFLAGSMASK 0x00FFFFFF   /* user-defined flag mask      */
-#define NOTE_TRIGGER    0x01000000   /* trigger the event           */
-
-/* ── NOTE_* flags for EVFILT_READ / EVFILT_WRITE ──────────────────── */
-
-#define NOTE_LOWAT 0x00000001   /* low-water mark for read/write     */
-
-/* ── Limits ───────────────────────────────────────────────────────── */
-
-#define MAX_KQUEUES    32       /* max kqueue objects system-wide    */
-#define MAX_KNOTES     64       /* max knotes per kqueue             */
-#define MAX_KEVENTS    64       /* max events returned per kevent()  */
-
-/* ── Userspace kevent structure ───────────────────────────────────── */
+#define	MAX_KQUEUES	32
+#define	MAX_KNOTES	64
+#define	MAX_KEVENTS	64
 
 struct kevent {
-  u64  ident;     /* identifier (fd, pid, timer id, etc.)            */
-  s16  filter;    /* filter type (EVFILT_*)                           */
-  u16  flags;     /* action flags (EV_*)                              */
-  u32  fflags;    /* filter-specific flags (NOTE_*)                   */
-  s64  data;      /* filter-specific data value                       */
-  u64  udata;     /* opaque user-defined value                        */
+	u64	ident;
+	s16	filter;
+	u16	flags;
+	u32	fflags;
+	s64	data;
+	u64	udata;
 };
 
-#define EV_SET(kevp, id, filt, fl, ffl, d, ud)                       \
-  do {                                                                \
-    (kevp)->ident  = (u64)(id);                                       \
-    (kevp)->filter = (s16)(filt);                                     \
-    (kevp)->flags  = (u16)(fl);                                       \
-    (kevp)->fflags = (u32)(ffl);                                      \
-    (kevp)->data   = (s64)(d);                                        \
-    (kevp)->udata  = (u64)(ud);                                       \
-  } while (0)
-
-/* ── Kernel-internal types ────────────────────────────────────────── */
+#define	EV_SET(kevp, id, filt, fl, ffl, d, ud)			\
+	do {							\
+		(kevp)->ident  = (u64)(id);			\
+		(kevp)->filter = (s16)(filt);			\
+		(kevp)->flags  = (u16)(fl);			\
+		(kevp)->fflags = (u32)(ffl);			\
+		(kevp)->data   = (s64)(d);			\
+		(kevp)->udata  = (u64)(ud);			\
+	} while (0)
 
 struct kqueue;
 struct knote;
 struct process;
+struct pipe;
 
-/*
- * Filter operations vtable — each filter implements these callbacks.
- * The kernel calls them to check conditions, attach, detach, and
- * process event delivery.
- */
-typedef int (*filter_attach_fn)(struct knote *kn);
-typedef void (*filter_detach_fn)(struct knote *kn);
-typedef int (*filter_event_fn)(struct knote *kn, u32 nevents);
-typedef void (*filter_touch_fn)(struct knote *kn, struct kevent *kev);
+typedef int	(*filter_attach_fn)(struct knote *kn);
+typedef void	(*filter_detach_fn)(struct knote *kn);
+typedef int	(*filter_event_fn)(struct knote *kn, u32 nevents);
+typedef void	(*filter_touch_fn)(struct knote *kn,
+    struct kevent *kev);
 
 typedef struct {
-  s16              filter;     /* EVFILT_* this ops implements          */
-  const char      *name;       /* human-readable name                   */
-  filter_attach_fn  attach;     /* called when knote is added            */
-  filter_detach_fn  detach;     /* called when knote is removed           */
-  filter_event_fn   event;      /* called to check if event is pending    */
-  filter_touch_fn   touch;      /* called when knote is modified          */
+	s16			filter;
+	const char		*name;
+	filter_attach_fn	 attach;
+	filter_detach_fn	 detach;
+	filter_event_fn		 event;
+	filter_touch_fn		 touch;
 } filter_ops_t;
 
-/*
- * knote — a registered event within a kqueue.
- * This is the kernel-side representation of a kevent.
- */
 typedef struct knote {
-  int               used;        /* 1 = slot occupied                     */
-  int               pending;     /* 1 = event is ready for delivery       */
-  int               disabled;    /* 1 = event disabled (not returned)     */
-  u64               ident;       /* identifier value                      */
-  s16               filter;      /* filter type                           */
-  u16               flags;       /* kevent flags                          */
-  u32               fflags;      /* filter-specific flags                 */
-  s64               data;        /* filter-specific data                  */
-  u64               udata;       /* user-defined opaque value             */
-
-  /* Filter-private state */
-  u64               fpriv;       /* filter-private data (timer deadline,
-                                   pipe bytes, proc pid, etc.)           */
-
-  /* Back-pointer to owning kqueue */
-  struct kqueue    *kq;
-
-  /* Linkage in the kqueue's knote list */
-  struct knote     *next;
+	int			used;
+	int			pending;
+	int			disabled;
+	u64			ident;
+	s16			filter;
+	u16			flags;
+	u32			fflags;
+	s64			data;
+	u64			udata;
+	u64			fpriv;
+	struct kqueue		*kq;
+	struct knote		*next;
 } knote_t;
 
-/*
- * kqueue — a kernel event queue. Allocated from a static pool.
- * Contains an array of knote slots and a ready-list of pending knotes.
- */
 typedef struct kqueue {
-  int               used;        /* 1 = slot occupied                     */
-  struct process   *owner;       /* owning process (for cleanup on exit)  */
-
-  /* Knote storage */
-  knote_t           knotes[MAX_KNOTES];
-
-  /* Ready list — singly-linked list of pending knotes */
-  knote_t          *ready_head;
-  knote_t          *ready_tail;
-  int               ready_count;
-
-  /* Sleep channel for blocking kevent() calls */
-  void             *wait_channel;
+	int			used;
+	struct process		*owner;
+	knote_t			knotes[MAX_KNOTES];
+	knote_t			*ready_head;
+	knote_t			*ready_tail;
+	int			ready_count;
+	void			*wait_channel;
 } kqueue_t;
 
-/* ── Public API ───────────────────────────────────────────────────── */
-
-/* Initialize the event subsystem (called once during boot) */
-void event_init(void);
-
-/* Create a new kqueue — returns index into kqueue pool, or -1 on error */
-int  kqueue_create(void);
-
-/* Destroy a kqueue by index */
-int  kqueue_destroy(int kq_idx);
-
-/* Get kqueue by index (returns NULL if invalid) */
+void	event_init(void);
+int	kqueue_create(void);
+int	kqueue_destroy(int kq_idx);
 kqueue_t *kqueue_get(int kq_idx);
-
-/* Register or modify events on a kqueue.
- * Processes the changelist (up to nchanges entries), then returns
- * up to nevents pending events into eventlist.
- * timeout_ms: -1 = block forever, 0 = poll, >0 = max wait in ms.
- * Returns number of events placed in eventlist, or -1 on error. */
-int  kevent_process(int kq_idx, struct kevent *changelist, int nchanges,
-                    struct kevent *eventlist, int nevents,
-                    s64 timeout_ms);
-
-/* Notify a kqueue that a knote may be ready (called by filters) */
-void knote_ready(knote_t *kn);
-
-/* Notify all knotes on all kqueues that match a given filter+ident */
-void knote_notify_all(s16 filter, u64 ident, u32 fflags, s64 data);
-
-/* Wake a process blocked in kevent() — called on event delivery */
-void kqueue_wakeup(kqueue_t *kq);
-
-/* Register a filter implementation */
-void filter_register(const filter_ops_t *ops);
-
-/* Get filter ops by filter id */
+int	kevent_process(int kq_idx, struct kevent *changelist,
+    int nchanges, struct kevent *eventlist, int nevents,
+    s64 timeout_ms);
+void	knote_ready(knote_t *kn);
+void	knote_notify_all(s16 filter, u64 ident, u32 fflags,
+    s64 data);
+void	kqueue_wakeup(kqueue_t *kq);
+void	filter_register(const filter_ops_t *ops);
 const filter_ops_t *filter_lookup(s16 filter);
+void	event_timer_tick(void);
+void	event_cleanup_process(struct process *proc);
+void	event_fork_process(struct process *parent,
+    struct process *child);
 
-/* Timer tick handler — called from IRQ0 to process timer filters */
-void event_timer_tick(void);
+void	event_notify_proc_exit(u32 pid, int exit_code);
+void	event_notify_proc_fork(u32 parent_pid, u32 child_pid);
+void	event_notify_signal(u32 pid, int sig);
+void	event_notify_pipe_change(struct pipe *p);
 
-/* Cleanup all kqueues owned by a process (called on process exit) */
-void event_cleanup_process(struct process *proc);
-
-/* Copy kqueues on fork (currently shares kq objects via refcount) */
-void event_fork_process(struct process *parent, struct process *child);
-
-/* ── Kernel-to-event notification hooks ───────────────────────────── */
-
-/* Called by process_exit() to notify EVFILT_PROC watchers */
-void event_notify_proc_exit(u32 pid, int exit_code);
-
-/* Called by process_create/clone/spawn to notify NOTE_FORK watchers */
-void event_notify_proc_fork(u32 parent_pid, u32 child_pid);
-
-/* Called by process_send_signal() to notify EVFILT_SIGNAL watchers */
-void event_notify_signal(u32 pid, int sig);
-
-/* Called by pipe_read/pipe_write to notify EVFILT_READ/EVFILT_WRITE */
-struct pipe;
-void event_notify_pipe_change(struct pipe *p);
-
-#endif /* KERNEL_EVENT_H */
+#endif

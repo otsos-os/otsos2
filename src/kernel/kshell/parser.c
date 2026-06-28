@@ -24,40 +24,63 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type char as 8 bit signed
+$define %type int as 32 bit signed
+
+$define %func kshell_is_space as function with args char
+$define %func kshell_parse_line as function with args char *, char *[], int
+
+*/
+
+/* !SPACE!
+
+$space %internal kshell_is_space
+$space %export kshell_parse_line
+
+*/
+
 #include <kernel/kshell/kshell.h>
 
-static int kshell_is_space(char c) {
-  return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+static int
+kshell_is_space(char c)
+{
+	return (c == ' ' || c == '\t' || c == '\n' || c == '\r');
 }
 
-int kshell_parse_line(char *line, char *argv[], int max_args) {
-  int argc = 0;
-  int i = 0;
+int
+kshell_parse_line(char *line, char *argv[], int max_args)
+{
+	int	argc, i;
 
-  if (!line || !argv || max_args <= 0) {
-    return 0;
-  }
+	argc = 0;
+	i = 0;
 
-  while (line[i] != '\0') {
-    while (kshell_is_space(line[i])) {
-      line[i] = '\0';
-      i++;
-    }
+	if (!line || !argv || max_args <= 0) {
+		return (0);
+	}
 
-    if (line[i] == '\0') {
-      break;
-    }
+	while (line[i] != '\0') {
+		while (kshell_is_space(line[i])) {
+			line[i] = '\0';
+			i++;
+		}
 
-    if (argc >= max_args) {
-      break;
-    }
+		if (line[i] == '\0') {
+			break;
+		}
 
-    argv[argc++] = &line[i];
+		if (argc >= max_args) {
+			break;
+		}
 
-    while (line[i] != '\0' && !kshell_is_space(line[i])) {
-      i++;
-    }
-  }
+		argv[argc++] = &line[i];
 
-  return argc;
+		while (line[i] != '\0' && !kshell_is_space(line[i])) {
+			i++;
+		}
+	}
+
+	return (argc);
 }

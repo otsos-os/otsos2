@@ -24,50 +24,46 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * Kernel console layer.
- *
- * This is the kernel's primary text output path. It sits above the DRM
- * frontend (pixels) and the tty subsystem (virtual terminals). When the tty
- * layer is initialized, characters are routed to the active tty. Before that
- * (early boot), characters are drawn straight to the screen via the DRM
- * frontend using a simple built-in cursor.
- *
- * The old VGA text-mode driver has been removed; this module keeps the
- * familiar printf/clear_scr/... entry points that the rest of the kernel
- * relies on, but they are now thin wrappers over the DRM-based pipeline.
- */
+/* !DEFINES!
+
+$define %type char as 8 bit signed
+$define %type u8 as 8 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type int as 32 bit signed
+
+$define %func printf as procedure with args const char *, ...
+$define %func console_putchar as procedure with args char
+$define %func console_puts as procedure with args const char *
+$define %func console_color_rgb as function with args u8
+$define %func console_put_entry_at as procedure with args char, u8, int, int
+$define %func console_set_color as procedure with args u8
+$define %func clear_scr as procedure with args void
+$define %func console_get_width as function with args void
+$define %func console_get_height as function with args void
+
+*/
+
+/* !SPACE!
+
+$space %export printf, console_putchar, console_puts, console_color_rgb
+$space %export console_put_entry_at, console_set_color, clear_scr
+$space %export console_get_width, console_get_height
+
+*/
 
 #ifndef CONSOLE_H
 #define CONSOLE_H
 
 #include <mlibc/mlibc.h>
 
-/* Formatted print to the active console (kernel-side printf). */
-void printf(const char *fmt, ...);
-
-/* Write a single character. Routes to tty when ready, otherwise draws via
- * the DRM frontend using the console's own cursor. */
-void console_putchar(char c);
-
-/* Write a NUL-terminated string. */
-void console_puts(const char *s);
-
-/* Map a legacy 4-bit VGA attribute nibble to an RGB color. */
-u32 console_color_rgb(u8 attr);
-
-/* Draw a character cell at (x, y) with the given attribute. Used by panic
- * and kshell that manage their own cursors. */
-void console_put_entry_at(char c, u8 color, int x, int y);
-
-/* Set the active text attribute (affects early-boot drawing + tty color). */
-void console_set_color(u8 color);
-
-/* Clear the screen. */
-void clear_scr(void);
-
-/* Dimensions of the active display, in text cells (fallback 80x25). */
-int console_get_width(void);
-int console_get_height(void);
+void	printf(const char *fmt, ...);
+void	console_putchar(char c);
+void	console_puts(const char *s);
+u32	console_color_rgb(u8 attr);
+void	console_put_entry_at(char c, u8 color, int x, int y);
+void	console_set_color(u8 color);
+void	clear_scr(void);
+int	console_get_width(void);
+int	console_get_height(void);
 
 #endif

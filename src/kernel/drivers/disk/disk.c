@@ -24,54 +24,101 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u32 as 32 bit unsigned
+$define %type u8 as 8 bit unsigned
+$define %type int as 32 bit signed
+$define %type disk_t as struct with name, type, sector_size, sectors, ops
+
+$define %func disk_manager_init as procedure with args void
+$define %func disk_manager_is_initialized as function with args void
+$define %func disk_register as function with args disk_t *
+$define %func disk_get as function with args int
+$define %func disk_count as function with args void
+$define %func disk_read as procedure with args disk_t *, u32, u8 *
+$define %func disk_write as procedure with args disk_t *, u32, u8 *
+
+*/
+
+/* !SPACE!
+
+$space %export disk_manager_init, disk_manager_is_initialized
+$space %export disk_register, disk_get, disk_count
+$space %export disk_read, disk_write
+
+*/
+
 #include "disk.h"
 #include <lib/com1.h>
 
-#define MAX_DISKS 8
+#define	MAX_DISKS	8
 
-static disk_t *disks[MAX_DISKS];
-static int disk_count_val = 0;
-static int disk_manager_initialized = 0;
+static disk_t	*disks[MAX_DISKS];
+static int	disk_count_val;
+static int	disk_manager_initialized_val;
 
-void disk_manager_init(void) {
-  for (int i = 0; i < MAX_DISKS; i++) {
-    disks[i] = 0;
-  }
-  disk_count_val = 0;
-  disk_manager_initialized = 1;
-  com1_printf("[DISK] Disk manager initialized\n");
+void
+disk_manager_init(void)
+{
+	int	i;
+
+	for (i = 0; i < MAX_DISKS; i++) {
+		disks[i] = 0;
+	}
+	disk_count_val = 0;
+	disk_manager_initialized_val = 1;
+	com1_printf("[DISK] Disk manager initialized\n");
 }
 
-int disk_manager_is_initialized(void) { return disk_manager_initialized; }
-
-int disk_register(disk_t *disk) {
-  if (disk_count_val >= MAX_DISKS) {
-    com1_printf("[DISK] Error: Max disks reached\n");
-    return -1;
-  }
-  disks[disk_count_val] = disk;
-  com1_printf("[DISK] Registered disk %d: %s (Type: %d, Sectors: %u)\n",
-              disk_count_val, disk->name, disk->type, disk->total_sectors);
-  return disk_count_val++;
+int
+disk_manager_is_initialized(void)
+{
+	return (disk_manager_initialized_val);
 }
 
-disk_t *disk_get(int index) {
-  if (index < 0 || index >= disk_count_val) {
-    return 0;
-  }
-  return disks[index];
+int
+disk_register(disk_t *disk)
+{
+	if (disk_count_val >= MAX_DISKS) {
+		com1_printf("[DISK] Error: Max disks reached\n");
+		return (-1);
+	}
+	disks[disk_count_val] = disk;
+	com1_printf("[DISK] Registered disk %d: %s "
+	    "(Type: %d, Sectors: %u)\n",
+	    disk_count_val, disk->name, disk->type,
+	    disk->total_sectors);
+	return (disk_count_val++);
 }
 
-int disk_count(void) { return disk_count_val; }
-
-void disk_read(disk_t *disk, u32 lba, u8 *buffer) {
-  if (disk && disk->read_sector) {
-    disk->read_sector(disk, lba, buffer);
-  }
+disk_t *
+disk_get(int index)
+{
+	if (index < 0 || index >= disk_count_val) {
+		return (0);
+	}
+	return (disks[index]);
 }
 
-void disk_write(disk_t *disk, u32 lba, u8 *buffer) {
-  if (disk && disk->write_sector) {
-    disk->write_sector(disk, lba, buffer);
-  }
+int
+disk_count(void)
+{
+	return (disk_count_val);
+}
+
+void
+disk_read(disk_t *disk, u32 lba, u8 *buffer)
+{
+	if (disk && disk->read_sector) {
+		disk->read_sector(disk, lba, buffer);
+	}
+}
+
+void
+disk_write(disk_t *disk, u32 lba, u8 *buffer)
+{
+	if (disk && disk->write_sector) {
+		disk->write_sector(disk, lba, buffer);
+	}
 }

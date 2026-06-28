@@ -24,50 +24,64 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u64 as 64 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type process_t as struct with process control block
+
+$define %func __stack_chk_fail as start with args void
+$define %func sleep as procedure with args u32
+
+*/
+
+/* !SPACE!
+
+$space %export __stack_chk_fail, sleep
+$space %export __stack_chk_guard
+
+*/
+
 #include <kernel/drivers/timer.h>
 #include <kernel/process.h>
 #include <lib/com1.h>
 #include <mlibc/stdlib.h>
 
-u64 __stack_chk_guard = 0x595e9fbd94fda766ULL;
+u64	__stack_chk_guard = 0x595e9fbd94fda766ULL;
 
-__attribute__((noreturn)) void __stack_chk_fail(void) {
-  com1_write_string("[STACK] stack smashing detected\n");
-  __asm__ volatile("cli");
-  while (1) {
-    __asm__ volatile("hlt");
-  }
+__attribute__((noreturn)) void
+__stack_chk_fail(void)
+{
+	com1_write_string("[STACK] stack smashing detected\n");
+	__asm__ volatile("cli");
+	while (1) {
+		__asm__ volatile("hlt");
+	}
 }
 
-/*
- * Kernel sleep — uses the event system's sleep/wake infrastructure
- * instead of busy-waiting. Falls back to busy-wait if the event
- * system is not yet initialized (early boot).
- *
- * For kernel-mode callers (kshell, boot code), we use a timer-based
- * busy-wait since proc_sleep requires a scheduler context switch
- * which is only meaningful for userspace processes.
- */
-void sleep(u32 ms) {
-  process_t *proc = process_current();
+void
+sleep(u32 ms)
+{
+	process_t	*proc;
+	u64		start_ticks;
+	u64		deadline;
 
-  /* If we're in kernel mode or no process is running, busy-wait. */
-  if (!proc || (proc->context.cs & 3) == 0) {
-    u64 start_ticks = timer_get_ticks();
-    while (timer_get_ticks() < start_ticks + ms) {
-      __asm__ volatile("pause");
-    }
-    return;
-  }
+	proc = process_current();
 
-  /* Userspace process: use timer-based sleep via event system. */
-  u64 deadline = timer_get_ticks() + (u64)ms * timer_get_frequency() / 1000;
-  while (timer_get_ticks() < deadline) {
-    /* Yield to scheduler — other processes run while we wait. */
-    process_yield();
-    /* Check if we overshot. */
-    if (timer_get_ticks() >= deadline) {
-      break;
-    }
-  }
+	if (!proc || (proc->context.cs & 3) == 0) {
+		start_ticks = timer_get_ticks();
+		while (timer_get_ticks() < start_ticks + ms) {
+			__asm__ volatile("pause");
+		}
+		return;
+	}
+
+	deadline = timer_get_ticks() +
+	    (u64)ms * timer_get_frequency() / 1000;
+	while (timer_get_ticks() < deadline) {
+		process_yield();
+		if (timer_get_ticks() >= deadline) {
+			break;
+		}
+	}
 }

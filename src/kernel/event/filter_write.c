@@ -24,105 +24,139 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u32 as 32 bit unsigned
+$define %type int as 32 bit signed
+$define %type knote_t as struct with registered event state
+$define %type kevent as struct with event ident, filter, flags, fflags, data, udata
+$define %type filter_ops_t as struct with filter callbacks vtable
+$define %type api_handle_t as struct with handle table entry
+$define %type api_object_t as struct with object table entry
+$define %type pipe_t as struct with pipe ring buffer
+
+$define %func filt_write_attach as function with args knote_t *
+$define %func filt_write_detach as procedure with args knote_t *
+$define %func filt_write_event as function with args knote_t *, u32
+$define %func filt_write_touch as procedure with args knote_t *, struct kevent *
+
+*/
+
+/* !SPACE!
+
+$space %internal filt_write_attach, filt_write_detach
+$space %internal filt_write_event, filt_write_touch
+$space %export filter_write_ops
+
+*/
+
 #include <kernel/event/event.h>
 #include <kernel/api/api.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
-/*
- * EVFILT_WRITE — returns when it is possible to write.
- *
- * For pipes: returns when there is space in the write buffer.
- * For tty: always writable (output buffer is never full in our impl).
- */
+static int
+filt_write_attach(knote_t *kn)
+{
+	int			fd;
+	api_handle_t		*handles;
 
-static int filt_write_attach(knote_t *kn) {
-  int fd = (int)kn->ident;
+	fd = (int)kn->ident;
 
-  /* fd 1 (stdout) and fd 2 (stderr) are always valid — implicit. */
-  if (fd == 1 || fd == 2) {
-    return 0;
-  }
+	if (fd == 1 || fd == 2) {
+		return (0);
+	}
 
-  api_handle_t *handles = api_get_handle_table();
-  if (!handles) {
-    return -API_ERR_BAD_HANDLE;
-  }
+	handles = api_get_handle_table();
+	if (!handles) {
+		return (-API_ERR_BAD_HANDLE);
+	}
 
-  if (fd < 0 || fd >= MAX_HANDLES || !handles[fd].used) {
-    com1_printf("[EVFILT_WRITE] attach: bad fd %d\n", fd);
-    return -API_ERR_BAD_HANDLE;
-  }
+	if (fd < 0 || fd >= MAX_HANDLES || !handles[fd].used) {
+		com1_printf("[EVFILT_WRITE] attach: bad fd %d\n",
+		    fd);
+		return (-API_ERR_BAD_HANDLE);
+	}
 
-  return 0;
+	return (0);
 }
 
-static void filt_write_detach(knote_t *kn) {
-  (void)kn;
+static void
+filt_write_detach(knote_t *kn)
+{
+	(void)kn;
 }
 
-static int filt_write_event(knote_t *kn, u32 nevents) {
-  int fd = (int)kn->ident;
+static int
+filt_write_event(knote_t *kn, u32 nevents)
+{
+	int			fd;
+	api_handle_t		*handles;
+	api_object_t		*objects;
+	int			obj_idx;
+	api_object_t		*obj;
+	pipe_t			*p;
+	u32			space;
 
-  /* Handle 1 (stdout) / Handle 2 (stderr) — always writable */
-  if (fd == 1 || fd == 2) {
-    kn->data = PIPE_BUF_SIZE;
-    return 1;
-  }
+	fd = (int)kn->ident;
 
-  api_handle_t *handles = api_get_handle_table();
-  if (!handles || fd < 0 || fd >= MAX_HANDLES || !handles[fd].used) {
-    return 0;
-  }
+	if (fd == 1 || fd == 2) {
+		kn->data = PIPE_BUF_SIZE;
+		return (1);
+	}
 
-  api_object_t *objects = api_get_object_table();
-  int obj_idx = handles[fd].object_index;
-  if (obj_idx < 0 || obj_idx >= MAX_DATA_OBJECTS || !objects[obj_idx].used) {
-    return 0;
-  }
+	handles = api_get_handle_table();
+	if (!handles || fd < 0 || fd >= MAX_HANDLES ||
+	    !handles[fd].used) {
+		return (0);
+	}
 
-  api_object_t *obj = &objects[obj_idx];
+	objects = api_get_object_table();
+	obj_idx = handles[fd].object_index;
+	if (obj_idx < 0 || obj_idx >= MAX_DATA_OBJECTS ||
+	    !objects[obj_idx].used) {
+		return (0);
+	}
 
-  if (obj->type == API_OBJECT_PIPE) {
-    pipe_t *p = (pipe_t *)obj->pipe;
-    if (!p) {
-      return 0;
-    }
+	obj = &objects[obj_idx];
 
-    u32 space = PIPE_BUF_SIZE - p->size;
-    if (space > 0) {
-      kn->data = space;
-      return 1;
-    }
+	if (obj->type == API_OBJECT_PIPE) {
+		p = (pipe_t *)obj->pipe;
+		if (!p) {
+			return (0);
+		}
+		space = PIPE_BUF_SIZE - p->size;
+		if (space > 0) {
+			kn->data = space;
+			return (1);
+		}
+		if (p->readers == 0) {
+			kn->flags |= EV_EOF;
+			return (1);
+		}
+		return (0);
+	}
 
-    /* EOF: no readers left */
-    if (p->readers == 0) {
-      kn->flags |= EV_EOF;
-      return 1;
-    }
+	if (obj->type == API_OBJECT_FILE) {
+		kn->data = PIPE_BUF_SIZE;
+		return (1);
+	}
 
-    return 0;
-  }
-
-  /* Regular file — always writable */
-  if (obj->type == API_OBJECT_FILE) {
-    kn->data = PIPE_BUF_SIZE;
-    return 1;
-  }
-
-  return 0;
+	return (0);
 }
 
-static void filt_write_touch(knote_t *kn, struct kevent *kev) {
-  (void)kn;
-  (void)kev;
+static void
+filt_write_touch(knote_t *kn, struct kevent *kev)
+{
+	(void)kn;
+	(void)kev;
 }
 
 const filter_ops_t filter_write_ops = {
-  .filter = EVFILT_WRITE,
-  .name   = "write",
-  .attach = filt_write_attach,
-  .detach = filt_write_detach,
-  .event  = filt_write_event,
-  .touch  = filt_write_touch,
+	.filter	= EVFILT_WRITE,
+	.name	= "write",
+	.attach	= filt_write_attach,
+	.detach	= filt_write_detach,
+	.event	= filt_write_event,
+	.touch	= filt_write_touch,
 };

@@ -24,15 +24,36 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u64 as 64 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type int as 32 bit signed
+
+$define %func timer_init as procedure with args u32
+$define %func timer_handler as procedure with args void
+$define %func timer_get_ticks as function with args void
+$define %func timer_is_initialized as function with args void
+$define %func timer_get_frequency as function with args void
+
+*/
+
+/* !SPACE!
+
+$space %export timer_init, timer_handler, timer_get_ticks
+$space %export timer_is_initialized, timer_get_frequency
+
+*/
+
 #ifndef TIMER_H
 #define TIMER_H
 
 #include <mlibc/mlibc.h>
 
-void timer_init(u32 frequency);
-void timer_handler();
-u64 timer_get_ticks();
-int timer_is_initialized(void);
-u32 timer_get_frequency(void);
+void	timer_init(u32 frequency);
+void	timer_handler(void);
+u64	timer_get_ticks(void);
+int	timer_is_initialized(void);
+u32	timer_get_frequency(void);
 
 #endif

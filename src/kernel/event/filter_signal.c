@@ -24,92 +24,121 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u32 as 32 bit unsigned
+$define %type u64 as 64 bit unsigned
+$define %type s64 as 64 bit signed
+$define %type int as 32 bit signed
+$define %type knote_t as struct with registered event state
+$define %type kevent as struct with event ident, filter, flags, fflags, data, udata
+$define %type filter_ops_t as struct with filter callbacks vtable
+$define %type process_t as struct with process control block
+
+$define %func filt_signal_attach as function with args knote_t *
+$define %func filt_signal_detach as procedure with args knote_t *
+$define %func filt_signal_event as function with args knote_t *, u32
+$define %func filt_signal_touch as procedure with args knote_t *, struct kevent *
+$define %func event_notify_signal as procedure with args u32, int
+
+*/
+
+/* !SPACE!
+
+$space %internal filt_signal_attach, filt_signal_detach
+$space %internal filt_signal_event, filt_signal_touch
+$space %export filter_signal_ops, event_notify_signal
+
+*/
+
 #include <kernel/event/event.h>
 #include <kernel/signal.h>
 #include <kernel/process.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
-/*
- * EVFILT_SIGNAL — returns when a signal is delivered to the process.
- *
- * ident:  signal number to monitor
- * data:   number of times the signal has occurred since last kevent()
- *
- * This filter automatically sets EV_CLEAR internally.
- */
+#define	MAX_SIGNAL_SLOTS	64
+#define	MAX_SIGNALS		32
 
-/* Per-process signal counts (indexed by pid, then signal number) */
-#define MAX_SIGNAL_SLOTS 64  /* matches MAX_PROCESSES */
-#define MAX_SIGNALS      32
+static u32	signal_counts[MAX_SIGNAL_SLOTS][MAX_SIGNALS];
 
-static u32 signal_counts[MAX_SIGNAL_SLOTS][MAX_SIGNALS];
+static int
+filt_signal_attach(knote_t *kn)
+{
+	int	sig;
 
-static int filt_signal_attach(knote_t *kn) {
-  int sig = (int)kn->ident;
-  if (sig < 0 || sig >= MAX_SIGNALS) {
-    com1_printf("[EVFILT_SIGNAL] attach: invalid signal %d\n", sig);
-    return -API_ERR_INVAL;
-  }
+	sig = (int)kn->ident;
+	if (sig < 0 || sig >= MAX_SIGNALS) {
+		com1_printf("[EVFILT_SIGNAL] attach: invalid "
+		    "signal %d\n", sig);
+		return (-API_ERR_INVAL);
+	}
 
-  /* EVFILT_SIGNAL auto-sets EV_CLEAR */
-  kn->flags |= EV_CLEAR;
-  return 0;
+	kn->flags |= EV_CLEAR;
+	return (0);
 }
 
-static void filt_signal_detach(knote_t *kn) {
-  (void)kn;
+static void
+filt_signal_detach(knote_t *kn)
+{
+	(void)kn;
 }
 
-static int filt_signal_event(knote_t *kn, u32 nevents) {
-  int sig = (int)kn->ident;
-  process_t *proc = process_current();
-  if (!proc) {
-    return 0;
-  }
+static int
+filt_signal_event(knote_t *kn, u32 nevents)
+{
+	int		sig, slot;
+	process_t	*proc;
+	u32		count;
 
-  int slot = (int)proc->pid % MAX_SIGNAL_SLOTS;
-  if (sig < 0 || sig >= MAX_SIGNALS) {
-    return 0;
-  }
+	sig = (int)kn->ident;
+	proc = process_current();
+	if (!proc) {
+		return (0);
+	}
 
-  u32 count = signal_counts[slot][sig];
-  if (count > 0) {
-    kn->data = (s64)count;
-    /* EV_CLEAR: reset count after retrieval */
-    signal_counts[slot][sig] = 0;
-    return 1;
-  }
+	slot = (int)proc->pid % MAX_SIGNAL_SLOTS;
+	if (sig < 0 || sig >= MAX_SIGNALS) {
+		return (0);
+	}
 
-  return 0;
+	count = signal_counts[slot][sig];
+	if (count > 0) {
+		kn->data = (s64)count;
+		signal_counts[slot][sig] = 0;
+		return (1);
+	}
+
+	return (0);
 }
 
-static void filt_signal_touch(knote_t *kn, struct kevent *kev) {
-  (void)kn;
-  (void)kev;
+static void
+filt_signal_touch(knote_t *kn, struct kevent *kev)
+{
+	(void)kn;
+	(void)kev;
 }
 
-/*
- * Called by process_send_signal() to record a signal delivery.
- * This is the kernel-to-event-system hook for signals.
- */
-void event_notify_signal(u32 pid, int sig) {
-  if (sig < 0 || sig >= MAX_SIGNALS) {
-    return;
-  }
+void
+event_notify_signal(u32 pid, int sig)
+{
+	int	slot;
 
-  int slot = (int)(pid % MAX_SIGNAL_SLOTS);
-  signal_counts[slot][sig]++;
+	if (sig < 0 || sig >= MAX_SIGNALS) {
+		return;
+	}
 
-  /* Notify all knotes watching this signal for this process */
-  knote_notify_all(EVFILT_SIGNAL, (u64)sig, 0, 0);
+	slot = (int)(pid % MAX_SIGNAL_SLOTS);
+	signal_counts[slot][sig]++;
+
+	knote_notify_all(EVFILT_SIGNAL, (u64)sig, 0, 0);
 }
 
 const filter_ops_t filter_signal_ops = {
-  .filter = EVFILT_SIGNAL,
-  .name   = "signal",
-  .attach = filt_signal_attach,
-  .detach = filt_signal_detach,
-  .event  = filt_signal_event,
-  .touch  = filt_signal_touch,
+	.filter	= EVFILT_SIGNAL,
+	.name	= "signal",
+	.attach	= filt_signal_attach,
+	.detach	= filt_signal_detach,
+	.event	= filt_signal_event,
+	.touch	= filt_signal_touch,
 };
