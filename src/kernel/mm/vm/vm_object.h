@@ -18,6 +18,8 @@ typedef struct vm_object {
   u32  ref_count;
   u64  size;
   void *backing;
+  u64 *pages;
+  u64 page_count;
   struct vm_object *next;
 } vm_object_t;
 
@@ -25,6 +27,8 @@ vm_object_t *vm_object_create(u32 type, u64 size, void *backing);
 void vm_object_ref(vm_object_t *obj);
 void vm_object_unref(vm_object_t *obj);
 u32 vm_object_type(vm_object_t *obj);
+u64 vm_object_page(vm_object_t *obj, u64 index);
+int vm_object_set_page(vm_object_t *obj, u64 index, u64 phys);
 
 void vm_object_init(void);
 

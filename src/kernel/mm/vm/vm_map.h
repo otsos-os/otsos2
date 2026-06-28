@@ -9,6 +9,7 @@
 
 #include <mlibc/mlibc.h>
 #include <kernel/process.h>
+#include <mm/vm/vm_object.h>
 
 #define VM_MAP_READ   0x1
 #define VM_MAP_WRITE  0x2
@@ -24,7 +25,7 @@
 
 u64 vm_map_find_free(process_t *proc, u64 length);
 int vm_map_insert(process_t *proc, u64 start, u64 end, u32 prot, u32 flags,
-                  u32 gem_handle);
+                  u32 gem_handle, vm_object_t *object, u64 object_offset);
 int vm_map_remove(process_t *proc, u64 addr);
 vma_t *vm_map_lookup(process_t *proc, u64 addr);
 void vm_map_free_all(process_t *proc);

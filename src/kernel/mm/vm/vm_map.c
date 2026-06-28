@@ -5,6 +5,8 @@
 #include <mm/vm/vm_map.h>
 #include <kernel/api/api.h>
 #include <mm/kmem.h>
+#include <mm/vm/pmap.h>
+#include <mm/vm/vm_page.h>
 #include <mlibc/mlibc.h>
 
 #define PAGE_SIZE 4096
@@ -70,7 +72,7 @@ u64 vm_map_find_free(process_t *proc, u64 length) {
 }
 
 int vm_map_insert(process_t *proc, u64 start, u64 end, u32 prot, u32 flags,
-            u32 gem_handle) {
+            u32 gem_handle, vm_object_t *object, u64 object_offset) {
   vma_t *vma = (vma_t *)kmem_calloc(sizeof(vma_t), 1);
   if (!vma) return -1;
 
@@ -79,6 +81,9 @@ int vm_map_insert(process_t *proc, u64 start, u64 end, u32 prot, u32 flags,
   vma->prot = prot;
   vma->flags = flags;
   vma->gem_handle = gem_handle;
+  vma->object_offset = object_offset;
+  vma->object = object;
+  vm_object_ref(object);
 
   /* Insert sorted by start address. */
   vma_t **pp = &proc->vma_list;
@@ -97,6 +102,7 @@ int vm_map_remove(process_t *proc, u64 addr) {
     if (addr >= (*pp)->start && addr < (*pp)->end) {
       vma_t *v = *pp;
       *pp = v->next;
+      vm_object_unref(v->object);
       kmem_free(v);
       return 0;
     }
@@ -118,6 +124,15 @@ void vm_map_free_all(process_t *proc) {
   vma_t *v = proc->vma_list;
   while (v) {
     vma_t *next = v->next;
+    for (u64 va = v->start; va < v->end; va += PAGE_SIZE) {
+      if (v->object == NULL) {
+        u64 phys = pmap_extract(va);
+        if (phys)
+          vm_page_free_phys(phys);
+      }
+      pmap_remove(va);
+    }
+    vm_object_unref(v->object);
     kmem_free(v);
     v = next;
   }
@@ -139,6 +154,8 @@ int vm_map_copy(process_t *dst, const process_t *src) {
     copy->prot = v->prot;
     copy->flags = v->flags;
     copy->gem_handle = v->gem_handle;
+    copy->object_offset = v->object_offset;
+    copy->object = NULL;
     copy->next = NULL;
     *tail = copy;
     tail = &copy->next;

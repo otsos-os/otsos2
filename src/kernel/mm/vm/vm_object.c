@@ -25,8 +25,11 @@
 
 #include <mm/vm/vm_object.h>
 #include <mm/kmem.h>
+#include <mm/vm/vm_page.h>
 #include <mlibc/mlibc.h>
 #include <lib/com1.h>
+
+#define PAGE_SIZE 4096
 
 static vm_object_t *vm_object_list = NULL;
 
@@ -50,6 +53,14 @@ vm_object_create(u32 type, u64 size, void *backing)
     obj->ref_count = 1;
     obj->size = size;
     obj->backing = backing;
+    obj->page_count = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+    if (obj->page_count != 0) {
+        obj->pages = kmem_calloc(obj->page_count, sizeof(u64));
+        if (obj->pages == NULL) {
+            kmem_free(obj);
+            return NULL;
+        }
+    }
     obj->next = vm_object_list;
     vm_object_list = obj;
 
@@ -92,6 +103,14 @@ vm_object_unref(vm_object_t *obj)
         cur = cur->next;
     }
 
+    if (obj->pages != NULL) {
+        for (u64 i = 0; i < obj->page_count; i++) {
+            if (obj->pages[i] != 0)
+                vm_page_free_phys(obj->pages[i]);
+        }
+        kmem_free(obj->pages);
+    }
+
     kmem_free(obj);
 }
 
@@ -101,4 +120,21 @@ vm_object_type(vm_object_t *obj)
     if (obj == NULL)
         return 0;
     return obj->type;
+}
+
+u64
+vm_object_page(vm_object_t *obj, u64 index)
+{
+    if (obj == NULL || index >= obj->page_count)
+        return 0;
+    return obj->pages[index];
+}
+
+int
+vm_object_set_page(vm_object_t *obj, u64 index, u64 phys)
+{
+    if (obj == NULL || index >= obj->page_count)
+        return -1;
+    obj->pages[index] = phys;
+    return 0;
 }

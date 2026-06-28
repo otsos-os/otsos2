@@ -30,6 +30,8 @@
 #include <kernel/api/api.h>
 #include <mlibc/mlibc.h>
 
+struct vm_object;
+
 #define MAX_PROCESSES 64
 #define PROCESS_NAME_LEN 32
 #define USER_STACK_SIZE (64 * 1024)   /* 64 KB user stack */
@@ -42,6 +44,8 @@ typedef struct vma {
   u32 prot;            /* API_MAP_READ / WRITE / EXEC */
   u32 flags;           /* API_MAP_ANON / MAP_GEM / MAP_PRIVATE etc */
   u32 gem_handle;      /* GEM handle if MAP_GEM, else 0 */
+  u64 object_offset;   /* offset into vm_object */
+  struct vm_object *object;
   struct vma *next;    /* singly-linked list, sorted by start */
 } vma_t;
 

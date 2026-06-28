@@ -159,12 +159,12 @@ void process_exit(int code) {
   api_release_handles(current_process);
   if (current_process->owns_address_space) {
     u64 old_cr3 = current_process->cr3;
+    vm_map_free_all(current_process);
     pmap_load(pmap_kernel_cr3());
     pmap_destroy(old_cr3);
     current_process->cr3 = 0;
     current_process->owns_address_space = 0;
   }
-  vm_map_free_all(current_process);
   current_process->mmap_base = MMAP_BASE;
 
   __asm__ volatile("sti");
@@ -245,6 +245,10 @@ int process_kill(u32 pid) {
 
   api_release_handles(proc);
   if (proc->owns_address_space) {
+    u64 old_cr3 = pmap_get_cr3();
+    pmap_load(proc->cr3);
+    vm_map_free_all(proc);
+    pmap_load(old_cr3);
     pmap_destroy(proc->cr3);
     proc->cr3 = 0;
     proc->owns_address_space = 0;

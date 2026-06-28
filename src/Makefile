@@ -371,11 +371,11 @@ $(VM_PAGE_O): kernel/mm/vm/vm_page.c kernel/mm/vm/vm_page.h kernel/mm/kmem.h ker
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(VM_MAP_O): kernel/mm/vm/vm_map.c kernel/mm/vm/vm_map.h kernel/process.h kernel/api/api.h
+$(VM_MAP_O): kernel/mm/vm/vm_map.c kernel/mm/vm/vm_map.h kernel/mm/vm/vm_object.h kernel/mm/vm/vm_page.h kernel/mm/vm/pmap.h kernel/process.h kernel/api/api.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(VM_OBJECT_O): kernel/mm/vm/vm_object.c kernel/mm/vm/vm_object.h kernel/mm/kmem.h
+$(VM_OBJECT_O): kernel/mm/vm/vm_object.c kernel/mm/vm/vm_object.h kernel/mm/vm/vm_page.h kernel/mm/kmem.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -403,11 +403,11 @@ $(LSEEK_O): kernel/api/lseek.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(WAIT_O): kernel/api/wait.c
+$(WAIT_O): kernel/api/wait.c kernel/mm/vm/vm_map.h kernel/mm/vm/pmap.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(MMAP_O): kernel/api/mmap.c kernel/api/api.h kernel/mm/vm/vm_map.h kernel/mm/vm/vm_page.h kernel/drivers/video/drm/gem.h
+$(MMAP_O): kernel/api/mmap.c kernel/api/api.h kernel/mm/vm/vm_map.h kernel/mm/vm/vm_object.h kernel/mm/vm/vm_page.h kernel/drivers/video/drm/gem.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -431,7 +431,7 @@ $(GDT_ASM_O): kernel/gdt.asm
 	@echo "  AS      $<"
 	@$(AS) -f $(NASM_FORMAT) -g -F dwarf $< -o $@
 
-$(PROCESS_O): kernel/process.c
+$(PROCESS_O): kernel/process.c kernel/mm/vm/vm_map.h kernel/mm/vm/pmap.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
