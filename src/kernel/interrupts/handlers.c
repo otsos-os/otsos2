@@ -32,6 +32,7 @@
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/interrupts/idt.h>
 #include <mm/vm/pmap.h>
+#include <mm/vm/vm_map.h>
 #include <kernel/scheduler.h>
 #include <mlibc/mlibc.h>
 
@@ -69,6 +70,9 @@ void isr_handler(registers_t *regs) {
       } else if (regs->int_no == 14) {
         u64 cr2 = 0;
         __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+        if (proc && vm_map_fault(proc, cr2, regs->err_code) == 0) {
+          return;
+        }
         printf("\033[31m[KERNEL] Segmentation Fault (Page Fault) CR2=%p "
                "ERR=0x%x\033[0m\n",
                (void *)cr2, (unsigned)regs->err_code);

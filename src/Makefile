@@ -259,7 +259,7 @@ $(PIC_O): kernel/interrupts/pic.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(HANDLERS_O): kernel/interrupts/handlers.c
+$(HANDLERS_O): kernel/interrupts/handlers.c kernel/mm/vm/vm_map.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

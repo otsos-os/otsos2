@@ -24,6 +24,7 @@
  */
 
 #include <mm/vm/vm_object.h>
+#include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <mm/kmem.h>
 #include <mm/vm/vm_page.h>
 #include <mlibc/mlibc.h>
@@ -53,6 +54,14 @@ vm_object_create(u32 type, u64 size, void *backing)
     obj->ref_count = 1;
     obj->size = size;
     obj->backing = backing;
+    if (type == VM_OBJ_FILE && backing != NULL) {
+        const char *path = (const char *)backing;
+        u32 i;
+        for (i = 0; i < VM_OBJECT_BACKING_MAX - 1 && path[i]; i++)
+            obj->backing_path[i] = path[i];
+        obj->backing_path[i] = '\0';
+        obj->backing = obj->backing_path;
+    }
     obj->page_count = (size + PAGE_SIZE - 1) / PAGE_SIZE;
     if (obj->page_count != 0) {
         obj->pages = kmem_calloc(obj->page_count, sizeof(u64));
@@ -137,4 +146,34 @@ vm_object_set_page(vm_object_t *obj, u64 index, u64 phys)
         return -1;
     obj->pages[index] = phys;
     return 0;
+}
+
+u64
+vm_object_get_page(vm_object_t *obj, u64 index, u64 file_offset)
+{
+    u64 phys;
+
+    if (obj == NULL || index >= obj->page_count)
+        return 0;
+
+    if (obj->pages[index] != 0)
+        return obj->pages[index];
+
+    if (obj->type == VM_OBJ_GEM)
+        return 0;
+
+    phys = vm_page_alloc_phys(0);
+    if (phys == 0)
+        return 0;
+
+    memset((void *)phys, 0, PAGE_SIZE);
+
+    if (obj->type == VM_OBJ_FILE && obj->backing != NULL) {
+        u32 bytes_read = 0;
+        chainfs_read_file_range((const char *)obj->backing, (u8 *)phys,
+                                PAGE_SIZE, (u32)file_offset, &bytes_read);
+    }
+
+    obj->pages[index] = phys;
+    return phys;
 }

@@ -15,6 +15,13 @@ static u64 align_up(u64 val, u64 align) {
   return (val + align - 1) & ~(align - 1);
 }
 
+static u64 page_flags_for_prot(u32 prot) {
+  u64 flags = PTE_PRESENT | PTE_USER;
+  if (prot & API_MAP_WRITE) flags |= PTE_RW;
+  if (!(prot & API_MAP_EXEC)) flags |= PTE_NX;
+  return flags;
+}
+
 u64 vm_map_find_free(process_t *proc, u64 length) {
   u64 aligned = align_up(length, PAGE_SIZE);
   if (aligned == 0) return 0;
@@ -161,5 +168,31 @@ int vm_map_copy(process_t *dst, const process_t *src) {
     tail = &copy->next;
   }
 
+  return 0;
+}
+
+int vm_map_fault(process_t *proc, u64 addr, u64 err_code) {
+  vma_t *v = vm_map_lookup(proc, addr);
+  if (!v || !v->object) {
+    return -1;
+  }
+
+  if ((err_code & 0x2) && !(v->prot & API_MAP_WRITE)) {
+    return -1;
+  }
+  if ((err_code & 0x10) && !(v->prot & API_MAP_EXEC)) {
+    return -1;
+  }
+
+  u64 page_va = addr & ~(PAGE_SIZE - 1);
+  u64 map_off = page_va - v->start;
+  u64 file_off = v->object_offset + map_off;
+  u64 index = map_off / PAGE_SIZE;
+  u64 phys = vm_object_get_page(v->object, index, file_off);
+  if (!phys) {
+    return -1;
+  }
+
+  pmap_enter(page_va, phys, page_flags_for_prot(v->prot));
   return 0;
 }

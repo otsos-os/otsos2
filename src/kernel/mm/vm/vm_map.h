@@ -30,5 +30,6 @@ int vm_map_remove(process_t *proc, u64 addr);
 vma_t *vm_map_lookup(process_t *proc, u64 addr);
 void vm_map_free_all(process_t *proc);
 int vm_map_copy(process_t *dst, const process_t *src);
+int vm_map_fault(process_t *proc, u64 addr, u64 err_code);
 
 #endif

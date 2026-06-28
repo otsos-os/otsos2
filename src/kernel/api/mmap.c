@@ -90,7 +90,7 @@ static u64 mmap_gem(process_t *proc, u32 gem_handle, u64 length, u32 prot,
   return addr;
 }
 
-/* Anonymous mapping: allocate fresh physical pages. */
+/* Anonymous mapping: pages are populated by vm_map_fault(). */
 static u64 mmap_anon(process_t *proc, u64 length, u32 prot, u32 flags,
                      u64 addr) {
   u64 aligned = align_up(length, PAGE_SIZE);
@@ -106,36 +106,12 @@ static u64 mmap_anon(process_t *proc, u64 length, u32 prot, u32 flags,
     }
   }
 
-  u64 pflags = page_flags_for_prot(prot);
   vm_object_t *obj = vm_object_create(VM_OBJ_ANON, aligned, NULL);
   if (!obj) {
     return (u64)(-API_ERR_NO_MEMORY);
   }
 
-  for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
-    u64 page = vm_page_alloc_phys(0);
-    if (!page) {
-      for (u64 rollback = 0; rollback < off; rollback += PAGE_SIZE) {
-        u64 phys = pmap_extract(addr + rollback);
-        pmap_remove(addr + rollback);
-        vm_page_free_phys(phys);
-        vm_object_set_page(obj, rollback / PAGE_SIZE, 0);
-      }
-      vm_object_unref(obj);
-      return (u64)(-API_ERR_NO_MEMORY);
-    }
-    memset((void *)page, 0, PAGE_SIZE);
-    vm_object_set_page(obj, off / PAGE_SIZE, page);
-    pmap_enter(addr + off, page, pflags);
-  }
-
   if (vm_map_insert(proc, addr, addr + aligned, prot, flags, 0, obj, 0) != 0) {
-    for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
-      u64 phys = pmap_extract(addr + off);
-      pmap_remove(addr + off);
-      vm_page_free_phys(phys);
-      vm_object_set_page(obj, off / PAGE_SIZE, 0);
-    }
     vm_object_unref(obj);
     return (u64)(-API_ERR_NO_MEMORY);
   }
@@ -144,7 +120,7 @@ static u64 mmap_anon(process_t *proc, u64 length, u32 prot, u32 flags,
   return addr;
 }
 
-/* File-backed mapping: read file contents into freshly allocated pages. */
+/* File-backed mapping: pages are read by vm_map_fault(). */
 static u64 mmap_file(process_t *proc, u64 length, u32 prot, u32 flags,
                      u64 addr, int fd, u64 offset) {
   api_handle_t *handles = api_get_handle_table();
@@ -182,48 +158,14 @@ static u64 mmap_file(process_t *proc, u64 length, u32 prot, u32 flags,
     }
   }
 
-  u64 pflags = page_flags_for_prot(prot);
   vm_object_t *obj = vm_object_create(VM_OBJ_FILE, aligned,
                                       (void *)objects[oi].path);
   if (!obj) {
     return (u64)(-API_ERR_NO_MEMORY);
   }
 
-  for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
-    u64 page = vm_page_alloc_phys(0);
-    if (!page) {
-      for (u64 rollback = 0; rollback < off; rollback += PAGE_SIZE) {
-        u64 phys = pmap_extract(addr + rollback);
-        pmap_remove(addr + rollback);
-        vm_page_free_phys(phys);
-        vm_object_set_page(obj, rollback / PAGE_SIZE, 0);
-      }
-      vm_object_unref(obj);
-      return (u64)(-API_ERR_NO_MEMORY);
-    }
-    memset((void *)page, 0, PAGE_SIZE);
-
-    u64 file_off = offset + off;
-    if (file_off < file_size) {
-      u32 to_copy = (u32)(file_size - file_off);
-      if (to_copy > PAGE_SIZE) to_copy = PAGE_SIZE;
-      u32 bytes_read = 0;
-      chainfs_read_file_range(objects[oi].path, (u8 *)page, to_copy,
-                              (u32)file_off, &bytes_read);
-    }
-
-    vm_object_set_page(obj, off / PAGE_SIZE, page);
-    pmap_enter(addr + off, page, pflags);
-  }
-
   if (vm_map_insert(proc, addr, addr + aligned, prot, flags, 0, obj,
                     offset) != 0) {
-    for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
-      u64 phys = pmap_extract(addr + off);
-      pmap_remove(addr + off);
-      vm_page_free_phys(phys);
-      vm_object_set_page(obj, off / PAGE_SIZE, 0);
-    }
     vm_object_unref(obj);
     return (u64)(-API_ERR_NO_MEMORY);
   }
