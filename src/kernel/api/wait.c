@@ -26,8 +26,10 @@
 
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_map.h>
+#include <kernel/event/event.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
+#include <lib/com1.h>
 #include <mm/kmem.h>
 
 int api_proc_wait(int *status) {
@@ -36,38 +38,55 @@ int api_proc_wait(int *status) {
     return -API_ERR_NO_CHILD;
   }
 
-  for (int i = 0; i < MAX_PROCESSES; i++) {
-    process_t *child = &process_table[i];
-    if (child->state != PROC_STATE_ZOMBIE) {
-      continue;
-    }
-    if (child->ppid != current->pid) {
-      continue;
+  /* Try to reap a zombie child first (non-blocking) */
+  for (int attempt = 0; attempt < 2; attempt++) {
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+      process_t *child = &process_table[i];
+      if (child->state != PROC_STATE_ZOMBIE) {
+        continue;
+      }
+      if (child->ppid != current->pid) {
+        continue;
+      }
+
+      if (status && is_user_address(status, sizeof(int))) {
+        *status = child->exit_code;
+      }
+
+      if (child->owns_address_space && child->cr3) {
+        u64 old_cr3 = pmap_get_cr3();
+        pmap_load(child->cr3);
+        vm_map_free_all(child);
+        pmap_load(old_cr3);
+        pmap_destroy(child->cr3);
+        child->cr3 = 0;
+        child->owns_address_space = 0;
+      }
+
+      if (child->kernel_stack) {
+        u64 kstack_base = child->kernel_stack - KERNEL_STACK_SIZE;
+        kmem_free((void *)kstack_base);
+      }
+
+      int pid = (int)child->pid;
+      memset(child, 0, sizeof(process_t));
+      child->state = PROC_STATE_UNUSED;
+      return pid;
     }
 
-    if (status && is_user_address(status, sizeof(int))) {
-      *status = child->exit_code;
-    }
+    /* No zombie child found — sleep and wait for a child to exit */
+    if (attempt == 0) {
+      /* Use the current process's PID as the wait channel.
+       * process_exit() calls event_notify_proc_exit which calls
+       * knote_notify_all, but we also need a direct wakeup.
+       * The simplest approach: sleep on a global "child wait" channel
+       * that process_exit wakes up. */
+      extern void proc_sleep(void *channel);
+      extern void proc_wakeup(void *channel);
 
-    if (child->owns_address_space && child->cr3) {
-      u64 old_cr3 = pmap_get_cr3();
-      pmap_load(child->cr3);
-      vm_map_free_all(child);
-      pmap_load(old_cr3);
-      pmap_destroy(child->cr3);
-      child->cr3 = 0;
-      child->owns_address_space = 0;
+      /* Use the parent's process structure as the wait channel */
+      proc_sleep((void *)current);
     }
-
-    if (child->kernel_stack) {
-      u64 kstack_base = child->kernel_stack - KERNEL_STACK_SIZE;
-      kmem_free((void *)kstack_base);
-    }
-
-    int pid = (int)child->pid;
-    memset(child, 0, sizeof(process_t));
-    child->state = PROC_STATE_UNUSED;
-    return pid;
   }
 
   return -API_ERR_NO_CHILD;

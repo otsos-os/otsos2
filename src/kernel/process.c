@@ -29,6 +29,7 @@
 #include <kernel/panic.h>
 #include <kernel/process.h>
 #include <kernel/signal.h>
+#include <kernel/event/event.h>
 #include <mm/vm/vm_map.h>
 #include <lib/com1.h>
 #include <mm/kmem.h>
@@ -149,6 +150,17 @@ void process_exit(int code) {
 
   com1_printf("[PROC] Process '%s' (PID %d) exited with code %d\n",
               current_process->name, current_process->pid, code);
+
+  event_notify_proc_exit(current_process->pid, code);
+  event_cleanup_process(current_process);
+
+  /* Wake up parent if it's sleeping in api_proc_wait */
+  if (current_process->ppid > 0) {
+    process_t *parent = process_get(current_process->ppid);
+    if (parent) {
+      proc_wakeup((void *)parent);
+    }
+  }
 
   if (current_process->pid == 1) {
     panic("Init process terminated! (PID 1 exited with code %d)", code);
@@ -278,6 +290,8 @@ int process_send_signal(u32 pid, int sig) {
   if (!proc) {
     return -1;
   }
+
+  event_notify_signal(pid, sig);
 
   if (sig == SIGTERM) {
     proc->exit_code = 128 + sig;

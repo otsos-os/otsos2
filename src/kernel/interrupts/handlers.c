@@ -30,6 +30,7 @@
 #include <kernel/drivers/timer.h>
 #include <kernel/drivers/tty.h>
 #include <kernel/drivers/watchdog/watchdog.h>
+#include <kernel/event/event.h>
 #include <kernel/interrupts/idt.h>
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_map.h>
@@ -107,6 +108,7 @@ void irq_handler(registers_t *regs) {
     timer_handler();
     power_button_poll();
     watchdog_tick();
+    event_timer_tick();
     scheduler_tick(regs);
     keyboard_poll();
     tty_update();

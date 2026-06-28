@@ -25,6 +25,7 @@
  */
 
 #include <kernel/api/api.h>
+#include <kernel/event/event.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mm/kmem.h>
@@ -43,11 +44,18 @@ int pipe_read(pipe_t *p, void *buf, u32 count) {
   if (!p || !buf || count == 0) {
     return 0;
   }
-  if (p->size == 0) {
+
+  /*
+   * Blocking read: if the pipe is empty and writers still exist,
+   * sleep until data arrives. If no writers, return 0 (EOF).
+   */
+  while (p->size == 0) {
     if (p->writers == 0) {
-      return 0;
+      return 0; /* EOF — all writers closed */
     }
-    return 0;
+    /* Sleep on the pipe's address as wait channel.
+     * pipe_write will call event_notify_pipe_change → proc_wakeup. */
+    proc_sleep((void *)p);
   }
 
   u32 to_read = count;
@@ -61,6 +69,13 @@ int pipe_read(pipe_t *p, void *buf, u32 count) {
     p->read_pos = (p->read_pos + 1) % PIPE_BUF_SIZE;
   }
   p->size -= to_read;
+
+  /* Notify EVFILT_WRITE watchers that space became available. */
+  event_notify_pipe_change(p);
+
+  /* Wake any writer sleeping on this pipe (space freed up). */
+  proc_wakeup((void *)p);
+
   return (int)to_read;
 }
 
@@ -72,11 +87,18 @@ int pipe_write(pipe_t *p, const void *buf, u32 count) {
     return -API_ERR_PIPE_CLOSED;
   }
 
-  u32 space = PIPE_BUF_SIZE - p->size;
-  if (space == 0) {
-    return 0;
+  /*
+   * Blocking write: if the pipe buffer is full and readers still exist,
+   * sleep until space becomes available.
+   */
+  while (PIPE_BUF_SIZE - p->size == 0) {
+    if (p->readers == 0) {
+      return -API_ERR_PIPE_CLOSED;
+    }
+    proc_sleep((void *)p);
   }
 
+  u32 space = PIPE_BUF_SIZE - p->size;
   u32 to_write = count;
   if (to_write > space) {
     to_write = space;
@@ -88,6 +110,13 @@ int pipe_write(pipe_t *p, const void *buf, u32 count) {
     p->write_pos = (p->write_pos + 1) % PIPE_BUF_SIZE;
   }
   p->size += to_write;
+
+  /* Notify EVFILT_READ watchers that data became available */
+  event_notify_pipe_change(p);
+
+  /* Wake any reader sleeping on this pipe (data arrived). */
+  proc_wakeup((void *)p);
+
   return (int)to_write;
 }
 

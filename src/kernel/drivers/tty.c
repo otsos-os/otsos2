@@ -29,6 +29,8 @@
 #include <kernel/drivers/tty.h>
 #include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/kms/console.h>
+#include <kernel/event/event.h>
+#include <kernel/process.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
@@ -36,6 +38,10 @@
 #define TTY_LINE_BUF_SIZE 256
 static void tty_lazy_init(void);
 void tty_update(void);
+
+/* Wait channel for keyboard input — processes sleeping in tty_read
+ * block on this address. keyboard_poll wakes them up. */
+static void *tty_input_channel = &tty_input_channel;
 
 typedef struct {
   u16 *cells;
@@ -461,6 +467,10 @@ void tty_set_active(int index) {
   tty_switch_to(index);
 }
 
+void *tty_get_input_channel(void) {
+  return tty_input_channel;
+}
+
 void tty_restore_active_display(void) {
   if (!tty_initialized) {
     return;
@@ -718,7 +728,10 @@ void tty_clear_active(void) {
   tty_redraw(tty);
 }
 
+/* Wait channel for keyboard input is defined at top of file */
+
 static void tty_pump_keyboard(void) {
+  int got_data = 0;
   while (1) {
     char c = keyboard_getchar();
     if (c == 0) {
@@ -730,6 +743,12 @@ static void tty_pump_keyboard(void) {
       q->buf[q->head] = c;
       q->head = next;
     }
+    got_data = 1;
+  }
+
+  /* If we got keyboard data, notify EVFILT_READ watchers for fd 0 */
+  if (got_data) {
+    knote_notify_all(EVFILT_READ, 0, 0, 1);
   }
 }
 
@@ -744,7 +763,9 @@ static char tty_getchar_blocking(int tty_idx) {
       tty_update();
       return c;
     }
-    __asm__ volatile("hlt");
+    /* Block: sleep until keyboard input arrives.
+     * keyboard_poll (called from IRQ0) will wake us up. */
+    proc_sleep(tty_input_channel);
   }
 }
 

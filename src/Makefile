@@ -126,6 +126,14 @@ VIRTIO_QUEUE_O = ../bin/virtio_queue.o
 VIRTIO_GPU_CMDS_O = ../bin/virtio_gpu_cmds.o
 VIRTIO_GPU_O = ../bin/virtio_gpu.o
 
+EVENT_O = ../bin/event.o
+EVENT_READ_O = ../bin/event_read.o
+EVENT_WRITE_O = ../bin/event_write.o
+EVENT_TIMER_O = ../bin/event_timer.o
+EVENT_PROC_O = ../bin/event_proc.o
+EVENT_SIGNAL_O = ../bin/event_signal.o
+EVENT_USER_O = ../bin/event_user.o
+
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
       $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O) $(VM_PAGER_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(DRM_KMS_CONSOLE_O) $(DRM_RAPI_O) $(TIMER_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
@@ -136,7 +144,9 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(BOOT
       $(KSHELL_O) $(KSHELL_PARSER_O) $(KSHELL_ECHO_O) $(KSHELL_DRM_O) \
       $(TOML_O) $(KUSR_O) $(KUSR_AUTH_O) $(DRM_API_O) $(RESTRICT_O) \
       $(CRYPTO_UTIL_O) $(CRYPTO_SHA256_O) $(CRYPTO_HMAC_O) $(CRYPTO_PBKDF2_O) $(CRYPTO_RNG_O) \
-      $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O)
+      $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O) \
+      $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
+      $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O)
 
 .PHONY: all ask_version check_build_tools check_run_tools
 
@@ -622,6 +632,34 @@ $(VIRTIO_GPU_O): kernel/drivers/video/card/virtio-gpu/virtio-gpu.c kernel/driver
 $(SYSCALL_ASM_O): kernel/syscall_asm.asm
 	@echo "  AS      $<"
 	@$(AS) -f $(NASM_FORMAT) -g -F dwarf $< -o $@
+
+$(EVENT_O): kernel/event/event.c kernel/event/event.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(EVENT_READ_O): kernel/event/filter_read.c kernel/event/event.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(EVENT_WRITE_O): kernel/event/filter_write.c kernel/event/event.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(EVENT_TIMER_O): kernel/event/filter_timer.c kernel/event/event.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(EVENT_PROC_O): kernel/event/filter_proc.c kernel/event/event.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(EVENT_SIGNAL_O): kernel/event/filter_signal.c kernel/event/event.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(EVENT_USER_O): kernel/event/filter_user.c kernel/event/event.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 
 $(STRING_O): mlibc/string.c

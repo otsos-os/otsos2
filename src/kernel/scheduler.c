@@ -98,6 +98,25 @@ void scheduler_tick(registers_t *regs) {
     return;
   }
 
+  /* If the process put itself to sleep (via proc_sleep), let the
+   * scheduler pick the next runnable process. If nothing else is
+   * runnable, just return — the hlt in proc_sleep keeps the CPU
+   * idle until the next interrupt. Do NOT sti;hlt;cli here because
+   * we are inside the IRQ0 handler and that would nest interrupts. */
+  if (current->state == PROC_STATE_SLEEPING) {
+    process_t *next = pick_next(current);
+    if (!next || next == current) {
+      return;
+    }
+    process_save_context(current, regs);
+    process_set_current(next);
+    if (next->cr3 != current->cr3) {
+      pmap_load(next->cr3);
+    }
+    load_context(next, regs);
+    return;
+  }
+
   process_save_context(current, regs);
 
   if (current->state == PROC_STATE_RUNNING) {

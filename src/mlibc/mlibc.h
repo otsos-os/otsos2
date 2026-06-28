@@ -42,6 +42,7 @@ typedef unsigned long size_t;
 typedef signed char s8;
 typedef signed short s16;
 typedef signed int s32;
+typedef signed long long s64;
 
 int strcmp(const char *str1, const char *str2);
 int strlen(const char *str);

@@ -42,5 +42,6 @@ void tty_com1_mirror(char c);
 void tty_set_active(int index);
 void tty_restore_active_display(void);
 void tty_update(void);
+void *tty_get_input_channel(void);
 
 #endif

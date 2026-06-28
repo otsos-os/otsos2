@@ -26,7 +26,9 @@
 
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/keyboard/ps2.h>
+#include <kernel/event/event.h>
 #include <kernel/kshell/kshell.h>
+#include <kernel/process.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
@@ -102,14 +104,39 @@ char keyboard_getchar_blocking() {
 }
 
 void keyboard_common_handler() {
-  if (current_driver && current_driver->handler) {
-    current_driver->handler();
+  if (!current_driver || !current_driver->handler) {
+    return;
+  }
+
+  current_driver->handler();
+
+  /* IRQ1 means a key was pressed — wake tty sleepers. */
+  extern void *tty_get_input_channel(void);
+  void *ch = tty_get_input_channel();
+  if (ch) {
+    proc_wakeup(ch);
   }
 }
 
 void keyboard_poll() {
-  if (current_driver && current_driver->poll) {
-    current_driver->poll();
+  if (!current_driver || !current_driver->poll) {
+    return;
+  }
+
+  /* Check if there's data before polling — only wake if we actually
+   * drained something. Reading the status port is cheap. */
+  u8 status = inb(0x64);
+  if (!(status & 0x01)) {
+    return; /* No data pending — don't wake anyone. */
+  }
+
+  current_driver->poll();
+
+  /* Data was drained — wake any process sleeping on tty input. */
+  extern void *tty_get_input_channel(void);
+  void *ch = tty_get_input_channel();
+  if (ch) {
+    proc_wakeup(ch);
   }
 }
 

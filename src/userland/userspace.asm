@@ -39,7 +39,9 @@ userspace_enter:
     
     ; Build iretq frame on stack
     push r11            ; SS (user data segment)
-    push rbx            ; RSP (user stack)
+    sub rbx, 8          ; Align RSP to 8 mod 16 (System V ABI: _start
+                        ; expects RSP = 8 mod 16, like after a `call`)
+    push rbx            ; RSP (user stack, aligned for ABI)
     pushfq              ; RFLAGS (current, will be modified)
     
     ; Enable interrupts in RFLAGS for user mode

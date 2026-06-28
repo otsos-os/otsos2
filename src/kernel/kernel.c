@@ -37,6 +37,7 @@
 #include <kernel/drivers/video/drm/init.h>
 #include <kernel/drivers/video/card/virtio-gpu/virtio-gpu.h>
 #include <kernel/drivers/watchdog/watchdog.h>
+#include <kernel/event/event.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/console.h>
 #include <mm/vm/pmap.h>
@@ -254,6 +255,7 @@ void kmain(u64 magic, u64 addr, u64 boot_option) {
 
   // api_init() moved down
   syscall_init();
+  event_init();
 
   disk_manager_init();
   pata_identify(NULL);

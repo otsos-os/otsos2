@@ -56,6 +56,10 @@
 #define CALL_SYS_KMEMINFO 0x502
 #define CALL_DRM_CALL 0x600
 
+#define CALL_EVENT_KQUEUE  0x700   /* create a new kqueue -> returns fd     */
+#define CALL_EVENT_KEVENT  0x701   /* register/retrieve events              */
+#define CALL_EVENT_CLOSE   0x702   /* close/destroy a kqueue                */
+
 void syscall_init(void);
 void syscall_handler(registers_t *regs);
 int syscall_is_initialized(void);

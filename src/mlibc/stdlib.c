@@ -25,6 +25,7 @@
  */
 
 #include <kernel/drivers/timer.h>
+#include <kernel/process.h>
 #include <lib/com1.h>
 #include <mlibc/stdlib.h>
 
@@ -38,9 +39,35 @@ __attribute__((noreturn)) void __stack_chk_fail(void) {
   }
 }
 
+/*
+ * Kernel sleep — uses the event system's sleep/wake infrastructure
+ * instead of busy-waiting. Falls back to busy-wait if the event
+ * system is not yet initialized (early boot).
+ *
+ * For kernel-mode callers (kshell, boot code), we use a timer-based
+ * busy-wait since proc_sleep requires a scheduler context switch
+ * which is only meaningful for userspace processes.
+ */
 void sleep(u32 ms) {
-  u64 start_ticks = timer_get_ticks();
-  while (timer_get_ticks() < start_ticks + ms) {
-    __asm__ volatile("pause");
+  process_t *proc = process_current();
+
+  /* If we're in kernel mode or no process is running, busy-wait. */
+  if (!proc || (proc->context.cs & 3) == 0) {
+    u64 start_ticks = timer_get_ticks();
+    while (timer_get_ticks() < start_ticks + ms) {
+      __asm__ volatile("pause");
+    }
+    return;
+  }
+
+  /* Userspace process: use timer-based sleep via event system. */
+  u64 deadline = timer_get_ticks() + (u64)ms * timer_get_frequency() / 1000;
+  while (timer_get_ticks() < deadline) {
+    /* Yield to scheduler — other processes run while we wait. */
+    process_yield();
+    /* Check if we overshot. */
+    if (timer_get_ticks() >= deadline) {
+      break;
+    }
   }
 }

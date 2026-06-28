@@ -104,6 +104,9 @@ typedef struct process {
   /* File descriptors */
   api_handle_t handles[MAX_HANDLES];
 
+  /* Sleep / wait channel for event system */
+  void *wait_channel;   /* channel the process is sleeping on, NULL if running */
+
   /* Links */
   struct process *next; /* For scheduler queue */
 } process_t;
@@ -146,6 +149,11 @@ void process_save_context(process_t *proc, registers_t *regs);
 /* Internal: find free process slot */
 process_t *alloc_process(void);
 int process_is_initialized(void);
+
+/* Sleep / wake — defined in event.c, used by process and event subsystem */
+void proc_sleep(void *channel);
+void proc_wakeup(void *channel);
+void proc_wakeup_one(void *channel);
 
 /* Global process data */
 extern process_t process_table[MAX_PROCESSES];

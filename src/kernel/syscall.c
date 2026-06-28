@@ -27,6 +27,7 @@
 #include <kernel/gdt.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/api/api.h>
+#include <kernel/event/event.h>
 #include <kernel/process.h>
 #include <kernel/syscall.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
@@ -177,6 +178,32 @@ void syscall_handler(registers_t *regs) {
     break;
   case CALL_DRM_CALL:
     regs->rax = (u64)api_drm_call(arg1, (void *)arg2);
+    break;
+  case CALL_EVENT_KQUEUE:
+    regs->rax = (u64)kqueue_create();
+    break;
+  case CALL_EVENT_KEVENT: {
+    /* arg1 = kq_idx, arg2 = pointer to kevent_args struct */
+    struct {
+      int kq_idx;
+      struct kevent *changelist;
+      int nchanges;
+      struct kevent *eventlist;
+      int nevents;
+      s64 timeout_ms;
+    } *args = (void *)arg2;
+
+    if (!args) {
+      regs->rax = (u64)(-API_ERR_BAD_ADDR);
+      break;
+    }
+    regs->rax = (u64)kevent_process(args->kq_idx, args->changelist,
+                                    args->nchanges, args->eventlist,
+                                    args->nevents, args->timeout_ms);
+    break;
+  }
+  case CALL_EVENT_CLOSE:
+    regs->rax = (u64)kqueue_destroy((int)arg1);
     break;
   default:
     com1_printf("Unknown syscall: %d\n", syscall_number);
