@@ -44,6 +44,7 @@ $space %export __stack_chk_guard
 
 #include <kernel/drivers/timer.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
 #include <lib/com1.h>
 #include <mlibc/stdlib.h>
 
@@ -62,13 +63,13 @@ __stack_chk_fail(void)
 void
 sleep(u32 ms)
 {
-	process_t	*proc;
 	u64		start_ticks;
 	u64		deadline;
+	thread_t	*td;
 
-	proc = process_current();
+	td = thread_current();
 
-	if (!proc || (proc->context.cs & 3) == 0) {
+	if (!td || (td->context.cs & 3) == 0) {
 		start_ticks = timer_get_ticks();
 		while (timer_get_ticks() < start_ticks + ms) {
 			__asm__ volatile("pause");

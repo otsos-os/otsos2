@@ -55,6 +55,7 @@ $space %export event_notify_proc_exit, event_notify_proc_fork
 
 #include <kernel/event/event.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
@@ -76,7 +77,8 @@ filt_proc_attach(knote_t *kn)
 	com1_printf("[EVFILT_PROC] attach: monitoring "
 	    "pid=%d\n", pid);
 
-	if (proc->state == PROC_STATE_ZOMBIE) {
+	if (proc->main_thread &&
+	    proc->main_thread->state == PROC_STATE_ZOMBIE) {
 		kn->fflags |= NOTE_EXIT;
 		kn->data = proc->exit_code;
 		knote_ready(kn);
@@ -105,7 +107,8 @@ filt_proc_event(knote_t *kn, u32 nevents)
 		return (1);
 	}
 
-	if (proc->state == PROC_STATE_ZOMBIE) {
+	if (proc->main_thread &&
+	    proc->main_thread->state == PROC_STATE_ZOMBIE) {
 		if (kn->fflags & NOTE_EXIT) {
 			return (kn->pending ? 1 : 0);
 		}

@@ -26,6 +26,7 @@
 
 #include <kernel/api/posix/posix.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
 #include <kernel/useraddr.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
@@ -151,6 +152,7 @@ posix_rt_sigreturn(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
     registers_t *regs)
 {
 	struct process	*proc;
+	struct thread	*td;
 
 	(void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
 
@@ -159,28 +161,36 @@ posix_rt_sigreturn(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 		return (-POSIX_EFAULT);
 	}
 
-	regs->r15 = proc->saved_context.r15;
-	regs->r14 = proc->saved_context.r14;
-	regs->r13 = proc->saved_context.r13;
-	regs->r12 = proc->saved_context.r12;
-	regs->r11 = proc->saved_context.r11;
-	regs->r10 = proc->saved_context.r10;
-	regs->r9 = proc->saved_context.r9;
-	regs->r8 = proc->saved_context.r8;
-	regs->rbp = proc->saved_context.rbp;
-	regs->rdi = proc->saved_context.rdi;
-	regs->rsi = proc->saved_context.rsi;
-	regs->rdx = proc->saved_context.rdx;
-	regs->rcx = proc->saved_context.rcx;
-	regs->rbx = proc->saved_context.rbx;
-	regs->rax = proc->saved_context.rax;
-	regs->rip = proc->saved_context.rip;
-	regs->cs = proc->saved_context.cs;
-	regs->rflags = proc->saved_context.rflags;
-	regs->rsp = proc->saved_context.rsp;
-	regs->ss = proc->saved_context.ss;
+	td = proc->cur_thread;
+	if (!td) {
+		td = proc->main_thread;
+	}
+	if (!td) {
+		return (-POSIX_EFAULT);
+	}
 
-	proc->sigmask = proc->saved_sigmask;
+	regs->r15 = td->saved_context.r15;
+	regs->r14 = td->saved_context.r14;
+	regs->r13 = td->saved_context.r13;
+	regs->r12 = td->saved_context.r12;
+	regs->r11 = td->saved_context.r11;
+	regs->r10 = td->saved_context.r10;
+	regs->r9 = td->saved_context.r9;
+	regs->r8 = td->saved_context.r8;
+	regs->rbp = td->saved_context.rbp;
+	regs->rdi = td->saved_context.rdi;
+	regs->rsi = td->saved_context.rsi;
+	regs->rdx = td->saved_context.rdx;
+	regs->rcx = td->saved_context.rcx;
+	regs->rbx = td->saved_context.rbx;
+	regs->rax = td->saved_context.rax;
+	regs->rip = td->saved_context.rip;
+	regs->cs = td->saved_context.cs;
+	regs->rflags = td->saved_context.rflags;
+	regs->rsp = td->saved_context.rsp;
+	regs->ss = td->saved_context.ss;
+
+	proc->sigmask = td->saved_sigmask;
 
 	return ((s64)regs->rax);
 }

@@ -25,8 +25,10 @@
  */
 
 #include <mm/vm/pmap.h>
+#include <kernel/gdt.h>
 #include <kernel/api/api.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
 #include <mm/vm/vm_map.h>
 #include <mm/kmem.h>
 
@@ -41,29 +43,16 @@ int api_proc_copy(registers_t *regs) {
     return -API_ERR_RETRY;
   }
 
-  child->state = PROC_STATE_EMBRYO;
+  memset(child, 0, sizeof(process_t));
 
   u64 child_cr3 = pmap_clone(parent->cr3);
   if (!child_cr3) {
     memset(child, 0, sizeof(process_t));
-    child->state = PROC_STATE_UNUSED;
     return -API_ERR_NO_MEMORY;
   }
-
-  u8 *kstack = (u8 *)kmem_alloc_aligned(KERNEL_STACK_SIZE, 16);
-  if (!kstack) {
-    pmap_destroy(child_cr3);
-    memset(child, 0, sizeof(process_t));
-    child->state = PROC_STATE_UNUSED;
-    return -API_ERR_NO_MEMORY;
-  }
-  memset(kstack, 0, KERNEL_STACK_SIZE);
-
-  memset(child, 0, sizeof(process_t));
 
   child->pid = next_pid++;
   child->ppid = parent->pid;
-  child->state = PROC_STATE_RUNNABLE;
   child->cr3 = child_cr3;
   child->entry_point = parent->entry_point;
 
@@ -72,20 +61,30 @@ int api_proc_copy(registers_t *regs) {
   }
   child->name[PROCESS_NAME_LEN - 1] = '\0';
 
-  child->kernel_stack = (u64)(kstack + KERNEL_STACK_SIZE);
   child->user_stack = parent->user_stack;
-
-  process_save_context(parent, regs);
-  child->context = parent->context;
-  child->context.rax = 0;
-
   child->exit_code = 0;
   child->owns_address_space = 1;
   child->mmap_base = parent->mmap_base;
   child->kusr_auth = parent->kusr_auth;
   vm_map_fork(parent, child);
   api_copy_handles(child, parent);
-  child->next = NULL;
+
+  /* Create thread for child process */
+  thread_t *td = thread_create(child, parent->entry_point,
+      parent->user_stack, USER_CS, USER_DS);
+  if (!td) {
+    pmap_destroy(child_cr3);
+    memset(child, 0, sizeof(process_t));
+    return -API_ERR_NO_MEMORY;
+  }
+
+  child->main_thread = td;
+  child->cur_thread = td;
+
+  /* Copy parent's context, set return value to 0 */
+  process_save_context(parent, regs);
+  td->context = parent->cur_thread->context;
+  td->context.rax = 0;
 
   return (int)child->pid;
 }

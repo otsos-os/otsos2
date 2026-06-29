@@ -1,7 +1,6 @@
 # Memory Management Subsystem (mm/)
 
-The `mm/` directory implements the kernel's memory management, inspired by
-FreeBSD's VM system architecture.
+The `mm/` directory implements the kernel's memory management.
 
 ## Structure
 
@@ -37,7 +36,7 @@ Backward-compatible aliases: `kmalloc`, `kfree`, `kcalloc`, `krealloc`,
 
 ### uma — Zone (Slab) Allocator
 
-FreeBSD-style UMA (Universal Memory Allocator). Provides type-tracked,
+UMA (Universal Memory Allocator). Provides type-tracked,
 pre-sized allocation zones for frequently-allocated objects.
 
 - `uma_zcreate(name, size, align, flags)` — create a zone

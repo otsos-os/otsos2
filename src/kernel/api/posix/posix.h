@@ -67,6 +67,7 @@ $space %export posix_signal_pending, posix_signal_deliver
 
 #include <kernel/interrupts/idt.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
+#include <kernel/thread.h>
 #include <mlibc/mlibc.h>
 
 #define POSIX_ENOEXEC		8
@@ -206,8 +207,39 @@ $space %export posix_signal_pending, posix_signal_deliver
 #define SYS_getegid		109
 #define SYS_getppid		110
 #define SYS_getdents64		217
+#define SYS_set_tid_address	218
+#define SYS_exit_group		231
 #define SYS_dup3		292
 #define SYS_pipe2		293
+
+#define SYS_clone		56
+#define SYS_gettid		186
+#define SYS_futex		202
+
+/* futex operations */
+#define FUTEX_WAIT		0
+#define FUTEX_WAKE		1
+#define FUTEX_FD		2
+#define FUTEX_REQUEUE		3
+#define FUTEX_CMP_REQUEUE	4
+#define FUTEX_WAKE_OP		5
+#define FUTEX_LOCK_PI		6
+#define FUTEX_UNLOCK_PI		7
+#define FUTEX_TRYLOCK_PI	8
+#define FUTEX_WAIT_BITSET	9
+#define FUTEX_WAKE_BITSET	10
+
+/* clone flags (Linux-compatible) */
+#define POSIX_CLONE_VM		0x00000100
+#define POSIX_CLONE_FS		0x00000200
+#define POSIX_CLONE_FILES	0x00000400
+#define POSIX_CLONE_SIGHAND	0x00000800
+#define POSIX_CLONE_THREAD	0x00010000
+#define POSIX_CLONE_PARENT_SETTID	0x00100000
+#define POSIX_CLONE_CHILD_CLEARTID	0x00200000
+#define POSIX_CLONE_CHILD_SETTID	0x01000000
+#define POSIX_CLONE_SETTLS		0x08000000
+#define POSIX_CLONE_PARENT_SETTID2	0x10000000
 
 struct process;
 

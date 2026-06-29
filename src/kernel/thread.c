@@ -1,0 +1,455 @@
+/*
+ * Copyright (c) 2026, otsos team
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ * this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/* !DEFINES!
+
+$define %type u64 as 64 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type int as 32 bit signed
+$define %type thread_t as struct with per-thread CPU context, stack, state
+$define %type process_t as struct with process control block
+$define %type registers_t as struct with CPU register snapshot
+$define %type cpu_context_t as struct with saved CPU registers
+
+$define %func thread_init as procedure with args void
+$define %func thread_alloc as function with args void
+$define %func thread_create as function with args process_t *, u64, u64, u64, u64
+$define %func thread_current as function with args void
+$define %func thread_set_current as procedure with args thread_t *
+$define %func thread_save_context as procedure with args thread_t *, registers_t *
+$define %func thread_load_context as procedure with args thread_t *, registers_t *
+$define %func thread_get_by_proc as function with args process_t *
+$define %func thread_get as function with args u32
+$define %func thread_destroy as procedure with args thread_t *
+$define %func thread_is_initialized as function with args void
+$define %func thread_exit as procedure with args int
+$define %func thread_join as function with args u32, int *
+$define %func thread_count_alive as function with args process_t *
+$define %func thread_kill_all as procedure with args process_t *
+$define %func thread_link as procedure with args process_t *, thread_t *
+$define %func thread_unlink as procedure with args thread_t *
+
+*/
+
+/* !SPACE!
+
+$space %internal thread_init, thread_alloc
+$space %internal thread_link, thread_unlink
+$space %export thread_create, thread_current, thread_set_current
+$space %export thread_save_context, thread_load_context
+$space %export thread_get_by_proc, thread_get, thread_destroy
+$space %export thread_is_initialized
+$space %export thread_exit, thread_join
+$space %export thread_count_alive, thread_kill_all
+
+*/
+
+#include <kernel/gdt.h>
+#include <kernel/process.h>
+#include <kernel/thread.h>
+#include <kernel/event/event.h>
+#include <lib/com1.h>
+#include <mlibc/mlibc.h>
+#include <mm/kmem.h>
+
+extern void	futex_wake_all(u64 uaddr);
+
+thread_t	thread_table[MAX_THREADS];
+u32		next_tid = 1;
+static thread_t	*current_thread = NULL;
+static int	thread_initialized = 0;
+
+static void	thread_link(process_t *proc, thread_t *td);
+static void	thread_unlink(thread_t *td);
+
+void
+thread_init(void)
+{
+	com1_printf("[THREAD] Initializing thread subsystem...\n");
+	memset(thread_table, 0, sizeof(thread_table));
+	next_tid = 1;
+	current_thread = NULL;
+	thread_initialized = 1;
+	com1_printf("[THREAD] Thread table initialized "
+	    "(%d slots)\n", MAX_THREADS);
+}
+
+int
+thread_is_initialized(void)
+{
+	return (thread_initialized);
+}
+
+thread_t *
+thread_alloc(void)
+{
+	int		i;
+	thread_t	*td;
+
+	for (i = 0; i < MAX_THREADS; i++) {
+		if (!thread_table[i].used) {
+			td = &thread_table[i];
+			memset(td, 0, sizeof(thread_t));
+			td->used = 1;
+			td->tid = next_tid++;
+			return (td);
+		}
+	}
+	return (NULL);
+}
+
+thread_t *
+thread_create(process_t *proc, u64 rip, u64 rsp, u64 cs, u64 ss)
+{
+	thread_t	*td;
+	u8		*kstack;
+
+	if (!proc) {
+		return (NULL);
+	}
+
+	td = thread_alloc();
+	if (!td) {
+		com1_printf("[THREAD] Error: no free thread slots\n");
+		return (NULL);
+	}
+
+	kstack = (u8 *)kmem_alloc_aligned(KERNEL_STACK_SIZE, 16);
+	if (!kstack) {
+		com1_printf("[THREAD] Error: failed to allocate "
+		    "kernel stack\n");
+		td->used = 0;
+		return (NULL);
+	}
+	memset(kstack, 0, KERNEL_STACK_SIZE);
+
+	td->proc = proc;
+	td->state = PROC_STATE_EMBRYO;
+	td->kernel_stack = (u64)(kstack + KERNEL_STACK_SIZE);
+
+	memset(&td->context, 0, sizeof(cpu_context_t));
+	td->context.rip = rip;
+	td->context.cs = cs;
+	td->context.rflags = 0x202;
+	td->context.rsp = rsp;
+	td->context.ss = ss;
+
+	td->wait_channel = NULL;
+	td->next = NULL;
+	td->prev = NULL;
+	td->exit_code = 0;
+
+	td->state = PROC_STATE_RUNNABLE;
+
+	thread_link(proc, td);
+
+	com1_printf("[THREAD] Created thread tid=%d for PID %d "
+	    "rip=%p\n", td->tid, proc->pid, (void *)rip);
+
+	return (td);
+}
+
+static void
+thread_link(process_t *proc, thread_t *td)
+{
+	if (!proc || !td) {
+		return;
+	}
+
+	td->prev = NULL;
+	td->next = proc->thread_list;
+	if (proc->thread_list) {
+		proc->thread_list->prev = td;
+	}
+	proc->thread_list = td;
+	proc->thread_count++;
+}
+
+static void
+thread_unlink(thread_t *td)
+{
+	process_t	*proc;
+
+	if (!td || !td->proc) {
+		return;
+	}
+
+	proc = td->proc;
+
+	if (td->prev) {
+		td->prev->next = td->next;
+	} else {
+		proc->thread_list = td->next;
+	}
+	if (td->next) {
+		td->next->prev = td->prev;
+	}
+
+	proc->thread_count--;
+	if (proc->thread_count < 0) {
+		proc->thread_count = 0;
+	}
+}
+
+thread_t *
+thread_current(void)
+{
+	return (current_thread);
+}
+
+void
+thread_set_current(thread_t *td)
+{
+	current_thread = td;
+	if (td) {
+		td->state = PROC_STATE_RUNNING;
+		if (td->proc) {
+			td->proc->cur_thread = td;
+		}
+		tss_set_rsp0(td->kernel_stack);
+	}
+}
+
+void
+thread_save_context(thread_t *td, registers_t *regs)
+{
+	if (!td || !regs) {
+		return;
+	}
+
+	td->context.r15 = regs->r15;
+	td->context.r14 = regs->r14;
+	td->context.r13 = regs->r13;
+	td->context.r12 = regs->r12;
+	td->context.r11 = regs->r11;
+	td->context.r10 = regs->r10;
+	td->context.r9 = regs->r9;
+	td->context.r8 = regs->r8;
+	td->context.rbp = regs->rbp;
+	td->context.rdi = regs->rdi;
+	td->context.rsi = regs->rsi;
+	td->context.rdx = regs->rdx;
+	td->context.rcx = regs->rcx;
+	td->context.rbx = regs->rbx;
+	td->context.rax = regs->rax;
+	td->context.rip = regs->rip;
+	td->context.cs = regs->cs;
+	td->context.rflags = regs->rflags;
+	td->context.rsp = regs->rsp;
+	td->context.ss = regs->ss;
+}
+
+void
+thread_load_context(thread_t *td, registers_t *regs)
+{
+	if (!td || !regs) {
+		return;
+	}
+
+	regs->r15 = td->context.r15;
+	regs->r14 = td->context.r14;
+	regs->r13 = td->context.r13;
+	regs->r12 = td->context.r12;
+	regs->r11 = td->context.r11;
+	regs->r10 = td->context.r10;
+	regs->r9 = td->context.r9;
+	regs->r8 = td->context.r8;
+	regs->rbp = td->context.rbp;
+	regs->rdi = td->context.rdi;
+	regs->rsi = td->context.rsi;
+	regs->rdx = td->context.rdx;
+	regs->rcx = td->context.rcx;
+	regs->rbx = td->context.rbx;
+	regs->rax = td->context.rax;
+	regs->rip = td->context.rip;
+	regs->cs = td->context.cs;
+	regs->rflags = td->context.rflags;
+	regs->rsp = td->context.rsp;
+	regs->ss = td->context.ss;
+}
+
+thread_t *
+thread_get_by_proc(process_t *proc)
+{
+	if (!proc) {
+		return (NULL);
+	}
+	return (proc->main_thread);
+}
+
+thread_t *
+thread_get(u32 tid)
+{
+	int	i;
+
+	for (i = 0; i < MAX_THREADS; i++) {
+		if (thread_table[i].used &&
+		    thread_table[i].tid == tid) {
+			return (&thread_table[i]);
+		}
+	}
+	return (NULL);
+}
+
+void
+thread_destroy(thread_t *td)
+{
+	if (!td || !td->used) {
+		return;
+	}
+
+	thread_unlink(td);
+
+	if (td->kernel_stack) {
+		u8	*kstack_base;
+
+		kstack_base = (u8 *)(td->kernel_stack -
+		    KERNEL_STACK_SIZE);
+		kmem_free(kstack_base);
+	}
+
+	memset(td, 0, sizeof(thread_t));
+}
+
+void
+thread_exit(int code)
+{
+	thread_t	*td;
+	process_t	*proc;
+
+	td = thread_current();
+	if (!td) {
+		return;
+	}
+
+	proc = td->proc;
+
+	com1_printf("[THREAD] tid=%d (PID %d) exiting code=%d\n",
+	    td->tid, proc ? (int)proc->pid : 0, code);
+
+	td->exit_code = code;
+	td->state = PROC_STATE_ZOMBIE;
+
+	/* If set_tid_address was called, clear the TID field
+	 * and do a futex wake so anyone waiting on it wakes up */
+	if (td->tid_address) {
+		u32	*tid_ptr;
+
+		tid_ptr = (u32 *)td->tid_address;
+		*tid_ptr = 0;
+		futex_wake_all(td->tid_address);
+	}
+
+	/* Wake up anyone joining this thread */
+	proc_wakeup((void *)td);
+
+	/* If this was the last alive thread, kill the whole process */
+	if (proc && thread_count_alive(proc) == 0) {
+		com1_printf("[THREAD] last thread exited, "
+		    "process PID %d terminating\n",
+		    (int)proc->pid);
+		process_exit(code);
+	}
+
+	__asm__ volatile("sti");
+	while (1) {
+		__asm__ volatile("hlt");
+	}
+}
+
+int
+thread_join(u32 tid, int *status)
+{
+	thread_t	*td;
+	int		i;
+
+	td = thread_get(tid);
+	if (!td) {
+		return (-1);
+	}
+
+	/* Wait for the thread to become zombie */
+	for (i = 0; i < 100000; i++) {
+		if (td->state == PROC_STATE_ZOMBIE) {
+			break;
+		}
+		proc_sleep((void *)td);
+	}
+
+	if (td->state != PROC_STATE_ZOMBIE) {
+		return (-1);
+	}
+
+	if (status) {
+		*status = td->exit_code;
+	}
+
+	int	reaped_tid;
+
+	reaped_tid = (int)td->tid;
+	thread_destroy(td);
+	return (reaped_tid);
+}
+
+int
+thread_count_alive(process_t *proc)
+{
+	thread_t	*td;
+	int		count;
+
+	if (!proc) {
+		return (0);
+	}
+
+	count = 0;
+	for (td = proc->thread_list; td; td = td->next) {
+		if (td->state != PROC_STATE_ZOMBIE &&
+		    td->state != PROC_STATE_UNUSED) {
+			count++;
+		}
+	}
+	return (count);
+}
+
+void
+thread_kill_all(process_t *proc)
+{
+	thread_t	*td, *next;
+
+	if (!proc) {
+		return;
+	}
+
+	td = proc->thread_list;
+	while (td) {
+		next = td->next;
+		if (td != proc->cur_thread) {
+			td->state = PROC_STATE_ZOMBIE;
+			td->exit_code = -1;
+		}
+		td = next;
+	}
+}

@@ -28,6 +28,7 @@
 #include <kernel/drivers/tty.h>
 #include <kernel/api/api.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
 #include <kernel/useraddr.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
@@ -144,8 +145,8 @@ int api_term_write(const void *buf, u32 count) {
   }
 
   if (!is_user_address(buf, count)) {
-    process_t *proc = process_current();
-    if (proc && (proc->context.cs & 3) == 3) {
+    thread_t *td = thread_current();
+    if (td && (td->context.cs & 3) == 3) {
       process_exit(-1);
     }
     return -API_ERR_BAD_ADDR;
@@ -171,8 +172,8 @@ int api_data_write(int handle, const void *buf, u32 count) {
   }
 
   if (!is_user_address(buf, count)) {
-    process_t *proc = process_current();
-    if (proc && (proc->context.cs & 3) == 3) {
+    thread_t *td = thread_current();
+    if (td && (td->context.cs & 3) == 3) {
       process_exit(-1);
     }
     return -API_ERR_BAD_ADDR;

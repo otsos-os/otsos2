@@ -30,6 +30,7 @@
 #include <mm/vm/vm_page.h>
 #include <kernel/api/posix/posix.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 #include <userland/elf.h>
@@ -118,25 +119,9 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
     return NULL;
   }
 
-  /* Allocate process structure */
-  process_t *proc = process_get(0); /* Get first available slot */
-  if (!proc) {
-    /* Need to find free slot manually */
-    extern process_t *alloc_process(void); /* Defined in process.c */
-  }
-
-  /* Allocate kernel stack */
-  u8 *kstack = (u8 *)kmem_alloc_aligned(KERNEL_STACK_SIZE, 16);
-  if (!kstack) {
-    com1_printf("[USERSPACE] Error: Failed to allocate kernel stack\n");
-    return NULL;
-  }
-  memset(kstack, 0, KERNEL_STACK_SIZE);
-
   /* Allocate user stack */
   u64 user_stack = allocate_user_stack();
   if (user_stack == 0) {
-    kmem_free(kstack);
     pmap_load(old_cr3);
     pmap_destroy(new_cr3);
     return NULL;
@@ -146,18 +131,17 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
 
   /* Allocate a new process slot */
   process_t *new_proc = alloc_process();
-
   if (!new_proc) {
     com1_printf("[USERSPACE] Error: No free process slots\n");
-    kmem_free(kstack);
     pmap_destroy(new_cr3);
     return NULL;
   }
 
+  memset(new_proc, 0, sizeof(process_t));
+
   /* Initialize process */
   new_proc->pid = next_pid++;
   new_proc->ppid = 0; /* Kernel is parent for init */
-  new_proc->state = PROC_STATE_EMBRYO;
 
   /* Copy name */
   int i;
@@ -171,16 +155,7 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   new_proc->entry_point = entry;
 
   /* Stacks */
-  new_proc->kernel_stack = (u64)(kstack + KERNEL_STACK_SIZE);
   new_proc->user_stack = user_stack;
-
-  /* Initialize context for userspace execution */
-  memset(&new_proc->context, 0, sizeof(cpu_context_t));
-  new_proc->context.rip = entry;
-  new_proc->context.cs = USER_CS;
-  new_proc->context.rflags = 0x202; /* IF=1 */
-  new_proc->context.rsp = user_stack;
-  new_proc->context.ss = USER_DS;
 
   new_proc->exit_code = 0;
   new_proc->owns_address_space = 1;
@@ -188,16 +163,25 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   api_init_process(new_proc);
   posix_init_process(new_proc);
   new_proc->personality = PERSONALITY_OTSOS;
-  new_proc->next = NULL;
 
-  new_proc->state = PROC_STATE_RUNNABLE;
+  thread_t *td = thread_create(new_proc, entry, user_stack,
+                               USER_CS, USER_DS);
+  if (!td) {
+    com1_printf("[USERSPACE] error: Failed to create thread\n");
+    pmap_destroy(new_cr3);
+    memset(new_proc, 0, sizeof(process_t));
+    return NULL;
+  }
+
+  new_proc->main_thread = td;
+  new_proc->cur_thread = td;
 
   com1_printf("[USERSPACE] Created process '%s' (PID %d)\n", new_proc->name,
               new_proc->pid);
   com1_printf("[USERSPACE]   Entry: %p\n", (void *)entry);
   com1_printf("[USERSPACE]   User stack: %p\n", (void *)user_stack);
   com1_printf("[USERSPACE]   Kernel stack: %p\n",
-              (void *)new_proc->kernel_stack);
+              (void *)td->kernel_stack);
 
   return new_proc;
 }
@@ -235,20 +219,26 @@ void userspace_jump(process_t *proc) {
     return;
   }
 
+  thread_t *td = proc->main_thread;
+  if (!td) {
+    com1_printf("[USERSPACE] Error: No main thread for process\n");
+    return;
+  }
+
   com1_printf("[USERSPACE] Jumping to userspace: %s (PID %d)\n", proc->name,
               proc->pid);
   com1_printf("[USERSPACE]   Entry: %p\n", (void *)proc->entry_point);
   com1_printf("[USERSPACE]   Stack: %p\n", (void *)proc->user_stack);
-  com1_printf("[USERSPACE]   CS: 0x%x, SS: 0x%x\n", (u32)proc->context.cs,
-              (u32)proc->context.ss);
+  com1_printf("[USERSPACE]   CS: 0x%x, SS: 0x%x\n", (u32)td->context.cs,
+              (u32)td->context.ss);
 
   /* Set as current process */
   process_set_current(proc);
   pmap_load(proc->cr3);
 
   /* Enter userspace via iretq */
-  userspace_enter(proc->entry_point, proc->user_stack, proc->context.cs,
-                  proc->context.ss);
+  userspace_enter(proc->entry_point, proc->user_stack, td->context.cs,
+                  td->context.ss);
 
   /* Should never return */
   com1_printf("[USERSPACE] FATAL: Returned from userspace!\n");

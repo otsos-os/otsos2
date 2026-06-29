@@ -311,5 +311,12 @@ int api_alloc_object(void);
 void api_release_object(int index);
 int api_proc_getpid(void);
 int api_proc_getppid(void);
+int api_proc_gettid(void);
+void api_thread_exit(int code);
+int api_thread_join(u32 tid, int *status);
+void api_proc_exit_group(int code);
+int api_proc_set_tid_address(u64 tidptr);
+int api_futex_wait(u64 uaddr, u32 expected_val);
+int api_futex_wake(u64 uaddr, u32 max_waiters);
 
 #endif

@@ -24,11 +24,48 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u8 as 8 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type u64 as 64 bit unsigned
+$define %type int as 32 bit signed
+$define %type process_t as struct with process control block
+$define %type thread_t as struct with per-thread CPU context and state
+$define %type registers_t as struct with CPU register snapshot
+
+$define %func process_init as procedure with args void
+$define %func alloc_process as function with args void
+$define %func process_create_kernel as function with args const char *, void (*)(void)
+$define %func process_get as function with args u32
+$define %func process_current as function with args void
+$define %func process_set_current as procedure with args process_t *
+$define %func process_yield as procedure with args void
+$define %func process_exit as procedure with args int
+$define %func process_dump as procedure with args process_t *
+$define %func process_save_context as procedure with args process_t *, registers_t *
+$define %func process_kill as function with args u32
+$define %func process_send_signal as function with args u32, int
+
+*/
+
+/* !SPACE!
+
+$space %internal alloc_process
+$space %export process_init, process_current, process_set_current
+$space %export process_yield, process_exit, process_dump
+$space %export process_save_context, process_kill
+$space %export process_send_signal, process_is_initialized
+$space %export process_get, process_create, process_create_kernel
+
+*/
+
 #include <kernel/gdt.h>
 #include <mm/vm/pmap.h>
 #include <kernel/panic.h>
 #include <kernel/process.h>
 #include <kernel/signal.h>
+#include <kernel/thread.h>
 #include <kernel/event/event.h>
 #include <mm/vm/vm_map.h>
 #include <lib/com1.h>
@@ -36,277 +73,357 @@
 
 #include <kernel/api/posix/posix.h>
 
-process_t process_table[MAX_PROCESSES];
-u32 next_pid = 1;
-static process_t *current_process = NULL;
-static int process_initialized = 0;
+process_t	process_table[MAX_PROCESSES];
+u32		next_pid = 1;
+static int	process_initialized = 0;
 
-void process_init(void) {
-  com1_printf("[PROC] Initializing process subsystem...\n");
-
-  memset(process_table, 0, sizeof(process_table));
-  next_pid = 1;
-  current_process = NULL;
-
-  com1_printf("[PROC] Process table initialized (%d slots)\n", MAX_PROCESSES);
-  process_initialized = 1;
+void
+process_init(void)
+{
+	com1_printf("[PROC] Initializing process subsystem...\n");
+	memset(process_table, 0, sizeof(process_table));
+	next_pid = 1;
+	thread_init();
+	process_initialized = 1;
+	com1_printf("[PROC] Process table initialized "
+	    "(%d slots)\n", MAX_PROCESSES);
 }
 
-process_t *alloc_process(void) {
-  for (int i = 0; i < MAX_PROCESSES; i++) {
-    if (process_table[i].state == PROC_STATE_UNUSED) {
-      return &process_table[i];
-    }
-  }
-  return NULL;
+process_t *
+alloc_process(void)
+{
+	int		i;
+
+	for (i = 0; i < MAX_PROCESSES; i++) {
+		if (process_table[i].pid == 0) {
+			return (&process_table[i]);
+		}
+	}
+	return (NULL);
 }
 
-process_t *process_create_kernel(const char *name, void (*entry)(void)) {
-  process_t *proc = alloc_process();
-  if (!proc) {
-    com1_printf("[PROC] Error: No free process slots\n");
-    return NULL;
-  }
+process_t *
+process_create_kernel(const char *name, void (*entry)(void))
+{
+	process_t	*proc;
+	thread_t	*td;
 
-  u8 *kstack = (u8 *)kmem_alloc_aligned(KERNEL_STACK_SIZE, 16);
-  if (!kstack) {
-    com1_printf("[PROC] Error: Failed to allocate kernel stack\n");
-    return NULL;
-  }
-  memset(kstack, 0, KERNEL_STACK_SIZE);
+	proc = alloc_process();
+	if (!proc) {
+		com1_printf("[PROC] Error: no free process slots\n");
+		return (NULL);
+	}
 
-  proc->pid = next_pid++;
-  proc->ppid = 0;
-  proc->state = PROC_STATE_EMBRYO;
+	memset(proc, 0, sizeof(process_t));
 
-  int i;
-  for (i = 0; i < PROCESS_NAME_LEN - 1 && name[i]; i++) {
-    proc->name[i] = name[i];
-  }
-  proc->name[i] = '\0';
+	proc->pid = next_pid++;
+	proc->ppid = 0;
 
-  proc->cr3 = pmap_get_cr3();
-  proc->entry_point = (u64)entry;
+	int		i;
+	for (i = 0; i < PROCESS_NAME_LEN - 1 && name[i]; i++) {
+		proc->name[i] = name[i];
+	}
+	proc->name[i] = '\0';
 
-  proc->kernel_stack = (u64)(kstack + KERNEL_STACK_SIZE);
-  proc->user_stack = 0;
+	proc->cr3 = pmap_get_cr3();
+	proc->entry_point = (u64)entry;
+	proc->owns_address_space = 0;
+	proc->mmap_base = MMAP_BASE;
+	proc->exit_code = 0;
+	proc->personality = PERSONALITY_OTSOS;
 
-  memset(&proc->context, 0, sizeof(cpu_context_t));
-  proc->context.rip = (u64)entry;
-  proc->context.cs = KERNEL_CS;
-  proc->context.rflags = 0x202;
-  proc->context.rsp = proc->kernel_stack;
-  proc->context.ss = KERNEL_DS;
+	api_init_process(proc);
+	posix_init_process(proc);
 
-  proc->exit_code = 0;
-  proc->owns_address_space = 0;
-  proc->mmap_base = MMAP_BASE;
-  api_init_process(proc);
-  posix_init_process(proc);
-  proc->personality = PERSONALITY_OTSOS;
-  proc->next = NULL;
+	td = thread_create(proc, (u64)entry, 0, KERNEL_CS,
+	    KERNEL_DS);
+	if (!td) {
+		com1_printf("[PROC] Error: failed to create thread "
+		    "for kernel process\n");
+		memset(proc, 0, sizeof(process_t));
+		return (NULL);
+	}
 
-  proc->state = PROC_STATE_RUNNABLE;
+	td->context.rsp = td->kernel_stack;
 
-  com1_printf("[PROC] Created kernel process '%s' (PID %d) entry=%p\n",
-              proc->name, proc->pid, (void *)proc->entry_point);
+	proc->main_thread = td;
+	proc->cur_thread = td;
 
-  return proc;
+	com1_printf("[PROC] Created kernel process '%s' "
+	    "(PID %d) entry=%p\n", proc->name, proc->pid,
+	    (void *)proc->entry_point);
+
+	return (proc);
 }
 
-process_t *process_get(u32 pid) {
-  for (int i = 0; i < MAX_PROCESSES; i++) {
-    if (process_table[i].state != PROC_STATE_UNUSED &&
-        process_table[i].pid == pid) {
-      return &process_table[i];
-    }
-  }
-  return NULL;
+process_t *
+process_get(u32 pid)
+{
+	int	i;
+
+	for (i = 0; i < MAX_PROCESSES; i++) {
+		if (process_table[i].pid != 0 &&
+		    process_table[i].pid == pid) {
+			return (&process_table[i]);
+		}
+	}
+	return (NULL);
 }
 
-process_t *process_current(void) { return current_process; }
+process_t *
+process_current(void)
+{
+	thread_t	*td;
 
-int process_is_initialized(void) { return process_initialized; }
-
-void process_set_current(process_t *proc) {
-  current_process = proc;
-  if (proc) {
-    proc->state = PROC_STATE_RUNNING;
-    tss_set_rsp0(proc->kernel_stack);
-  }
+	td = thread_current();
+	if (!td) {
+		return (NULL);
+	}
+	return (td->proc);
 }
 
-void process_switch(process_t *proc) {
-  if (!proc) {
-    return;
-  }
-  process_set_current(proc);
-  pmap_load(proc->cr3);
+int
+process_is_initialized(void)
+{
+	return (process_initialized);
 }
 
-void process_yield(void) { __asm__ volatile("int $32"); }
+void
+process_set_current(process_t *proc)
+{
+	if (!proc) {
+		return;
+	}
 
-void process_exit(int code) {
-  if (!current_process) {
-    com1_printf("[PROC] Error: No current process to exit\n");
-    return;
-  }
+	thread_t	*td;
 
-  com1_printf("[PROC] Process '%s' (PID %d) exited with code %d\n",
-              current_process->name, current_process->pid, code);
-
-  if (current_process->pid == 1) {
-    panic("Init process terminated! (PID 1 exited with code %d)", code);
-  }
-
-  current_process->exit_code = code;
-  current_process->state = PROC_STATE_ZOMBIE;
-  api_release_handles(current_process);
-  posix_cleanup_process(current_process);
-  if (current_process->owns_address_space) {
-    u64 old_cr3 = current_process->cr3;
-    vm_map_free_all(current_process);
-    pmap_load(pmap_kernel_cr3());
-    pmap_destroy(old_cr3);
-    current_process->cr3 = 0;
-    current_process->owns_address_space = 0;
-  }
-  current_process->mmap_base = MMAP_BASE;
-
-  event_notify_proc_exit(current_process->pid, code);
-  event_cleanup_process(current_process);
-
-  /* Wake up parent if it's sleeping in api_proc_wait */
-  if (current_process->ppid > 0) {
-    process_t *parent = process_get(current_process->ppid);
-    if (parent) {
-      proc_wakeup((void *)parent);
-    }
-  }
-
-  __asm__ volatile("sti");
-  while (1) {
-    __asm__ volatile("hlt");
-  }
+	td = proc->cur_thread;
+	if (!td) {
+		td = proc->main_thread;
+	}
+	if (td) {
+		thread_set_current(td);
+	}
 }
 
-void process_dump(process_t *proc) {
-  if (!proc) {
-    com1_printf("[PROC] NULL process\n");
-    return;
-  }
-
-  const char *state_names[] = {"UNUSED",  "EMBRYO",   "RUNNABLE",
-                               "RUNNING", "SLEEPING", "ZOMBIE"};
-
-  com1_printf("=== Process Dump ===\n");
-  com1_printf("  PID: %d, PPID: %d\n", proc->pid, proc->ppid);
-  com1_printf("  Name: %s\n", proc->name);
-  com1_printf("  State: %s\n", state_names[proc->state]);
-  com1_printf("  Entry: %p\n", (void *)proc->entry_point);
-  com1_printf("  CR3: %p\n", (void *)proc->cr3);
-  com1_printf("  Kernel Stack: %p\n", (void *)proc->kernel_stack);
-  com1_printf("  User Stack: %p\n", (void *)proc->user_stack);
-  com1_printf("  Context RIP: %p\n", (void *)proc->context.rip);
-  com1_printf("  Context RSP: %p\n", (void *)proc->context.rsp);
-  com1_printf("====================\n");
+void
+process_yield(void)
+{
+	__asm__ volatile("int $32");
 }
 
-void process_save_context(process_t *proc, registers_t *regs) {
-  if (!proc || !regs) {
-    return;
-  }
+void
+process_exit(int code)
+{
+	process_t	*proc;
+	thread_t	*td;
 
-  proc->context.r15 = regs->r15;
-  proc->context.r14 = regs->r14;
-  proc->context.r13 = regs->r13;
-  proc->context.r12 = regs->r12;
-  proc->context.r11 = regs->r11;
-  proc->context.r10 = regs->r10;
-  proc->context.r9 = regs->r9;
-  proc->context.r8 = regs->r8;
-  proc->context.rbp = regs->rbp;
-  proc->context.rdi = regs->rdi;
-  proc->context.rsi = regs->rsi;
-  proc->context.rdx = regs->rdx;
-  proc->context.rcx = regs->rcx;
-  proc->context.rbx = regs->rbx;
-  proc->context.rax = regs->rax;
-  proc->context.rip = regs->rip;
-  proc->context.cs = regs->cs;
-  proc->context.rflags = regs->rflags;
-  proc->context.rsp = regs->rsp;
-  proc->context.ss = regs->ss;
+	proc = process_current();
+	if (!proc) {
+		com1_printf("[PROC] Error: no current process "
+		    "to exit\n");
+		return;
+	}
+
+	td = thread_current();
+	if (!td) {
+		td = proc->main_thread;
+	}
+
+	com1_printf("[PROC] Process '%s' (PID %d) exited "
+	    "with code %d\n", proc->name, proc->pid, code);
+
+	if (proc->pid == 1) {
+		panic("Init process terminated! (PID 1 exited "
+		    "with code %d)", code);
+	}
+
+	proc->exit_code = code;
+
+	thread_kill_all(proc);
+
+	if (td) {
+		td->state = PROC_STATE_ZOMBIE;
+	}
+
+	api_release_handles(proc);
+	posix_cleanup_process(proc);
+	if (proc->owns_address_space) {
+		u64	old_cr3;
+
+		old_cr3 = proc->cr3;
+		vm_map_free_all(proc);
+		pmap_load(pmap_kernel_cr3());
+		pmap_destroy(old_cr3);
+		proc->cr3 = 0;
+		proc->owns_address_space = 0;
+	}
+	proc->mmap_base = MMAP_BASE;
+
+	event_notify_proc_exit(proc->pid, code);
+	event_cleanup_process(proc);
+
+	if (proc->ppid > 0) {
+		process_t	*parent;
+
+		parent = process_get(proc->ppid);
+		if (parent) {
+			proc_wakeup((void *)parent);
+		}
+	}
+
+	__asm__ volatile("sti");
+	while (1) {
+		__asm__ volatile("hlt");
+	}
 }
 
-process_t *process_create(const char *name, void *elf_data, u64 elf_size) {
-  extern process_t *userspace_load_elf(const char *name, void *elf_data,
-                                       u64 elf_size);
-  return userspace_load_elf(name, elf_data, elf_size);
+void
+process_dump(process_t *proc)
+{
+	thread_t	*td;
+
+	if (!proc) {
+		com1_printf("[PROC] NULL process\n");
+		return;
+	}
+
+	td = proc->main_thread;
+
+	const char	*state_names[] = {"UNUSED", "EMBRYO",
+	    "RUNNABLE", "RUNNING", "SLEEPING", "ZOMBIE"};
+
+	com1_printf("=== Process Dump ===\n");
+	com1_printf("  PID: %d, PPID: %d\n", proc->pid,
+	    proc->ppid);
+	com1_printf("  Name: %s\n", proc->name);
+	if (td) {
+		com1_printf("  State: %s\n",
+		    state_names[td->state]);
+		com1_printf("  TID: %d\n", td->tid);
+		com1_printf("  Kernel Stack: %p\n",
+		    (void *)td->kernel_stack);
+		com1_printf("  Context RIP: %p\n",
+		    (void *)td->context.rip);
+		com1_printf("  Context RSP: %p\n",
+		    (void *)td->context.rsp);
+	}
+	com1_printf("  Entry: %p\n", (void *)proc->entry_point);
+	com1_printf("  CR3: %p\n", (void *)proc->cr3);
+	com1_printf("  User Stack: %p\n",
+	    (void *)proc->user_stack);
+	com1_printf("====================\n");
 }
 
-int process_kill(u32 pid) {
-  if (pid == 1) {
-    return -1;
-  }
+void
+process_save_context(process_t *proc, registers_t *regs)
+{
+	thread_t	*td;
 
-  process_t *proc = process_get(pid);
-  if (!proc) {
-    return -1;
-  }
+	if (!proc || !regs) {
+		return;
+	}
 
-  if (proc == current_process) {
-    process_exit(-1);
-    return 0;
-  }
+	td = proc->cur_thread;
+	if (!td) {
+		td = proc->main_thread;
+	}
+	if (!td) {
+		return;
+	}
 
-  api_release_handles(proc);
-  posix_cleanup_process(proc);
-  if (proc->owns_address_space) {
-    u64 old_cr3 = pmap_get_cr3();
-    pmap_load(proc->cr3);
-    vm_map_free_all(proc);
-    pmap_load(old_cr3);
-    pmap_destroy(proc->cr3);
-    proc->cr3 = 0;
-    proc->owns_address_space = 0;
-  }
-
-  if (proc->kernel_stack) {
-    void *kstack_base = (void *)(proc->kernel_stack - KERNEL_STACK_SIZE);
-    kmem_free(kstack_base);
-  }
-
-  memset(proc, 0, sizeof(process_t));
-  proc->state = PROC_STATE_UNUSED;
-
-  return 0;
+	thread_save_context(td, regs);
 }
 
-int process_send_signal(u32 pid, int sig) {
-  if (sig == 0) {
-    sig = SIGKILL;
-  }
+process_t *
+process_create(const char *name, void *elf_data, u64 elf_size)
+{
+	extern process_t *userspace_load_elf(const char *name,
+	    void *elf_data, u64 elf_size);
 
-  if (sig != SIGKILL && sig != SIGTERM) {
-    return -1;
-  }
+	return (userspace_load_elf(name, elf_data, elf_size));
+}
 
-  process_t *proc = process_get(pid);
-  if (!proc) {
-    return -1;
-  }
+int
+process_kill(u32 pid)
+{
+	process_t	*proc;
 
-  event_notify_signal(pid, sig);
+	if (pid == 1) {
+		return (-1);
+	}
 
-  if (sig == SIGTERM) {
-    proc->exit_code = 128 + sig;
-  }
+	proc = process_get(pid);
+	if (!proc) {
+		return (-1);
+	}
 
-  if (proc == current_process) {
-    process_exit(proc->exit_code ? proc->exit_code : -1);
-    return 0;
-  }
+	if (proc == process_current()) {
+		process_exit(-1);
+		return (0);
+	}
 
-  return process_kill(pid);
+	thread_kill_all(proc);
+
+	api_release_handles(proc);
+	posix_cleanup_process(proc);
+	if (proc->owns_address_space) {
+		u64	old_cr3;
+
+		old_cr3 = pmap_get_cr3();
+		pmap_load(proc->cr3);
+		vm_map_free_all(proc);
+		pmap_load(old_cr3);
+		pmap_destroy(proc->cr3);
+		proc->cr3 = 0;
+		proc->owns_address_space = 0;
+	}
+
+	/* Destroy all threads */
+	{
+		thread_t	*td, *next;
+
+		td = proc->thread_list;
+		while (td) {
+			next = td->next;
+			thread_destroy(td);
+			td = next;
+		}
+	}
+
+	memset(proc, 0, sizeof(process_t));
+
+	return (0);
+}
+
+int
+process_send_signal(u32 pid, int sig)
+{
+	process_t	*proc;
+
+	if (sig == 0) {
+		sig = SIGKILL;
+	}
+
+	if (sig != SIGKILL && sig != SIGTERM) {
+		return (-1);
+	}
+
+	proc = process_get(pid);
+	if (!proc) {
+		return (-1);
+	}
+
+	event_notify_signal(pid, sig);
+
+	if (sig == SIGTERM) {
+		proc->exit_code = 128 + sig;
+	}
+
+	if (proc == process_current()) {
+		process_exit(proc->exit_code ? proc->exit_code : -1);
+		return (0);
+	}
+
+	return (process_kill(pid));
 }

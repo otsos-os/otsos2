@@ -27,6 +27,7 @@
 #include <kernel/api/posix/posix.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
 #include <kernel/useraddr.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
@@ -133,7 +134,17 @@ s64	posix_geteuid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 s64	posix_getegid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	    registers_t *regs);
 s64	posix_getdents64(u64 fd, u64 buf, u64 count, u64 a4, u64 a5,
-	    u64 a6, registers_t *regs);
+    u64 a6, registers_t *regs);
+s64	posix_clone(u64 flags, u64 stack, u64 ptid, u64 ctid, u64 tls,
+    u64 a6, registers_t *regs);
+s64	posix_gettid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs);
+s64	posix_futex(u64 uaddr, u64 op, u64 val, u64 timeout, u64 uaddr2,
+    u64 val3, registers_t *regs);
+s64	posix_set_tid_address(u64 tidptr, u64 a2, u64 a3, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_exit_group(u64 code, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs);
 
 void
 posix_syscall_handler(registers_t *regs)
@@ -309,6 +320,21 @@ posix_syscall_handler(registers_t *regs)
 		break;
 	case SYS_getdents64:
 		ret = posix_getdents64(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_clone:
+		ret = posix_clone(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_gettid:
+		ret = posix_gettid(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_futex:
+		ret = posix_futex(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_set_tid_address:
+		ret = posix_set_tid_address(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_exit_group:
+		ret = posix_exit_group(a1, a2, a3, a4, a5, a6, regs);
 		break;
 	default:
 		com1_printf("[POSIX] unknown syscall: %d\n", (int)num);
@@ -491,8 +517,17 @@ posix_signal_deliver(struct process *proc, registers_t *regs)
 	u64	pending;
 	int	sig;
 	u64	mask;
+	struct thread	*td;
 
 	if (!proc || !regs) {
+		return;
+	}
+
+	td = proc->cur_thread;
+	if (!td) {
+		td = proc->main_thread;
+	}
+	if (!td) {
 		return;
 	}
 
@@ -515,9 +550,9 @@ posix_signal_deliver(struct process *proc, registers_t *regs)
 				continue;
 			}
 
-			process_save_context(proc, regs);
-			proc->saved_context = proc->context;
-			proc->saved_sigmask = proc->sigmask;
+			thread_save_context(td, regs);
+			td->saved_context = td->context;
+			td->saved_sigmask = proc->sigmask;
 			proc->sigmask |= proc->sigaction[sig - 1].mask;
 			proc->sigmask |= mask;
 			proc->sigpending &= ~mask;

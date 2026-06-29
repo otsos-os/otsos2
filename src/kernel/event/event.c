@@ -85,6 +85,7 @@ $space %export event_fork_process, event_notify_pipe_change
 #include <kernel/api/api.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
 #include <kernel/panic.h>
 #include <mm/kmem.h>
 #include <lib/com1.h>
@@ -137,36 +138,36 @@ filter_lookup(s16 filter)
 void
 proc_sleep(void *channel)
 {
-	process_t	*proc;
+	thread_t	*td;
 
-	proc = process_current();
-	if (!proc) {
+	td = thread_current();
+	if (!td) {
 		return;
 	}
 
-	proc->wait_channel = channel;
-	proc->state = PROC_STATE_SLEEPING;
+	td->wait_channel = channel;
+	td->state = PROC_STATE_SLEEPING;
 
 	__asm__ volatile("sti");
-	while (proc->wait_channel != NULL) {
+	while (td->wait_channel != NULL) {
 		__asm__ volatile("hlt");
 	}
 
-	proc->state = PROC_STATE_RUNNING;
+	td->state = PROC_STATE_RUNNING;
 }
 
 void
 proc_wakeup(void *channel)
 {
 	int		i;
-	process_t	*p;
+	thread_t	*td;
 
-	for (i = 0; i < MAX_PROCESSES; i++) {
-		p = &process_table[i];
-		if (p->state == PROC_STATE_SLEEPING &&
-		    p->wait_channel == channel) {
-			p->state = PROC_STATE_RUNNABLE;
-			p->wait_channel = NULL;
+	for (i = 0; i < MAX_THREADS; i++) {
+		td = &thread_table[i];
+		if (td->used && td->state == PROC_STATE_SLEEPING &&
+		    td->wait_channel == channel) {
+			td->state = PROC_STATE_RUNNABLE;
+			td->wait_channel = NULL;
 		}
 	}
 }
@@ -175,14 +176,14 @@ void
 proc_wakeup_one(void *channel)
 {
 	int		i;
-	process_t	*p;
+	thread_t	*td;
 
-	for (i = 0; i < MAX_PROCESSES; i++) {
-		p = &process_table[i];
-		if (p->state == PROC_STATE_SLEEPING &&
-		    p->wait_channel == channel) {
-			p->state = PROC_STATE_RUNNABLE;
-			p->wait_channel = NULL;
+	for (i = 0; i < MAX_THREADS; i++) {
+		td = &thread_table[i];
+		if (td->used && td->state == PROC_STATE_SLEEPING &&
+		    td->wait_channel == channel) {
+			td->state = PROC_STATE_RUNNABLE;
+			td->wait_channel = NULL;
 			return;
 		}
 	}
@@ -791,9 +792,15 @@ event_notify_pipe_change(pipe_t *p)
 		for (pid_slot = 0; pid_slot < MAX_PROCESSES;
 		    pid_slot++) {
 			process_t	*proc;
+			thread_t	*td;
 
 			proc = &process_table[pid_slot];
-			if (proc->state == PROC_STATE_UNUSED) {
+			if (proc->pid == 0) {
+				continue;
+			}
+
+			td = proc->main_thread;
+			if (!td || td->state == PROC_STATE_UNUSED) {
 				continue;
 			}
 

@@ -29,6 +29,7 @@
 
 #include <kernel/api/api.h>
 #include <kernel/api/posix/posix.h>
+#include <kernel/thread.h>
 #include <mlibc/mlibc.h>
 
 struct vm_object;
@@ -39,7 +40,7 @@ struct vm_object;
 #define MAX_PROCESSES 64
 #define PROCESS_NAME_LEN 32
 #define USER_STACK_SIZE (64 * 1024)   /* 64 KB user stack */
-#define KERNEL_STACK_SIZE (16 * 1024) /* 16 KB kernel stack per process */
+#define KERNEL_STACK_SIZE (16 * 1024) // 16 kb kheap for thread
 
 /* Virtual Memory Area — tracks a mapped region of a process's address space. */
 typedef struct vma {
@@ -53,32 +54,10 @@ typedef struct vma {
   struct vma *next;    /* singly-linked list, sorted by start */
 } vma_t;
 
-/* Process states */
-typedef enum {
-  PROC_STATE_UNUSED = 0,
-  PROC_STATE_EMBRYO,   /* Being created */
-  PROC_STATE_RUNNABLE, /* Ready to run */
-  PROC_STATE_RUNNING,  /* Currently running */
-  PROC_STATE_SLEEPING, /* Waiting for event */
-  PROC_STATE_ZOMBIE    /* Terminated, waiting for parent */
-} process_state_t;
-
-/* CPU context saved during context switch */
-typedef struct {
-  u64 r15, r14, r13, r12, r11, r10, r9, r8;
-  u64 rbp, rdi, rsi, rdx, rcx, rbx, rax;
-  u64 rip;
-  u64 cs;
-  u64 rflags;
-  u64 rsp;
-  u64 ss;
-} __attribute__((packed)) cpu_context_t;
-
 /* Process Control Block (PCB) */
 typedef struct process {
   u32 pid;                     /* Process ID */
   u32 ppid;                    /* Parent Process ID */
-  process_state_t state;       /* Current state */
   char name[PROCESS_NAME_LEN]; /* Process name */
 
   /* Memory */
@@ -86,11 +65,12 @@ typedef struct process {
   u64 entry_point; /* Entry point address */
 
   /* Stack */
-  u64 kernel_stack; /* Kernel stack top */
   u64 user_stack;   /* User stack top */
 
-  /* Context */
-  cpu_context_t context; /* Saved CPU state */
+  thread_t	*main_thread; 
+  thread_t	*cur_thread;
+  thread_t	*thread_list;	/* linked list of all threads in this proc */
+  int		thread_count;	/* number of alive threads */
 
   /* Exit status */
   int exit_code;
@@ -114,15 +94,7 @@ typedef struct process {
   posix_sigaction_t	sigaction[MAX_POSIX_SIGS];
   u64		sigmask;
   u64		sigpending;
-  cpu_context_t	saved_context;
-  u64		saved_sigmask;
   u64		brk;
-
-  /* Sleep / wait channel for event system */
-  void *wait_channel;   /* channel the process is sleeping on, NULL if running */
-
-  /* Links */
-  struct process *next; /* For scheduler queue */
 } process_t;
 
 /* Initialize process subsystem */
@@ -137,10 +109,8 @@ process_t *process_create_kernel(const char *name, void (*entry)(void));
 /* Get process by PID */
 process_t *process_get(u32 pid);
 
-/* Get current running process */
 process_t *process_current(void);
 
-/* Set current running process */
 void process_set_current(process_t *proc);
 
 /* Exit current process */
@@ -148,16 +118,11 @@ void process_exit(int code);
 int process_kill(u32 pid);
 int process_send_signal(u32 pid, int sig);
 
-/* Switch to a process (used by scheduler) */
-void process_switch(process_t *proc);
-
-/* Yield CPU to another process */
 void process_yield(void);
 
 /* Debug: dump process info */
 void process_dump(process_t *proc);
 
-/* Save CPU context from interrupt/syscall frame */
 void process_save_context(process_t *proc, registers_t *regs);
 
 /* Internal: find free process slot */

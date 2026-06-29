@@ -24,31 +24,92 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef USERSPACE_H
-#define USERSPACE_H
-
+#include <kernel/api/api.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
+#include <kernel/useraddr.h>
+#include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
-/* Default user stack virtual address */
-#define USER_STACK_BASE 0x00007FFFFFFFFFF0
-#define USER_STACK_TOP (USER_STACK_BASE - USER_STACK_SIZE + 16)
+extern int	futex_wait(u64 uaddr, u32 expected_val);
+extern int	futex_wake(u64 uaddr, u32 max_waiters);
 
-/* Initialize userspace subsystem */
-void userspace_init(void);
+int
+api_proc_gettid(void)
+{
+	thread_t	*td;
 
-/* Load init process from multiboot module */
-void userspace_load_init(void *module_start, u64 module_size);
+	td = thread_current();
+	if (!td) {
+		return (0);
+	}
+	return ((int)td->tid);
+}
 
-/* Load ELF and create userspace process */
-process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size);
+void
+api_thread_exit(int code)
+{
+	thread_exit(code);
+}
 
-/* Jump to userspace (starts executing the process) */
-void userspace_jump(process_t *proc);
+int
+api_thread_join(u32 tid, int *status)
+{
+	if (status && !is_user_address(status, sizeof(int))) {
+		return (-API_ERR_BAD_ADDR);
+	}
 
-/* Assembly function to switch to Ring 3 */
-extern void userspace_enter(u64 entry, u64 user_stack, u64 user_cs,
-                            u64 user_ds);
+	return (thread_join(tid, status));
+}
 
-#endif
+void
+api_proc_exit_group(int code)
+{
+	process_t	*proc;
+
+	proc = process_current();
+	if (!proc) {
+		return;
+	}
+
+	process_exit(code);
+}
+
+int
+api_proc_set_tid_address(u64 tidptr)
+{
+	thread_t	*td;
+
+	td = thread_current();
+	if (!td) {
+		return (-API_ERR_BAD_VALUE);
+	}
+
+	td->tid_address = tidptr;
+
+	if (tidptr && is_user_address((void *)tidptr, sizeof(u32))) {
+		*(u32 *)tidptr = td->tid;
+	}
+
+	return ((int)td->tid);
+}
+
+int
+api_futex_wait(u64 uaddr, u32 expected_val)
+{
+	if (!is_user_address((void *)uaddr, sizeof(u32))) {
+		return (-API_ERR_BAD_ADDR);
+	}
+
+	return (futex_wait(uaddr, expected_val));
+}
+
+int
+api_futex_wake(u64 uaddr, u32 max_waiters)
+{
+	if (!is_user_address((void *)uaddr, sizeof(u32))) {
+		return (-API_ERR_BAD_ADDR);
+	}
+
+	return (futex_wake(uaddr, max_waiters));
+}

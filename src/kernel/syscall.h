@@ -80,6 +80,13 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 
 #define	CALL_PROC_GETPID	0x408
 #define	CALL_PROC_GETPPID	0x409
+#define	CALL_PROC_THREAD_EXIT	0x40A
+#define	CALL_PROC_THREAD_JOIN	0x40B
+#define	CALL_PROC_GETTID	0x40C
+#define	CALL_PROC_EXIT_GROUP	0x40D
+#define	CALL_PROC_SET_TID_ADDR	0x40E
+#define	CALL_FUTEX_WAIT		0x40F
+#define	CALL_FUTEX_WAKE		0x410
 
 #define	CALL_PERSONALITY	0xFFFF
 

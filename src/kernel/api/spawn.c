@@ -33,6 +33,7 @@
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
 #include <userland/elf.h>
@@ -348,32 +349,18 @@ int api_proc_spawn(const char *path, const char *const *argv,
     kmem_free(kpath);
     return -API_ERR_RETRY;
   }
-  child->state = PROC_STATE_EMBRYO;
+  memset(child, 0, sizeof(process_t));
 
   u64 new_cr3 = pmap_create();
   if (!new_cr3) {
     com1_printf("[SPAWN] Error: failed to create address space\n");
     memset(child, 0, sizeof(process_t));
-    child->state = PROC_STATE_UNUSED;
     kmem_free(elf_buf);
     free_string_array(kargv);
     free_string_array(kenvp);
     kmem_free(kpath);
     return -API_ERR_NO_MEMORY;
   }
-
-  u8 *kstack = (u8 *)kmem_alloc_aligned(KERNEL_STACK_SIZE, 16);
-  if (!kstack) {
-    free_spawn_cr3(new_cr3);
-    memset(child, 0, sizeof(process_t));
-    child->state = PROC_STATE_UNUSED;
-    kmem_free(elf_buf);
-    free_string_array(kargv);
-    free_string_array(kenvp);
-    kmem_free(kpath);
-    return -API_ERR_NO_MEMORY;
-  }
-  memset(kstack, 0, KERNEL_STACK_SIZE);
 
   u64 old_cr3 = pmap_get_cr3();
   pmap_load(new_cr3);
@@ -384,9 +371,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
     com1_printf("[SPAWN] Error: elf_load failed for '%s'\n", kpath);
     pmap_load(old_cr3);
     free_spawn_cr3(new_cr3);
-    kmem_free(kstack);
     memset(child, 0, sizeof(process_t));
-    child->state = PROC_STATE_UNUSED;
     free_string_array(kargv);
     free_string_array(kenvp);
     kmem_free(kpath);
@@ -398,9 +383,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
     com1_printf("[SPAWN] Error: allocate_user_stack failed\n");
     pmap_load(old_cr3);
     free_spawn_cr3(new_cr3);
-    kmem_free(kstack);
     memset(child, 0, sizeof(process_t));
-    child->state = PROC_STATE_UNUSED;
     free_string_array(kargv);
     free_string_array(kenvp);
     kmem_free(kpath);
@@ -416,9 +399,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
     com1_printf("[SPAWN] Error: build_user_stack failed\n");
     pmap_load(old_cr3);
     free_spawn_cr3(new_cr3);
-    kmem_free(kstack);
     memset(child, 0, sizeof(process_t));
-    child->state = PROC_STATE_UNUSED;
     free_string_array(kargv);
     free_string_array(kenvp);
     kmem_free(kpath);
@@ -434,24 +415,11 @@ int api_proc_spawn(const char *path, const char *const *argv,
 
   child->pid = pid;
   child->ppid = parent->pid;
-  child->state = PROC_STATE_RUNNABLE;
   copy_process_name(child->name, kpath);
 
   child->cr3 = new_cr3;
   child->entry_point = entry;
-  child->kernel_stack = (u64)(kstack + KERNEL_STACK_SIZE);
   child->user_stack = user_stack;
-
-  memset(&child->context, 0, sizeof(cpu_context_t));
-  child->context.rip = entry;
-  child->context.rsp = new_rsp;
-  child->context.cs = USER_CS;
-  child->context.ss = USER_DS;
-  child->context.rflags = 0x202;
-  child->context.rdi = (u64)argc;
-  child->context.rsi = argv_addr;
-  child->context.rdx = envp_addr;
-  child->context.rax = 0;
 
   child->exit_code = 0;
   child->owns_address_space = 1;
@@ -465,7 +433,25 @@ int api_proc_spawn(const char *path, const char *const *argv,
   posix_copy_fds(child, parent);
   child->personality = PERSONALITY_POSIX;
   posix_setup_stdio(child);
-  child->next = NULL;
+
+  /* Create the main thread for the child process */
+  thread_t *td = thread_create(child, entry, new_rsp,
+                               USER_CS, USER_DS);
+  if (!td) {
+    com1_printf("[SPAWN] Error: failed to create thread\n");
+    pmap_destroy(new_cr3);
+    memset(child, 0, sizeof(process_t));
+    kmem_free(kpath);
+    return -API_ERR_NO_MEMORY;
+  }
+
+  td->context.rdi = (u64)argc;
+  td->context.rsi = argv_addr;
+  td->context.rdx = envp_addr;
+  td->context.rax = 0;
+
+  child->main_thread = td;
+  child->cur_thread = td;
 
   com1_printf("[SPAWN] Created '%s' (PID %d) from '%s'\n", child->name,
               child->pid, kpath);

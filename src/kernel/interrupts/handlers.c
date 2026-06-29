@@ -35,6 +35,7 @@
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_map.h>
 #include <kernel/scheduler.h>
+#include <kernel/thread.h>
 #include <mlibc/mlibc.h>
 
 extern void kernel_panic(registers_t *regs);

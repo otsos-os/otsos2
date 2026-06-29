@@ -25,9 +25,12 @@
  */
 
 #include <mm/vm/pmap.h>
+#include <kernel/gdt.h>
 #include <kernel/api/api.h>
 #include <kernel/api/posix/posix.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
+#include <lib/com1.h>
 #include <mm/vm/vm_map.h>
 #include <mm/kmem.h>
 
@@ -38,7 +41,38 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
     return -API_ERR_BAD_VALUE;
   }
 
-  /* Only support full process copy for now. */
+  thread_t *parent_td = thread_current();
+  if (!parent_td) {
+    return -API_ERR_BAD_VALUE;
+  }
+
+  /* Thread creation: CLONE_VM | CLONE_THREAD — shares address space */
+  if ((flags & API_CLONE_THREAD) && (flags & API_CLONE_VM)) {
+    if (!child_stack) {
+      return -API_ERR_BAD_VALUE;
+    }
+
+    thread_t *new_td = thread_create(parent,
+        parent_td->context.rip,
+        child_stack & ~0xFULL,
+        USER_CS, USER_DS);
+    if (!new_td) {
+      return -API_ERR_NO_MEMORY;
+    }
+
+    /* Copy parent's context, set return value to 0 */
+    thread_save_context(parent_td, regs);
+    new_td->context = parent_td->context;
+    new_td->context.rax = 0;
+    new_td->context.rsp = child_stack & ~0xFULL;
+
+    com1_printf("[CLONE] new thread tid=%d in PID %d\n",
+        new_td->tid, parent->pid);
+
+    return (long)new_td->tid;
+  }
+
+  /* Full process fork: no CLONE_VM, no CLONE_THREAD */
   if (flags & (API_CLONE_VM | API_CLONE_THREAD)) {
     return -API_ERR_BAD_VALUE;
   }
@@ -48,29 +82,16 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
     return -API_ERR_RETRY;
   }
 
-  child->state = PROC_STATE_EMBRYO;
+  memset(child, 0, sizeof(process_t));
 
   u64 child_cr3 = pmap_clone(parent->cr3);
   if (!child_cr3) {
     memset(child, 0, sizeof(process_t));
-    child->state = PROC_STATE_UNUSED;
     return -API_ERR_NO_MEMORY;
   }
-
-  u8 *kstack = (u8 *)kmem_alloc_aligned(KERNEL_STACK_SIZE, 16);
-  if (!kstack) {
-    pmap_destroy(child_cr3);
-    memset(child, 0, sizeof(process_t));
-    child->state = PROC_STATE_UNUSED;
-    return -API_ERR_NO_MEMORY;
-  }
-  memset(kstack, 0, KERNEL_STACK_SIZE);
-
-  memset(child, 0, sizeof(process_t));
 
   child->pid = next_pid++;
   child->ppid = parent->pid;
-  child->state = PROC_STATE_RUNNABLE;
   child->cr3 = child_cr3;
   child->entry_point = parent->entry_point;
 
@@ -79,25 +100,35 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
   }
   child->name[PROCESS_NAME_LEN - 1] = '\0';
 
-  child->kernel_stack = (u64)(kstack + KERNEL_STACK_SIZE);
   child->user_stack = parent->user_stack;
-
-  process_save_context(parent, regs);
-  child->context = parent->context;
-  child->context.rax = 0;
-
-  if (child_stack) {
-    child->context.rsp = child_stack & ~0xFULL;
-    child->user_stack = child->context.rsp;
-  }
-
   child->exit_code = 0;
   child->owns_address_space = 1;
   child->mmap_base = parent->mmap_base;
   vm_map_fork(parent, child);
   api_copy_handles(child, parent);
   posix_copy_fds(child, parent);
-  child->next = NULL;
+
+  /* Create thread for child process */
+  thread_t *td = thread_create(child, parent->entry_point,
+      child_stack ? (child_stack & ~0xFULL) : parent->user_stack,
+      USER_CS, USER_DS);
+  if (!td) {
+    pmap_destroy(child_cr3);
+    memset(child, 0, sizeof(process_t));
+    return -API_ERR_NO_MEMORY;
+  }
+
+  child->main_thread = td;
+  child->cur_thread = td;
+
+  /* Copy parent's context, set return value to 0 */
+  thread_save_context(parent_td, regs);
+  td->context = parent_td->context;
+  td->context.rax = 0;
+
+  if (child_stack) {
+    td->context.rsp = child_stack & ~0xFULL;
+  }
 
   return (long)child->pid;
 }

@@ -28,6 +28,7 @@
 #include <mm/vm/vm_map.h>
 #include <kernel/event/event.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
 #include <kernel/useraddr.h>
 #include <lib/com1.h>
 #include <mm/kmem.h>
@@ -44,7 +45,11 @@ int api_proc_wait(int *status) {
   for (int attempt = 0; attempt < 2; attempt++) {
     for (int i = 0; i < MAX_PROCESSES; i++) {
       process_t *child = &process_table[i];
-      if (child->state != PROC_STATE_ZOMBIE) {
+      if (child->pid == 0) {
+        continue;
+      }
+      thread_t *child_td = child->main_thread;
+      if (!child_td || child_td->state != PROC_STATE_ZOMBIE) {
         continue;
       }
       if (child->ppid != current->pid) {
@@ -65,14 +70,12 @@ int api_proc_wait(int *status) {
         child->owns_address_space = 0;
       }
 
-      if (child->kernel_stack) {
-        u64 kstack_base = child->kernel_stack - KERNEL_STACK_SIZE;
-        kmem_free((void *)kstack_base);
+      if (child_td) {
+        thread_destroy(child_td);
       }
 
       int pid = (int)child->pid;
       memset(child, 0, sizeof(process_t));
-      child->state = PROC_STATE_UNUSED;
       return pid;
     }
 

@@ -30,6 +30,7 @@
 #include <kernel/api/posix/posix.h>
 #include <kernel/event/event.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
 #include <kernel/syscall.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
@@ -179,9 +180,15 @@ void syscall_handler(registers_t *regs) {
     regs->rax = (u64)api_proc_spawn((const char *)arg1, (const char *const *)arg2,
                                 (const char *const *)arg3);
     break;
-  case CALL_PROC_EXIT:
-    process_exit((int)arg1);
+  case CALL_PROC_EXIT: {
+    process_t *proc = process_current();
+    if (proc && thread_count_alive(proc) > 1) {
+      api_thread_exit((int)arg1);
+    } else {
+      process_exit((int)arg1);
+    }
     break;
+  }
   case CALL_PROC_WAIT:
     regs->rax = (u64)api_proc_wait((int *)arg1);
     break;
@@ -237,6 +244,27 @@ void syscall_handler(registers_t *regs) {
     break;
   case CALL_PROC_GETPPID:
     regs->rax = (u64)api_proc_getppid();
+    break;
+  case CALL_PROC_THREAD_EXIT:
+    api_thread_exit((int)arg1);
+    break;
+  case CALL_PROC_THREAD_JOIN:
+    regs->rax = (u64)api_thread_join((u32)arg1, (int *)arg2);
+    break;
+  case CALL_PROC_GETTID:
+    regs->rax = (u64)api_proc_gettid();
+    break;
+  case CALL_PROC_EXIT_GROUP:
+    api_proc_exit_group((int)arg1);
+    break;
+  case CALL_PROC_SET_TID_ADDR:
+    regs->rax = (u64)api_proc_set_tid_address(arg1);
+    break;
+  case CALL_FUTEX_WAIT:
+    regs->rax = (u64)api_futex_wait(arg1, (u32)arg2);
+    break;
+  case CALL_FUTEX_WAKE:
+    regs->rax = (u64)api_futex_wake(arg1, (u32)arg2);
     break;
   default:
     com1_printf("Unknown syscall: %d\n", syscall_number);

@@ -39,6 +39,14 @@ not Linux/POSIX compatible.
 #define CALL_PROC_WAIT   0x404
 #define CALL_PROC_KILL   0x405
 
+#define CALL_PROC_THREAD_EXIT  0x40A
+#define CALL_PROC_THREAD_JOIN  0x40B
+#define CALL_PROC_GETTID       0x40C
+#define CALL_PROC_EXIT_GROUP   0x40D
+#define CALL_PROC_SET_TID_ADDR 0x40E
+#define CALL_FUTEX_WAIT        0x40F
+#define CALL_FUTEX_WAKE        0x410
+
 #define CALL_SYS_INFO    0x500
 #define CALL_DRM_CALL    0x600
 ```
@@ -53,3 +61,16 @@ Returns are non-negative on success and negative `API_ERR_*` values on failure.
 - `procSpawn(path, argv, envp)` creates a new process and returns its PID.
 - `procCopy` is a low-level process copy call for experiments; normal userspace
   should prefer `procSpawn`.
+- `procClone(CLONE_VM|CLONE_THREAD, stack, 0)` creates a new thread in the
+  current process. Returns the new TID to the parent, 0 to the child.
+- `procThreadExit(code)` exits the calling thread. If it was the last thread,
+  the whole process exits.
+- `procThreadJoin(tid, &status)` waits for thread `tid` to terminate.
+- `procGetTid()` returns the calling thread's TID.
+- `procExitGroup(code)` kills the entire process (all threads) immediately.
+- `procSetTidAddr(ptr)` sets the tid-clearing address. On thread exit the
+  kernel writes 0 to `*ptr` and does a futex wake on it.
+- `futexWait(uaddr, expected)` — if `*uaddr == expected`, sleep on `uaddr`.
+- `futexWake(uaddr, max)` — wake up to `max` threads waiting on `uaddr`.
+- `procExit(code)` is thread-aware: if >1 thread alive, exits just the
+  calling thread; otherwise exits the whole process.

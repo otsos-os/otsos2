@@ -59,6 +59,7 @@ $space %export kshell_set_boot_info, kshell_echo_command
 #include <kernel/kshell/kshell.h>
 #include <kernel/api/api.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
 #include <mlibc/mlibc.h>
 
 static int	g_kshell_is_multiboot2;
@@ -259,18 +260,24 @@ print_kernel_var(const char *name)
 		kshell_console_write("PID\tNAME\tSTATE\n");
 		for (i = 0; i < MAX_PROCESSES; i++) {
 			process_t	*proc;
+			thread_t	*td;
 
 			proc = &process_table[i];
-			if (proc->state != PROC_STATE_UNUSED) {
-				kshell_console_write_int(
-				    (int)proc->pid);
-				kshell_console_write("\t");
-				kshell_console_write(proc->name);
-				kshell_console_write("\t");
-				kshell_console_write(
-				    process_state_name(proc->state));
-				kshell_console_write("\n");
+			if (proc->pid == 0) {
+				continue;
 			}
+			td = proc->main_thread;
+			if (!td) {
+				continue;
+			}
+			kshell_console_write_int(
+			    (int)proc->pid);
+			kshell_console_write("\t");
+			kshell_console_write(proc->name);
+			kshell_console_write("\t");
+			kshell_console_write(
+			    process_state_name(td->state));
+			kshell_console_write("\n");
 		}
 		return (0);
 	}

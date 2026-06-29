@@ -29,18 +29,18 @@
 $define %type u64 as 64 bit unsigned
 $define %type u32 as 32 bit unsigned
 $define %type int as 32 bit signed
+$define %type thread_t as struct with per-thread CPU context and state
 $define %type process_t as struct with process control block
 $define %type registers_t as struct with CPU register snapshot
 
-$define %func load_context as procedure with args process_t *, registers_t *
-$define %func pick_next as function with args process_t *
+$define %func pick_next_thread as function with args thread_t *
 $define %func scheduler_tick as procedure with args registers_t *
 
 */
 
 /* !SPACE!
 
-$space %internal load_context, pick_next
+$space %internal pick_next_thread
 $space %export scheduler_tick
 
 */
@@ -49,47 +49,24 @@ $space %export scheduler_tick
 #include <mm/vm/pmap.h>
 #include <kernel/process.h>
 #include <kernel/scheduler.h>
+#include <kernel/thread.h>
 
-static void
-load_context(process_t *proc, registers_t *regs)
+static thread_t *
+pick_next_thread(thread_t *current)
 {
-	regs->r15 = proc->context.r15;
-	regs->r14 = proc->context.r14;
-	regs->r13 = proc->context.r13;
-	regs->r12 = proc->context.r12;
-	regs->r11 = proc->context.r11;
-	regs->r10 = proc->context.r10;
-	regs->r9 = proc->context.r9;
-	regs->r8 = proc->context.r8;
-	regs->rbp = proc->context.rbp;
-	regs->rdi = proc->context.rdi;
-	regs->rsi = proc->context.rsi;
-	regs->rdx = proc->context.rdx;
-	regs->rcx = proc->context.rcx;
-	regs->rbx = proc->context.rbx;
-	regs->rax = proc->context.rax;
-	regs->rip = proc->context.rip;
-	regs->cs = proc->context.cs;
-	regs->rflags = proc->context.rflags;
-	regs->rsp = proc->context.rsp;
-	regs->ss = proc->context.ss;
-}
-
-static process_t *
-pick_next(process_t *current)
-{
-	process_t	*cand;
+	thread_t	*cand;
 	int		start, i, idx;
 
 	start = 0;
 	if (current) {
-		start = (int)(current - process_table) + 1;
+		start = (int)(current - thread_table) + 1;
 	}
 
-	for (i = 0; i < MAX_PROCESSES; i++) {
-		idx = (start + i) % MAX_PROCESSES;
-		cand = &process_table[idx];
-		if (cand->state == PROC_STATE_RUNNABLE) {
+	for (i = 0; i < MAX_THREADS; i++) {
+		idx = (start + i) % MAX_THREADS;
+		cand = &thread_table[idx];
+		if (cand->used &&
+		    cand->state == PROC_STATE_RUNNABLE) {
 			return (cand);
 		}
 	}
@@ -101,7 +78,8 @@ void
 scheduler_tick(registers_t *regs)
 {
 	static u32	last_magic = 0;
-	process_t	*current, *next;
+	thread_t	*current, *next;
+	process_t	*cur_proc;
 
 	if (last_magic == 0) {
 		last_magic = g_chainfs.superblock.magic;
@@ -124,45 +102,50 @@ scheduler_tick(registers_t *regs)
 		return;
 	}
 
-	current = process_current();
+	current = thread_current();
 	if (!current) {
 		return;
 	}
 
-	if ((regs->cs & 3) == 0 && current->state == PROC_STATE_RUNNING) {
+	cur_proc = current->proc;
+
+	if ((regs->cs & 3) == 0 &&
+	    current->state == PROC_STATE_RUNNING) {
 		return;
 	}
 
 	if (current->state == PROC_STATE_SLEEPING) {
-		next = pick_next(current);
+		next = pick_next_thread(current);
 		if (!next || next == current) {
 			return;
 		}
-		process_save_context(current, regs);
-		process_set_current(next);
-		if (next->cr3 != current->cr3) {
-			pmap_load(next->cr3);
+		thread_save_context(current, regs);
+		thread_set_current(next);
+		if (next->proc && cur_proc &&
+		    next->proc->cr3 != cur_proc->cr3) {
+			pmap_load(next->proc->cr3);
 		}
-		load_context(next, regs);
+		thread_load_context(next, regs);
 		return;
 	}
 
-	process_save_context(current, regs);
+	thread_save_context(current, regs);
 
 	if (current->state == PROC_STATE_RUNNING) {
 		current->state = PROC_STATE_RUNNABLE;
 	}
 
-	next = pick_next(current);
+	next = pick_next_thread(current);
 	if (!next || next == current) {
 		current->state = PROC_STATE_RUNNING;
 		return;
 	}
 
-	process_set_current(next);
-	if (next->cr3 != current->cr3) {
-		pmap_load(next->cr3);
+	thread_set_current(next);
+	if (next->proc && cur_proc &&
+	    next->proc->cr3 != cur_proc->cr3) {
+		pmap_load(next->proc->cr3);
 	}
 
-	load_context(next, regs);
+	thread_load_context(next, regs);
 }

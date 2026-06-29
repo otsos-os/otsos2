@@ -31,6 +31,7 @@
 #include <kernel/event/event.h>
 #include <kernel/gdt.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
 #include <kernel/signal.h>
 #include <kernel/useraddr.h>
 #include <kernel/interrupts/idt.h>
@@ -42,6 +43,10 @@
 #include <mm/vm/vm_map.h>
 #include <userland/elf.h>
 #include <userland/userspace.h>
+
+extern void	futex_wake_all(u64 uaddr);
+extern int	futex_wait(u64 uaddr, u32 expected_val);
+extern int	futex_wake(u64 uaddr, u32 max_waiters);
 
 extern void pmap_destroy_page_tables_only(u64 cr3);
 
@@ -354,9 +359,49 @@ s64
 posix_exit(u64 code, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
     registers_t *regs)
 {
+	struct process	*proc;
+	struct thread	*td;
+
 	(void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
 
-	posix_cleanup_process(process_current());
+	proc = process_current();
+	if (!proc) {
+		return (0);
+	}
+
+	td = thread_current();
+	if (!td) {
+		posix_cleanup_process(proc);
+		process_exit((int)code);
+		return (0);
+	}
+
+	/* If this is the last alive thread, exit the whole process */
+	if (thread_count_alive(proc) <= 1) {
+		posix_cleanup_process(proc);
+		process_exit((int)code);
+		return (0);
+	}
+
+	/* Otherwise just exit this thread */
+	thread_exit((int)code);
+	return (0);
+}
+
+s64
+posix_exit_group(u64 code, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+	struct process	*proc;
+
+	(void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
+
+	proc = process_current();
+	if (!proc) {
+		return (0);
+	}
+
+	posix_cleanup_process(proc);
 	process_exit((int)code);
 	return (0);
 }
@@ -382,9 +427,15 @@ posix_wait4(u64 pid_u, u64 status_u, u64 options, u64 rusage_u,
 	for (attempt = 0; attempt < 2; attempt++) {
 		for (i = 0; i < MAX_PROCESSES; i++) {
 			process_t	*child;
+			thread_t	*child_td;
 
 			child = &process_table[i];
-			if (child->state != PROC_STATE_ZOMBIE) {
+			if (child->pid == 0) {
+				continue;
+			}
+			child_td = child->main_thread;
+			if (!child_td ||
+			    child_td->state != PROC_STATE_ZOMBIE) {
 				continue;
 			}
 			if (child->ppid != current->pid) {
@@ -407,18 +458,14 @@ posix_wait4(u64 pid_u, u64 status_u, u64 options, u64 rusage_u,
 				child->owns_address_space = 0;
 			}
 
-			if (child->kernel_stack) {
-				u64	kstack_base;
-				kstack_base = child->kernel_stack -
-				    KERNEL_STACK_SIZE;
-				kmem_free((void *)kstack_base);
+			if (child_td) {
+				thread_destroy(child_td);
 			}
 
 			{
 				int	reaped_pid;
 				reaped_pid = (int)child->pid;
 				memset(child, 0, sizeof(process_t));
-				child->state = PROC_STATE_UNUSED;
 				return ((s64)reaped_pid);
 			}
 		}
@@ -438,8 +485,9 @@ posix_fork(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 {
 	struct process	*parent;
 	struct process	*child;
+	struct thread	*parent_td;
+	struct thread	*child_td;
 	u64		child_cr3;
-	u8		*kstack;
 
 	(void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
 
@@ -448,34 +496,25 @@ posix_fork(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 		return (-POSIX_EFAULT);
 	}
 
+	parent_td = thread_current();
+	if (!parent_td) {
+		return (-POSIX_EFAULT);
+	}
+
 	child = alloc_process();
 	if (!child) {
 		return (-POSIX_EAGAIN);
 	}
-
-	child->state = PROC_STATE_EMBRYO;
+	memset(child, 0, sizeof(process_t));
 
 	child_cr3 = pmap_clone(parent->cr3);
 	if (!child_cr3) {
 		memset(child, 0, sizeof(process_t));
-		child->state = PROC_STATE_UNUSED;
 		return (-POSIX_ENOMEM);
 	}
-
-	kstack = (u8 *)kmem_alloc_aligned(KERNEL_STACK_SIZE, 16);
-	if (!kstack) {
-		pmap_destroy(child_cr3);
-		memset(child, 0, sizeof(process_t));
-		child->state = PROC_STATE_UNUSED;
-		return (-POSIX_ENOMEM);
-	}
-	memset(kstack, 0, KERNEL_STACK_SIZE);
-
-	memset(child, 0, sizeof(process_t));
 
 	child->pid = next_pid++;
 	child->ppid = parent->pid;
-	child->state = PROC_STATE_RUNNABLE;
 	child->cr3 = child_cr3;
 	child->entry_point = parent->entry_point;
 
@@ -488,13 +527,7 @@ posix_fork(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 		child->name[i] = '\0';
 	}
 
-	child->kernel_stack = (u64)(kstack + KERNEL_STACK_SIZE);
 	child->user_stack = parent->user_stack;
-
-	process_save_context(parent, regs);
-	child->context = parent->context;
-	child->context.rax = 0;
-
 	child->exit_code = 0;
 	child->owns_address_space = 1;
 	child->mmap_base = parent->mmap_base;
@@ -504,7 +537,22 @@ posix_fork(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	api_copy_handles(child, parent);
 	posix_copy_fds(child, parent);
 
-	child->next = NULL;
+	/* Create thread for child process */
+	child_td = thread_create(child, parent->entry_point,
+	    parent->user_stack, USER_CS, USER_DS);
+	if (!child_td) {
+		pmap_destroy(child_cr3);
+		memset(child, 0, sizeof(process_t));
+		return (-POSIX_ENOMEM);
+	}
+
+	child->main_thread = child_td;
+	child->cur_thread = child_td;
+
+	/* Copy parent's context, set return value to 0 */
+	process_save_context(parent, regs);
+	child_td->context = parent_td->context;
+	child_td->context.rax = 0;
 
 	return ((s64)child->pid);
 }
@@ -806,4 +854,159 @@ posix_nanosleep(u64 req_u, u64 rem_u, u64 a3, u64 a4, u64 a5,
 	}
 
 	return (0);
+}
+
+s64
+posix_clone(u64 flags_u, u64 stack, u64 ptid, u64 ctid, u64 tls,
+    u64 a6, registers_t *regs)
+{
+	struct process	*parent;
+	struct thread	*parent_td;
+	u64		flags;
+
+	(void)a6;
+	(void)tls;	/* TODO: CLONE_SETTLS */
+
+	parent = process_current();
+	if (!parent || !regs) {
+		return (-POSIX_EFAULT);
+	}
+
+	parent_td = thread_current();
+	if (!parent_td) {
+		return (-POSIX_EFAULT);
+	}
+
+	flags = flags_u;
+
+	/* Thread creation: CLONE_VM | CLONE_THREAD */
+	if ((flags & POSIX_CLONE_THREAD) && (flags & POSIX_CLONE_VM)) {
+		struct thread	*new_td;
+
+		if (!stack) {
+			return (-POSIX_EINVAL);
+		}
+
+		new_td = thread_create(parent,
+		    parent_td->context.rip,
+		    stack & ~0xFULL,
+		    USER_CS, USER_DS);
+		if (!new_td) {
+			return (-POSIX_ENOMEM);
+		}
+
+		thread_save_context(parent_td, regs);
+		new_td->context = parent_td->context;
+		new_td->context.rax = 0;
+		new_td->context.rsp = stack & ~0xFULL;
+
+		/* CLONE_PARENT_SETTID: write child TID to ptid */
+		if ((flags & POSIX_CLONE_PARENT_SETTID) && ptid) {
+			if (is_user_address((void *)ptid,
+			    sizeof(u32))) {
+				*(u32 *)ptid = new_td->tid;
+			}
+		}
+
+		/* CLONE_CHILD_SETTID: write child TID to ctid
+		 * (in child's address space — same as parent for threads) */
+		if ((flags & POSIX_CLONE_CHILD_SETTID) && ctid) {
+			if (is_user_address((void *)ctid,
+			    sizeof(u32))) {
+				*(u32 *)ctid = new_td->tid;
+			}
+		}
+
+		/* CLONE_CHILD_CLEARTID: set tid_address for futex wake
+		 * on thread exit */
+		if (flags & POSIX_CLONE_CHILD_CLEARTID) {
+			new_td->tid_address = ctid;
+		}
+
+		com1_printf("[POSIX clone] new thread tid=%d "
+		    "PID %d\n", new_td->tid, parent->pid);
+
+		return ((s64)new_td->tid);
+	}
+
+	/* Full process fork */
+	if (flags & (POSIX_CLONE_VM | POSIX_CLONE_THREAD)) {
+		return (-POSIX_EINVAL);
+	}
+
+	/* Fall back to fork semantics */
+	return (posix_fork(0, 0, 0, 0, 0, 0, regs));
+}
+
+s64
+posix_gettid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+	struct thread	*td;
+
+	(void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+	(void)regs;
+
+	td = thread_current();
+	if (!td) {
+		return (0);
+	}
+	return ((s64)td->tid);
+}
+
+s64
+posix_futex(u64 uaddr_u, u64 op_u, u64 val_u, u64 timeout, u64 uaddr2,
+    u64 val3, registers_t *regs)
+{
+	int		op;
+	u32		val;
+	u64		uaddr;
+
+	(void)timeout; (void)uaddr2; (void)val3; (void)regs;
+
+	uaddr = uaddr_u;
+	op = (int)op_u;
+	val = (u32)val_u;
+
+	if (!is_user_address((void *)uaddr, sizeof(u32))) {
+		return (-POSIX_EFAULT);
+	}
+
+	switch (op) {
+	case FUTEX_WAIT:
+		return ((s64)futex_wait(uaddr, val));
+
+	case FUTEX_WAKE:
+		return ((s64)futex_wake(uaddr, val));
+
+	default:
+		com1_printf("[POSIX futex] unsupported op=%d\n",
+		    op);
+		return (-POSIX_ENOSYS);
+	}
+}
+
+s64
+posix_set_tid_address(u64 tidptr_u, u64 a2, u64 a3, u64 a4, u64 a5,
+    u64 a6, registers_t *regs)
+{
+	struct thread	*td;
+
+	(void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
+
+	td = thread_current();
+	if (!td) {
+		return (-POSIX_EFAULT);
+	}
+
+	td->tid_address = tidptr_u;
+
+	/* Write our TID to the address so userspace can check
+	 * if the thread is still alive */
+	if (tidptr_u && is_user_address((void *)tidptr_u,
+	    sizeof(u32))) {
+		*(u32 *)tidptr_u = td->tid;
+	}
+
+	return ((s64)td->tid);
 }

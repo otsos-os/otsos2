@@ -148,6 +148,7 @@ struct kevent {
 struct kqueue;
 struct knote;
 struct process;
+struct thread;
 struct pipe;
 
 typedef int	(*filter_attach_fn)(struct knote *kn);

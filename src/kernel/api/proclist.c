@@ -26,6 +26,7 @@
 
 #include <kernel/api/api.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
 
@@ -40,13 +41,18 @@ int api_proc_list(struct api_proc_info *buf, u32 max_entries) {
   u32 count = 0;
   for (int i = 0; i < MAX_PROCESSES && count < max_entries; i++) {
     process_t *proc = &process_table[i];
-    if (proc->state == PROC_STATE_UNUSED) {
+    if (proc->pid == 0) {
+      continue;
+    }
+
+    thread_t *td = proc->main_thread;
+    if (!td) {
       continue;
     }
 
     buf[count].pid = proc->pid;
     buf[count].ppid = proc->ppid;
-    buf[count].state = (u32)proc->state;
+    buf[count].state = (u32)td->state;
 
     memset(buf[count].name, 0, sizeof(buf[count].name));
     int j = 0;
