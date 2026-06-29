@@ -33,5 +33,6 @@ void crypto_rng_init(void);
 void crypto_rng_add_entropy(const u8 *data, u32 len);
 int  crypto_rng_bytes(u8 *out, u32 len);
 u64  crypto_rng_u64(void);
+void crypto_rng_tick(void);
 
 #endif

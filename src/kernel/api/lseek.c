@@ -24,57 +24,71 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/api/api.h>
 
-long api_data_seek(int handle, long offset, int whence) {
-  api_handle_t *handles = api_get_handle_table();
-  api_object_t *objects = api_get_object_table();
+long
+api_data_seek(int handle, long offset, int whence)
+{
+	api_handle_t	*handles;
+	api_object_t	*objects;
+	int		object_index;
+	posix_stat_t	st;
+	long long	new_off;
 
-  if (handle < 0 || handle >= MAX_HANDLES) {
-    return -API_ERR_BAD_HANDLE;
-  }
-  if (!handles[handle].used) {
-    return -API_ERR_BAD_HANDLE;
-  }
+	handles = api_get_handle_table();
+	objects = api_get_object_table();
 
-  int object_index = handles[handle].object_index;
-  if (object_index < 0 || object_index >= MAX_DATA_OBJECTS) {
-    return -API_ERR_NOT_SEEKABLE;
-  }
-  if (!objects[object_index].used) {
-    return -API_ERR_BAD_HANDLE;
-  }
-  if (objects[object_index].type == API_OBJECT_PIPE) {
-    return -API_ERR_NOT_SEEKABLE;
-  }
+	if (handle < 0 || handle >= MAX_HANDLES) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	if (!handles[handle].used) {
+		return (-API_ERR_BAD_HANDLE);
+	}
 
-  chainfs_file_entry_t entry;
-  u32 entry_block, entry_offset;
-  if (chainfs_find_file(objects[object_index].path, &entry, &entry_block,
-                        &entry_offset) != 0) {
-    return -API_ERR_NOT_FOUND;
-  }
+	object_index = handles[handle].object_index;
+	if (object_index < 0 || object_index >= MAX_DATA_OBJECTS) {
+		return (-API_ERR_NOT_SEEKABLE);
+	}
+	if (!objects[object_index].used) {
+		return (-API_ERR_BAD_HANDLE);
+	}
 
-  long long new_off = 0;
-  switch (whence) {
-  case API_SEEK_SET:
-    new_off = (long long)offset;
-    break;
-  case API_SEEK_CUR:
-    new_off = (long long)objects[object_index].offset + (long long)offset;
-    break;
-  case API_SEEK_END:
-    new_off = (long long)entry.size + (long long)offset;
-    break;
-  default:
-    return -API_ERR_BAD_VALUE;
-  }
+	if (objects[object_index].type == API_OBJECT_PIPE) {
+		return (-API_ERR_NOT_SEEKABLE);
+	}
 
-  if (new_off < 0) {
-    return -API_ERR_BAD_VALUE;
-  }
+	if (objects[object_index].type == API_OBJECT_VNODE) {
+		return (-API_ERR_NOT_SEEKABLE);
+	}
 
-  objects[object_index].offset = (u32)new_off;
-  return (long)objects[object_index].offset;
+	if (objects[object_index].vn == NULL) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+
+	if (vnode_stat(objects[object_index].vn, &st) != 0) {
+		return (-API_ERR_IO);
+	}
+
+	new_off = 0;
+	switch (whence) {
+	case API_SEEK_SET:
+		new_off = (long long)offset;
+		break;
+	case API_SEEK_CUR:
+		new_off = (long long)objects[object_index].offset +
+		    (long long)offset;
+		break;
+	case API_SEEK_END:
+		new_off = (long long)st.st_size + (long long)offset;
+		break;
+	default:
+		return (-API_ERR_BAD_VALUE);
+	}
+
+	if (new_off < 0) {
+		return (-API_ERR_BAD_VALUE);
+	}
+
+	objects[object_index].offset = (u32)new_off;
+	return ((long)objects[object_index].offset);
 }

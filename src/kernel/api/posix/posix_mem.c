@@ -26,7 +26,6 @@
 
 #include <kernel/api/posix/posix.h>
 #include <kernel/api/api.h>
-#include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/video/drm/gem.h>
 #include <kernel/process.h>
@@ -126,8 +125,7 @@ posix_mmap(u64 addr_u, u64 length, u64 prot, u64 flags, u64 fd_u,
 	{
 		posix_fd_t	*pfd;
 		vnode_t		*vn;
-		chainfs_file_entry_t	entry;
-		u32			entry_block, entry_offset;
+		posix_stat_t	st;
 
 		pfd = posix_get_fd(proc, (int)fd_u);
 		if (!pfd || !pfd->vnode) {
@@ -139,15 +137,14 @@ posix_mmap(u64 addr_u, u64 length, u64 prot, u64 flags, u64 fd_u,
 			return (-POSIX_ENODEV);
 		}
 
+		if (vnode_stat(vn, &st) != 0) {
+			return (-POSIX_EIO);
+		}
+
 		char	*path;
 		path = (char *)vn->data;
 		if (!path) {
 			return (-POSIX_EINVAL);
-		}
-
-		if (chainfs_find_file(path, &entry, &entry_block,
-		    &entry_offset) != 0) {
-			return (-POSIX_ENOENT);
 		}
 
 		u32		api_prot;

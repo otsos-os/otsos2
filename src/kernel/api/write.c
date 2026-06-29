@@ -24,7 +24,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/tty.h>
 #include <kernel/api/api.h>
 #include <kernel/process.h>
@@ -33,210 +32,240 @@
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
-static api_handle_t kernel_handles[MAX_HANDLES];
-static api_object_t api_objects[MAX_DATA_OBJECTS];
+static api_handle_t	kernel_handles[MAX_HANDLES];
+static api_object_t	api_objects[MAX_DATA_OBJECTS];
 
-api_handle_t *api_get_handle_table(void) {
-  process_t *proc = process_current();
-  if (proc) {
-    return proc->handles;
-  }
-  return kernel_handles;
+api_handle_t *
+api_get_handle_table(void)
+{
+	process_t	*proc;
+
+	proc = process_current();
+	if (proc) {
+		return (proc->handles);
+	}
+	return (kernel_handles);
 }
 
-api_object_t *api_get_object_table(void) { return api_objects; }
-
-int api_alloc_object(void) {
-  for (int i = 0; i < MAX_DATA_OBJECTS; i++) {
-    if (!api_objects[i].used) {
-      api_objects[i].used = 1;
-      api_objects[i].refcount = 1;
-      api_objects[i].offset = 0;
-      api_objects[i].flags = 0;
-      api_objects[i].type = API_OBJECT_FILE;
-      api_objects[i].pipe = NULL;
-      memset(api_objects[i].path, 0, sizeof(api_objects[i].path));
-      return i;
-    }
-  }
-  return -API_ERR_OBJECTS_FULL;
+api_object_t *
+api_get_object_table(void)
+{
+	return (api_objects);
 }
 
-void api_release_object(int index) {
-  if (index < 0 || index >= MAX_DATA_OBJECTS) {
-    return;
-  }
-  if (!api_objects[index].used) {
-    return;
-  }
-  api_objects[index].refcount--;
-  if (api_objects[index].refcount <= 0) {
-    if (api_objects[index].type == API_OBJECT_PIPE &&
-        api_objects[index].pipe) {
-      pipe_t *p = (pipe_t *)api_objects[index].pipe;
-      if (api_objects[index].flags & API_OPEN_WRITE) {
-        if (p->writers > 0) {
-          p->writers--;
-        }
-      } else {
-        if (p->readers > 0) {
-          p->readers--;
-        }
-      }
-      if (p->readers == 0 && p->writers == 0) {
-        kmem_free(p);
-      }
-    }
-    memset(&api_objects[index], 0, sizeof(api_objects[index]));
-  }
+int
+api_alloc_object(void)
+{
+	int	i;
+
+	for (i = 0; i < MAX_DATA_OBJECTS; i++) {
+		if (!api_objects[i].used) {
+			api_objects[i].used = 1;
+			api_objects[i].refcount = 1;
+			api_objects[i].offset = 0;
+			api_objects[i].flags = 0;
+			api_objects[i].type = API_OBJECT_FILE;
+			api_objects[i].pipe = NULL;
+			api_objects[i].vn = NULL;
+			memset(api_objects[i].path, 0,
+			    sizeof(api_objects[i].path));
+			return (i);
+		}
+	}
+	return (-API_ERR_OBJECTS_FULL);
 }
 
-void api_init() {
-  com1_printf("[API] Initializing handle tables at %p\n", kernel_handles);
-  memset(kernel_handles, 0, sizeof(kernel_handles));
-  memset(api_objects, 0, sizeof(api_objects));
+void
+api_release_object(int index)
+{
+	if (index < 0 || index >= MAX_DATA_OBJECTS) {
+		return;
+	}
+	if (!api_objects[index].used) {
+		return;
+	}
+
+	api_objects[index].refcount--;
+	if (api_objects[index].refcount <= 0) {
+		if (api_objects[index].type == API_OBJECT_PIPE &&
+		    api_objects[index].pipe) {
+			pipe_t	*p;
+
+			p = (pipe_t *)api_objects[index].pipe;
+			if (api_objects[index].flags & API_OPEN_WRITE) {
+				if (p->writers > 0) {
+					p->writers--;
+				}
+			} else {
+				if (p->readers > 0) {
+					p->readers--;
+				}
+			}
+			if (p->readers == 0 && p->writers == 0) {
+				kmem_free(p);
+			}
+		}
+
+		if (api_objects[index].vn) {
+			vnode_release(api_objects[index].vn);
+			api_objects[index].vn = NULL;
+		}
+
+		memset(&api_objects[index], 0, sizeof(api_objects[index]));
+	}
 }
 
-void api_init_process(struct process *proc) {
-  if (!proc) {
-    return;
-  }
-  memcpy(proc->handles, kernel_handles, sizeof(kernel_handles));
+void
+api_init(void)
+{
+	com1_printf("[API] Initializing handle tables at %p\n",
+	    kernel_handles);
+	memset(kernel_handles, 0, sizeof(kernel_handles));
+	memset(api_objects, 0, sizeof(api_objects));
 }
 
-void api_copy_handles(struct process *dst, const struct process *src) {
-  if (!dst || !src) {
-    return;
-  }
-  memcpy(dst->handles, src->handles, sizeof(dst->handles));
-  for (int i = 0; i < MAX_HANDLES; i++) {
-    if (!dst->handles[i].used) {
-      continue;
-    }
-    int object_index = dst->handles[i].object_index;
-    if (object_index >= 0 && object_index < MAX_DATA_OBJECTS &&
-        api_objects[object_index].used) {
-      api_objects[object_index].refcount++;
-    }
-  }
+void
+api_init_process(struct process *proc)
+{
+	if (!proc) {
+		return;
+	}
+	memcpy(proc->handles, kernel_handles, sizeof(kernel_handles));
 }
 
-void api_release_handles(struct process *proc) {
-  if (!proc) {
-    return;
-  }
-  for (int i = 0; i < MAX_HANDLES; i++) {
-    if (!proc->handles[i].used) {
-      continue;
-    }
-    int object_index = proc->handles[i].object_index;
-    if (object_index >= 0) {
-      api_release_object(object_index);
-    }
-    proc->handles[i].used = 0;
-    proc->handles[i].flags = 0;
-    proc->handles[i].object_index = -1;
-  }
+void
+api_copy_handles(struct process *dst, const struct process *src)
+{
+	int	i;
+
+	if (!dst || !src) {
+		return;
+	}
+	memcpy(dst->handles, src->handles, sizeof(dst->handles));
+	for (i = 0; i < MAX_HANDLES; i++) {
+		if (!dst->handles[i].used) {
+			continue;
+		}
+		int	object_index;
+
+		object_index = dst->handles[i].object_index;
+		if (object_index >= 0 && object_index < MAX_DATA_OBJECTS &&
+		    api_objects[object_index].used) {
+			api_objects[object_index].refcount++;
+		}
+	}
 }
 
-int api_term_write(const void *buf, u32 count) {
-  if (count == 0) {
-    return 0;
-  }
+void
+api_release_handles(struct process *proc)
+{
+	int	i;
 
-  if (!is_user_address(buf, count)) {
-    thread_t *td = thread_current();
-    if (td && (td->context.cs & 3) == 3) {
-      process_exit(-1);
-    }
-    return -API_ERR_BAD_ADDR;
-  }
+	if (!proc) {
+		return;
+	}
+	for (i = 0; i < MAX_HANDLES; i++) {
+		if (!proc->handles[i].used) {
+			continue;
+		}
+		int	object_index;
 
-  return tty_write(buf, count);
+		object_index = proc->handles[i].object_index;
+		if (object_index >= 0) {
+			api_release_object(object_index);
+		}
+		proc->handles[i].used = 0;
+		proc->handles[i].flags = 0;
+		proc->handles[i].object_index = -1;
+	}
 }
 
-int api_data_write(int handle, const void *buf, u32 count) {
-  api_handle_t *handles = api_get_handle_table();
-  api_object_t *objects = api_get_object_table();
+int
+api_term_write(const void *buf, u32 count)
+{
+	if (count == 0) {
+		return (0);
+	}
 
-  if (handle < 0 || handle >= MAX_HANDLES) {
-    return -API_ERR_BAD_HANDLE;
-  }
+	if (!is_user_address(buf, count)) {
+		thread_t	*td;
 
-  if (!handles[handle].used) {
-    return -API_ERR_BAD_HANDLE;
-  }
+		td = thread_current();
+		if (td && (td->context.cs & 3) == 3) {
+			process_exit(-1);
+		}
+		return (-API_ERR_BAD_ADDR);
+	}
 
-  if (count == 0) {
-    return 0;
-  }
+	return (tty_write(buf, count));
+}
 
-  if (!is_user_address(buf, count)) {
-    thread_t *td = thread_current();
-    if (td && (td->context.cs & 3) == 3) {
-      process_exit(-1);
-    }
-    return -API_ERR_BAD_ADDR;
-  }
+int
+api_data_write(int handle, const void *buf, u32 count)
+{
+	api_handle_t	*handles;
+	api_object_t	*objects;
+	int		object_index;
+	int		n;
 
-  if (!(handles[handle].flags & API_OPEN_WRITE)) {
-    return -API_ERR_BAD_HANDLE;
-  }
+	handles = api_get_handle_table();
+	objects = api_get_object_table();
 
-  if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
-    com1_printf("API WRITE: ChainFS not initialized or corrupted magic: %x\n",
-                g_chainfs.superblock.magic);
-    return -API_ERR_IO;
-  }
+	if (handle < 0 || handle >= MAX_HANDLES) {
+		return (-API_ERR_BAD_HANDLE);
+	}
 
-  int object_index = handles[handle].object_index;
-  if (object_index < 0 || object_index >= MAX_DATA_OBJECTS ||
-      !objects[object_index].used) {
-    return -API_ERR_BAD_HANDLE;
-  }
+	if (!handles[handle].used) {
+		return (-API_ERR_BAD_HANDLE);
+	}
 
-  if (objects[object_index].type == API_OBJECT_PIPE) {
-    return pipe_write((pipe_t *)objects[object_index].pipe, buf, count);
-  }
+	if (count == 0) {
+		return (0);
+	}
 
-  chainfs_file_entry_t entry;
-  u32 entry_block, entry_offset;
-  if (chainfs_find_file(objects[object_index].path, &entry, &entry_block,
-                        &entry_offset) != 0) {
-    return -API_ERR_NOT_FOUND;
-  }
+	if (!is_user_address(buf, count)) {
+		thread_t	*td;
 
-  if (handles[handle].flags & API_OPEN_APPEND) {
-    objects[object_index].offset = entry.size;
-  }
+		td = thread_current();
+		if (td && (td->context.cs & 3) == 3) {
+			process_exit(-1);
+		}
+		return (-API_ERR_BAD_ADDR);
+	}
 
-  u32 offset = objects[object_index].offset;
-  u32 end_pos = offset + count;
-  u32 new_size = (end_pos > entry.size) ? end_pos : entry.size;
+	if (!(handles[handle].flags & API_OPEN_WRITE)) {
+		return (-API_ERR_BAD_HANDLE);
+	}
 
-  u8 *new_data = (u8 *)kmem_calloc(new_size, 1);
-  if (!new_data) {
-    return -API_ERR_NO_MEMORY;
-  }
+	object_index = handles[handle].object_index;
+	if (object_index < 0 || object_index >= MAX_DATA_OBJECTS ||
+	    !objects[object_index].used) {
+		return (-API_ERR_BAD_HANDLE);
+	}
 
-  if (entry.size > 0) {
-    u32 bytes_read = 0;
-    if (chainfs_read_file(objects[object_index].path, new_data, entry.size,
-                          &bytes_read) != 0) {
-      kmem_free(new_data);
-      return -API_ERR_IO;
-    }
-  }
+	if (objects[object_index].type == API_OBJECT_PIPE) {
+		return (pipe_write((pipe_t *)objects[object_index].pipe,
+		    buf, count));
+	}
 
-  memcpy(new_data + offset, buf, count);
+	if (objects[object_index].vn == NULL) {
+		return (-API_ERR_BAD_HANDLE);
+	}
 
-  int result = chainfs_write_file(objects[object_index].path, new_data, new_size);
-  kmem_free(new_data);
+	if (handles[handle].flags & API_OPEN_APPEND) {
+		posix_stat_t	st;
 
-  if (result == 0) {
-    objects[object_index].offset = offset + count;
-    return count;
-  }
+		if (vnode_stat(objects[object_index].vn, &st) == 0) {
+			objects[object_index].offset = (u32)st.st_size;
+		}
+	}
 
-  return -API_ERR_IO;
+	n = vnode_write(objects[object_index].vn, buf, count,
+	    objects[object_index].offset);
+	if (n < 0) {
+		return (-API_ERR_IO);
+	}
+
+	objects[object_index].offset += (u32)n;
+	return (n);
 }

@@ -24,164 +24,189 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/api/api.h>
 #include <kernel/other/restrict.h>
 #include <kernel/useraddr.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
-static char *copy_user_path(const char *path) {
-  if (!path) {
-    return NULL;
-  }
-  if (!is_user_address(path, 1)) {
-    return NULL;
-  }
-  int len = 0;
-  while (len < 255) {
-    if (!is_user_address(path + len, 1)) {
-      return NULL;
-    }
-    if (path[len] == '\0') {
-      break;
-    }
-    len++;
-  }
-  if (len == 255) {
-    return NULL;
-  }
-  char *buf = (char *)kmem_calloc(len + 1, 1);
-  if (!buf) {
-    return NULL;
-  }
-  memcpy(buf, path, len);
-  buf[len] = '\0';
-  return buf;
+static char *
+copy_user_path(const char *path)
+{
+	char	*buf;
+	int	len;
+
+	if (!path) {
+		return (NULL);
+	}
+	if (!is_user_address(path, 1)) {
+		return (NULL);
+	}
+
+	len = 0;
+	while (len < 255) {
+		if (!is_user_address(path + len, 1)) {
+			return (NULL);
+		}
+		if (path[len] == '\0') {
+			break;
+		}
+		len++;
+	}
+	if (len == 255) {
+		return (NULL);
+	}
+
+	buf = (char *)kmem_calloc(len + 1, 1);
+	if (!buf) {
+		return (NULL);
+	}
+	memcpy(buf, path, len);
+	buf[len] = '\0';
+	return (buf);
 }
 
-static int api_find_free_handle(void) {
-  api_handle_t *handles = api_get_handle_table();
-  for (int i = 0; i < MAX_HANDLES; i++) {
-    if (!handles[i].used) {
-      return i;
-    }
-  }
-  return -API_ERR_HANDLES_FULL;
+static int
+api_find_free_handle(void)
+{
+	api_handle_t	*handles;
+	int		i;
+
+	handles = api_get_handle_table();
+	for (i = 0; i < MAX_HANDLES; i++) {
+		if (!handles[i].used) {
+			return (i);
+		}
+	}
+	return (-API_ERR_HANDLES_FULL);
 }
 
-static int api_flags_valid(int flags) {
-  if ((flags & API_OPEN_RW) == 0) {
-    return 0;
-  }
+static int
+api_flags_valid(int flags)
+{
+	if ((flags & API_OPEN_RW) == 0) {
+		return (0);
+	}
 
-  if ((flags & (API_OPEN_CREATE | API_OPEN_TRUNC | API_OPEN_APPEND)) &&
-      !(flags & API_OPEN_WRITE)) {
-    return 0;
-  }
+	if ((flags & (API_OPEN_CREATE | API_OPEN_TRUNC | API_OPEN_APPEND)) &&
+	    !(flags & API_OPEN_WRITE)) {
+		return (0);
+	}
 
-  return 1;
+	return (1);
 }
 
-static int path_is_old_dev_namespace(const char *path) {
-  return path && path[0] == '/' && path[1] == 'd' && path[2] == 'e' &&
-         path[3] == 'v' && (path[4] == '\0' || path[4] == '/');
-}
+int
+api_data_open(const char *path, int flags)
+{
+	api_handle_t	*handles;
+	api_object_t	*objects;
+	char		*kpath;
+	vnode_t		*vn;
+	int		handle;
+	int		object_index;
+	posix_stat_t	st;
 
-int api_data_open(const char *path, int flags) {
-  api_handle_t *handles = api_get_handle_table();
-  api_object_t *objects = api_get_object_table();
+	handles = api_get_handle_table();
+	objects = api_get_object_table();
 
-  char *kpath = copy_user_path(path);
-  if (!kpath || kpath[0] == 0) {
-    if (kpath) {
-      kmem_free(kpath);
-    }
-    return -API_ERR_BAD_ADDR;
-  }
+	kpath = copy_user_path(path);
+	if (!kpath || kpath[0] == 0) {
+		if (kpath) {
+			kmem_free(kpath);
+		}
+		return (-API_ERR_BAD_ADDR);
+	}
 
-  if (!api_flags_valid(flags)) {
-    kmem_free(kpath);
-    return -API_ERR_BAD_VALUE;
-  }
+	if (!api_flags_valid(flags)) {
+		kmem_free(kpath);
+		return (-API_ERR_BAD_VALUE);
+	}
 
-  if (path_is_old_dev_namespace(kpath)) {
-    kmem_free(kpath);
-    return -API_ERR_NO_DEVICE;
-  }
+	if (restrict_kusr_check(kpath)) {
+		kmem_free(kpath);
+		return (-API_ERR_PERM);
+	}
 
-  if (restrict_kusr_check(kpath)) {
-    kmem_free(kpath);
-    return -API_ERR_PERM;
-  }
+	vn = NULL;
+	if (vfs_resolve(kpath, &vn) != 0 || vn == NULL) {
+		if (!(flags & API_OPEN_CREATE)) {
+			kmem_free(kpath);
+			return (-API_ERR_NOT_FOUND);
+		}
+		if (vfs_create_file(kpath) != 0) {
+			kmem_free(kpath);
+			return (-API_ERR_IO);
+		}
+		if (vfs_resolve(kpath, &vn) != 0 || vn == NULL) {
+			kmem_free(kpath);
+			return (-API_ERR_IO);
+		}
+	}
 
-  if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
-    com1_printf("API OPEN: ChainFS not initialized or corrupted magic: %x\n",
-                g_chainfs.superblock.magic);
-    kmem_free(kpath);
-    return -API_ERR_IO;
-  }
+	if (vn->type == VDIR) {
+		vnode_release(vn);
+		kmem_free(kpath);
+		return (-API_ERR_IS_DIR);
+	}
 
-  chainfs_file_entry_t entry;
-  u32 entry_block, entry_offset;
-  int exists =
-      (chainfs_find_file(kpath, &entry, &entry_block, &entry_offset) == 0);
+	if (flags & API_OPEN_TRUNC) {
+		if (vn->type == VCHR) {
+		} else if (vfs_truncate(kpath, 0) != 0) {
+			vnode_release(vn);
+			kmem_free(kpath);
+			return (-API_ERR_IO);
+		}
+		vn->size = 0;
+	}
 
-  if (!exists) {
-    if (!(flags & API_OPEN_CREATE)) {
-      kmem_free(kpath);
-      return -API_ERR_NOT_FOUND;
-    }
-    if (chainfs_write_file(kpath, (const u8 *)"", 0) != 0) {
-      kmem_free(kpath);
-      return -API_ERR_IO;
-    }
-    exists =
-        (chainfs_find_file(kpath, &entry, &entry_block, &entry_offset) == 0);
-    if (!exists) {
-      kmem_free(kpath);
-      return -API_ERR_IO;
-    }
-  } else if (entry.type == CHAINFS_TYPE_DIR) {
-    kmem_free(kpath);
-    return -API_ERR_IS_DIR;
-  } else if (flags & API_OPEN_TRUNC) {
-    if (chainfs_write_file(kpath, (const u8 *)"", 0) != 0) {
-      kmem_free(kpath);
-      return -API_ERR_IO;
-    }
-    if (chainfs_find_file(kpath, &entry, &entry_block, &entry_offset) != 0) {
-      kmem_free(kpath);
-      return -API_ERR_IO;
-    }
-  }
+	handle = api_find_free_handle();
+	if (handle < 0) {
+		vnode_release(vn);
+		kmem_free(kpath);
+		return (handle);
+	}
 
-  int handle = api_find_free_handle();
-  if (handle < 0) {
-    kmem_free(kpath);
-    return handle;
-  }
+	object_index = api_alloc_object();
+	if (object_index < 0) {
+		vnode_release(vn);
+		kmem_free(kpath);
+		return (object_index);
+	}
 
-  int object_index = api_alloc_object();
-  if (object_index < 0) {
-    kmem_free(kpath);
-    return object_index;
-  }
+	objects[object_index].flags = flags;
+	objects[object_index].vn = vn;
+	objects[object_index].type =
+	    (vn->type == VCHR) ? API_OBJECT_VNODE : API_OBJECT_FILE;
 
-  objects[object_index].flags = flags;
-  objects[object_index].offset = (flags & API_OPEN_APPEND) ? entry.size : 0;
+	if (flags & API_OPEN_APPEND) {
+		if (vnode_stat(vn, &st) == 0) {
+			objects[object_index].offset = (u32)st.st_size;
+		} else {
+			objects[object_index].offset = 0;
+		}
+	} else {
+		objects[object_index].offset = 0;
+	}
 
-  memset(objects[object_index].path, 0, sizeof(objects[object_index].path));
-  int path_len = strlen(kpath);
-  if (path_len >= (int)sizeof(objects[object_index].path)) {
-    path_len = (int)sizeof(objects[object_index].path) - 1;
-  }
-  memcpy(objects[object_index].path, kpath, path_len);
-  kmem_free(kpath);
+	memset(objects[object_index].path, 0,
+	    sizeof(objects[object_index].path));
+	{
+		int	path_len;
 
-  handles[handle].used = 1;
-  handles[handle].flags = flags;
-  handles[handle].object_index = object_index;
+		path_len = strlen(kpath);
+		if (path_len >= (int)sizeof(objects[object_index].path)) {
+			path_len = (int)sizeof(objects[object_index].path) - 1;
+		}
+		memcpy(objects[object_index].path, kpath, path_len);
+	}
 
-  return handle;
+	kmem_free(kpath);
+
+	handles[handle].used = 1;
+	handles[handle].flags = flags;
+	handles[handle].object_index = object_index;
+
+	return (handle);
 }

@@ -66,7 +66,7 @@ $space %export kmain
 #include <kernel/drivers/disk/ramdisk/ramdisk.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
-#include <kernel/drivers/fs/devfs/devfs.h>
+#include <kernel/drivers/fs/devtmpfs/devtmpfs.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/power/power.h>
 #include <kernel/drivers/timer.h>
@@ -86,6 +86,7 @@ $space %export kmain
 #include <kernel/pci/pci.h>
 #include <kernel/api/api.h>
 #include <kernel/bootmem.h>
+#include <kernel/crypto/crypto.h>
 #include <kernel/kshell/kshell.h>
 #include <kernel/other/kusr.h>
 #include <kernel/syscall.h>
@@ -355,6 +356,7 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 
 	syscall_init();
 	event_init();
+	crypto_rng_init();
 
 	disk_manager_init();
 	pata_identify(NULL);
@@ -599,10 +601,10 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 
 		api_init();
 
-		chainfs_mkdir("/bin");
+		vfs_mkdir("/bin");
 
 		if (yes_mod && yes_sz > 0) {
-			res = chainfs_write_file("/bin/yes",
+			res = vfs_write_file("/bin/yes",
 			    (const u8 *)yes_mod, yes_sz);
 			if (res == 0) {
 				com1_printf("[KERNEL] Installed "
@@ -616,7 +618,7 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 		}
 
 		if (fetch_mod && fetch_sz > 0) {
-			res = chainfs_write_file("/bin/fetch",
+			res = vfs_write_file("/bin/fetch",
 			    (const u8 *)fetch_mod, fetch_sz);
 			if (res == 0) {
 				com1_printf("[KERNEL] Installed "
@@ -630,7 +632,7 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 		}
 
 		if (sh_mod && sh_sz > 0) {
-			res = chainfs_write_file("/bin/sh",
+			res = vfs_write_file("/bin/sh",
 			    (const u8 *)sh_mod, sh_sz);
 			if (res == 0) {
 				com1_printf("[KERNEL] Installed "
@@ -644,7 +646,7 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 		}
 
 		if (posix_hello_mod && posix_hello_sz > 0) {
-			res = chainfs_write_file("/bin/posix_hello",
+			res = vfs_write_file("/bin/posix_hello",
 			    (const u8 *)posix_hello_mod,
 			    posix_hello_sz);
 			if (res == 0) {

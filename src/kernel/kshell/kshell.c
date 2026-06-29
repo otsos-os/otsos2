@@ -79,7 +79,7 @@ $space %export kshell_try_open_if_requested, kshell_run
 
 #include <kernel/console.h>
 #include <kernel/drivers/keyboard/keyboard.h>
-#include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/tty.h>
 #include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/kms/console.h>
@@ -589,7 +589,7 @@ kshell_execute(int argc, char *argv[])
 	overflow = 0;
 	out_size = kshell_capture_end(&overflow);
 
-	if (chainfs_write_file(redir_path,
+	if (vfs_write_file(redir_path,
 	    (const u8 *)capture_buf, out_size) != 0) {
 		kshell_console_write("kshell: failed to write "
 		    "redirection file: ");

@@ -26,7 +26,7 @@
 
 #include <mlibc/toml.h>
 #include <mlibc/mlibc.h>
-#include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/drivers/fs/vfs/vfs.h>
 
 toml_doc_t *toml_new(void) {
   toml_doc_t *doc = (toml_doc_t *)kmem_calloc(1, sizeof(toml_doc_t));
@@ -191,25 +191,57 @@ toml_doc_t *toml_parse(const char *data, u32 len) {
 }
 
 toml_doc_t *toml_parse_file(const char *path) {
-  chainfs_file_entry_t entry;
-  u32 entry_block, entry_offset;
-  if (chainfs_find_file(path, &entry, &entry_block, &entry_offset) != 0)
+  u32 size;
+  u8 *buf;
+  toml_doc_t *doc;
+  vnode_t *vn;
+  posix_stat_t st;
+
+  if (vfs_resolve(path, &vn) != 0 || vn == NULL) {
     return NULL;
+  }
 
-  u32 size = entry.size;
-  if (size == 0) return toml_new();
+  if (vnode_stat(vn, &st) != 0) {
+    vnode_release(vn);
+    return NULL;
+  }
 
-  u8 *buf = (u8 *)kmem_calloc(size + 1, 1);
-  if (!buf) return NULL;
+  size = (u32)st.st_size;
+  if (size == 0) {
+    vnode_release(vn);
+    return toml_new();
+  }
 
-  u32 bytes_read = 0;
-  if (chainfs_read_file(path, buf, size, &bytes_read) != 0 || bytes_read != size) {
+  buf = (u8 *)kmem_calloc(size + 1, 1);
+  if (!buf) {
+    vnode_release(vn);
+    return NULL;
+  }
+
+  u32 total = 0;
+  while (total < size) {
+    u32 to_read = size - total;
+    if (to_read > 4096) to_read = 4096;
+    int n = vnode_read(vn, buf + total, to_read, total);
+    if (n < 0) {
+      vnode_release(vn);
+      kmem_free(buf);
+      return NULL;
+    }
+    if (n == 0) break;
+    total += (u32)n;
+  }
+
+  vnode_release(vn);
+
+  if (total != size) {
     kmem_free(buf);
     return NULL;
   }
+
   buf[size] = '\0';
 
-  toml_doc_t *doc = toml_parse((const char *)buf, size);
+  doc = toml_parse((const char *)buf, size);
   kmem_free(buf);
   return doc;
 }
@@ -272,7 +304,7 @@ int toml_save(toml_doc_t *doc, const char *path) {
   char *data = toml_serialize(doc);
   if (!data) return -1;
   int len = strlen(data);
-  int ret = chainfs_write_file(path, (const u8 *)data, (u32)len);
+  int ret = vfs_write_file(path, (const u8 *)data, (u32)len);
   kmem_free(data);
   return ret;
 }

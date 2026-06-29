@@ -27,7 +27,7 @@
 #include <kernel/console.h>
 #include <kernel/other/kusr.h>
 #include <kernel/crypto/crypto.h>
-#include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/tty.h>
 #include <lib/com1.h>
@@ -139,7 +139,7 @@ static int kusr_first_boot_setup(void) {
     crypto_secure_wipe(salt, sizeof(salt));
     crypto_secure_wipe(hash, sizeof(hash));
 
-    chainfs_mkdir("/conf");
+    vfs_mkdir("/conf");
 
     toml_doc_t *doc = toml_new();
     if (!doc) {
@@ -183,9 +183,9 @@ void kusr_init(void) {
   com1_printf("[KUSR] Initializing...\n");
   crypto_rng_init();
 
-  chainfs_file_entry_t entry;
-  u32 entry_block, entry_offset;
-  if (chainfs_find_file(KUSR_CONFIG_PATH, &entry, &entry_block, &entry_offset) == 0) {
+  vnode_t *vn;
+  if (vfs_resolve(KUSR_CONFIG_PATH, &vn) == 0 && vn != NULL) {
+    vnode_release(vn);
     com1_printf("[KUSR] Config exists, skipping first-boot setup\n");
     g_kusr_authenticated = 0;
     return;

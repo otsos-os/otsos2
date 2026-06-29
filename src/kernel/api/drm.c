@@ -4,6 +4,7 @@
 
 #include <kernel/api/api.h>
 #include <kernel/api/errno.h>
+#include <kernel/drivers/tty.h>
 #include <kernel/drivers/video/drm/auth.h>
 #include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/gem.h>
@@ -14,6 +15,8 @@
 #include <kernel/drivers/video/drm/kms/plane.h>
 #include <kernel/drivers/video/drm/rapi/rapi.h>
 #include <kernel/process.h>
+#include <kernel/useraddr.h>
+#include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
 static int drm_op_info(struct api_drm_info *out) {
@@ -163,6 +166,81 @@ static int drm_op_rapi_blit(struct api_drm_rapi_blit *a) {
   return (rc == DRM_OK) ? 0 : -API_ERR_INVAL;
 }
 
+static int
+drm_op_driver_list(struct api_drm_driver_list *arg)
+{
+	u32	count, i, active_idx;
+
+	if (!arg) {
+		return (-API_ERR_INVAL);
+	}
+	if (!is_user_address(arg->entries,
+	    arg->max_entries * sizeof(struct api_drm_driver_entry))) {
+		return (-API_ERR_BAD_ADDR);
+	}
+
+	count = drm_driver_available_count();
+	active_idx = (u32)drm_driver_get_selected_index();
+
+	arg->count = 0;
+	for (i = 0; i < count && i < arg->max_entries; i++) {
+		const drm_driver_t	*drv;
+		struct api_drm_driver_entry	*e;
+
+		drv = drm_driver_available_get(i);
+		if (!drv) {
+			continue;
+		}
+
+		e = &arg->entries[i];
+		e->id = i;
+		e->active = (drv == drm_driver_get_selected()) ? 1 : 0;
+		memset(e->name, 0, sizeof(e->name));
+		if (drv->name) {
+			u32	j;
+
+			for (j = 0; j < 31 && drv->name[j]; j++) {
+				e->name[j] = drv->name[j];
+			}
+			e->name[j] = '\0';
+		}
+		arg->count++;
+	}
+
+	return (0);
+}
+
+static int
+drm_op_driver_switch(struct api_drm_driver_switch *arg)
+{
+	const drm_driver_t	*drv;
+	int			rc;
+
+	if (!arg) {
+		return (-API_ERR_INVAL);
+	}
+
+	drv = drm_driver_available_get(arg->id);
+	if (!drv) {
+		return (-API_ERR_NOT_FOUND);
+	}
+
+	if (drv == drm_driver_get_selected()) {
+		return (0);
+	}
+
+	    arg->id, drv->name ? drv->name : "?";
+
+	rc = drm_reinit(drv, NULL);
+	if (rc != 0) {
+		return (-API_ERR_NODEV);
+	}
+
+	tty_reinit();
+
+	return (0);
+}
+
 int api_drm_call(u64 op, void *arg) {
   if (!drm_is_ready() && op != DRM_OP_INFO) {
     return -API_ERR_NODEV;
@@ -223,6 +301,14 @@ int api_drm_call(u64 op, void *arg) {
   case DRM_OP_ATOMIC_COMMIT:
     if (!is_kusr) return -API_ERR_PERM;
     return drm_op_atomic_commit((struct api_drm_atomic_commit *)arg);
+
+  /* --- driver management --- */
+  case DRM_OP_DRIVER_LIST:
+    return drm_op_driver_list((struct api_drm_driver_list *)arg);
+
+  case DRM_OP_DRIVER_SWITCH:
+    if (!is_kusr) return -API_ERR_PERM;
+    return drm_op_driver_switch((struct api_drm_driver_switch *)arg);
 
   default:
     return -API_ERR_INVAL;

@@ -66,6 +66,68 @@ int drm_driver_get_selected_index(void) {
   return -1;
 }
 
+extern const void *drm_fbdev_get_boot_info(void);
+
+u32
+drm_driver_available_count(void)
+{
+	const void	*boot;
+	u32		count, i;
+
+	build_driver_list();
+	boot = drm_fbdev_get_boot_info();
+	count = 0;
+	for (i = 0; i < g_known_count; i++) {
+		const drm_driver_t	*d;
+
+		d = g_known_drivers[i];
+		if (!d) {
+			continue;
+		}
+		if (d == g_selected_driver) {
+			count++;
+			continue;
+		}
+		if (!d->probe || d->probe(boot) == 0) {
+			count++;
+		}
+	}
+	return (count);
+}
+
+const drm_driver_t *
+drm_driver_available_get(u32 index)
+{
+	const void	*boot;
+	u32		count, i;
+
+	build_driver_list();
+	boot = drm_fbdev_get_boot_info();
+	count = 0;
+	for (i = 0; i < g_known_count; i++) {
+		const drm_driver_t	*d;
+
+		d = g_known_drivers[i];
+		if (!d) {
+			continue;
+		}
+		if (d == g_selected_driver) {
+			if (count == index) {
+				return (d);
+			}
+			count++;
+			continue;
+		}
+		if (!d->probe || d->probe(boot) == 0) {
+			if (count == index) {
+				return (d);
+			}
+			count++;
+		}
+	}
+	return (NULL);
+}
+
 const drm_driver_t *drm_driver_get_selected(void) { return g_selected_driver; }
 
 const char *drm_driver_get_selected_name(void) {

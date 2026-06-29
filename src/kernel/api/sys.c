@@ -24,24 +24,25 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/api/api.h>
+#include <kernel/crypto/rng/rng.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
 
 int
-api_fs_getcwd(char *buf, u32 size)
+api_sys_random(u8 *buf, u32 len)
 {
-	if (!buf || size == 0) {
-		return (-API_ERR_BAD_VALUE);
+	if (len == 0) {
+		return (0);
 	}
-	if (!is_user_address(buf, size)) {
+
+	if (!is_user_address(buf, len)) {
 		return (-API_ERR_BAD_ADDR);
 	}
 
-	if (vfs_getcwd(buf, size) != 0) {
-		return (-API_ERR_IO);
+	if (crypto_rng_bytes(buf, len) != 0) {
+		return (-API_ERR_NO_MEMORY);
 	}
 
-	return (0);
+	return ((int)len);
 }

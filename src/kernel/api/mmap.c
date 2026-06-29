@@ -3,7 +3,7 @@
  */
 
 #include <kernel/api/api.h>
-#include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/video/drm/gem.h>
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_page.h>
@@ -137,14 +137,16 @@ static u64 mmap_file(process_t *proc, u64 length, u32 prot, u32 flags,
     return (u64)(-API_ERR_NO_DEVICE);
   }
 
-  chainfs_file_entry_t entry;
-  u32 entry_block, entry_offset;
-  if (chainfs_find_file(objects[oi].path, &entry, &entry_block,
-                        &entry_offset) != 0) {
+  if (objects[oi].vn == NULL) {
+    return (u64)(-API_ERR_BAD_HANDLE);
+  }
+
+  posix_stat_t st;
+  if (vnode_stat(objects[oi].vn, &st) != 0) {
     return (u64)(-API_ERR_NOT_FOUND);
   }
 
-  u32 file_size = entry.size;
+  u32 file_size = (u32)st.st_size;
   u64 aligned = align_up(length, PAGE_SIZE);
 
   if (flags & API_MAP_FIXED) {

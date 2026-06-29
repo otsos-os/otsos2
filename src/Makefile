@@ -138,7 +138,7 @@ EVENT_SIGNAL_O = ../bin/event_signal.o
 EVENT_USER_O = ../bin/event_user.o
 
 VFS_O = ../bin/vfs.o
-DEVFS_O = ../bin/devfs.o
+DEVTMPFS_O = ../bin/devtmpfs.o
 POSIX_O = ../bin/posix.o
 POSIX_IO_O = ../bin/posix_io.o
 POSIX_PROC_O = ../bin/posix_proc.o
@@ -148,6 +148,7 @@ POSIX_SIGNAL_O = ../bin/posix_signal.o
 PROC_PID_O = ../bin/proc_pid.o
 THREAD_API_O = ../bin/thread_api.o
 FUTEX_O = ../bin/futex.o
+SYS_O = ../bin/sys.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
       $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O) $(VM_PAGER_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(DRM_KMS_CONSOLE_O) $(DRM_RAPI_O) $(TIMER_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
@@ -162,10 +163,10 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(BOOT
       $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O) \
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
       $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
-      $(VFS_O) $(DEVFS_O) \
+      $(VFS_O) $(DEVTMPFS_O) \
       $(POSIX_O) $(POSIX_IO_O) $(POSIX_PROC_O) $(POSIX_FS_O) \
       $(POSIX_MEM_O) $(POSIX_SIGNAL_O) \
-      $(PROC_PID_O) $(THREAD_API_O) $(FUTEX_O)
+      $(PROC_PID_O) $(THREAD_API_O) $(FUTEX_O) $(SYS_O)
 
 .PHONY: all ask_version check_build_tools check_run_tools
 
@@ -507,7 +508,7 @@ $(GETCWD_O): kernel/api/getcwd.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(LISTDIR_O): kernel/api/listdir.c kernel/drivers/fs/vfs/vfs.h kernel/drivers/fs/chainFS/chainfs.h
+$(LISTDIR_O): kernel/api/listdir.c kernel/drivers/fs/vfs/vfs.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -699,7 +700,7 @@ $(VFS_O): kernel/drivers/fs/vfs/vfs.c kernel/drivers/fs/vfs/vfs.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(DEVFS_O): kernel/drivers/fs/devfs/devfs.c kernel/drivers/fs/devfs/devfs.h
+$(DEVTMPFS_O): kernel/drivers/fs/devtmpfs/devtmpfs.c kernel/drivers/fs/devtmpfs/devtmpfs.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -736,6 +737,10 @@ $(THREAD_API_O): kernel/api/thread_api.c kernel/api/api.h kernel/process.h kerne
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(FUTEX_O): kernel/futex.c kernel/thread.h kernel/process.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(SYS_O): kernel/api/sys.c kernel/api/api.h kernel/crypto/rng/rng.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

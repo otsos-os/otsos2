@@ -133,6 +133,8 @@ const drm_driver_t *drm_driver_get_selected(void);
 const char *drm_driver_get_selected_name(void);
 u32 drm_driver_count(void);
 const drm_driver_t *drm_driver_get_by_index(u32 index);
+u32 drm_driver_available_count(void);
+const drm_driver_t *drm_driver_available_get(u32 index);
 int drm_driver_get_selected_index(void);
 int drm_driver_switch_by_id(int id);
 

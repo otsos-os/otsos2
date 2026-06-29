@@ -25,7 +25,6 @@
  */
 
 #include <kernel/api/posix/posix.h>
-#include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
@@ -82,12 +81,7 @@ posix_chdir(u64 path_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 		return (-POSIX_EFAULT);
 	}
 
-	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
-		kmem_free(path);
-		return (-POSIX_EIO);
-	}
-
-	ret = chainfs_chdir(path);
+	ret = vfs_chdir(path);
 	kmem_free(path);
 
 	if (ret != 0) {
@@ -120,15 +114,12 @@ posix_getcwd(u64 buf_u, u64 size_u, u64 a3, u64 a4, u64 a5, u64 a6,
 		return (-POSIX_EFAULT);
 	}
 
-	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+	memset(kbuf, 0, sizeof(kbuf));
+	if (vfs_getcwd(kbuf, sizeof(kbuf)) != 0) {
 		return (-POSIX_EIO);
 	}
 
-	memset(kbuf, 0, sizeof(kbuf));
-	path = chainfs_get_current_path(kbuf, sizeof(kbuf));
-	if (!path) {
-		return (-POSIX_EIO);
-	}
+	path = kbuf;
 
 	path_len = strlen(path);
 	if (path_len >= size) {

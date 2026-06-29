@@ -26,6 +26,7 @@
 
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/console.h>
+#include <kernel/crypto/rng/rng.h>
 #include <kernel/drivers/power/pbutton.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/drivers/tty.h>
@@ -99,6 +100,7 @@ void irq_handler(registers_t *regs) {
     power_button_poll();
     watchdog_tick();
     event_timer_tick();
+    crypto_rng_tick();
     scheduler_tick(regs);
     keyboard_poll();
     tty_update();

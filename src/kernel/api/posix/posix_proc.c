@@ -26,7 +26,6 @@
 
 #include <kernel/api/posix/posix.h>
 #include <kernel/api/api.h>
-#include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/event/event.h>
 #include <kernel/gdt.h>
@@ -568,8 +567,8 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 	int		argc, envc;
 	u8		*elf_buf;
 	u32		elf_size;
-	chainfs_file_entry_t	entry;
-	u32			entry_block, entry_offset;
+	vnode_t		*vn;
+	posix_stat_t	st;
 	u64		new_cr3, old_cr3;
 	u64		entry_point;
 	u64		user_stack, new_rsp, argv_addr, envp_addr;
@@ -603,37 +602,42 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 		return ((s64)envc);
 	}
 
-	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
-		free_string_array(kargv);
-		free_string_array(kenvp);
-		kmem_free(kpath);
-		return (-POSIX_EIO);
-	}
-
-	if (chainfs_find_file(kpath, &entry, &entry_block,
-	    &entry_offset) != 0) {
+	vn = NULL;
+	if (vfs_resolve(kpath, &vn) != 0 || vn == NULL) {
 		free_string_array(kargv);
 		free_string_array(kenvp);
 		kmem_free(kpath);
 		return (-POSIX_ENOENT);
 	}
 
-	if (entry.type == CHAINFS_TYPE_DIR) {
+	if (vn->type == VDIR) {
+		vnode_release(vn);
 		free_string_array(kargv);
 		free_string_array(kenvp);
 		kmem_free(kpath);
 		return (-POSIX_EISDIR);
 	}
 
-	if (entry.size == 0) {
+	if (vnode_stat(vn, &st) != 0) {
+		vnode_release(vn);
+		free_string_array(kargv);
+		free_string_array(kenvp);
+		kmem_free(kpath);
+		return (-POSIX_EIO);
+	}
+
+	if (st.st_size == 0) {
+		vnode_release(vn);
 		free_string_array(kargv);
 		free_string_array(kenvp);
 		kmem_free(kpath);
 		return (-POSIX_ENOEXEC);
 	}
 
-	elf_buf = (u8 *)kmem_calloc(entry.size, 1);
+	elf_size = (u32)st.st_size;
+	elf_buf = (u8 *)kmem_calloc(elf_size, 1);
 	if (!elf_buf) {
+		vnode_release(vn);
 		free_string_array(kargv);
 		free_string_array(kenvp);
 		kmem_free(kpath);
@@ -641,10 +645,37 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 	}
 
 	{
-		u32	bytes_read;
-		bytes_read = 0;
-		if (chainfs_read_file(kpath, elf_buf, entry.size,
-		    &bytes_read) != 0 || bytes_read != entry.size) {
+		u32	total;
+
+		total = 0;
+		while (total < elf_size) {
+			u32	to_read;
+
+			to_read = elf_size - total;
+			if (to_read > 4096) {
+				to_read = 4096;
+			}
+			int	n;
+
+			n = vnode_read(vn, elf_buf + total, to_read,
+			    total);
+			if (n < 0) {
+				vnode_release(vn);
+				kmem_free(elf_buf);
+				free_string_array(kargv);
+				free_string_array(kenvp);
+				kmem_free(kpath);
+				return (-POSIX_EIO);
+			}
+			if (n == 0) {
+				break;
+			}
+			total += (u32)n;
+		}
+
+		vnode_release(vn);
+
+		if (total != elf_size) {
 			kmem_free(elf_buf);
 			free_string_array(kargv);
 			free_string_array(kenvp);
@@ -652,7 +683,6 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 			return (-POSIX_EIO);
 		}
 	}
-	elf_size = entry.size;
 
 	new_cr3 = pmap_create();
 	if (!new_cr3) {

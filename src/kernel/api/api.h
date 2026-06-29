@@ -29,6 +29,7 @@
 
 #include <kernel/interrupts/idt.h>
 #include <kernel/api/errno.h>
+#include <kernel/drivers/fs/vfs/vfs.h>
 #include <mlibc/mlibc.h>
 
 #define MAX_HANDLES 32
@@ -50,6 +51,7 @@ typedef struct {
   u32 offset;
   int flags;
   void *pipe;
+  vnode_t *vn;
 } api_object_t;
 
 #define API_OPEN_READ 0x0001
@@ -77,6 +79,7 @@ typedef struct {
 
 #define API_OBJECT_FILE 0
 #define API_OBJECT_PIPE 1
+#define API_OBJECT_VNODE 2
 #define MMAP_BASE 0x0000001000000000ULL
 #define MMAP_LIMIT 0x00007FFF00000000ULL
 
@@ -148,6 +151,8 @@ struct api_proc_info {
  *     touch memory / objects, not the screen).
  *   - ATOMIC_COMMIT page-flip (PLANE_FB_ID on active CRTC): all processes.
  *   - ATOMIC_COMMIT modeset (anything else): kusr only.
+ *   - DRIVER_LIST: available to all processes
+ *   - DRIVER_SWITCH: kusr only
  */
 
 /* Queries — everyone */
@@ -173,6 +178,9 @@ struct api_proc_info {
 #define DRM_OP_RAPI_GLYPH      12  /* draw 8x16 glyph                    */
 #define DRM_OP_RAPI_SCROLL     13  /* scroll buffer up                   */
 #define DRM_OP_RAPI_BLIT       14  /* copy rect between buffers          */
+
+#define DRM_OP_DRIVER_SWITCH   15
+#define DRM_OP_DRIVER_LIST     16 
 
 struct api_drm_info {
   u32 available;     /* 1 if DRM is ready                     */
@@ -273,6 +281,22 @@ struct api_drm_rapi_blit {
   u32 dx, dy;          /* dest origin                         */
 };
 
+struct api_drm_driver_entry {
+  u32 id;
+  char name[32];
+  u32 active;
+};
+
+struct api_drm_driver_list {
+  struct api_drm_driver_entry *entries;
+  u32 max_entries;
+  u32 count;
+};
+
+struct api_drm_driver_switch {
+  u32 id;
+};
+
 int api_term_read(void *buf, u32 count);
 int api_term_write(const void *buf, u32 count);
 int api_data_read(int handle, void *buf, u32 count);
@@ -318,5 +342,6 @@ void api_proc_exit_group(int code);
 int api_proc_set_tid_address(u64 tidptr);
 int api_futex_wait(u64 uaddr, u32 expected_val);
 int api_futex_wake(u64 uaddr, u32 max_waiters);
+int api_sys_random(u8 *buf, u32 len);
 
 #endif

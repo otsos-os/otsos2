@@ -135,6 +135,11 @@ int		vfs_rmdir(const char *path);
 int		vfs_unlink(const char *path);
 int		vfs_rename(const char *oldpath, const char *newpath);
 int		vfs_truncate(const char *path, u64 length);
+int		vfs_chdir(const char *path);
+int		vfs_getcwd(char *buf, u32 size);
+int		vfs_read_file_full(const char *path, u8 *buf, u32 bufsize,
+		    u32 *bytes_read);
+int		vfs_write_file(const char *path, const u8 *data, u32 size);
 
 vnode_t		*vnode_alloc(int type, const char *name);
 vnode_t		*vnode_acquire(vnode_t *vn);

@@ -24,7 +24,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/api/api.h>
 #include <kernel/crypto/crypto.h>
 #include <kernel/process.h>

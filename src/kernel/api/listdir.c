@@ -24,7 +24,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/api/api.h>
 #include <kernel/useraddr.h>
@@ -59,11 +58,9 @@ int api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries) {
    * it to an absolute path so that VFS can handle it uniformly.
    */
   if (path == NULL || path[0] == '\0') {
-    if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+    if (vfs_getcwd(curpath, sizeof(curpath)) != 0) {
       return -API_ERR_IO;
     }
-    memset(curpath, 0, sizeof(curpath));
-    chainfs_get_current_path(curpath, sizeof(curpath));
     resolve_path = curpath;
   } else {
     resolve_path = path;

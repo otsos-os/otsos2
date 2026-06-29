@@ -26,7 +26,7 @@
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
-#include <kernel/drivers/fs/devfs/devfs.h>
+#include <kernel/drivers/fs/devtmpfs/devtmpfs.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
@@ -81,7 +81,7 @@ vfs_init(void)
 		vnode_pool[i].readdir_fn = NULL;
 	}
 
-	devfs_init();
+	devtmpfs_init();
 	vfs_initialized = 1;
 	com1_printf("[VFS] initialized (vnode pool: %d slots)\n",
 	    VFS_MAX_VNODES);
@@ -507,11 +507,11 @@ vfs_lookup_chainfs(const char *path)
 }
 
 static vnode_t *
-vfs_lookup_devfs(const char *path)
+vfs_lookup_devtmpfs(const char *path)
 {
 	vnode_t	*vn;
 
-	vn = devfs_lookup(path);
+	vn = devtmpfs_lookup(path);
 	if (vn) {
 		return (vn);
 	}
@@ -519,7 +519,7 @@ vfs_lookup_devfs(const char *path)
 	if (strcmp(path, "/dev") == 0 || strcmp(path, "/dev/") == 0) {
 		vn = vnode_alloc(VDIR, "dev");
 		if (vn) {
-			vn->readdir_fn = devfs_root_readdir;
+			vn->readdir_fn = devtmpfs_root_readdir;
 			vn->data = NULL;
 		}
 		return (vn);
@@ -542,7 +542,7 @@ vfs_resolve(const char *path, vnode_t **out)
 	}
 
 	if (path_starts_with(path, "/dev")) {
-		vn = vfs_lookup_devfs(path);
+		vn = vfs_lookup_devtmpfs(path);
 		if (vn) {
 			*out = vn;
 			return (0);
@@ -726,4 +726,125 @@ vfs_truncate(const char *path, u64 length)
 
 	kmem_free(buf);
 	return (0);
+}
+
+int
+vfs_chdir(const char *path)
+{
+	vnode_t	*vn;
+
+	if (!path || path[0] == '\0') {
+		return (-1);
+	}
+
+	if (path_starts_with(path, "/dev")) {
+		return (-1);
+	}
+
+	if (vfs_resolve(path, &vn) != 0 || vn == NULL) {
+		return (-1);
+	}
+
+	if (vn->type != VDIR) {
+		vnode_release(vn);
+		return (-1);
+	}
+
+	vnode_release(vn);
+	return (chainfs_chdir(path));
+}
+
+int
+vfs_getcwd(char *buf, u32 size)
+{
+	if (!buf || size == 0) {
+		return (-1);
+	}
+
+	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+		return (-1);
+	}
+
+	if (chainfs_get_current_path(buf, size) == NULL) {
+		return (-1);
+	}
+
+	return (0);
+}
+
+int
+vfs_read_file_full(const char *path, u8 *buf, u32 bufsize,
+    u32 *bytes_read)
+{
+	vnode_t		*vn;
+	posix_stat_t	st;
+	int		n;
+	u32		total;
+	u8		*tbuf;
+	u32		file_size;
+
+	if (vfs_resolve(path, &vn) != 0 || vn == NULL) {
+		return (-1);
+	}
+
+	if (vn->type == VDIR) {
+		vnode_release(vn);
+		return (-1);
+	}
+
+	if (vnode_stat(vn, &st) != 0) {
+		vnode_release(vn);
+		return (-1);
+	}
+
+	file_size = (u32)st.st_size;
+	if (file_size == 0) {
+		vnode_release(vn);
+		*bytes_read = 0;
+		return (0);
+	}
+
+	if (file_size > bufsize) {
+		vnode_release(vn);
+		return (-1);
+	}
+
+	tbuf = buf;
+	total = 0;
+	while (total < file_size) {
+		u32	to_read;
+
+		to_read = file_size - total;
+		if (to_read > 4096) {
+			to_read = 4096;
+		}
+
+		n = vnode_read(vn, tbuf + total, to_read, total);
+		if (n < 0) {
+			vnode_release(vn);
+			return (-1);
+		}
+		if (n == 0) {
+			break;
+		}
+		total += (u32)n;
+	}
+
+	vnode_release(vn);
+	*bytes_read = total;
+	return (0);
+}
+
+int
+vfs_write_file(const char *path, const u8 *data, u32 size)
+{
+	if (path_starts_with(path, "/dev")) {
+		return (-1);
+	}
+
+	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+		return (-1);
+	}
+
+	return (chainfs_write_file(path, data, size));
 }

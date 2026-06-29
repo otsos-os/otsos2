@@ -24,24 +24,26 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifndef DEVTMPFS_H
+#define DEVTMPFS_H
+
 #include <kernel/drivers/fs/vfs/vfs.h>
-#include <kernel/api/api.h>
-#include <kernel/useraddr.h>
-#include <mlibc/mlibc.h>
 
-int
-api_fs_getcwd(char *buf, u32 size)
-{
-	if (!buf || size == 0) {
-		return (-API_ERR_BAD_VALUE);
-	}
-	if (!is_user_address(buf, size)) {
-		return (-API_ERR_BAD_ADDR);
-	}
+#define DEVTMPFS_DEV_NULL	1
+#define DEVTMPFS_DEV_ZERO	2
+#define DEVTMPFS_DEV_TTY	3
+#define DEVTMPFS_DEV_CONSOLE	4
+#define DEVTMPFS_DEV_FB0	5
+#define DEVTMPFS_DEV_RANDOM	6
+#define DEVTMPFS_DEV_URANDOM	7
 
-	if (vfs_getcwd(buf, size) != 0) {
-		return (-API_ERR_IO);
-	}
+void		devtmpfs_init(void);
+vnode_t		*devtmpfs_lookup(const char *path);
+int		devtmpfs_root_readdir(vnode_t *vn, u32 index, char *name,
+		    int *type);
+int		devtmpfs_register(const char *name, int device_id,
+		    int (*read_fn)(void *, u64),
+		    int (*write_fn)(const void *, u64));
+int		devtmpfs_unregister(const char *name);
 
-	return (0);
-}
+#endif

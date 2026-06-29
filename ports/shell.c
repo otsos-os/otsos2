@@ -25,6 +25,11 @@
 #define CALL_SYS_INFO   0x500
 #define CALL_SYS_MEMINFO 0x501
 #define CALL_SYS_KMEMINFO 0x502
+#define CALL_DRM_CALL    0x600
+
+#define DRM_OP_INFO            1
+#define DRM_OP_DRIVER_LIST     16
+#define DRM_OP_DRIVER_SWITCH   15
 
 #define CALL_PERSONALITY 0xFFFF
 
@@ -119,6 +124,22 @@ struct api_kmeminfo {
   u64 kmem_heap_addr;
 };
 
+struct api_drm_driver_entry {
+  u32 id;
+  char name[32];
+  u32 active;
+};
+
+struct api_drm_driver_list {
+  struct api_drm_driver_entry *entries;
+  u32 max_entries;
+  u32 count;
+};
+
+struct api_drm_driver_switch {
+  u32 id;
+};
+
 static char **g_envp;
 static int g_kusr_authed = 0;
 /* ------------------------------------------------------------------ */
@@ -186,6 +207,15 @@ static long sys_meminfo(struct api_meminfo *buf) {
 
 static long sys_kmeminfo(struct api_kmeminfo *buf) {
   return syscall1(CALL_SYS_KMEMINFO, (long)buf);
+}
+
+static long drm_call(u64 op, void *arg) {
+  long ret;
+  __asm__ volatile("syscall"
+                   : "=a"(ret)
+                   : "a"((long)CALL_DRM_CALL), "D"((long)op), "S"((long)arg)
+                   : "rcx", "r11", "memory");
+  return ret;
 }
 
 static long data_open(const char *path, int flags) {
@@ -470,6 +500,81 @@ static int run_external(const char *path, char **argv, char **envp) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  built-in: drm_list                                                 */
+/* ------------------------------------------------------------------ */
+
+static void cmd_drm_list(void) {
+  struct api_drm_driver_entry entries[8];
+  struct api_drm_driver_list list;
+  list.entries = entries;
+  list.max_entries = 8;
+  list.count = 0;
+
+  long ret = drm_call(DRM_OP_DRIVER_LIST, &list);
+  if (ret < 0) {
+    print_err("drm_list", ret);
+    return;
+  }
+
+  println("ID  NAME                 STATUS");
+  for (u32 i = 0; i < list.count; i++) {
+    print_int((int)entries[i].id);
+    print("  ");
+    print(entries[i].name);
+    if (entries[i].active) {
+      print("  [active]");
+    }
+    printc('\n');
+  }
+
+  if (list.count == 0) {
+    println("(no drivers registered)");
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  built-in: drm_switch                                               */
+/* ------------------------------------------------------------------ */
+
+static int parse_nonneg(const char *s) {
+  int v = 0;
+  for (int i = 0; s[i]; i++) {
+    if (s[i] < '0' || s[i] > '9') return -1;
+    v = v * 10 + (s[i] - '0');
+  }
+  return v;
+}
+
+static void cmd_drm_switch(int argc, char **argv) {
+  if (argc < 2) {
+    println("drm_switch: usage: drm_switch <id>");
+    println("  use drm_list to see available drivers");
+    return;
+  }
+
+  int id = parse_nonneg(argv[1]);
+  if (id < 0) {
+    println("drm_switch: invalid id");
+    return;
+  }
+
+  struct api_drm_driver_switch sw;
+  sw.id = (u32)id;
+
+  long ret = drm_call(DRM_OP_DRIVER_SWITCH, &sw);
+  if (ret < 0) {
+    if (ret == -ERR_PERM) {
+      println("drm_switch: permission denied (need kusr)");
+    } else {
+      print_err("drm_switch", ret);
+    }
+    return;
+  }
+
+  println("drm_switch: ok");
+}
+
+/* ------------------------------------------------------------------ */
 /*  built-in: help                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -485,6 +590,8 @@ static void cmd_help(void) {
   println("  clear              clear screen");
   println("  color <hex>        set text color (e.g. FF0000)");
   println("  kusr               authenticate as kernel user");
+  println("  drm_list           list DRM drivers");
+  println("  drm_switch <id>    switch DRM driver (kusr only)");
   println("  env                print environment");
   println("  exit               exit shell");
   println("  help               this help");
@@ -908,6 +1015,8 @@ static int exec_builtin(int argc, char **argv) {
   if (strcmp_s(cmd, "clear") == 0)  { cmd_clear(); return 0; }
   if (strcmp_s(cmd, "color") == 0)  { cmd_color(argc, argv); return 0; }
   if (strcmp_s(cmd, "kusr") == 0)   { cmd_kusr(); return 0; }
+  if (strcmp_s(cmd, "drm_list") == 0) { cmd_drm_list(); return 0; }
+  if (strcmp_s(cmd, "drm_switch") == 0) { cmd_drm_switch(argc, argv); return 0; }
   if (strcmp_s(cmd, "env") == 0)    { cmd_env(); return 0; }
   if (strcmp_s(cmd, "exit") == 0)   { return 1; }
 

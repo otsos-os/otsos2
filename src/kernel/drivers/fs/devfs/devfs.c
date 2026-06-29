@@ -27,6 +27,7 @@
 #include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/drivers/tty.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
+#include <kernel/crypto/rng/rng.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
@@ -99,18 +100,38 @@ dev_console_write(const void *buf, u64 count)
 static int
 dev_random_read(void *buf, u64 count)
 {
-	u8	*out;
-	u64	i;
+	if (count == 0) {
+		return (0);
+	}
 
-	out = (u8 *)buf;
-	for (i = 0; i < count; i++) {
-		out[i] = (u8)(i * 2654435761u);
+	if (crypto_rng_bytes((u8 *)buf, (u32)count) != 0) {
+		return (-1);
 	}
 	return ((int)count);
 }
 
 static int
 dev_random_write(const void *buf, u64 count)
+{
+	crypto_rng_add_entropy((const u8 *)buf, (u32)count);
+	return ((int)count);
+}
+
+static int
+dev_urandom_read(void *buf, u64 count)
+{
+	if (count == 0) {
+		return (0);
+	}
+
+	if (crypto_rng_bytes((u8 *)buf, (u32)count) != 0) {
+		return (-1);
+	}
+	return ((int)count);
+}
+
+static int
+dev_urandom_write(const void *buf, u64 count)
 {
 	(void)buf;
 	return ((int)count);
@@ -156,7 +177,7 @@ devfs_init(void)
 	devfs_register("random", DEVFS_DEV_RANDOM,
 	    dev_random_read, dev_random_write);
 	devfs_register("urandom", DEVFS_DEV_URANDOM,
-	    dev_random_read, dev_random_write);
+	    dev_urandom_read, dev_urandom_write);
 
 	com1_printf("[DEVFS] initialized (%d devices)\n",
 	    devfs_device_count);

@@ -61,7 +61,7 @@ $space %export vm_pager_create_device, vm_pager_destroy
 #include <mm/vm/vm_page.h>
 #include <mm/kmem.h>
 #include <mlibc/mlibc.h>
-#include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/drivers/fs/vfs/vfs.h>
 
 #define PAGE_SIZE 4096
 
@@ -111,8 +111,9 @@ vm_pager_create_default(u64 size)
 static int
 vnode_getpage(vm_pager_t *pager, u64 offset, u64 *out_phys)
 {
-	u64 phys;
-	u32 bytes_read;
+	u64	phys;
+	vnode_t	*vn;
+	int	n;
 
 	phys = vm_page_alloc_phys(0);
 	if (phys == 0) {
@@ -120,10 +121,13 @@ vnode_getpage(vm_pager_t *pager, u64 offset, u64 *out_phys)
 	}
 	memset((void *)phys, 0, PAGE_SIZE);
 	if (pager->path[0] != '\0') {
-		bytes_read = 0;
-		chainfs_read_file_range(pager->path,
-		    (u8 *)phys, PAGE_SIZE,
-		    (u32)offset, &bytes_read);
+		vn = NULL;
+		if (vfs_resolve(pager->path, &vn) == 0 && vn != NULL) {
+			n = vnode_read(vn, (void *)phys, PAGE_SIZE,
+			    offset);
+			vnode_release(vn);
+			(void)n;
+		}
 	}
 	*out_phys = phys;
 	return (0);

@@ -24,27 +24,37 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/api/api.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
 
-int api_fs_chdir(const char *path) {
-  if (!is_user_address(path, 1)) {
-    return -API_ERR_BAD_ADDR;
-  }
+int
+api_fs_chdir(const char *path)
+{
+	char	kpath[256];
+	int	len;
 
-  char kpath[256];
-  memset(kpath, 0, sizeof(kpath));
-  int len = 0;
-  while (len < 255) {
-    if (!is_user_address(path + len, 1)) {
-      return -API_ERR_BAD_ADDR;
-    }
-    if (path[len] == '\0') break;
-    kpath[len] = path[len];
-    len++;
-  }
+	if (!is_user_address(path, 1)) {
+		return (-API_ERR_BAD_ADDR);
+	}
 
-  return chainfs_chdir(kpath);
+	memset(kpath, 0, sizeof(kpath));
+	len = 0;
+	while (len < 255) {
+		if (!is_user_address(path + len, 1)) {
+			return (-API_ERR_BAD_ADDR);
+		}
+		if (path[len] == '\0') {
+			break;
+		}
+		kpath[len] = path[len];
+		len++;
+	}
+
+	if (vfs_chdir(kpath) != 0) {
+		return (-API_ERR_NOT_FOUND);
+	}
+
+	return (0);
 }

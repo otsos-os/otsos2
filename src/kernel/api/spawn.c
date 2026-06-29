@@ -24,17 +24,17 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/gdt.h>
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_page.h>
 #include <kernel/api/api.h>
 #include <kernel/api/posix/posix.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
-#include <kernel/drivers/fs/devfs/devfs.h>
+#include <kernel/drivers/fs/devtmpfs/devtmpfs.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
+#include <lib/com1.h>
 #include <mlibc/mlibc.h>
 #include <userland/elf.h>
 #include <userland/userspace.h>
@@ -138,25 +138,56 @@ static void free_string_array(char **arr) {
 
 static int read_file_into_buffer(const char *path, u8 **out_buf,
                                  u32 *out_size) {
-  chainfs_file_entry_t entry;
-  u32 entry_block, entry_offset;
-  if (chainfs_find_file(path, &entry, &entry_block, &entry_offset) != 0) {
+  vnode_t *vn;
+  posix_stat_t st;
+  u32 size;
+  u8 *buf;
+  u32 bytes_read;
+
+  if (vfs_resolve(path, &vn) != 0 || vn == NULL) {
     return -API_ERR_NOT_FOUND;
   }
 
-  u32 size = entry.size;
-  if (size == 0) {
+  if (vn->type == VDIR) {
+    vnode_release(vn);
     return -API_ERR_BAD_IMAGE;
   }
 
-  u8 *buf = (u8 *)kmem_calloc(size, 1);
+  if (vnode_stat(vn, &st) != 0) {
+    vnode_release(vn);
+    return -API_ERR_IO;
+  }
+
+  size = (u32)st.st_size;
+  if (size == 0) {
+    vnode_release(vn);
+    return -API_ERR_BAD_IMAGE;
+  }
+
+  buf = (u8 *)kmem_calloc(size, 1);
   if (!buf) {
+    vnode_release(vn);
     return -API_ERR_NO_MEMORY;
   }
 
-  u32 bytes_read = 0;
-  if (chainfs_read_file(path, buf, size, &bytes_read) != 0 ||
-      bytes_read != size) {
+  bytes_read = 0;
+  u32 total = 0;
+  while (total < size) {
+    u32 to_read = size - total;
+    if (to_read > 4096) to_read = 4096;
+    int n = vnode_read(vn, buf + total, to_read, total);
+    if (n < 0) {
+      vnode_release(vn);
+      kmem_free(buf);
+      return -API_ERR_IO;
+    }
+    if (n == 0) break;
+    total += (u32)n;
+  }
+
+  vnode_release(vn);
+
+  if (total != size) {
     kmem_free(buf);
     return -API_ERR_IO;
   }
@@ -300,12 +331,6 @@ int api_proc_spawn(const char *path, const char *const *argv,
     com1_printf("[SPAWN] Error: invalid user path pointer %p\n",
                 (void *)path);
     return -API_ERR_BAD_ADDR;
-  }
-
-  if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
-    com1_printf("[SPAWN] Error: ChainFS not initialized (magic=0x%x)\n",
-                g_chainfs.superblock.magic);
-    return -API_ERR_IO;
   }
 
   char *kpath = copy_user_string(path, SPAWN_MAX_STR);
