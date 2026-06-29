@@ -75,6 +75,13 @@ filt_proc_attach(knote_t *kn)
 
 	com1_printf("[EVFILT_PROC] attach: monitoring "
 	    "pid=%d\n", pid);
+
+	if (proc->state == PROC_STATE_ZOMBIE) {
+		kn->fflags |= NOTE_EXIT;
+		kn->data = proc->exit_code;
+		knote_ready(kn);
+	}
+
 	return (0);
 }
 

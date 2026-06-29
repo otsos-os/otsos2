@@ -517,7 +517,7 @@ $(SCHEDULER_O): kernel/scheduler.c kernel/scheduler.h kernel/process.h kernel/mm
 
 $(ELF_O): userland/elf.zig kernel/mm/vm/vm_page.h
 	@echo "  ZIG     $<"
-	@$(ZIG) build-obj -femit-bin=$@ -target $(ZIG_TARGET) -mcmodel=kernel -O ReleaseSafe --dep panic -Melf=userland/elf.zig -Mpanic=kernel/panic.zig
+	@$(ZIG) build-obj -femit-bin=$@ -target $(ZIG_TARGET) -mcpu=x86_64-sse-mmx-sse2-avx-avx2 -mcmodel=kernel -O ReleaseSafe --dep panic -Melf=userland/elf.zig -Mpanic=kernel/panic.zig
 
 $(USERSPACE_O): userland/userspace.c userland/userspace.h kernel/process.h kernel/mm/vm/pmap.h kernel/mm/vm/vm_page.h kernel/gdt.h
 	@echo "  CC      $<"

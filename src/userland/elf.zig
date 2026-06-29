@@ -40,6 +40,7 @@ const ELFCLASS64: u8 = 2;
 const ELFDATA2LSB: u8 = 1;
 
 const ET_EXEC: u16 = 2;
+const ET_DYN: u16 = 3;
 const EM_X86_64: u16 = 62;
 
 const PT_LOAD: u32 = 1;
@@ -160,7 +161,7 @@ pub export fn elf_validate(data: *anyopaque, size: u64) elf_result_t {
         return .ELF_ERR_INVALID_ENDIAN;
     }
 
-    if (ehdr.e_type != ET_EXEC) {
+    if (ehdr.e_type != ET_EXEC and ehdr.e_type != ET_DYN) {
         return .ELF_ERR_INVALID_TYPE;
     }
 
@@ -187,7 +188,9 @@ pub export fn elf_parse(data: *anyopaque, size: u64, info: *elf_info_t) elf_resu
 
     info.header = ehdr;
     info.phdrs = phdrs;
-    info.entry_point = ehdr.e_entry;
+
+    const load_base: u64 = if (ehdr.e_type == ET_DYN) 0x400000 else 0;
+    info.entry_point = ehdr.e_entry + load_base;
     info.load_addr_min = ~@as(u64, 0);
     info.load_addr_max = 0;
 
@@ -200,10 +203,10 @@ pub export fn elf_parse(data: *anyopaque, size: u64, info: *elf_info_t) elf_resu
         }
 
         if (phdr.p_vaddr < info.load_addr_min) {
-            info.load_addr_min = phdr.p_vaddr;
+            info.load_addr_min = phdr.p_vaddr + load_base;
         }
 
-        const end_addr = phdr.p_vaddr + phdr.p_memsz;
+        const end_addr = phdr.p_vaddr + phdr.p_memsz + load_base;
         if (end_addr > info.load_addr_max) {
             info.load_addr_max = end_addr;
         }
@@ -220,6 +223,8 @@ pub export fn elf_load(data: *anyopaque, size: u64) u64 {
         com1_printf("[ELF] Error: %s\n", elf_strerror(result));
         return 0;
     }
+
+    const load_base: u64 = if (info.header.e_type == ET_DYN) 0x400000 else 0;
 
     com1_printf(
         "[ELF] Loading ELF: entry=%p, segments=%d\n",
@@ -240,7 +245,7 @@ pub export fn elf_load(data: *anyopaque, size: u64) u64 {
             continue;
         }
 
-        const vaddr = phdr.p_vaddr;
+        const vaddr = phdr.p_vaddr + load_base;
         const filesz = phdr.p_filesz;
         const memsz = phdr.p_memsz;
         const offset = phdr.p_offset;

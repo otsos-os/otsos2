@@ -281,7 +281,7 @@ _start(void)
 			continue;
 		}
 
-		print("child running\n");
+		// print("child running\n");
 		child_pid = (int)pid;
 
 		if (kq >= 0) {
@@ -301,7 +301,7 @@ _start(void)
 					if (events[i].filter ==
 					    EVFILT_PROC &&
 					    events[i].fflags & NOTE_EXIT) {
-						print("child exited\n");
+						// print("child exited\n");
 					}
 				}
 			}
