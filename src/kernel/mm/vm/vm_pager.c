@@ -23,6 +23,40 @@
  * SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u8 as 8 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type u64 as 64 bit unsigned
+$define %type int as 32 bit signed
+$define %type vm_pager_t as struct with type, size, handle, path, getpage, putpage, haspage
+
+$define %func default_getpage as function with args vm_pager_t *, u64, u64 *
+$define %func default_putpage as function with args vm_pager_t *, u64, u64
+$define %func default_haspage as function with args vm_pager_t *, u64
+$define %func vnode_getpage as function with args vm_pager_t *, u64, u64 *
+$define %func vnode_putpage as function with args vm_pager_t *, u64, u64
+$define %func vnode_haspage as function with args vm_pager_t *, u64
+$define %func device_getpage as function with args vm_pager_t *, u64, u64 *
+$define %func device_putpage as function with args vm_pager_t *, u64, u64
+$define %func device_haspage as function with args vm_pager_t *, u64
+$define %func vm_pager_create_default as function with args u64
+$define %func vm_pager_create_vnode as function with args const char *, u64
+$define %func vm_pager_create_device as function with args void *, u64
+$define %func vm_pager_destroy as procedure with args vm_pager_t *
+
+*/
+
+/* !SPACE!
+
+$space %internal default_getpage, default_putpage, default_haspage
+$space %internal vnode_getpage, vnode_putpage, vnode_haspage
+$space %internal device_getpage, device_putpage, device_haspage
+$space %export vm_pager_create_default, vm_pager_create_vnode
+$space %export vm_pager_create_device, vm_pager_destroy
+
+*/
+
 #include <mm/vm/vm_pager.h>
 #include <mm/vm/vm_page.h>
 #include <mm/kmem.h>
@@ -34,138 +68,146 @@
 static int
 default_getpage(vm_pager_t *pager, u64 offset, u64 *out_phys)
 {
-    u64 phys;
+	u64 phys;
 
-    phys = vm_page_alloc_phys(0);
-    if (phys == 0)
-        return -1;
-    memset((void *)phys, 0, PAGE_SIZE);
-    *out_phys = phys;
-    return 0;
+	phys = vm_page_alloc_phys(0);
+	if (phys == 0) {
+		return (-1);
+	}
+	memset((void *)phys, 0, PAGE_SIZE);
+	*out_phys = phys;
+	return (0);
 }
 
 static int
 default_putpage(vm_pager_t *pager, u64 offset, u64 phys)
 {
-    return 0;
+	return (0);
 }
 
 static int
 default_haspage(vm_pager_t *pager, u64 offset)
 {
-    return 0;
+	return (0);
 }
 
 vm_pager_t *
 vm_pager_create_default(u64 size)
 {
-    vm_pager_t *p;
+	vm_pager_t *p;
 
-    p = kmem_calloc(1, sizeof(vm_pager_t));
-    if (p == NULL)
-        return NULL;
-    p->type = VM_PAGER_DEFAULT;
-    p->size = size;
-    p->getpage = default_getpage;
-    p->putpage = default_putpage;
-    p->haspage = default_haspage;
-    return p;
+	p = kmem_calloc(1, sizeof(vm_pager_t));
+	if (p == NULL) {
+		return (NULL);
+	}
+	p->type = VM_PAGER_DEFAULT;
+	p->size = size;
+	p->getpage = default_getpage;
+	p->putpage = default_putpage;
+	p->haspage = default_haspage;
+	return (p);
 }
 
 static int
 vnode_getpage(vm_pager_t *pager, u64 offset, u64 *out_phys)
 {
-    u64 phys;
+	u64 phys;
+	u32 bytes_read;
 
-    phys = vm_page_alloc_phys(0);
-    if (phys == 0)
-        return -1;
-    memset((void *)phys, 0, PAGE_SIZE);
-
-    if (pager->path[0] != '\0') {
-        u32 bytes_read = 0;
-        chainfs_read_file_range(pager->path, (u8 *)phys, PAGE_SIZE,
-                                (u32)offset, &bytes_read);
-    }
-    *out_phys = phys;
-    return 0;
+	phys = vm_page_alloc_phys(0);
+	if (phys == 0) {
+		return (-1);
+	}
+	memset((void *)phys, 0, PAGE_SIZE);
+	if (pager->path[0] != '\0') {
+		bytes_read = 0;
+		chainfs_read_file_range(pager->path,
+		    (u8 *)phys, PAGE_SIZE,
+		    (u32)offset, &bytes_read);
+	}
+	*out_phys = phys;
+	return (0);
 }
 
 static int
 vnode_putpage(vm_pager_t *pager, u64 offset, u64 phys)
 {
-    return 0;
+	return (0);
 }
 
 static int
 vnode_haspage(vm_pager_t *pager, u64 offset)
 {
-    return 1;
+	return (1);
 }
 
 vm_pager_t *
 vm_pager_create_vnode(const char *path, u64 size)
 {
-    vm_pager_t *p;
-    u32 i;
+	vm_pager_t *p;
+	u32 i;
 
-    p = kmem_calloc(1, sizeof(vm_pager_t));
-    if (p == NULL)
-        return NULL;
-    p->type = VM_PAGER_VNODE;
-    p->size = size;
-    if (path != NULL) {
-        for (i = 0; i < VM_PAGER_PATH_MAX - 1 && path[i]; i++)
-            p->path[i] = path[i];
-        p->path[i] = '\0';
-        p->handle = p->path;
-    }
-    p->getpage = vnode_getpage;
-    p->putpage = vnode_putpage;
-    p->haspage = vnode_haspage;
-    return p;
+	p = kmem_calloc(1, sizeof(vm_pager_t));
+	if (p == NULL) {
+		return (NULL);
+	}
+	p->type = VM_PAGER_VNODE;
+	p->size = size;
+	if (path != NULL) {
+		for (i = 0; i < VM_PAGER_PATH_MAX - 1 && path[i]; i++) {
+			p->path[i] = path[i];
+		}
+		p->path[i] = '\0';
+		p->handle = p->path;
+	}
+	p->getpage = vnode_getpage;
+	p->putpage = vnode_putpage;
+	p->haspage = vnode_haspage;
+	return (p);
 }
 
 static int
 device_getpage(vm_pager_t *pager, u64 offset, u64 *out_phys)
 {
-    *out_phys = (u64)pager->handle + offset;
-    return 0;
+	*out_phys = (u64)pager->handle + offset;
+	return (0);
 }
 
 static int
 device_putpage(vm_pager_t *pager, u64 offset, u64 phys)
 {
-    return 0;
+	return (0);
 }
 
 static int
 device_haspage(vm_pager_t *pager, u64 offset)
 {
-    return 1;
+	return (1);
 }
 
 vm_pager_t *
 vm_pager_create_device(void *data, u64 size)
 {
-    vm_pager_t *p;
+	vm_pager_t *p;
 
-    p = kmem_calloc(1, sizeof(vm_pager_t));
-    if (p == NULL)
-        return NULL;
-    p->type = VM_PAGER_DEVICE;
-    p->size = size;
-    p->handle = data;
-    p->getpage = device_getpage;
-    p->putpage = device_putpage;
-    p->haspage = device_haspage;
-    return p;
+	p = kmem_calloc(1, sizeof(vm_pager_t));
+	if (p == NULL) {
+		return (NULL);
+	}
+	p->type = VM_PAGER_DEVICE;
+	p->size = size;
+	p->handle = data;
+	p->getpage = device_getpage;
+	p->putpage = device_putpage;
+	p->haspage = device_haspage;
+	return (p);
 }
 
 void
 vm_pager_destroy(vm_pager_t *pager)
 {
-    if (pager == NULL)
-        return;
-    kmem_free(pager);
+	if (pager == NULL) {
+		return;
+	}
+	kmem_free(pager);
 }
