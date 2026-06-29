@@ -121,6 +121,7 @@ CRYPTO_SHA256_O = ../bin/crypto_sha256.o
 CRYPTO_HMAC_O = ../bin/crypto_hmac.o
 CRYPTO_PBKDF2_O = ../bin/crypto_pbkdf2.o
 CRYPTO_RNG_O = ../bin/crypto_rng.o
+CRYPTO_CHACHA20_O = ../bin/crypto_chacha20.o
 
 VIRTIO_HW_O = ../bin/virtio_hw.o
 VIRTIO_QUEUE_O = ../bin/virtio_queue.o
@@ -154,7 +155,7 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(BOOT
       $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O) \
       $(KSHELL_O) $(KSHELL_PARSER_O) $(KSHELL_ECHO_O) $(KSHELL_DRM_O) \
       $(TOML_O) $(KUSR_O) $(KUSR_AUTH_O) $(DRM_API_O) $(RESTRICT_O) \
-      $(CRYPTO_UTIL_O) $(CRYPTO_SHA256_O) $(CRYPTO_HMAC_O) $(CRYPTO_PBKDF2_O) $(CRYPTO_RNG_O) \
+      $(CRYPTO_UTIL_O) $(CRYPTO_SHA256_O) $(CRYPTO_HMAC_O) $(CRYPTO_PBKDF2_O) $(CRYPTO_RNG_O) $(CRYPTO_CHACHA20_O) \
       $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O) \
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
       $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
@@ -499,7 +500,7 @@ $(GETCWD_O): kernel/api/getcwd.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(LISTDIR_O): kernel/api/listdir.c
+$(LISTDIR_O): kernel/api/listdir.c kernel/drivers/fs/vfs/vfs.h kernel/drivers/fs/chainFS/chainfs.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -632,6 +633,10 @@ $(CRYPTO_PBKDF2_O): kernel/crypto/kdf/pbkdf2.c kernel/crypto/kdf/pbkdf2.h kernel
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(CRYPTO_RNG_O): kernel/crypto/rng/rng.c kernel/crypto/rng/rng.h kernel/crypto/hash/sha256.h kernel/crypto/util/crypto_util.h kernel/drivers/timer.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(CRYPTO_CHACHA20_O): kernel/crypto/cipher/chacha20.c kernel/crypto/cipher/chacha20.h kernel/crypto/util/crypto_util.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

@@ -38,6 +38,7 @@
  *     hmac/             — HMAC-SHA256
  *     kdf/              — PBKDF2-HMAC-SHA256 (password hashing / verification)
  *     rng/              — CSPRNG (RDRAND/RDSEED + SHA-256 entropy pool)
+ *     cipher/           — ChaCha20 stream cipher (RFC 8439)
  *
  * Usage:
  *   #include <kernel/crypto/crypto.h>
@@ -50,5 +51,6 @@
 #include <kernel/crypto/hmac/hmac_sha256.h>
 #include <kernel/crypto/kdf/pbkdf2.h>
 #include <kernel/crypto/rng/rng.h>
+#include <kernel/crypto/cipher/chacha20.h>
 
 #endif

@@ -99,9 +99,17 @@ posix_open(u64 path_u, u64 flags, u64 mode, u64 a4, u64 a5, u64 a6,
 	if (vfs_resolve(path, &vn) == 0 && vn != NULL) {
 		exists = 1;
 		if (vn->type == VDIR) {
-			vnode_release(vn);
-			kmem_free(path);
-			return (-POSIX_EISDIR);
+			/*
+			 * Directories may be opened read-only (for
+			 * getdents64 / opendir).  Reject write/open
+			 * attempts as EISDIR.
+			 */
+			if ((posix_flags & POSIX_O_WRONLY) ||
+			    (posix_flags & POSIX_O_RDWR)) {
+				vnode_release(vn);
+				kmem_free(path);
+				return (-POSIX_EISDIR);
+			}
 		}
 	} else {
 		exists = 0;

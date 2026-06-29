@@ -397,6 +397,55 @@ chainfs_vnode_readdir(vnode_t *vn, u32 index, char *name, int *type)
 	return (1);
 }
 
+/*
+ * Root directory readdir: merges ChainFS root entries with the
+ * virtual "dev" directory so that `ls /` shows /dev.
+ */
+static int
+vfs_root_readdir(vnode_t *vn, u32 index, char *name, int *type)
+{
+	chainfs_file_entry_t	entries[128];
+	u32			count;
+	int			j;
+
+	(void)vn;
+
+	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+		return (-1);
+	}
+
+	count = 0;
+	if (chainfs_list_dir("/", entries, 128, &count) != 0) {
+		return (-1);
+	}
+
+	if (index < count) {
+		for (j = 0; j < 31 && entries[index].name[j] != '\0';
+		    j++) {
+			name[j] = entries[index].name[j];
+		}
+		name[j] = '\0';
+		if (type) {
+			*type = (entries[index].type ==
+			    CHAINFS_TYPE_DIR) ? VDIR : VREG;
+		}
+		return (1);
+	}
+
+	if (index == count) {
+		name[0] = 'd';
+		name[1] = 'e';
+		name[2] = 'v';
+		name[3] = '\0';
+		if (type) {
+			*type = VDIR;
+		}
+		return (1);
+	}
+
+	return (0);
+}
+
 static vnode_t *
 vfs_lookup_chainfs(const char *path)
 {
@@ -444,6 +493,15 @@ vfs_lookup_chainfs(const char *path)
 	vn->write_fn = chainfs_vnode_write;
 	vn->stat_fn = chainfs_vnode_stat;
 	vn->readdir_fn = chainfs_vnode_readdir;
+
+	/*
+	 * The root directory merges ChainFS entries with the virtual
+	 * /dev mount point so that `ls /` shows dev alongside regular
+	 * files.
+	 */
+	if (strcmp(path, "/") == 0) {
+		vn->readdir_fn = vfs_root_readdir;
+	}
 
 	return (vn);
 }

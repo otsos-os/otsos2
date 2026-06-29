@@ -25,13 +25,21 @@
  */
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/api/api.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
 
-#define LISTDIR_MAX_FILES 128
-
 int api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries) {
+  vnode_t *vn;
+  u32 i;
+  int ret;
+  char name[32];
+  int type;
+  int j;
+  char curpath[256];
+  const char *resolve_path;
+
   if (!buf || max_entries == 0) {
     return -API_ERR_BAD_VALUE;
   }
@@ -39,46 +47,55 @@ int api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries) {
     return -API_ERR_BAD_ADDR;
   }
 
-  const char *use_path = path;
   if (path) {
     if (!is_user_address(path, 1)) {
       return -API_ERR_BAD_ADDR;
     }
   }
 
-  chainfs_file_entry_t entries[LISTDIR_MAX_FILES];
-  u32 file_count = 0;
-
-  const char *list_path = NULL;
-  if (use_path && use_path[0] == '\0') {
-    list_path = NULL;
+  /*
+   * Determine the path to list.  An empty or NULL path means the
+   * current directory, which ChainFS tracks internally.  We resolve
+   * it to an absolute path so that VFS can handle it uniformly.
+   */
+  if (path == NULL || path[0] == '\0') {
+    if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+      return -API_ERR_IO;
+    }
+    memset(curpath, 0, sizeof(curpath));
+    chainfs_get_current_path(curpath, sizeof(curpath));
+    resolve_path = curpath;
   } else {
-    list_path = use_path;
+    resolve_path = path;
   }
 
-  int ret = chainfs_list_dir(list_path, entries, LISTDIR_MAX_FILES, &file_count);
-  if (ret != 0) {
-    return ret;
+  if (vfs_resolve(resolve_path, &vn) != 0 || vn == NULL) {
+    return -API_ERR_NOT_FOUND;
   }
 
-  u32 to_copy = file_count;
-  if (to_copy > max_entries) {
-    to_copy = max_entries;
+  if (vn->type != VDIR) {
+    vnode_release(vn);
+    return -API_ERR_BAD_VALUE;
   }
 
-  for (u32 i = 0; i < to_copy; i++) {
+  for (i = 0; i < max_entries; i++) {
+    type = 0;
+    ret = vnode_readdir(vn, i, name, &type);
+    if (ret <= 0) {
+      break;
+    }
+
     memset(buf[i].name, 0, sizeof(buf[i].name));
-    int j = 0;
-    while (j < 31 && entries[i].name[j] != '\0') {
-      buf[i].name[j] = entries[i].name[j];
-      j++;
+    for (j = 0; j < 31 && name[j] != '\0'; j++) {
+      buf[i].name[j] = name[j];
     }
     buf[i].name[j] = '\0';
-    buf[i].type = entries[i].type;
+    buf[i].type = (u8)type;
     buf[i].pad[0] = 0;
     buf[i].pad[1] = 0;
     buf[i].pad[2] = 0;
   }
 
-  return (int)to_copy;
+  vnode_release(vn);
+  return (int)i;
 }

@@ -24,6 +24,9 @@ crypto/
   rng/
     rng.h           — CSPRNG API
     rng.c           — RDRAND/RDSEED + SHA-256 entropy pool (Fortuna-like)
+  cipher/
+    chacha20.h      — ChaCha20 stream cipher API
+    chacha20.c      — RFC 8439 ChaCha20 (256-bit key, 96-bit nonce)
 ```
 
 ## Usage
@@ -69,6 +72,21 @@ u8 salt[16];
 crypto_rng_bytes(salt, 16);
 u64 rnd = crypto_rng_u64();
 crypto_rng_add_entropy(extra_data, extra_len);
+```
+
+### ChaCha20 (stream cipher)
+
+```c
+/* one-shot encrypt / decrypt (same operation: XOR with keystream) */
+u8 ciphertext[len];
+chacha20_encrypt(key, nonce, plaintext, len, ciphertext);
+
+/* streaming usage */
+chacha20_ctx_t ctx;
+chacha20_init(&ctx, key, nonce);
+chacha20_xor(&ctx, chunk1, out1, len1);
+chacha20_xor(&ctx, chunk2, out2, len2);
+chacha20_wipe(&ctx);
 ```
 
 ## Kusr Integration
