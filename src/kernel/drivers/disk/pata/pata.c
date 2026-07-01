@@ -75,9 +75,6 @@ pata_wait_not_bsy(u32 timeout)
 		if (status == 0 || status == 0xFF) {
 			return (-1);
 		}
-		if (status & IDE_STATUS_ERR) {
-			return (-1);
-		}
 		if ((status & IDE_STATUS_BSY) == 0) {
 			return (0);
 		}
@@ -232,7 +229,20 @@ pata_identify(u16 *target_buf)
 
 	pata_disk.type = DISK_TYPE_PATA;
 	pata_disk.sector_size = 512;
-	pata_disk.total_sectors = 0xFFFFFF;
+
+	{
+		u32	capa;
+		u16	*buf;
+
+		buf = (u16 *)pata_dummy_area.buffer;
+		capa = ((u32)buf[61] << 16) | (u32)buf[60];
+		if (capa == 0) {
+			capa = 20480;
+		}
+		pata_disk.total_sectors = capa;
+		com1_printf("[PATA] capacity: %u sectors (%u MB)\n",
+		    capa, capa / 2048);
+	}
 
 	{
 		void pata_disk_read(struct disk *self, u32 lba,
@@ -275,6 +285,7 @@ pata_read_sector(u32 lba, u8 *buffer)
 	u32	magic_before;
 
 	if (pata_wait_not_bsy(1000000) != 0) {
+		com1_printf("[PATA] read_sector(%u): BSY timeout\n", lba);
 		if (buffer) {
 			memset(buffer, 0, 512);
 		}
@@ -289,8 +300,17 @@ pata_read_sector(u32 lba, u8 *buffer)
 	outb(IDE_LBA_HIGH, (u8)(lba >> 16));
 	outb(IDE_COMMAND, IDE_CMD_READ);
 
-	if (pata_wait_not_bsy(1000000) != 0 ||
-	    pata_wait_drq(1000000) != 0) {
+	if (pata_wait_not_bsy(1000000) != 0) {
+		com1_printf("[PATA] read_sector(%u): BSY timeout "
+		    "after cmd\n", lba);
+		if (buffer) {
+			memset(buffer, 0, 512);
+		}
+		return;
+	}
+	if (pata_wait_drq(1000000) != 0) {
+		com1_printf("[PATA] read_sector(%u): DRQ timeout\n",
+		    lba);
 		if (buffer) {
 			memset(buffer, 0, 512);
 		}
