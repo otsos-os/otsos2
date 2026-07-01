@@ -35,7 +35,6 @@ $define %type process_t as struct with process control block
 $define %type api_sysinfo as struct with system info strings
 $define %type drm_driver_t as struct with DRM driver vtable
 
-$define %func kshell_set_boot_info as procedure with args int
 $define %func process_state_name as function with args process_state_t
 $define %func parse_number as function with args const char **, int *
 $define %func parse_term as function with args const char **, int *
@@ -49,7 +48,7 @@ $define %func kshell_echo_command as function with args int, char *[]
 
 $space %internal process_state_name, parse_number, parse_term
 $space %internal parse_expr, print_kernel_var
-$space %export kshell_set_boot_info, kshell_echo_command
+$space %export kshell_echo_command
 
 */
 
@@ -61,14 +60,6 @@ $space %export kshell_set_boot_info, kshell_echo_command
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <mlibc/mlibc.h>
-
-static int	g_kshell_is_multiboot2;
-
-void
-kshell_set_boot_info(int is_multiboot2)
-{
-	g_kshell_is_multiboot2 = is_multiboot2 ? 1 : 0;
-}
 
 static const char *
 process_state_name(process_state_t state)
@@ -237,7 +228,7 @@ print_kernel_var(const char *name)
 			    drm_crtc_get_bpp());
 			kshell_console_write(", multiboot");
 			kshell_console_write_int(
-			    g_kshell_is_multiboot2 ? 2 : 1);
+			    kshell_is_multiboot2() ? 2 : 1);
 			kshell_console_write("\n");
 		} else {
 			kshell_console_write("unavailable\n");

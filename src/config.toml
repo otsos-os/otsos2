@@ -1,0 +1,45 @@
+# ---------------------------------------------------------------------------
+# [os]  --  operating system identity
+#
+# The Makefile ask_version target bumps the version here.
+# The kernel reads these at runtime via config_get().
+# ---------------------------------------------------------------------------
+[os]
+sysname = "otsos2"
+nodename = "localhost"
+release = "2.3.3"
+version = "otsos2-kernel-rev2"
+machine = "x86_64"
+domainname = "localdomain"
+
+[kshell]
+enabled = false
+prompt = "kshell> "
+
+[disk.pata]
+enabled = false
+
+[kshell.commands.help]
+enabled = true
+description = "show command list or detailed help for one command"
+usage = "help [command]"
+
+[kshell.commands.clear]
+enabled = true
+description = "clear kshell screen"
+usage = "clear"
+
+[kshell.commands.echo]
+enabled = true
+description = "prints text, evaluates math, or prints kernel value"
+usage = "echo <text> | echo &<math> | echo %videoM | %dkey | %prun | %uname | %drm"
+
+[kshell.commands.drm_switch]
+enabled = true
+description = "switch active DRM driver by list id from echo %drm"
+usage = "drm_switch <id>"
+
+[kshell.commands.exit]
+enabled = true
+description = "close kshell"
+usage = "exit"

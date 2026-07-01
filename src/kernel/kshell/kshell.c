@@ -48,10 +48,13 @@ $define %func kshell_console_putc as procedure with args char
 $define %func kshell_console_write as procedure with args const char *
 $define %func kshell_console_write_int as procedure with args int
 $define %func kshell_console_write_ptr as procedure with args const void *
+$define %func kshell_set_boot_info as procedure with args int
+$define %func kshell_is_multiboot2 as function with args void
 $define %func kshell_request_open as procedure with args void
 $define %func kshell_try_open_if_requested as function with args void
 $define %func kshell_capture_begin as procedure with args char *, u32
 $define %func kshell_capture_end as function with args int *
+$define %func kshell_help_list_cb as function with args const char *, void *
 $define %func kshell_help_list as procedure with args void
 $define %func kshell_help_command as procedure with args const char *
 $define %func kshell_execute_core as function with args int, char *[]
@@ -67,12 +70,13 @@ $space %internal kshell_width, kshell_height, kshell_sync_cells
 $space %internal kshell_con, kshell_draw_cell, kshell_redraw
 $space %internal kshell_set_visible, kshell_put_entry_at
 $space %internal kshell_newline, kshell_capture_begin
-$space %internal kshell_capture_end, kshell_help_list
+$space %internal kshell_capture_end, kshell_help_list_cb, kshell_help_list
 $space %internal kshell_help_command, kshell_execute_core
 $space %internal kshell_execute, kshell_discard_keyboard_buffer
 $space %export kshell_console_clear, kshell_console_putc
 $space %export kshell_console_write, kshell_console_write_int
-$space %export kshell_console_write_ptr, kshell_request_open
+$space %export kshell_console_write_ptr, kshell_set_boot_info
+$space %export kshell_is_multiboot2, kshell_request_open
 $space %export kshell_try_open_if_requested, kshell_run
 
 */
@@ -84,6 +88,7 @@ $space %export kshell_try_open_if_requested, kshell_run
 #include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/kms/console.h>
 #include <kernel/kshell/kshell.h>
+#include <kernel/other/config.h>
 #include <mlibc/mlibc.h>
 
 static volatile int	kshell_open_requested;
@@ -100,6 +105,19 @@ static u32		kshell_capture_cap;
 static u32		kshell_capture_len;
 static int		kshell_capture_overflow;
 static kms_console_t	*g_con;
+static int		g_kshell_is_multiboot2;
+
+void
+kshell_set_boot_info(int is_multiboot2)
+{
+	g_kshell_is_multiboot2 = is_multiboot2 ? 1 : 0;
+}
+
+int
+kshell_is_multiboot2(void)
+{
+	return (g_kshell_is_multiboot2);
+}
 
 static int
 kshell_width(void)
@@ -416,15 +434,44 @@ kshell_capture_end(int *overflow)
 	return (kshell_capture_len);
 }
 
+struct kshell_help_ctx {
+	int	first;
+};
+
+static int
+kshell_help_list_cb(const char *section, void *ctx)
+{
+	struct kshell_help_ctx	*hc;
+	const char		*cmd;
+	const char		*pfx;
+
+	hc = (struct kshell_help_ctx *)ctx;
+	pfx = "kshell.commands.";
+	cmd = section + strlen(pfx);
+	if (!config_get_bool(section, "enabled", 1)) {
+		return (0);
+	}
+	if (hc->first) {
+		kshell_console_write("commands:\n");
+		hc->first = 0;
+	}
+	kshell_console_write("  ");
+	kshell_console_write(cmd);
+	kshell_console_write("\n");
+	return (0);
+}
+
 static void
 kshell_help_list(void)
 {
-	kshell_console_write("commands:\n");
-	kshell_console_write("  help\n");
-	kshell_console_write("  clear\n");
-	kshell_console_write("  echo\n");
-	kshell_console_write("  drm_switch\n");
-	kshell_console_write("  exit\n");
+	struct kshell_help_ctx	hc;
+
+	hc.first = 1;
+	config_foreach_section("kshell.commands.",
+	    kshell_help_list_cb, &hc);
+	if (hc.first) {
+		kshell_console_write("commands: <none>\n");
+	}
 	kshell_console_write("redirection:\n");
 	kshell_console_write("  <command> > /absolute/path\n");
 	kshell_console_write("use: help <command>\n");
@@ -433,55 +480,42 @@ kshell_help_list(void)
 static void
 kshell_help_command(const char *cmd)
 {
-	if (strcmp(cmd, "help") == 0) {
-		kshell_console_write("help\n");
-		kshell_console_write("  usage: help "
-		    "[command]\n");
-		kshell_console_write("  show command list or "
-		    "detailed help for one command\n");
-		kshell_console_write("  supports output redirect: "
-		    "> /absolute/path\n");
+	char		section[128];
+	const char	*desc, *usage;
+
+	strcpy(section, "kshell.commands.");
+	strcat(section, cmd);
+
+	if (!config_get_bool(section, "enabled", 1)) {
+		kshell_console_write("help: command disabled: ");
+		kshell_console_write(cmd);
+		kshell_console_write("\n");
 		return;
 	}
 
-	if (strcmp(cmd, "clear") == 0) {
-		kshell_console_write("clear\n");
-		kshell_console_write("  usage: clear\n");
-		kshell_console_write("  clear kshell screen\n");
+	desc = config_get_string(section, "description",
+	    NULL);
+	usage = config_get_string(section, "usage", NULL);
+
+	if (!desc && !usage) {
+		kshell_console_write("help: unknown command: ");
+		kshell_console_write(cmd);
+		kshell_console_write("\n");
 		return;
 	}
 
-	if (strcmp(cmd, "echo") == 0) {
-		kshell_console_write("echo\n");
-		kshell_console_write("  usage: echo <text>\n");
-		kshell_console_write("  usage: echo "
-		    "&<math expression>\n");
-		kshell_console_write("  usage: echo %%videoM | "
-		    "%%dkey | %%prun | %%uname | %%drm\n");
-		kshell_console_write("  prints text, evaluates "
-		    "math, or prints kernel value\n");
-		return;
-	}
-
-	if (strcmp(cmd, "drm_switch") == 0) {
-		kshell_console_write("drm_switch\n");
-		kshell_console_write("  usage: drm_switch "
-		    "<id>\n");
-		kshell_console_write("  switch active DRM driver "
-		    "by list id from echo %%drm\n");
-		return;
-	}
-
-	if (strcmp(cmd, "exit") == 0) {
-		kshell_console_write("exit\n");
-		kshell_console_write("  usage: exit\n");
-		kshell_console_write("  close kshell\n");
-		return;
-	}
-
-	kshell_console_write("help: unknown command: ");
 	kshell_console_write(cmd);
 	kshell_console_write("\n");
+	if (usage) {
+		kshell_console_write("  usage: ");
+		kshell_console_write(usage);
+		kshell_console_write("\n");
+	}
+	if (desc) {
+		kshell_console_write("  ");
+		kshell_console_write(desc);
+		kshell_console_write("\n");
+	}
 }
 
 static int
@@ -491,6 +525,7 @@ kshell_execute_core(int argc, char *argv[])
 		return (0);
 	}
 
+#ifdef CONFIG_KSHELL_CMD_HELP
 	if (strcmp(argv[0], "help") == 0) {
 		if (argc == 1) {
 			kshell_help_list();
@@ -499,23 +534,33 @@ kshell_execute_core(int argc, char *argv[])
 		}
 		return (0);
 	}
+#endif
 
+#ifdef CONFIG_KSHELL_CMD_CLEAR
 	if (strcmp(argv[0], "clear") == 0) {
 		kshell_console_clear();
 		return (0);
 	}
+#endif
 
+#ifdef CONFIG_KSHELL_CMD_ECHO
 	if (strcmp(argv[0], "echo") == 0) {
 		return (kshell_echo_command(argc, argv));
 	}
+#endif
 
+#ifdef CONFIG_KSHELL_CMD_DRM_SWITCH
 	if (strcmp(argv[0], "drm_switch") == 0) {
-		return (kshell_drm_switch_command(argc, argv));
+		return (kshell_drm_switch_command(argc,
+		    argv));
 	}
+#endif
 
+#ifdef CONFIG_KSHELL_CMD_EXIT
 	if (strcmp(argv[0], "exit") == 0) {
 		return (1);
 	}
+#endif
 
 	kshell_console_write("kshell: unknown command: ");
 	kshell_console_write(argv[0]);
@@ -616,10 +661,14 @@ kshell_discard_keyboard_buffer(void)
 void
 kshell_run(void)
 {
-	char	line[KSHELL_MAX_LINE];
-	char	*argv[KSHELL_MAX_ARGS];
-	int	len, rc;
-	char	c;
+	char		line[KSHELL_MAX_LINE];
+	char		*argv[KSHELL_MAX_ARGS];
+	int		len, rc;
+	char		c;
+	const char	*prompt;
+
+	prompt = config_get_string("kshell", "prompt",
+	    "kshell> ");
 
 	kshell_set_visible(1);
 	kshell_console_clear();
@@ -633,7 +682,7 @@ kshell_run(void)
 		rc = 0;
 
 		memset(line, 0, sizeof(line));
-		kshell_console_write("kshell> ");
+		kshell_console_write(prompt);
 
 		while (1) {
 			c = 0;

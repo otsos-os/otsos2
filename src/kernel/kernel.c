@@ -62,7 +62,9 @@ $space %export kmain
 
 #include <kernel/drivers/acpi/acpi.h>
 #include <kernel/drivers/disk/disk.h>
+#ifdef CONFIG_DISK_PATA
 #include <kernel/drivers/disk/pata/pata.h>
+#endif
 #include <kernel/drivers/disk/ramdisk/ramdisk.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
@@ -89,6 +91,7 @@ $space %export kmain
 #include <kernel/crypto/crypto.h>
 #include <kernel/kshell/kshell.h>
 #include <kernel/other/kusr.h>
+#include <kernel/other/config.h>
 #include <kernel/syscall.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
@@ -324,9 +327,15 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 	char		*p;
 	u64		ram_kb;
 	char		c;
-	disk_t		*selected_disk, *pata_disk, *ram_disk;
+	disk_t		*selected_disk, *ram_disk;
+#ifdef CONFIG_DISK_PATA
+	disk_t		*pata_disk;
+#endif
 	int		fs_ok, fmt_ok, heap_ok, idt_ok, timer_ok;
-	int		pmap_ok, syscall_ok, disk_ok, pata_ok;
+	int		pmap_ok, syscall_ok, disk_ok;
+#ifdef CONFIG_DISK_PATA
+	int		pata_ok;
+#endif
 	int		ramdisk_ok, fb_ok, drm_atomic_ok, acpi_ok;
 	int		power_ok, pci_ok, watchdog_ok;
 	u32		format_blocks;
@@ -334,6 +343,8 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 	u32		init_sz, yes_sz, fetch_sz, sh_sz;
 	void		*posix_hello_mod;
 	u32		posix_hello_sz;
+	void		*config_mod;
+	u32		config_sz;
 	int		res;
 
 	safe_mode = (boot_option == 1);
@@ -359,7 +370,9 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 	crypto_rng_init();
 
 	disk_manager_init();
+#ifdef CONFIG_DISK_PATA
 	pata_identify(NULL);
+#endif
 
 	if (ramdisk_mem) {
 		ramdisk_init(ramdisk_mem, 4 * 1024 * 1024);
@@ -378,6 +391,23 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 
 		mboot2_ptr = (multiboot2_info_t *)addr;
 		debug_multiboot2_tags(mboot2_ptr);
+
+		config_mod = NULL;
+		config_sz = 0;
+		mb2_find_module(mboot2_ptr, "config",
+		    &config_mod, &config_sz);
+		if (config_mod && config_sz > 0) {
+			config_init_from_data(
+			    (const char *)config_mod,
+			    config_sz);
+			com1_printf("get config "
+			    "from module\n",
+			    config_sz);
+		} else {
+			com1_printf("config"
+			    "module doesnt found\n");
+		}
+
 		drm_boot_init_mb2(mboot2_ptr, 0);
 
 		acpi_init_from_multiboot2(mboot2_ptr);
@@ -467,7 +497,9 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 	    pmap_get_cr3() != 0;
 	syscall_ok = syscall_is_initialized();
 	disk_ok = disk_manager_is_initialized();
+#ifdef CONFIG_DISK_PATA
 	pata_ok = disk_has_type(DISK_TYPE_PATA);
+#endif
 	ramdisk_ok = disk_has_type(DISK_TYPE_RAM);
 	fb_ok = drm_is_ready() != 0;
 	drm_atomic_ok = drm_is_ready();
@@ -483,7 +515,9 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 	status_line("pmap", pmap_ok);
 	status_line("syscall", syscall_ok);
 	status_line("disk manager", disk_ok);
+#ifdef CONFIG_DISK_PATA
 	status_line("pata identify", pata_ok);
+#endif
 	status_line("ramdisk", ramdisk_ok);
 	status_line("framebuffer", fb_ok);
 	status_line("drm", drm_atomic_ok);
@@ -499,44 +533,48 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 
 	tty_set_active(1);
 
-	printf("\nSelect boot disk:\n");
-	printf("1. Hard Drive (PATA)\n");
-	printf("2. Live USB (RAM Disk)\n");
-
 	selected_disk = NULL;
-	pata_disk = disk_find_type(DISK_TYPE_PATA);
 	ram_disk = disk_find_type(DISK_TYPE_RAM);
-	while (1) {
-		c = keyboard_getchar();
-		if (c == '1') {
-			if (!pata_disk) {
-				printf("PATA disk not available, "
-				    "fallback to RAM disk\n");
-				if (ram_disk) {
-					selected_disk = ram_disk;
-					printf("Selected RAM Disk "
-					    "(%s)\n",
-					    selected_disk->name);
-					break;
-				}
-				printf("RAM disk also not "
-				    "available\n");
-				continue;
+
+#ifdef CONFIG_DISK_PATA
+	pata_disk = disk_find_type(DISK_TYPE_PATA);
+
+	if (pata_disk && ram_disk) {
+		printf("\nSelect boot disk:\n");
+		printf("1. Hard Drive (PATA)\n");
+		printf("2. Live USB (RAM Disk)\n");
+
+		while (1) {
+			c = keyboard_getchar();
+			if (c == '1') {
+				selected_disk = pata_disk;
+				printf("Selected PATA (%s)\n",
+				    selected_disk->name);
+				break;
+			} else if (c == '2') {
+				selected_disk = ram_disk;
+				printf("Selected RAM Disk "
+				    "(%s)\n",
+				    selected_disk->name);
+				break;
 			}
-			selected_disk = pata_disk;
-			printf("Selected PATA (%s)\n",
-			    selected_disk->name);
-			break;
-		} else if (c == '2') {
-			if (!ram_disk) {
-				printf("RAM disk not available\n");
-				continue;
-			}
+		}
+	} else if (pata_disk) {
+		selected_disk = pata_disk;
+		printf("Selected PATA (%s)\n",
+		    selected_disk->name);
+	} else
+#endif
+	{
+		if (ram_disk) {
 			selected_disk = ram_disk;
 			printf("Selected RAM Disk (%s)\n",
 			    selected_disk->name);
-			break;
 		}
+	}
+
+	if (!selected_disk) {
+		panic("no boot disk\n");
 	}
 
 	fs_ok = (chainfs_init(selected_disk) == 0);
@@ -559,6 +597,21 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 	if (fs_ok) {
 		vfs_init();
 		status_line("vfs", vfs_is_initialized());
+		if (vfs_is_initialized() &&
+		    config_is_initialized()) {
+			vfs_mkdir("/conf");
+			vfs_mkdir("/conf/boot");
+			if (config_save_to_file(
+			    CONFIG_PATH_BOOT) == 0) {
+				com1_printf("saved config to "
+				    "to %s\n",
+				    CONFIG_PATH_BOOT);
+			} else {
+				com1_printf("fail save config "
+				    "to %s\n",
+				    CONFIG_PATH_BOOT);
+			}
+		}
 	}
 	if (!fs_ok) {
 		com1_printf("[CHAINFS] filesystem unavailable, "

@@ -29,6 +29,7 @@
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/event/event.h>
 #include <kernel/gdt.h>
+#include <kernel/other/config.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/signal.h>
@@ -851,12 +852,19 @@ posix_uname(u64 buf_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	buf = (posix_utsname_t *)buf_u;
 	memset(buf, 0, sizeof(posix_utsname_t));
 
-	strcpy(buf->sysname, "otsos2");
-	strcpy(buf->nodename, "localhost");
-	strcpy(buf->release, "2.3.3");
-	strcpy(buf->version, "otsos2-kernel-rev2");
-	strcpy(buf->machine, "x86_64");
-	strcpy(buf->domainname, "localdomain");
+	strcpy(buf->sysname,
+	    config_get_string("os", "sysname", "otsos2"));
+	strcpy(buf->nodename,
+	    config_get_string("os", "nodename", "localhost"));
+	strcpy(buf->release,
+	    config_get_string("os", "release", "0.0.0"));
+	strcpy(buf->version,
+	    config_get_string("os", "version", "unknown"));
+	strcpy(buf->machine,
+	    config_get_string("os", "machine", "x86_64"));
+	strcpy(buf->domainname,
+	    config_get_string("os", "domainname",
+	    "localdomain"));
 
 	return (0);
 }

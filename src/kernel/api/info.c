@@ -25,17 +25,24 @@
  */
 
 #include <kernel/api/api.h>
+#include <kernel/other/config.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
 
 void api_info_fill(struct api_sysinfo *buf) {
   memset(buf, 0, sizeof(struct api_sysinfo));
-  strcpy(buf->sysname, "otsos2");
-  strcpy(buf->nodename, "localhost");
-  strcpy(buf->release, "2.3.3");
-  strcpy(buf->version, "otsos2-kernel-rev2");
-  strcpy(buf->machine, "x86_64");
-  strcpy(buf->domainname, "localdomain");
+  strcpy(buf->sysname,
+    config_get_string("os", "sysname", "otsos2"));
+  strcpy(buf->nodename,
+    config_get_string("os", "nodename", "localhost"));
+  strcpy(buf->release,
+    config_get_string("os", "release", "0.0.0"));
+  strcpy(buf->version,
+    config_get_string("os", "version", "unknown"));
+  strcpy(buf->machine,
+    config_get_string("os", "machine", "x86_64"));
+  strcpy(buf->domainname,
+    config_get_string("os", "domainname", "localdomain"));
 }
 
 int api_info(struct api_sysinfo *buf) {

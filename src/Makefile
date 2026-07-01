@@ -13,6 +13,14 @@ LDFLAGS ?= -m elf_x86_64 -T linker.ld -Map=../bin/kernel.map
 NASM_FORMAT ?= elf64
 ZIG_TARGET ?= x86_64-freestanding
 
+.DEFAULT_GOAL := all
+
+include kernel/kshell/kshell.mk
+CFLAGS += $(KSHELL_DEFINES)
+
+include kernel/drivers/disk/disk.mk
+CFLAGS += $(DISK_DEFINES)
+
 KERNEL_BIN = ../bin/kernel.bin
 ISO_IMAGE = ../otsos.iso
 ISODIR = ../isodir
@@ -36,7 +44,6 @@ PIC_O = ../bin/pic_c.o
 HANDLERS_O = ../bin/handlers_c.o
 PANIC_O = ../bin/panic.o
 CONSOLE_O = ../bin/console.o
-PATA_O = ../bin/pata.o
 DISK_O = ../bin/disk.o
 RAMDISK_O = ../bin/ramdisk.o
 CHAINFS_O = ../bin/chainfs.o
@@ -108,13 +115,10 @@ PCI_BAR_O = ../bin/pci_bar.o
 WATCHDOG_O = ../bin/watchdog.o
 WATCHDOG_I6300ESB_O = ../bin/watchdog_i6300esb.o
 WATCHDOG_ICH_TCO_O = ../bin/watchdog_ich_tco.o
-KSHELL_O = ../bin/kshell.o
-KSHELL_PARSER_O = ../bin/kshell_parser.o
-KSHELL_ECHO_O = ../bin/kshell_echo.o
-KSHELL_DRM_O = ../bin/kshell_drm.o
 TOML_O = ../bin/toml.o
 KUSR_O = ../bin/kusr.o
 KUSR_AUTH_O = ../bin/kusr_auth.o
+CONFIG_O = ../bin/config.o
 DRM_API_O = ../bin/drm_api.o
 RESTRICT_O = ../bin/restrict.o
 CRYPTO_UTIL_O = ../bin/crypto_util.o
@@ -151,14 +155,14 @@ FUTEX_O = ../bin/futex.o
 SYS_O = ../bin/sys.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O) $(VM_PAGER_O) $(PATA_O) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(DRM_KMS_CONSOLE_O) $(DRM_RAPI_O) $(TIMER_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
+      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TTY_O) $(PS2_O) $(KEYBOARD_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(DRM_KMS_CONSOLE_O) $(DRM_RAPI_O) $(TIMER_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(THREAD_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(UNAME_O) $(MEMINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
       $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O) \
-      $(KSHELL_O) $(KSHELL_PARSER_O) $(KSHELL_ECHO_O) $(KSHELL_DRM_O) \
-      $(TOML_O) $(KUSR_O) $(KUSR_AUTH_O) $(DRM_API_O) $(RESTRICT_O) \
+      $(KSHELL_OBJ) \
+      $(TOML_O) $(KUSR_O) $(KUSR_AUTH_O) $(CONFIG_O) $(DRM_API_O) $(RESTRICT_O) \
       $(CRYPTO_UTIL_O) $(CRYPTO_SHA256_O) $(CRYPTO_HMAC_O) $(CRYPTO_PBKDF2_O) $(CRYPTO_RNG_O) $(CRYPTO_CHACHA20_O) \
       $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O) \
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
@@ -208,9 +212,9 @@ ask_version:
 		read ans; \
 		case "$$ans" in \
 			y|Y|yes|YES) \
-				cur_ver=$$(sed -n 's/.*strcpy(buf->release, "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)").*/\1/p' kernel/api/info.c | head -n1); \
+				cur_ver=$$(sh ../tools/toml_get.sh config.toml os release "0.0.0"); \
 				if [ -z "$$cur_ver" ]; then \
-					echo "  VERSION failed to parse kernel version from kernel/api/info.c"; \
+					echo "  VERSION failed to parse kernel version from config.toml"; \
 					exit 1; \
 				fi; \
 				IFS=.; set -- $$cur_ver; \
@@ -225,7 +229,7 @@ ask_version:
 					major=$$((major + 1)); \
 				fi; \
 				next_ver="$$major.$$minor.$$patch"; \
-				sed -i 's/strcpy(buf->release, "[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*")/strcpy(buf->release, "'"$$next_ver"'")/' kernel/api/info.c; \
+				sed -i 's/^release = "[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*"/release = "'"$$next_ver"'"/' config.toml; \
 				echo "  VERSION $$cur_ver -> $$next_ver";; \
 			*) \
 				echo "  VERSION unchanged";; \
@@ -264,12 +268,14 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 	@cp $(FETCH_BIN) $(ISODIR)/boot/fetch
 	@cp $(SHELL_BIN) $(ISODIR)/boot/sh
 	@cp $(POSIX_HELLO_BIN) $(ISODIR)/boot/posix_hello
+	@cp config.toml $(ISODIR)/boot/config.toml
 	@echo 'set timeout=4' > $(ISODIR)/boot/grub/grub.cfg
 	@echo 'set default=0' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo 'insmod all_video' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo 'menuentry "OTSOS" {' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    multiboot2 /boot/kernel.bin' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '    module2 /boot/config.toml config' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    module2 /boot/init init' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    module2 /boot/yes yes' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    module2 /boot/fetch fetch' >> $(ISODIR)/boot/grub/grub.cfg
@@ -313,10 +319,6 @@ $(PANIC_O): kernel/panic.c
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(CONSOLE_O): kernel/console.c kernel/console.h kernel/drivers/tty.h kernel/drivers/video/drm/drm.h kernel/drivers/video/drm/kms/console.h
-	@echo "  CC      $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-
-$(PATA_O): kernel/drivers/disk/pata/pata.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -464,7 +466,7 @@ $(PIPE_O): kernel/api/pipe.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(UNAME_O): kernel/api/info.c kernel/api/api.h
+$(UNAME_O): kernel/api/info.c kernel/api/api.h kernel/other/config.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -588,22 +590,6 @@ $(WATCHDOG_ICH_TCO_O): kernel/drivers/watchdog/devices/ich_tco.c kernel/drivers/
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(KSHELL_O): kernel/kshell/kshell.c kernel/kshell/kshell.h
-	@echo "  CC      $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-
-$(KSHELL_PARSER_O): kernel/kshell/parser.c kernel/kshell/kshell.h
-	@echo "  CC      $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-
-$(KSHELL_ECHO_O): kernel/kshell/commands/echo.c kernel/kshell/kshell.h kernel/process.h kernel/api/api.h
-	@echo "  CC      $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-
-$(KSHELL_DRM_O): kernel/kshell/commands/drm.c kernel/kshell/kshell.h kernel/drivers/tty.h
-	@echo "  CC      $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-
 $(TOML_O): mlibc/toml.c mlibc/toml.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
@@ -621,6 +607,10 @@ $(DRM_API_O): kernel/api/drm.c kernel/api/api.h kernel/drivers/video/drm/drm.h k
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(RESTRICT_O): kernel/other/restrict.c kernel/other/restrict.h kernel/process.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(CONFIG_O): kernel/other/config.c kernel/other/config.h mlibc/toml.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -712,7 +702,7 @@ $(POSIX_IO_O): kernel/api/posix/posix_io.c kernel/api/posix/posix.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(POSIX_PROC_O): kernel/api/posix/posix_proc.c kernel/api/posix/posix.h
+$(POSIX_PROC_O): kernel/api/posix/posix_proc.c kernel/api/posix/posix.h kernel/other/config.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -811,4 +801,4 @@ debug: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 clean:
 	@echo "  CLEAN"
 	@rm -f ../bin/*.o ../bin/kernel.bin ../bin/kernel.map $(ISO_IMAGE) $(DISK_IMG)
-	@rm -rf $(ISODIR)/boot/kernel.bin
+	@rm -rf $(ISODIR)/boot/kernel.bin $(ISODIR)/boot/config.toml
