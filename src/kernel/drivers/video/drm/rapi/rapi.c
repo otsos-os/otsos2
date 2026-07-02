@@ -114,18 +114,19 @@ int rapi_scroll_up(drm_gem_buffer_t *buf, u32 pitch, u8 bpp, u32 lines,
   }
   u32 move_bytes = pitch * (h - lines);
   memcpy(buf->data, buf->data + (u64)lines * pitch, move_bytes);
-  /* Clear exposed bottom. */
+  /* Clear exposed bottom.  Black is the common terminal background and can
+   * be cleared with a single memset; otherwise fill per-pixel. */
   u8 *bottom = buf->data + move_bytes;
-  for (u64 i = 0; i < (u64)lines * pitch; i++) {
-    bottom[i] = 0;
-  }
-  /* Repaint bottom region with bg via rapi_fill_rect would double-iterate;
-   * cheaper to do it inline by storing bg per pixel. */
-  u32 bpp_bytes = (u32)(bpp / 8);
-  u32 w = pitch / bpp_bytes;
-  for (u32 y = h - lines; y < h; y++) {
-    for (u32 x = 0; x < w; x++) {
-      store_pixel(buf->data, pitch, bpp, x, y, bg);
+  u32 bottom_bytes = (u32)((u64)lines * pitch);
+  if (bg == 0) {
+    memset(bottom, 0, bottom_bytes);
+  } else {
+    u32 bpp_bytes = (u32)(bpp / 8);
+    u32 w = pitch / bpp_bytes;
+    for (u32 y = h - lines; y < h; y++) {
+      for (u32 x = 0; x < w; x++) {
+        store_pixel(buf->data, pitch, bpp, x, y, bg);
+      }
     }
   }
   return DRM_OK;

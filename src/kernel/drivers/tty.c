@@ -319,7 +319,10 @@ static void tty_scroll(tty_state_t *tty, int active) {
   }
 
   if (active) {
-    tty_redraw(tty);
+    kms_console_t *con = tty_con();
+    if (con) {
+      kms_console_scroll_up(con, 16, 0x000000);
+    }
   }
 }
 

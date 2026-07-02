@@ -107,15 +107,69 @@ char* strchr(const char* str, int c) {
 void *memset(void *s, int c, unsigned long n) {
   debug_chainfs_write(s, n, "memset");
   unsigned char *p = (unsigned char *)s;
+  unsigned char val = (unsigned char)c;
+  unsigned long v = val;
+
+  v |= v << 8;
+  v |= v << 16;
+  v |= v << 32;
+
+  while (n > 0 && ((unsigned long)p & 7)) {
+    *p++ = val;
+    n--;
+  }
+  unsigned long *wp = (unsigned long *)p;
+  while (n >= 8) {
+    *wp++ = v;
+    n -= 8;
+  }
+  p = (unsigned char *)wp;
   while (n--)
-    *p++ = (unsigned char)c;
+    *p++ = val;
   return s;
 }
 void *memcpy(void *dest, const void *src, unsigned long n) {
   debug_chainfs_write(dest, n, "memcpy");
   unsigned char *d = (unsigned char *)dest;
   const unsigned char *s = (const unsigned char *)src;
-  while (n--)
-    *d++ = *s++;
+
+  if (d == s || n == 0)
+    return dest;
+
+  if (d < s || d >= s + n) {
+    /* Forward copy: align destination to 8 bytes, then copy in qwords. */
+    while (n > 0 && ((unsigned long)d & 7)) {
+      *d++ = *s++;
+      n--;
+    }
+    unsigned long *dw = (unsigned long *)d;
+    const unsigned long *sw = (const unsigned long *)s;
+    while (n >= 8) {
+      *dw++ = *sw++;
+      n -= 8;
+    }
+    d = (unsigned char *)dw;
+    s = (const unsigned char *)sw;
+    while (n--)
+      *d++ = *s++;
+  } else {
+    /* Backward copy: source and destination overlap. */
+    unsigned char *de = d + n;
+    const unsigned char *se = s + n;
+    while (n > 0 && ((unsigned long)de & 7)) {
+      *--de = *--se;
+      n--;
+    }
+    unsigned long *dwe = (unsigned long *)de;
+    const unsigned long *swe = (const unsigned long *)se;
+    while (n >= 8) {
+      *--dwe = *--swe;
+      n -= 8;
+    }
+    d = (unsigned char *)dwe;
+    s = (const unsigned char *)swe;
+    while (n--)
+      *--d = *--s;
+  }
   return dest;
 }

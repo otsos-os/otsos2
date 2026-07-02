@@ -77,8 +77,10 @@ static int fbdev_present(const drm_framebuffer_t *src) {
   if (copy > g_hw_pitch) {
     copy = g_hw_pitch;
   }
+  u32 src_y = src->src_y;
   for (u32 y = 0; y < src->height; y++) {
-    memcpy(g_hw_base + y * g_hw_pitch, src->gem->data + y * src->pitch, copy);
+    memcpy(g_hw_base + y * g_hw_pitch,
+           src->gem->data + (u64)(y + src_y) * src->pitch, copy);
   }
   return 0;
 }
@@ -96,9 +98,11 @@ static int fbdev_present_rect(const drm_framebuffer_t *src, u32 x, u32 y,
   if (x2 > g_hw_width) x2 = g_hw_width;
   if (y2 > g_hw_height) y2 = g_hw_height;
   u32 copy = (x2 - x) * bpp_bytes;
+  u32 src_y = src->src_y;
   for (u32 ry = y; ry < y2; ry++) {
     memcpy(g_hw_base + ry * g_hw_pitch + x * bpp_bytes,
-           src->gem->data + ry * src->pitch + x * bpp_bytes, copy);
+           src->gem->data + (u64)(ry + src_y) * src->pitch + x * bpp_bytes,
+           copy);
   }
   return 0;
 }

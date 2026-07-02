@@ -30,6 +30,7 @@ drm_id_t drm_framebuffer_create(drm_handle_t gem, u32 width, u32 height,
   fb->height = height;
   fb->pitch = pitch;
   fb->bpp = bpp;
+  fb->src_y = 0;
   fb->gem = buf;
   buf->refcount++;
 

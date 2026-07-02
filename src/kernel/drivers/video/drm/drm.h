@@ -83,6 +83,7 @@ struct drm_framebuffer {
   u32 height;
   u32 pitch;
   u8 bpp;
+  u32 src_y;            /* vertical scanout offset within the GEM buffer */
   drm_gem_buffer_t *gem;
 };
 

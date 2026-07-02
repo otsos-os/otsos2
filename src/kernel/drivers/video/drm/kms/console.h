@@ -23,12 +23,15 @@ typedef struct {
   drm_handle_t gem;
   drm_id_t fb;
   u32 width;       /* in pixels */
-  u32 height;
+  u32 height;      /* visible screen height */
   u32 pitch;
   u8 bpp;
   u32 cols;        /* in text cells (8x16 font) */
   u32 rows;
   int ready;
+  /* offset-based scrolling state */
+  u32 buf_h;       /* total GEM buffer height */
+  u32 pan_y;       /* vertical offset of the visible region */
   /* dirty-rect tracking */
   u32 dirty_x1, dirty_y1, dirty_x2, dirty_y2;
   int dirty;

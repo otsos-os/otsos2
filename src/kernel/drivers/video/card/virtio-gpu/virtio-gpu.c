@@ -429,74 +429,76 @@ vgpu_drm_present(const drm_framebuffer_t *src)
 	if (copy > st->pitch) {
 		copy = st->pitch;
 	}
-	for (y = 0; y < src->height; y++) {
-		memcpy(st->backing + (u64)y * st->pitch,
-		    src->gem->data + (u64)y * src->pitch, copy);
-	}
+  u32 src_y = src->src_y;
+  for (y = 0; y < src->height; y++) {
+    memcpy(st->backing + (u64)y * st->pitch,
+        src->gem->data + (u64)(y + src_y) * src->pitch, copy);
+  }
 
-	if (virtio_gpu_cmd_transfer_to_host_2d(&st->hw,
-	    &st->vqs[VIRTIO_GPU_CONTROLQ],
-	    st->backing_resource_id,
-	    0, 0, st->width, st->height, 0) != 0) {
-		return (-1);
-	}
-	if (virtio_gpu_cmd_resource_flush(&st->hw,
-	    &st->vqs[VIRTIO_GPU_CONTROLQ],
-	    st->backing_resource_id,
-	    0, 0, st->width, st->height) != 0) {
-		return (-1);
-	}
-	return (0);
+  if (virtio_gpu_cmd_transfer_to_host_2d(&st->hw,
+      &st->vqs[VIRTIO_GPU_CONTROLQ],
+      st->backing_resource_id,
+      0, 0, st->width, st->height, 0) != 0) {
+    return (-1);
+  }
+  if (virtio_gpu_cmd_resource_flush(&st->hw,
+      &st->vqs[VIRTIO_GPU_CONTROLQ],
+      st->backing_resource_id,
+      0, 0, st->width, st->height) != 0) {
+    return (-1);
+  }
+  return (0);
 }
 
 static int
 vgpu_drm_present_rect(const drm_framebuffer_t *src,
     u32 x, u32 y, u32 w, u32 h)
 {
-	virtio_gpu_state_t	*st;
-	u32			x2, y2, rw, rh, bpp_bytes;
-	u32			src_line_bytes, ry;
-	u64			offset;
+  virtio_gpu_state_t	*st;
+  u32			x2, y2, rw, rh, bpp_bytes;
+  u32			src_line_bytes, ry;
+  u64			offset;
 
-	st = &g_state;
-	if (!st->display_ready || !src || !src->gem ||
-	    !src->gem->data) {
-		return (-1);
-	}
-	if (x >= st->width || y >= st->height || w == 0 ||
-	    h == 0) {
-		return (0);
-	}
+  st = &g_state;
+  if (!st->display_ready || !src || !src->gem ||
+      !src->gem->data) {
+    return (-1);
+  }
+  if (x >= st->width || y >= st->height || w == 0 ||
+      h == 0) {
+    return (0);
+  }
 
-	x2 = x + w;
-	y2 = y + h;
-	if (x2 > st->width) {
-		x2 = st->width;
-	}
-	if (y2 > st->height) {
-		y2 = st->height;
-	}
-	rw = x2 - x;
-	rh = y2 - y;
+  x2 = x + w;
+  y2 = y + h;
+  if (x2 > st->width) {
+    x2 = st->width;
+  }
+  if (y2 > st->height) {
+    y2 = st->height;
+  }
+  rw = x2 - x;
+  rh = y2 - y;
 
-	bpp_bytes = (u32)(src->bpp / 8);
-	src_line_bytes = rw * bpp_bytes;
+  bpp_bytes = (u32)(src->bpp / 8);
+  src_line_bytes = rw * bpp_bytes;
 
-	for (ry = 0; ry < rh; ry++) {
-		memcpy(st->backing +
-		    (u64)(y + ry) * st->pitch +
-		    (u64)x * bpp_bytes,
-		    src->gem->data +
-		    (u64)(y + ry) * src->pitch +
-		    (u64)x * bpp_bytes,
-		    src_line_bytes);
-	}
+  u32 src_y = src->src_y;
+  for (ry = 0; ry < rh; ry++) {
+    memcpy(st->backing +
+        (u64)(y + ry) * st->pitch +
+        (u64)x * bpp_bytes,
+        src->gem->data +
+        (u64)(y + ry + src_y) * src->pitch +
+        (u64)x * bpp_bytes,
+        src_line_bytes);
+  }
 
-	offset = (u64)y * st->pitch + (u64)x * bpp_bytes;
-	if (virtio_gpu_cmd_transfer_to_host_2d(&st->hw,
-	    &st->vqs[VIRTIO_GPU_CONTROLQ],
-	    st->backing_resource_id,
-	    x, y, rw, rh, offset) != 0) {
+  offset = (u64)y * st->pitch + (u64)x * bpp_bytes;
+  if (virtio_gpu_cmd_transfer_to_host_2d(&st->hw,
+      &st->vqs[VIRTIO_GPU_CONTROLQ],
+      st->backing_resource_id,
+      x, y, rw, rh, offset) != 0) {
 		return (-1);
 	}
 	if (virtio_gpu_cmd_resource_flush(&st->hw,
