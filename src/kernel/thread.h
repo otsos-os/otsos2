@@ -108,6 +108,7 @@ typedef struct thread {
 	int			exit_code;
 	u64			tid_address;	/* set_tid_address: cleared on exit */
 	u64			fs_base;	/* FS segment base (TLS) */
+	u64			sleep_target_ticks; /* nanosleep wakeup target */
 	struct thread		*next;
 	struct thread		*prev;
 } thread_t;

@@ -68,6 +68,7 @@ $space %export posix_signal_pending, posix_signal_deliver
 #include <kernel/interrupts/idt.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/thread.h>
+#include <kernel/time.h>
 #include <mlibc/mlibc.h>
 
 #define POSIX_ENOEXEC		8
@@ -190,6 +191,11 @@ $space %export posix_signal_pending, posix_signal_deliver
 #define SYS_wait4		61
 #define SYS_kill		62
 #define SYS_uname		63
+#define SYS_time		201
+#define SYS_gettimeofday	96
+#define SYS_clock_gettime	228
+#define SYS_clock_nanosleep	230
+#define SYS_times		100
 #define SYS_fcntl		72
 #define SYS_flock		73
 #define SYS_getcwd		79
@@ -219,6 +225,9 @@ $space %export posix_signal_pending, posix_signal_deliver
 #define SYS_gettid		186
 #define SYS_futex		202
 #define SYS_arch_prctl		158
+#define POSIX_CLOCK_REALTIME	0
+#define POSIX_CLOCK_MONOTONIC	1
+#define POSIX_CLOCK_TIMER_ABSTIME	1
 
 /* futex operations */
 #define FUTEX_WAIT		0
@@ -298,5 +307,16 @@ posix_fd_t	*posix_get_fd(struct process *proc, int fd);
 int		posix_signal_pending(struct process *proc);
 void		posix_signal_deliver(struct process *proc,
 		    registers_t *regs);
+
+s64	posix_time(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5,
+	    u64 a6, registers_t *regs);
+s64	posix_gettimeofday(u64 tv, u64 tz, u64 a3, u64 a4, u64 a5,
+	    u64 a6, registers_t *regs);
+s64	posix_clock_gettime(u64 clock_id, u64 tp, u64 a3, u64 a4,
+	    u64 a5, u64 a6, registers_t *regs);
+s64	posix_clock_nanosleep(u64 clock_id, u64 flags, u64 req,
+	    u64 rem, u64 a5, u64 a6, registers_t *regs);
+s64	posix_times(u64 buf, u64 a2, u64 a3, u64 a4, u64 a5,
+	    u64 a6, registers_t *regs);
 
 #endif

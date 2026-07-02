@@ -214,4 +214,8 @@ void	event_notify_proc_fork(u32 parent_pid, u32 child_pid);
 void	event_notify_signal(u32 pid, int sig);
 void	event_notify_pipe_change(struct pipe *p);
 
+void	proc_sleep(void *channel);
+void	proc_wakeup(void *channel);
+void	proc_wakeup_one(void *channel);
+
 #endif

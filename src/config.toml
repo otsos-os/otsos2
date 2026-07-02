@@ -19,13 +19,13 @@ hz = 1000
 timezone_offset = 3
 
 [kshell]
-enabled = false
+enabled = true
 prompt = "kshell> "
 
 [disk.pata]
 enabled = false
 [libc]
-enabled = false
+enabled = true
 type = "musl"
 
 [kshell.commands.help]

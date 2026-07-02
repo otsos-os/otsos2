@@ -28,7 +28,9 @@
 #include <kernel/time/clocksource.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/drivers/rtc/rtc.h>
+#include <kernel/event/event.h>
 #include <kernel/other/config.h>
+#include <kernel/thread.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
@@ -253,6 +255,29 @@ getmicrotime(struct timeval *tv)
 	microtime(tv);
 }
 
+static void
+time_check_sleepers(void)
+{
+	thread_t	*td;
+	u64		now;
+	int		i;
+
+	now = timer_get_ticks();
+	for (i = 0; i < MAX_THREADS; i++) {
+		td = &thread_table[i];
+		if (!td->used || td->state != PROC_STATE_SLEEPING) {
+			continue;
+		}
+		if (td->sleep_target_ticks == 0) {
+			continue;
+		}
+		if (td->sleep_target_ticks <= now) {
+			td->sleep_target_ticks = 0;
+			proc_wakeup_one(td->wait_channel);
+		}
+	}
+}
+
 void
 time_tick(void)
 {
@@ -279,6 +304,8 @@ time_tick(void)
 
 	time_uptime = th->th_offset.sec;
 	time_second = boottime.sec + time_uptime;
+
+	time_check_sleepers();
 }
 
 static void

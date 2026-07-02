@@ -255,6 +255,21 @@ posix_syscall_handler(registers_t *regs)
 	case SYS_nanosleep:
 		ret = posix_nanosleep(a1, a2, a3, a4, a5, a6, regs);
 		break;
+	case SYS_time:
+		ret = posix_time(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_gettimeofday:
+		ret = posix_gettimeofday(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_clock_gettime:
+		ret = posix_clock_gettime(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_clock_nanosleep:
+		ret = posix_clock_nanosleep(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_times:
+		ret = posix_times(a1, a2, a3, a4, a5, a6, regs);
+		break;
 	case SYS_getpid:
 		ret = posix_getpid(a1, a2, a3, a4, a5, a6, regs);
 		break;

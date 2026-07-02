@@ -45,6 +45,8 @@ $space %export main
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <time.h>
+#include <sys/time.h>
 
 int
 main(int argc, char *argv[])
@@ -56,10 +58,30 @@ main(int argc, char *argv[])
 	int	pid;
 	int	i;
 
-	pid = (int)getpid();
+  pid = (int)getpid();
 
-	printf("hello\n");
-	printf("pid=%d argc=%d\n", pid, argc);
+  printf("hello\n");
+  printf("pid=%d argc=%d\n", pid, argc);
+
+  {
+    time_t t;
+    struct timespec ts;
+    struct timeval tv;
+
+    t = time(NULL);
+    printf("time: %ld\n", t);
+    if (clock_gettime(CLOCK_REALTIME, &ts) == 0) {
+      printf("clock_gettime: %ld.%09ld\n", ts.tv_sec, ts.tv_nsec);
+    } else {
+      printf("clock_gettime failed\n");
+    }
+    if (gettimeofday(&tv, NULL) == 0) {
+      printf("gettimeofday: %ld.%06ld\n", tv.tv_sec, tv.tv_usec);
+    } else {
+      printf("gettimeofday failed\n");
+    }
+  }
+
 
 	if (argc > 1) {
 		printf("argv=%s\n", argv[1]);

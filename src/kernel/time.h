@@ -133,4 +133,16 @@ void	bintime_sub(struct bintime *bt, const struct bintime *bt2);
 void	bintime_add_ns(struct bintime *bt, u64 ns);
 void	bintime_sub_ns(struct bintime *bt, u64 ns);
 
+static inline u64
+bintime_frac_to_nsec(u64 frac)
+{
+	return ((unsigned __int128)frac * NSEC_PER_SEC >> 64);
+}
+
+static inline u64
+bintime_frac_to_usec(u64 frac)
+{
+	return ((unsigned __int128)frac * USEC_PER_SEC >> 64);
+}
+
 #endif

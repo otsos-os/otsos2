@@ -29,6 +29,7 @@
 #include <kernel/api/auxv.h>
 #include <kernel/crypto/rng/rng.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
+#include <kernel/drivers/timer.h>
 #include <kernel/event/event.h>
 #include <kernel/gdt.h>
 #include <kernel/other/config.h>
@@ -1053,29 +1054,14 @@ posix_uname(u64 buf_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	return (0);
 }
 
+static volatile int	nanosleep_channel;
+
 s64
 posix_nanosleep(u64 req_u, u64 rem_u, u64 a3, u64 a4, u64 a5,
     u64 a6, registers_t *regs)
 {
-	struct {
-		s64	tv_sec;
-		s64	tv_nsec;
-	} *req;
-
-	(void)a3; (void)a4; (void)a5; (void)a6; (void)rem_u; (void)regs;
-
-	if (!is_user_address((void *)req_u, 16)) {
-		return (-POSIX_EFAULT);
-	}
-
-	req = (void *)req_u;
-	if (req->tv_sec > 0 || req->tv_nsec > 0) {
-		extern void proc_sleep(void *channel);
-		static volatile int	nanosleep_channel;
-		proc_sleep((void *)&nanosleep_channel);
-	}
-
-	return (0);
+	return (posix_clock_nanosleep(POSIX_CLOCK_REALTIME, 0, req_u, rem_u,
+	    a5, a6, regs));
 }
 
 s64
@@ -1305,4 +1291,168 @@ posix_arch_prctl(u64 code, u64 addr, u64 a3, u64 a4, u64 a5, u64 a6,
 	default:
 		return (-POSIX_EINVAL);
 	}
+}
+
+s64
+posix_time(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+	(void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+	(void)regs;
+
+	return ((s64)time_second);
+}
+
+s64
+posix_gettimeofday(u64 tv_u, u64 tz_u, u64 a3, u64 a4, u64 a5,
+    u64 a6, registers_t *regs)
+{
+	struct bintime	bt;
+	struct {
+		long	tv_sec;
+		long	tv_usec;
+	} *tv;
+
+	(void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
+
+	bintime(&bt);
+
+	if (tv_u != 0) {
+		tv = (void *)tv_u;
+		if (!is_user_address(tv, sizeof(*tv))) {
+			return (-POSIX_EFAULT);
+		}
+		tv->tv_sec = (long)bt.sec;
+		tv->tv_usec = (long)bintime_frac_to_usec(bt.frac);
+	}
+
+	(void)tz_u;
+	return (0);
+}
+
+s64
+posix_clock_gettime(u64 clock_id, u64 tp_u, u64 a3, u64 a4, u64 a5,
+    u64 a6, registers_t *regs)
+{
+	struct bintime	bt;
+	struct {
+		long	tv_sec;
+		long	tv_nsec;
+	} *tp;
+
+	(void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
+
+	if (clock_id == POSIX_CLOCK_REALTIME) {
+		bintime(&bt);
+	} else if (clock_id == POSIX_CLOCK_MONOTONIC) {
+		binuptime(&bt);
+	} else {
+		return (-POSIX_EINVAL);
+	}
+
+	if (tp_u == 0) {
+		return (-POSIX_EFAULT);
+	}
+	tp = (void *)tp_u;
+	if (!is_user_address(tp, sizeof(*tp))) {
+		return (-POSIX_EFAULT);
+	}
+	tp->tv_sec = (long)bt.sec;
+	tp->tv_nsec = (long)bintime_frac_to_nsec(bt.frac);
+
+	return (0);
+}
+
+s64
+posix_clock_nanosleep(u64 clock_id, u64 flags, u64 req_u, u64 rem_u,
+    u64 a5, u64 a6, registers_t *regs)
+{
+	struct {
+		long	tv_sec;
+		long	tv_nsec;
+	} *req;
+	struct thread	*td;
+	u64		ns;
+	u64		ms;
+	u64		target_ticks;
+
+	(void)rem_u; (void)a5; (void)a6; (void)regs;
+
+	if (clock_id != POSIX_CLOCK_REALTIME &&
+	    clock_id != POSIX_CLOCK_MONOTONIC) {
+		return (-POSIX_EINVAL);
+	}
+
+	if (req_u == 0) {
+		return (-POSIX_EFAULT);
+	}
+	req = (void *)req_u;
+	if (!is_user_address(req, sizeof(*req))) {
+		return (-POSIX_EFAULT);
+	}
+
+	if (req->tv_sec < 0 || req->tv_nsec < 0 ||
+	    (u64)req->tv_nsec >= NSEC_PER_SEC) {
+		return (-POSIX_EINVAL);
+	}
+
+	ns = (u64)req->tv_sec * NSEC_PER_SEC + (u64)req->tv_nsec;
+	ms = ns / 1000000ULL;
+	if (ms == 0) {
+		return (0);
+	}
+
+	td = thread_current();
+	if (!td) {
+		return (-POSIX_EINTR);
+	}
+
+	if (flags & POSIX_CLOCK_TIMER_ABSTIME) {
+		u64	boot_epoch;
+
+		boot_epoch = time_second - time_uptime;
+		if ((u64)req->tv_sec < boot_epoch) {
+			return (0);
+		}
+		ns = ((u64)req->tv_sec - boot_epoch) * NSEC_PER_SEC +
+		    (u64)req->tv_nsec;
+		ms = ns / 1000000ULL;
+	}
+
+	target_ticks = timer_get_ticks() + ms;
+	if (target_ticks < timer_get_ticks()) {
+		target_ticks = timer_get_ticks();
+	}
+
+	td->sleep_target_ticks = target_ticks;
+	proc_sleep((void *)&nanosleep_channel);
+
+	return (0);
+}
+
+s64
+posix_times(u64 buf_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+	struct {
+		long	tms_utime;
+		long	tms_stime;
+		long	tms_cutime;
+		long	tms_cstime;
+	} *buf;
+
+	(void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
+
+	if (buf_u == 0) {
+		return (0);
+	}
+	buf = (void *)buf_u;
+	if (!is_user_address(buf, sizeof(*buf))) {
+		return (-POSIX_EFAULT);
+	}
+	buf->tms_utime = 0;
+	buf->tms_stime = 0;
+	buf->tms_cutime = 0;
+	buf->tms_cstime = 0;
+	return (0);
 }
