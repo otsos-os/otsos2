@@ -47,6 +47,7 @@ const PT_LOAD: u32 = 1;
 const PT_INTERP: u32 = 3;
 const PT_PHDR: u32 = 6;
 const PF_X: u32 = 0x1;
+const PF_W: u32 = 0x2;
 const ELF_INTERP_BASE: u64 = 0x40000000;
 
 pub const elf64_ehdr_t = extern struct {
@@ -117,6 +118,9 @@ pub const elf_loadinfo_t = extern struct {
     e_type: u64,
     interp_off: u64,
     interp_len: u64,
+    load_addr_max: u64,
+    data_start: u64,
+    data_end: u64,
 };
 
 extern fn com1_printf(fmt: [*:0]const u8, ...) void;
@@ -470,14 +474,37 @@ pub export fn elf_load_full(data: *anyopaque, size: u64, out: *elf_loadinfo_t) u
     out.phent = info.header.e_phentsize;
     out.phnum = info.header.e_phnum;
     out.e_type = info.header.e_type;
+    out.interp_off = 0;
+    out.interp_len = 0;
     find_interp(&info, &out.interp_off, &out.interp_len);
+    out.load_addr_max = info.load_addr_max;
+
+    out.data_start = 0;
+    out.data_end = 0;
+    const page_size: u64 = 4096;
+    const page_mask: u64 = page_size - 1;
+    var phdr_i: u16 = 0;
+    while (phdr_i < info.header.e_phnum) : (phdr_i += 1) {
+        const phdr = &info.phdrs[phdr_i];
+        if (phdr.p_type == PT_LOAD and (phdr.p_flags & PF_W) != 0) {
+            const vaddr = phdr.p_vaddr + load_base;
+            const seg_start = vaddr & ~page_mask;
+            const seg_end = (vaddr + phdr.p_memsz + page_mask) & ~page_mask;
+            if (out.data_start == 0 or seg_start < out.data_start)
+                out.data_start = seg_start;
+            if (seg_end > out.data_end)
+                out.data_end = seg_end;
+        }
+    }
 
     com1_printf(
-        "[ELF] main loaded: entry=%p phdr=%p phnum=%d interp_len=%d\n",
+        "[ELF] main loaded: entry=%p phdr=%p phnum=%d interp_len=%d data=[%p, %p)\n",
         u64_to_ptr_dbg(out.entry),
         u64_to_ptr_dbg(out.phdr_vaddr),
         @as(c_int, @intCast(out.phnum)),
         @as(c_int, @intCast(out.interp_len)),
+        u64_to_ptr_dbg(out.data_start),
+        u64_to_ptr_dbg(out.data_end),
     );
     return info.entry_point;
 }

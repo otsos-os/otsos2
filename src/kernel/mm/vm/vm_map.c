@@ -56,11 +56,11 @@ $space %export vm_map_fault, vm_cow_fault
 */
 
 #include <mm/vm/vm_map.h>
-#include <kernel/api/api.h>
-#include <mm/kmem.h>
+#include <mm/vm/vm_object.h>
+#include <mm/vm/vm_pager.h>
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_page.h>
-#include <mm/vm/vm_pager.h>
+#include <mm/kmem.h>
 #include <mlibc/mlibc.h>
 
 #define PAGE_SIZE	4096

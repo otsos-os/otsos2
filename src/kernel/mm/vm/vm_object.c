@@ -274,3 +274,46 @@ vm_object_get_page(vm_object_t *obj, u64 index, u64 file_offset)
 
 	return (page_phys);
 }
+
+int
+vm_object_resize(vm_object_t *obj, u64 new_size)
+{
+	u64	*new_pages;
+	u64	new_page_count;
+	u64	i;
+	u64	copy_count;
+
+	if (obj == NULL)
+		return (-1);
+
+	new_size = (new_size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+	if (new_size == obj->size)
+		return (0);
+
+	new_page_count = new_size / PAGE_SIZE;
+	if (new_size < obj->size) {
+		for (i = new_page_count; i < obj->page_count; i++) {
+			if (obj->pages[i] != 0)
+				vm_page_free_phys(obj->pages[i]);
+		}
+	}
+
+	new_pages = kmem_calloc(new_page_count, sizeof(u64));
+	if (new_pages == NULL)
+		return (-1);
+
+	copy_count = obj->page_count;
+	if (copy_count > new_page_count)
+		copy_count = new_page_count;
+	for (i = 0; i < copy_count; i++)
+		new_pages[i] = obj->pages[i];
+
+	kmem_free(obj->pages);
+	obj->pages = new_pages;
+	obj->page_count = new_page_count;
+	obj->size = new_size;
+	if (obj->pager != NULL)
+		obj->pager->size = new_size;
+
+	return (0);
+}

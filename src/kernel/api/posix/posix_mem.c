@@ -118,7 +118,6 @@ posix_mmap(u64 addr_u, u64 length, u64 prot, u64 flags, u64 fd_u,
 			return (-POSIX_ENOMEM);
 		}
 		vm_object_unref(obj);
-
 		return ((s64)addr);
 	}
 
@@ -285,6 +284,14 @@ posix_brk(u64 addr_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
     registers_t *regs)
 {
 	struct process	*proc;
+	vma_t		*vma;
+	u64		old_brk;
+	u64		new_brk;
+	u64		va;
+	u64		phys;
+	u64		obj_size;
+	u64		idx;
+	u64		p;
 
 	(void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
 
@@ -294,12 +301,88 @@ posix_brk(u64 addr_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	}
 
 	if (addr_u == 0) {
-		if (proc->brk == 0) {
-			proc->brk = MMAP_BASE;
-		}
 		return ((s64)proc->brk);
 	}
 
-	proc->brk = addr_u;
+	old_brk = proc->brk;
+	new_brk = (addr_u + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+	if (new_brk < proc->brk_min) {
+		new_brk = proc->brk_min;
+	}
+	if (new_brk == old_brk) {
+		return ((s64)proc->brk);
+	}
+
+	vma = NULL;
+	if (old_brk > proc->brk_min) {
+		vma = vm_map_lookup(proc, old_brk - 1);
+	}
+	if (vma == NULL && new_brk > proc->brk_min) {
+		vma = vm_map_lookup(proc, new_brk - 1);
+	}
+
+	if (vma == NULL) {
+		/* No data/BSS vma; fallback to direct page mapping. */
+		if (new_brk > old_brk) {
+			for (va = old_brk; va < new_brk; va += PAGE_SIZE) {
+				phys = vm_page_alloc_phys(0);
+				if (phys == 0) {
+					for (va = old_brk; va < new_brk;
+					    va += PAGE_SIZE) {
+						p = pmap_extract(va);
+						if (p) {
+							pmap_remove(va);
+							vm_page_free_phys(p);
+						}
+					}
+					return (-POSIX_ENOMEM);
+				}
+				memset((void *)phys, 0, PAGE_SIZE);
+				pmap_enter(va, phys,
+				    PTE_PRESENT | PTE_RW | PTE_USER);
+			}
+		} else {
+			for (va = new_brk; va < old_brk; va += PAGE_SIZE) {
+				p = pmap_extract(va);
+				if (p) {
+					pmap_remove(va);
+					vm_page_free_phys(p);
+				}
+			}
+		}
+		proc->brk = new_brk;
+		return ((s64)proc->brk);
+	}
+
+	obj_size = new_brk - vma->start;
+	if (vm_object_resize(vma->object, obj_size) != 0) {
+		return (-POSIX_ENOMEM);
+	}
+	vma->end = new_brk;
+
+	if (new_brk > old_brk) {
+		for (va = old_brk; va < new_brk; va += PAGE_SIZE) {
+			idx = (va - vma->start) / PAGE_SIZE;
+			phys = vm_object_get_page(vma->object, idx, 0);
+			if (phys == 0) {
+				vm_object_resize(vma->object,
+				    old_brk - vma->start);
+				vma->end = old_brk;
+				for (va = old_brk; va < new_brk;
+				    va += PAGE_SIZE) {
+					pmap_remove(va);
+				}
+				return (-POSIX_ENOMEM);
+			}
+			pmap_enter(va, phys,
+			    PTE_PRESENT | PTE_RW | PTE_USER);
+		}
+	} else {
+		for (va = new_brk; va < old_brk; va += PAGE_SIZE) {
+			pmap_remove(va);
+		}
+	}
+
+	proc->brk = new_brk;
 	return ((s64)proc->brk);
 }

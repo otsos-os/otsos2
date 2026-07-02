@@ -43,6 +43,7 @@ void userspace_load_init(void *module_start, u64 module_size);
 
 /* Load ELF and create userspace process */
 process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size);
+void register_data_bss(process_t *proc, u64 data_start, u64 data_end);
 
 /* Jump to userspace (starts executing the process) */
 void userspace_jump(process_t *proc);

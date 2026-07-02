@@ -92,9 +92,10 @@ typedef struct process {
   int		personality;
   posix_fd_t	posix_fds[MAX_POSIX_FDS];
   posix_sigaction_t	sigaction[MAX_POSIX_SIGS];
-  u64		sigmask;
-  u64		sigpending;
-  u64		brk;
+	u64		sigmask;
+	u64		sigpending;
+	u64		brk;
+	u64		brk_min;
 } process_t;
 
 /* Initialize process subsystem */

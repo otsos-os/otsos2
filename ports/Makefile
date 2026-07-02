@@ -26,8 +26,15 @@ MUSL_LIBC = $(MUSL_DIR)/lib/libc.a
 MUSL_CRT1 = $(MUSL_DIR)/lib/crt1.o
 MUSL_TEST_BIN = musl_test
 MUSL_TEST_OBJS = musl_test.o
+LIBC_ENABLED ?= true
 
-all: $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN) $(MUSL_TEST_BIN)
+ifeq ($(LIBC_ENABLED),true)
+ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN) $(MUSL_TEST_BIN)
+else
+ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN)
+endif
+
+all: $(ALL_TARGETS)
 
 $(YES_BIN): $(YES_OBJS)
 	@echo "  LLD      $@"

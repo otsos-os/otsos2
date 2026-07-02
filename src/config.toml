@@ -18,6 +18,9 @@ prompt = "kshell> "
 
 [disk.pata]
 enabled = false
+[libc]
+enabled = false
+type = "musl"
 
 [kshell.commands.help]
 enabled = true

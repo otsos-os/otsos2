@@ -31,6 +31,18 @@ FETCH_BIN = $(PORTS_DIR)/fetch
 SHELL_BIN = $(PORTS_DIR)/sh
 POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
 MUSL_TEST_BIN = $(PORTS_DIR)/musl_test
+LIBC_ENABLED := $(shell sh ../tools/toml_get.sh config.toml libc enabled true)
+
+ifeq ($(LIBC_ENABLED),true)
+ISO_MUSL_TEST_DEP = $(MUSL_TEST_BIN)
+ISO_MUSL_TEST_COPY = @cp $(MUSL_TEST_BIN) $(ISODIR)/boot/musl_test
+GRUB_MUSL_TEST = @echo '    module2 /boot/musl_test musl_test' >> $(ISODIR)/boot/grub/grub.cfg
+else
+ISO_MUSL_TEST_DEP =
+ISO_MUSL_TEST_COPY =
+GRUB_MUSL_TEST =
+endif
+
 # object files
 BOOT_O = ../bin/boot.o
 KERNEL_O = ../bin/kernel.o
@@ -249,24 +261,24 @@ $(INIT_BIN):
 .PHONY: $(YES_BIN)
 $(YES_BIN):
 	@echo "  MAKE    ports/yes"
-	@$(MAKE) -C $(PORTS_DIR)
+	@$(MAKE) -C $(PORTS_DIR) LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(SHELL_BIN)
 $(SHELL_BIN):
 	@echo "  MAKE    ports/sh"
-	@$(MAKE) -C $(PORTS_DIR)
+	@$(MAKE) -C $(PORTS_DIR) LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(POSIX_HELLO_BIN)
 $(POSIX_HELLO_BIN):
 	@echo "  MAKE    ports/posix_hello"
-	@$(MAKE) -C $(PORTS_DIR)
+	@$(MAKE) -C $(PORTS_DIR) LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(MUSL_TEST_BIN)
 $(MUSL_TEST_BIN):
 	@echo "  MAKE    ports/musl_test"
-	@$(MAKE) -C $(PORTS_DIR)
+	@$(MAKE) -C $(PORTS_DIR) LIBC_ENABLED=$(LIBC_ENABLED)
 
-$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN) $(MUSL_TEST_BIN)
+$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN) $(ISO_MUSL_TEST_DEP)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
 	@cp $(INIT_BIN) $(ISODIR)/boot/init
@@ -274,7 +286,7 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 	@cp $(FETCH_BIN) $(ISODIR)/boot/fetch
 	@cp $(SHELL_BIN) $(ISODIR)/boot/sh
 	@cp $(POSIX_HELLO_BIN) $(ISODIR)/boot/posix_hello
-	@cp $(MUSL_TEST_BIN) $(ISODIR)/boot/musl_test
+	$(ISO_MUSL_TEST_COPY)
 	@cp config.toml $(ISODIR)/boot/config.toml
 	@echo 'set timeout=4' > $(ISODIR)/boot/grub/grub.cfg
 	@echo 'set default=0' >> $(ISODIR)/boot/grub/grub.cfg
@@ -288,7 +300,7 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 	@echo '    module2 /boot/fetch fetch' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    module2 /boot/sh sh' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    module2 /boot/posix_hello posix_hello' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo '    module2 /boot/musl_test musl_test' >> $(ISODIR)/boot/grub/grub.cfg
+	$(GRUB_MUSL_TEST)
 	@echo '    boot' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '}' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo "  ISO     $(ISO_IMAGE)"

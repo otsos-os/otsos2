@@ -27,8 +27,11 @@
 #include <kernel/console.h>
 #include <kernel/gdt.h>
 #include <mm/vm/pmap.h>
+#include <mm/vm/vm_map.h>
+#include <mm/vm/vm_object.h>
 #include <mm/vm/vm_page.h>
 #include <kernel/api/posix/posix.h>
+#include <kernel/api/api.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <lib/com1.h>
@@ -97,6 +100,42 @@ static u64 allocate_user_stack(void) {
   return USER_STACK_BASE;
 }
 
+void
+register_data_bss(process_t *proc, u64 data_start, u64 data_end)
+{
+  vm_object_t *obj;
+  u64 va;
+  u64 phys;
+  u64 idx;
+
+  if (data_start == 0 || data_end == 0 || data_start >= data_end)
+    return;
+
+  obj = vm_object_create(VM_OBJ_ANON, data_end - data_start, NULL);
+  if (!obj) {
+    com1_printf("[USERSPACE] Error: failed to create data/BSS object\n");
+    return;
+  }
+
+  for (va = data_start, idx = 0; va < data_end; va += PAGE_SIZE, idx++) {
+    phys = pmap_extract(va);
+    if (phys == 0) {
+      phys = vm_page_alloc_phys(0);
+      if (phys == 0) {
+        com1_printf("[USERSPACE] Error: failed to allocate data/BSS page at %p\n", (void *)va);
+        break;
+      }
+      memset((void *)phys, 0, PAGE_SIZE);
+      pmap_enter(va, phys, PTE_PRESENT | PTE_RW | PTE_USER);
+    }
+    vm_object_set_page(obj, idx, phys);
+  }
+
+  vm_map_insert(proc, data_start, data_end, API_MAP_READ | API_MAP_WRITE,
+      API_MAP_PRIVATE | API_MAP_ANON, 0, obj, 0);
+  vm_object_unref(obj);
+}
+
 process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   com1_printf("[USERSPACE] Loading ELF process '%s' (%d bytes)\n", name,
               (int)elf_size);
@@ -111,7 +150,8 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   pmap_load(new_cr3);
 
   /* Validate and load ELF */
-  u64 entry = elf_load(elf_data, elf_size);
+  elf_loadinfo_t li;
+  u64 entry = elf_load_full(elf_data, elf_size, &li);
   if (entry == 0) {
     com1_printf("[USERSPACE] Error: Failed to load ELF\n");
     pmap_load(old_cr3);
@@ -160,6 +200,15 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   new_proc->exit_code = 0;
   new_proc->owns_address_space = 1;
   new_proc->mmap_base = MMAP_BASE;
+  if (li.data_end != 0) {
+    new_proc->brk_min = li.data_end;
+  } else if (li.load_addr_max != 0) {
+    new_proc->brk_min = (li.load_addr_max + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+  } else {
+    new_proc->brk_min = MMAP_BASE;
+  }
+  new_proc->brk = new_proc->brk_min;
+  register_data_bss(new_proc, li.data_start, li.data_end);
   api_init_process(new_proc);
   posix_init_process(new_proc);
   new_proc->personality = PERSONALITY_OTSOS;

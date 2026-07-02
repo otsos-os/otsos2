@@ -59,7 +59,7 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_FS_CHDIR		0x206
 #define	CALL_FS_GETCWD		0x207
 #define	CALL_FS_LISTDIR		0x208
-#define	CALL_MEM_MAP		0x300
+#define	CALL_MEM_MAP		0x300	
 #define	CALL_MEM_UNMAP		0x301
 #define	CALL_PROC_CLONE		0x400
 #define	CALL_PROC_COPY		0x401

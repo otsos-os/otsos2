@@ -635,6 +635,8 @@ posix_fork(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	child->exit_code = 0;
 	child->owns_address_space = 1;
 	child->mmap_base = parent->mmap_base;
+	child->brk_min = parent->brk_min;
+	child->brk = parent->brk;
 	child->kusr_auth = parent->kusr_auth;
 
 	vm_map_fork(parent, child);
@@ -678,6 +680,7 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 	u64		new_cr3, old_cr3;
 	u64		entry_point;
 	u64		user_stack, new_rsp, argv_addr, envp_addr;
+	u64		data_start, data_end;
 	auxv_desc_t	aux;
 	int		i;
 
@@ -791,6 +794,9 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 		}
 	}
 
+	data_start = 0;
+	data_end = 0;
+
 	new_cr3 = pmap_create();
 	if (!new_cr3) {
 		kmem_free(elf_buf);
@@ -815,6 +821,14 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 			free_string_array(kenvp);
 			kmem_free(kpath);
 			return (-POSIX_ENOEXEC);
+		}
+
+		data_start = li.data_start;
+		data_end = li.data_end;
+		if (data_end == 0 && li.load_addr_max != 0) {
+			data_end = (li.load_addr_max + PAGE_SIZE - 1)
+			    & ~(PAGE_SIZE - 1);
+			data_start = 0;
 		}
 
 		aux.at_phdr = li.phdr_vaddr;
@@ -959,8 +973,11 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 
 	pmap_load(new_cr3);
 
-	com1_printf("[EXECVE] PID %d now running '%s' entry=%p\n",
-	    proc->pid, proc->name, (void *)entry_point);
+	if (data_end != 0) {
+		proc->brk_min = data_end;
+		proc->brk = data_end;
+		register_data_bss(proc, data_start, data_end);
+	}
 
 	return (0);
 }
@@ -1210,6 +1227,12 @@ posix_set_tid_address(u64 tidptr_u, u64 a2, u64 a3, u64 a4, u64 a5,
 	 * if the thread is still alive */
 	if (tidptr_u && is_user_address((void *)tidptr_u,
 	    sizeof(u32))) {
+		/* After fork the page can be COW/read-only; make sure
+		 * it is writable before touching userspace directly. */
+		if (vm_map_fault(process_current(), tidptr_u, 0x3)
+		    != 0 && vm_cow_fault(tidptr_u, 0x3) != 0) {
+			return (-POSIX_EFAULT);
+		}
 		*(u32 *)tidptr_u = td->tid;
 	}
 

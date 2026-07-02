@@ -87,6 +87,7 @@ int		vm_object_set_page(vm_object_t *obj, u64 index,
 		    u64 phys);
 u64		vm_object_get_page(vm_object_t *obj, u64 index,
 		    u64 file_offset);
+int		vm_object_resize(vm_object_t *obj, u64 new_size);
 void		vm_object_init(void);
 
 #endif

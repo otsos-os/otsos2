@@ -125,6 +125,9 @@ typedef struct {
   u64 e_type;      //ET_EXEC or ET_DYN
   u64 interp_off;  //file offset PT_INTERP string 0 if none
   u64 interp_len;  //length of interp string incl NULL 0 if none
+  u64 load_addr_max; // end of highest PT_LOAD segment
+  u64 data_start;    // page-aligned start of writable PT_LOAD segment
+  u64 data_end;      // page-aligned end of writable PT_LOAD segment
 } elf_loadinfo_t;
 
 #define ELF_INTERP_BASE 0x40000000ULL
