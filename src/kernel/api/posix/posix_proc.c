@@ -657,6 +657,7 @@ posix_fork(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	process_save_context(parent, regs);
 	child_td->context = parent_td->context;
 	child_td->context.rax = 0;
+	child_td->fs_base = parent_td->fs_base;
 
 	return ((s64)child->pid);
 }
@@ -1213,4 +1214,72 @@ posix_set_tid_address(u64 tidptr_u, u64 a2, u64 a3, u64 a4, u64 a5,
 	}
 
 	return ((s64)td->tid);
+}
+
+#define	MSR_FS_BASE	0xC0000100
+
+static inline u64
+posix_rdmsr(u32 msr)
+{
+	u32	low, high;
+
+	__asm__ volatile("rdmsr" : "=a"(low), "=d"(high) : "c"(msr));
+	return (((u64)high << 32) | low);
+}
+
+static inline void
+posix_wrmsr(u32 msr, u64 value)
+{
+	u32	low, high;
+
+	low = (u32)value;
+	high = (u32)(value >> 32);
+	__asm__ volatile("wrmsr" : : "c"(msr), "a"(low), "d"(high));
+}
+
+#define	ARCH_SET_FS	0x1002
+#define	ARCH_GET_FS	0x1003
+#define	ARCH_SET_GS	0x1001
+#define	ARCH_GET_GS	0x1004
+
+s64
+posix_arch_prctl(u64 code, u64 addr, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+	struct thread	*td;
+
+	(void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
+
+	td = thread_current();
+	if (!td) {
+		return (-POSIX_EFAULT);
+	}
+
+	switch (code) {
+	case ARCH_SET_FS:
+		posix_wrmsr(MSR_FS_BASE, addr);
+		td->fs_base = addr;
+		return (0);
+
+	case ARCH_GET_FS:
+		if (!is_user_address((void *)addr, sizeof(u64))) {
+			return (-POSIX_EFAULT);
+		}
+		*(u64 *)addr = posix_rdmsr(MSR_FS_BASE);
+		return (0);
+
+	case ARCH_SET_GS:
+		posix_wrmsr(0xC0000101, addr);
+		return (0);
+
+	case ARCH_GET_GS:
+		if (!is_user_address((void *)addr, sizeof(u64))) {
+			return (-POSIX_EFAULT);
+		}
+		*(u64 *)addr = posix_rdmsr(0xC0000101);
+		return (0);
+
+	default:
+		return (-POSIX_EINVAL);
+	}
 }

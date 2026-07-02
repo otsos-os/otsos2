@@ -107,6 +107,7 @@ typedef struct thread {
 	u64			saved_sigmask;
 	int			exit_code;
 	u64			tid_address;	/* set_tid_address: cleared on exit */
+	u64			fs_base;	/* FS segment base (TLS) */
 	struct thread		*next;
 	struct thread		*prev;
 } thread_t;

@@ -21,7 +21,13 @@ SHELL_OBJS = shell.o
 POSIX_HELLO_BIN = posix_hello
 POSIX_HELLO_OBJS = posix_hello.o
 
-all: $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN)
+MUSL_DIR = ../libc/musl
+MUSL_LIBC = $(MUSL_DIR)/lib/libc.a
+MUSL_CRT1 = $(MUSL_DIR)/lib/crt1.o
+MUSL_TEST_BIN = musl_test
+MUSL_TEST_OBJS = musl_test.o
+
+all: $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN) $(MUSL_TEST_BIN)
 
 $(YES_BIN): $(YES_OBJS)
 	@echo "  LLD      $@"
@@ -47,11 +53,27 @@ $(POSIX_HELLO_BIN): $(POSIX_HELLO_OBJS)
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
+$(MUSL_LIBC):
+	@echo "  MAKE    musl libc"
+	@$(MAKE) -C $(MUSL_DIR)
+
+$(MUSL_TEST_BIN): $(MUSL_CRT1) $(MUSL_TEST_OBJS) $(MUSL_LIBC)
+	@echo "  LLD      $@"
+	@$(LD) $(LDFLAGS) $(MUSL_CRT1) $(MUSL_TEST_OBJS) $(MUSL_LIBC) -o $@
+	@echo "  SIZE    $@"
+	@$(SIZE) $@
+
 %.o: %.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+musl_test.o: musl_test.c
+	@echo "  CC      $< (musl)"
+	@$(CC) $(TARGET_CFLAGS) -O2 -g -fno-pic -fno-stack-protector \
+	    -I$(MUSL_DIR)/arch/x86_64 -I$(MUSL_DIR)/arch/generic \
+	    -I$(MUSL_DIR)/obj/include -I$(MUSL_DIR)/include -c $< -o $@
+
 clean:
-	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN) $(POSIX_HELLO_OBJS) $(POSIX_HELLO_BIN)
+	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN) $(POSIX_HELLO_OBJS) $(POSIX_HELLO_BIN) $(MUSL_TEST_OBJS) $(MUSL_TEST_BIN)
 
 .PHONY: all clean

@@ -635,6 +635,11 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 		sh_sz = 0;
 		posix_hello_mod = NULL;
 		posix_hello_sz = 0;
+		void		*musl_test_mod;
+		u32		musl_test_sz;
+
+		musl_test_mod = NULL;
+		musl_test_sz = 0;
 
 		if (boot_magic ==
 		    MULTIBOOT2_BOOTLOADER_MAGIC) {
@@ -650,6 +655,8 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 			    &sh_mod, &sh_sz);
 			mb2_find_module(mboot2_ptr, "posix_hello",
 			    &posix_hello_mod, &posix_hello_sz);
+			mb2_find_module(mboot2_ptr, "musl_test",
+			    &musl_test_mod, &musl_test_sz);
 		}
 
 		api_init();
@@ -709,6 +716,21 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 			} else {
 				com1_printf("[KERNEL] Failed to "
 				    "install /bin/posix_hello from "
+				    "module\n");
+			}
+		}
+
+		if (musl_test_mod && musl_test_sz > 0) {
+			res = vfs_write_file("/bin/musl_test",
+			    (const u8 *)musl_test_mod,
+			    musl_test_sz);
+			if (res == 0) {
+				com1_printf("[KERNEL] Installed "
+				    "/bin/musl_test from module "
+				    "(%u bytes)\n", musl_test_sz);
+			} else {
+				com1_printf("[KERNEL] Failed to "
+				    "install /bin/musl_test from "
 				    "module\n");
 			}
 		}

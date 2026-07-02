@@ -345,7 +345,54 @@ fn compute_phdr_vaddr(info: *const elf_info_t, load_base: u64) u64 {
             return phdr.p_vaddr + load_base + (ehdr.e_phoff - phdr.p_offset);
         }
     }
+    i = 0;
+    while (i < ehdr.e_phnum) : (i += 1) {
+        const phdr = &info.phdrs[i];
+        if (phdr.p_type == PT_LOAD) {
+            return phdr.p_vaddr + load_base - phdr.p_offset + ehdr.e_phoff;
+        }
+    }
     return 0;
+}
+
+fn map_elf_headers(data: *anyopaque, info: *const elf_info_t, load_base: u64) bool {
+    const ehdr = info.header;
+    var first_load: ?*align(1) const elf64_phdr_t = null;
+    var i: u16 = 0;
+    while (i < ehdr.e_phnum) : (i += 1) {
+        const phdr = &info.phdrs[i];
+        if (phdr.p_type == PT_LOAD) {
+            first_load = phdr;
+            break;
+        }
+    }
+    if (first_load == null) return false;
+    const fl = first_load.?;
+    if (fl.p_offset == 0) return true;
+
+    const header_vaddr = fl.p_vaddr + load_base - fl.p_offset;
+    const page_mask: u64 = PAGE_SIZE - 1;
+    const map_start = header_vaddr & ~page_mask;
+    const map_end = (fl.p_vaddr + load_base + page_mask) & ~page_mask;
+
+    var page = map_start;
+    while (page < map_end) : (page += PAGE_SIZE) {
+        const phys = vm_page_alloc_phys(0);
+        if (phys == 0) {
+            com1_printf("[ELF] Failed to allocate header page at %p\n", u64_to_ptr(page));
+            return false;
+        }
+        _ = memset(u64_to_ptr(phys), 0, u64_to_usize(PAGE_SIZE));
+        pmap_enter(page, phys, PTE_PRESENT | PTE_USER | PTE_RW);
+    }
+
+    const base = data_as_bytes(data);
+    const dst: [*]u8 = @ptrFromInt(u64_to_usize(header_vaddr));
+    var j: u64 = 0;
+    while (j < fl.p_offset) : (j += 1) {
+        dst[u64_to_usize(j)] = base[u64_to_usize(j)];
+    }
+    return true;
 }
 
 fn find_interp(info: *const elf_info_t, off: *u64, len: *u64) void {
@@ -388,6 +435,11 @@ pub export fn elf_load(data: *anyopaque, size: u64) u64 {
         return 0;
     }
 
+    if (!map_elf_headers(data, &info, load_base)) {
+        com1_printf("[ELF] Error: Failed to map ELF headers\n");
+        return 0;
+    }
+
     com1_printf("[ELF] Load complete, entry point: %p\n", u64_to_ptr(info.entry_point));
     return info.entry_point;
 }
@@ -404,6 +456,11 @@ pub export fn elf_load_full(data: *anyopaque, size: u64, out: *elf_loadinfo_t) u
     const load_base: u64 = if (info.header.e_type == ET_DYN) 0x400000 else 0;
 
     if (!load_segments(data, &info, load_base)) {
+        return 0;
+    }
+
+    if (!map_elf_headers(data, &info, load_base)) {
+        com1_printf("[ELF] Error: Failed to map ELF headers\n");
         return 0;
     }
 

@@ -30,6 +30,7 @@ YES_BIN = $(PORTS_DIR)/yes
 FETCH_BIN = $(PORTS_DIR)/fetch
 SHELL_BIN = $(PORTS_DIR)/sh
 POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
+MUSL_TEST_BIN = $(PORTS_DIR)/musl_test
 # object files
 BOOT_O = ../bin/boot.o
 KERNEL_O = ../bin/kernel.o
@@ -260,7 +261,12 @@ $(POSIX_HELLO_BIN):
 	@echo "  MAKE    ports/posix_hello"
 	@$(MAKE) -C $(PORTS_DIR)
 
-$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN)
+.PHONY: $(MUSL_TEST_BIN)
+$(MUSL_TEST_BIN):
+	@echo "  MAKE    ports/musl_test"
+	@$(MAKE) -C $(PORTS_DIR)
+
+$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN) $(MUSL_TEST_BIN)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
 	@cp $(INIT_BIN) $(ISODIR)/boot/init
@@ -268,6 +274,7 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 	@cp $(FETCH_BIN) $(ISODIR)/boot/fetch
 	@cp $(SHELL_BIN) $(ISODIR)/boot/sh
 	@cp $(POSIX_HELLO_BIN) $(ISODIR)/boot/posix_hello
+	@cp $(MUSL_TEST_BIN) $(ISODIR)/boot/musl_test
 	@cp config.toml $(ISODIR)/boot/config.toml
 	@echo 'set timeout=4' > $(ISODIR)/boot/grub/grub.cfg
 	@echo 'set default=0' >> $(ISODIR)/boot/grub/grub.cfg
@@ -281,6 +288,7 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 	@echo '    module2 /boot/fetch fetch' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    module2 /boot/sh sh' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    module2 /boot/posix_hello posix_hello' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '    module2 /boot/musl_test musl_test' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    boot' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '}' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo "  ISO     $(ISO_IMAGE)"

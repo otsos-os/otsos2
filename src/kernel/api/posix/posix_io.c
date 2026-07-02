@@ -287,6 +287,99 @@ posix_write(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 	return ((s64)n);
 }
 
+struct posix_iovec {
+	void	*iov_base;
+	size_t	iov_len;
+};
+
+s64
+posix_readv(u64 fd_u, u64 iov_u, u64 iovcnt_u, u64 a4, u64 a5,
+    u64 a6, registers_t *regs)
+{
+	struct posix_iovec	*iov;
+	u64			total;
+	u64			i;
+	s64			n;
+
+	(void)a4; (void)a5; (void)a6;
+
+	if (iovcnt_u == 0) {
+		return (0);
+	}
+	if (iovcnt_u > 1024) {
+		return (-POSIX_EINVAL);
+	}
+
+	iov = (struct posix_iovec *)iov_u;
+	if (!is_user_address(iov, iovcnt_u * sizeof(struct posix_iovec))) {
+		return (-POSIX_EFAULT);
+	}
+
+	total = 0;
+	for (i = 0; i < iovcnt_u; i++) {
+		if (iov[i].iov_len == 0) {
+			continue;
+		}
+		n = posix_read(fd_u, (u64)iov[i].iov_base,
+		    iov[i].iov_len, 0, 0, 0, regs);
+		if (n < 0) {
+			if (total == 0) {
+				return (n);
+			}
+			break;
+		}
+		total += (u64)n;
+		if ((u64)n < iov[i].iov_len) {
+			break;
+		}
+	}
+	return ((s64)total);
+}
+
+s64
+posix_writev(u64 fd_u, u64 iov_u, u64 iovcnt_u, u64 a4, u64 a5,
+    u64 a6, registers_t *regs)
+{
+	struct posix_iovec	*iov;
+	u64			total;
+	u64			i;
+	s64			n;
+
+	(void)a4; (void)a5; (void)a6;
+
+	if (iovcnt_u == 0) {
+		return (0);
+	}
+	if (iovcnt_u > 1024) {
+		return (-POSIX_EINVAL);
+	}
+
+	iov = (struct posix_iovec *)iov_u;
+	if (!is_user_address(iov, iovcnt_u * sizeof(struct posix_iovec))) {
+		return (-POSIX_EFAULT);
+	}
+
+	total = 0;
+	for (i = 0; i < iovcnt_u; i++) {
+		if (iov[i].iov_len == 0) {
+			continue;
+		}
+		n = posix_write(fd_u, (u64)iov[i].iov_base,
+		    iov[i].iov_len, 0, 0, 0, regs);
+		if (n < 0) {
+			if (total == 0) {
+				return (n);
+			}
+			break;
+		}
+		total += (u64)n;
+		if ((u64)n < iov[i].iov_len) {
+			break;
+		}
+	}
+	return ((s64)total);
+}
+
 s64
 posix_lseek(u64 fd_u, u64 offset_u, u64 whence_u, u64 a4, u64 a5,
     u64 a6, registers_t *regs)

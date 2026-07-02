@@ -34,9 +34,13 @@
 #include <mm/kmem.h>
 
 s64	posix_read(u64 fd, u64 buf, u64 count, u64 a4, u64 a5, u64 a6,
-	    registers_t *regs);
+    registers_t *regs);
 s64	posix_write(u64 fd, u64 buf, u64 count, u64 a4, u64 a5, u64 a6,
-	    registers_t *regs);
+    registers_t *regs);
+s64	posix_readv(u64 fd, u64 iov, u64 iovcnt, u64 a4, u64 a5, u64 a6,
+    registers_t *regs);
+s64	posix_writev(u64 fd, u64 iov, u64 iovcnt, u64 a4, u64 a5, u64 a6,
+    registers_t *regs);
 s64	posix_open(u64 path, u64 flags, u64 mode, u64 a4, u64 a5, u64 a6,
 	    registers_t *regs);
 s64	posix_close(u64 fd, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
@@ -145,6 +149,8 @@ s64	posix_set_tid_address(u64 tidptr, u64 a2, u64 a3, u64 a4, u64 a5,
     u64 a6, registers_t *regs);
 s64	posix_exit_group(u64 code, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
     registers_t *regs);
+s64	posix_arch_prctl(u64 code, u64 addr, u64 a3, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
 
 void
 posix_syscall_handler(registers_t *regs)
@@ -173,6 +179,12 @@ posix_syscall_handler(registers_t *regs)
 		break;
 	case SYS_write:
 		ret = posix_write(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_readv:
+		ret = posix_readv(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_writev:
+		ret = posix_writev(a1, a2, a3, a4, a5, a6, regs);
 		break;
 	case SYS_open:
 		ret = posix_open(a1, a2, a3, a4, a5, a6, regs);
@@ -335,6 +347,9 @@ posix_syscall_handler(registers_t *regs)
 		break;
 	case SYS_exit_group:
 		ret = posix_exit_group(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_arch_prctl:
+		ret = posix_arch_prctl(a1, a2, a3, a4, a5, a6, regs);
 		break;
 	default:
 		com1_printf("[POSIX] unknown syscall: %d\n", (int)num);

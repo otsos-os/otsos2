@@ -77,6 +77,27 @@ $space %export thread_count_alive, thread_kill_all
 
 extern void	futex_wake_all(u64 uaddr);
 
+#define	MSR_FS_BASE	0xC0000100
+
+static inline u64
+thread_rdmsr(u32 msr)
+{
+	u32	low, high;
+
+	__asm__ volatile("rdmsr" : "=a"(low), "=d"(high) : "c"(msr));
+	return (((u64)high << 32) | low);
+}
+
+static inline void
+thread_wrmsr(u32 msr, u64 value)
+{
+	u32	low, high;
+
+	low = (u32)value;
+	high = (u32)(value >> 32);
+	__asm__ volatile("wrmsr" : : "c"(msr), "a"(low), "d"(high));
+}
+
 thread_t	thread_table[MAX_THREADS];
 u32		next_tid = 1;
 static thread_t	*current_thread = NULL;
@@ -161,6 +182,7 @@ thread_create(process_t *proc, u64 rip, u64 rsp, u64 cs, u64 ss)
 	td->next = NULL;
 	td->prev = NULL;
 	td->exit_code = 0;
+	td->fs_base = 0;
 
 	td->state = PROC_STATE_RUNNABLE;
 
@@ -260,6 +282,7 @@ thread_save_context(thread_t *td, registers_t *regs)
 	td->context.rflags = regs->rflags;
 	td->context.rsp = regs->rsp;
 	td->context.ss = regs->ss;
+	td->fs_base = thread_rdmsr(MSR_FS_BASE);
 }
 
 void
@@ -289,6 +312,7 @@ thread_load_context(thread_t *td, registers_t *regs)
 	regs->rflags = td->context.rflags;
 	regs->rsp = td->context.rsp;
 	regs->ss = td->context.ss;
+	thread_wrmsr(MSR_FS_BASE, td->fs_base);
 }
 
 thread_t *

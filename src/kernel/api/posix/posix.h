@@ -164,8 +164,11 @@ $space %export posix_signal_pending, posix_signal_deliver
 #define SYS_stat		4
 #define SYS_fstat		5
 #define SYS_lstat		6
+#define SYS_poll		7
 #define SYS_lseek		8
 #define SYS_mmap		9
+#define SYS_readv		19
+#define SYS_writev		20
 #define SYS_mprotect		10
 #define SYS_munmap		11
 #define SYS_brk		12
@@ -215,6 +218,7 @@ $space %export posix_signal_pending, posix_signal_deliver
 #define SYS_clone		56
 #define SYS_gettid		186
 #define SYS_futex		202
+#define SYS_arch_prctl		158
 
 /* futex operations */
 #define FUTEX_WAIT		0
