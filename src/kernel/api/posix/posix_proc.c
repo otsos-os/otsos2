@@ -26,6 +26,8 @@
 
 #include <kernel/api/posix/posix.h>
 #include <kernel/api/api.h>
+#include <kernel/api/auxv.h>
+#include <kernel/crypto/rng/rng.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/event/event.h>
 #include <kernel/gdt.h>
@@ -185,14 +187,18 @@ allocate_execve_stack(void)
 	return (USER_STACK_BASE);
 }
 
+#define EXECVE_AUXV_COUNT	8
+
 static int
 build_execve_stack(char **argv, int argc, char **envp, int envc,
-    u64 *out_rsp, u64 *out_argv, u64 *out_envp)
+    const auxv_desc_t *aux, u64 *out_rsp, u64 *out_argv, u64 *out_envp)
 {
 	u64	sp;
 	u64	stack_min;
 	u64	*argv_ptrs;
 	u64	*envp_ptrs;
+	u64	at_random_addr;
+	u64	words, total;
 	int	i;
 
 	sp = USER_STACK_BASE & ~0xFULL;
@@ -233,11 +239,48 @@ build_execve_stack(char **argv, int argc, char **envp, int envc,
 	}
 
 	sp &= ~0xFULL;
-
-	if (sp < stack_min + (u64)(8 * (argc + envc + 3))) {
+	if (sp < stack_min + 16) {
 		kmem_free(argv_ptrs);
 		kmem_free(envp_ptrs);
 		return (-POSIX_ENOMEM);
+	}
+	sp -= 16;
+	at_random_addr = sp;
+	if (crypto_rng_bytes((u8 *)sp, 16) != 0) {
+		memset((void *)sp, 0, 16);
+	}
+
+	sp &= ~0xFULL;
+
+	words = 1 + (u64)argc + 1 + (u64)envc + 1 + 2 * EXECVE_AUXV_COUNT;
+	total = words * 8;
+	if (sp < stack_min + total + 8) {
+		kmem_free(argv_ptrs);
+		kmem_free(envp_ptrs);
+		return (-POSIX_ENOMEM);
+	}
+	if (((sp - total) & 0xFULL) != 0) {
+		sp -= 8;
+	}
+
+	// high adress first
+	sp -= 8; *(u64 *)sp = 0;//at_null.a_val
+	sp -= 8; *(u64 *)sp = AT_NULL;//at_null.a_type
+
+	{
+		u64	aux_pairs[EXECVE_AUXV_COUNT - 1][2] = {
+			{AT_PHDR, aux->at_phdr},
+			{AT_PHENT, aux->at_phent},
+			{AT_PHNUM, aux->at_phnum},
+			{AT_ENTRY, aux->at_entry},
+			{AT_BASE, aux->at_base},
+			{AT_PAGESZ, aux->at_pagesz},
+			{AT_RANDOM, at_random_addr},
+		};
+		for (i = EXECVE_AUXV_COUNT - 2; i >= 0; i--) {
+			sp -= 8; *(u64 *)sp = aux_pairs[i][1];
+			sp -= 8; *(u64 *)sp = aux_pairs[i][0];
+		}
 	}
 
 	sp -= 8;
@@ -285,6 +328,67 @@ copy_process_name(char *dst, const char *path)
 	for (i = 0; i < PROCESS_NAME_LEN - 1 && base[i] != '\0'; i++) {
 		dst[i] = base[i];
 	}
+}
+
+
+static int
+execve_read_file(const char *path, u8 **out_buf, u32 *out_size)
+{
+	vnode_t		*vn;
+	posix_stat_t	st;
+	u32		size, total;
+	u8		*buf;
+
+	vn = NULL;
+	if (vfs_resolve(path, &vn) != 0 || vn == NULL) {
+		return (-POSIX_ENOENT);
+	}
+	if (vn->type == VDIR) {
+		vnode_release(vn);
+		return (-POSIX_EISDIR);
+	}
+	if (vnode_stat(vn, &st) != 0 || st.st_size == 0) {
+		vnode_release(vn);
+		return (-POSIX_ENOEXEC);
+	}
+
+	size = (u32)st.st_size;
+	buf = (u8 *)kmem_calloc(size, 1);
+	if (!buf) {
+		vnode_release(vn);
+		return (-POSIX_ENOMEM);
+	}
+
+	total = 0;
+	while (total < size) {
+		u32	to_read;
+		int	n;
+
+		to_read = size - total;
+		if (to_read > 4096) {
+			to_read = 4096;
+		}
+		n = vnode_read(vn, buf + total, to_read, total);
+		if (n < 0) {
+			vnode_release(vn);
+			kmem_free(buf);
+			return (-POSIX_EIO);
+		}
+		if (n == 0) {
+			break;
+		}
+		total += (u32)n;
+	}
+	vnode_release(vn);
+
+	if (total != size) {
+		kmem_free(buf);
+		return (-POSIX_EIO);
+	}
+
+	*out_buf = buf;
+	*out_size = size;
+	return (0);
 }
 
 s64
@@ -573,6 +677,7 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 	u64		new_cr3, old_cr3;
 	u64		entry_point;
 	u64		user_stack, new_rsp, argv_addr, envp_addr;
+	auxv_desc_t	aux;
 	int		i;
 
 	(void)a4; (void)a5; (void)a6;
@@ -697,15 +802,76 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 	old_cr3 = pmap_get_cr3();
 	pmap_load(new_cr3);
 
-	entry_point = elf_load(elf_buf, elf_size);
-	kmem_free(elf_buf);
-	if (entry_point == 0) {
-		pmap_load(old_cr3);
-		pmap_destroy(new_cr3);
-		free_string_array(kargv);
-		free_string_array(kenvp);
-		kmem_free(kpath);
-		return (-POSIX_ENOEXEC);
+	{
+		elf_loadinfo_t	li;
+
+		entry_point = elf_load_full(elf_buf, elf_size, &li);
+		if (entry_point == 0) {
+			kmem_free(elf_buf);
+			pmap_load(old_cr3);
+			pmap_destroy(new_cr3);
+			free_string_array(kargv);
+			free_string_array(kenvp);
+			kmem_free(kpath);
+			return (-POSIX_ENOEXEC);
+		}
+
+		aux.at_phdr = li.phdr_vaddr;
+		aux.at_phent = li.phent;
+		aux.at_phnum = li.phnum;
+		aux.at_entry = li.entry;
+		aux.at_base = 0;
+		aux.at_pagesz = PAGE_SIZE;
+
+		if (li.interp_off != 0 && li.interp_len != 0) {
+			char	interp_path[256];
+			u64	ilen;
+			u8	*interp_buf;
+			u32	interp_size;
+			u64	interp_entry;
+			int	ierr;
+
+			ilen = li.interp_len;
+			if (ilen > sizeof(interp_path)) {
+				ilen = sizeof(interp_path);
+			}
+			memcpy(interp_path, (char *)elf_buf + li.interp_off,
+			    ilen);
+			interp_path[ilen - 1] = '\0';
+			kmem_free(elf_buf);
+			elf_buf = NULL;
+
+			interp_buf = NULL;
+			interp_size = 0;
+			ierr = execve_read_file(interp_path, &interp_buf,
+			    &interp_size);
+			if (ierr < 0) {
+				pmap_load(old_cr3);
+				pmap_destroy(new_cr3);
+				free_string_array(kargv);
+				free_string_array(kenvp);
+				kmem_free(kpath);
+				return ((s64)ierr);
+			}
+
+			interp_entry = elf_load_interp(interp_buf, interp_size,
+			    ELF_INTERP_BASE);
+			kmem_free(interp_buf);
+			if (interp_entry == 0) {
+				pmap_load(old_cr3);
+				pmap_destroy(new_cr3);
+				free_string_array(kargv);
+				free_string_array(kenvp);
+				kmem_free(kpath);
+				return (-POSIX_ENOEXEC);
+			}
+
+			aux.at_base = ELF_INTERP_BASE;
+			entry_point = interp_entry;
+		} else {
+			kmem_free(elf_buf);
+			elf_buf = NULL;
+		}
 	}
 
 	user_stack = allocate_execve_stack();
@@ -721,7 +887,7 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 	{
 		int	err;
 		err = build_execve_stack(kargv, argc, kenvp, envc,
-		    &new_rsp, &argv_addr, &envp_addr);
+		    &aux, &new_rsp, &argv_addr, &envp_addr);
 		if (err < 0) {
 			pmap_load(old_cr3);
 			pmap_destroy(new_cr3);

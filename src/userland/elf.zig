@@ -44,8 +44,10 @@ const ET_DYN: u16 = 3;
 const EM_X86_64: u16 = 62;
 
 const PT_LOAD: u32 = 1;
-
+const PT_INTERP: u32 = 3;
+const PT_PHDR: u32 = 6;
 const PF_X: u32 = 0x1;
+const ELF_INTERP_BASE: u64 = 0x40000000;
 
 pub const elf64_ehdr_t = extern struct {
     e_ident: [16]u8,
@@ -106,6 +108,17 @@ pub const elf_info_t = extern struct {
     load_addr_max: u64,
 };
 
+pub const elf_loadinfo_t = extern struct {
+    entry: u64,
+    load_base: u64,
+    phdr_vaddr: u64,
+    phent: u64,
+    phnum: u64,
+    e_type: u64,
+    interp_off: u64,
+    interp_len: u64,
+};
+
 extern fn com1_printf(fmt: [*:0]const u8, ...) void;
 extern fn vm_page_alloc_phys(flags: u32) u64;
 extern fn memset(s: *anyopaque, c: c_int, n: usize) *anyopaque;
@@ -118,6 +131,10 @@ inline fn u64_to_usize(value: u64) usize {
 }
 
 inline fn u64_to_ptr(value: u64) *anyopaque {
+    return @ptrFromInt(u64_to_usize(value));
+}
+
+inline fn u64_to_ptr_dbg(value: u64) ?*anyopaque {
     return @ptrFromInt(u64_to_usize(value));
 }
 
@@ -215,28 +232,8 @@ pub export fn elf_parse(data: *anyopaque, size: u64, info: *elf_info_t) elf_resu
     return .ELF_OK;
 }
 
-pub export fn elf_load(data: *anyopaque, size: u64) u64 {
-    var info: elf_info_t = undefined;
-    const result = elf_parse(data, size, &info);
 
-    if (result != .ELF_OK) {
-        com1_printf("[ELF] Error: %s\n", elf_strerror(result));
-        return 0;
-    }
-
-    const load_base: u64 = if (info.header.e_type == ET_DYN) 0x400000 else 0;
-
-    com1_printf(
-        "[ELF] Loading ELF: entry=%p, segments=%d\n",
-        u64_to_ptr(info.entry_point),
-        @as(c_int, @intCast(info.header.e_phnum)),
-    );
-    com1_printf(
-        "[ELF] Load range: %p - %p\n",
-        u64_to_ptr(info.load_addr_min),
-        u64_to_ptr(info.load_addr_max),
-    );
-
+fn load_segments(data: *anyopaque, info: *const elf_info_t, load_base: u64) bool {
     var i: u16 = 0;
     while (i < info.header.e_phnum) : (i += 1) {
         const phdr = &info.phdrs[i];
@@ -286,7 +283,7 @@ pub export fn elf_load(data: *anyopaque, size: u64) u64 {
             const phys_page = vm_page_alloc_phys(0);
             if (phys_page == 0) {
                 com1_printf("[ELF] Error: Failed to allocate page at %p\n", u64_to_ptr(page));
-                return 0;
+                return false;
             }
             _ = memset(u64_to_ptr(phys_page), 0, u64_to_usize(PAGE_SIZE));
 
@@ -325,7 +322,123 @@ pub export fn elf_load(data: *anyopaque, size: u64) u64 {
             pmap_enter(page, phys, combined_flags);
         }
     }
+    return true;
+}
+
+
+fn compute_phdr_vaddr(info: *const elf_info_t, load_base: u64) u64 {
+    const ehdr = info.header;
+    var i: u16 = 0;
+    while (i < ehdr.e_phnum) : (i += 1) {
+        const phdr = &info.phdrs[i];
+        if (phdr.p_type == PT_PHDR) {
+            return phdr.p_vaddr + load_base;
+        }
+    }
+    i = 0;
+    while (i < ehdr.e_phnum) : (i += 1) {
+        const phdr = &info.phdrs[i];
+        if (phdr.p_type != PT_LOAD) continue;
+        if (ehdr.e_phoff >= phdr.p_offset and
+            ehdr.e_phoff < phdr.p_offset + phdr.p_filesz)
+        {
+            return phdr.p_vaddr + load_base + (ehdr.e_phoff - phdr.p_offset);
+        }
+    }
+    return 0;
+}
+
+fn find_interp(info: *const elf_info_t, off: *u64, len: *u64) void {
+    off.* = 0;
+    len.* = 0;
+    var i: u16 = 0;
+    while (i < info.header.e_phnum) : (i += 1) {
+        const phdr = &info.phdrs[i];
+        if (phdr.p_type == PT_INTERP) {
+            off.* = phdr.p_offset;
+            len.* = phdr.p_filesz;
+            return;
+        }
+    }
+}
+
+pub export fn elf_load(data: *anyopaque, size: u64) u64 {
+    var info: elf_info_t = undefined;
+    const result = elf_parse(data, size, &info);
+
+    if (result != .ELF_OK) {
+        com1_printf("[ELF] error: %s\n", elf_strerror(result));
+        return 0;
+    }
+
+    const load_base: u64 = if (info.header.e_type == ET_DYN) 0x400000 else 0;
+
+    com1_printf(
+        "[ELF] loading: entry=%p, segments=%d\n",
+        u64_to_ptr(info.entry_point),
+        @as(c_int, @intCast(info.header.e_phnum)),
+    );
+    com1_printf(
+        "[ELF] Load range: %p - %p\n",
+        u64_to_ptr(info.load_addr_min),
+        u64_to_ptr(info.load_addr_max),
+    );
+
+    if (!load_segments(data, &info, load_base)) {
+        return 0;
+    }
 
     com1_printf("[ELF] Load complete, entry point: %p\n", u64_to_ptr(info.entry_point));
     return info.entry_point;
+}
+
+
+pub export fn elf_load_full(data: *anyopaque, size: u64, out: *elf_loadinfo_t) u64 {
+    var info: elf_info_t = undefined;
+    const result = elf_parse(data, size, &info);
+    if (result != .ELF_OK) {
+        com1_printf("[ELF] error: %s\n", elf_strerror(result));
+        return 0;
+    }
+
+    const load_base: u64 = if (info.header.e_type == ET_DYN) 0x400000 else 0;
+
+    if (!load_segments(data, &info, load_base)) {
+        return 0;
+    }
+
+    out.entry = info.entry_point;
+    out.load_base = load_base;
+    out.phdr_vaddr = compute_phdr_vaddr(&info, load_base);
+    out.phent = info.header.e_phentsize;
+    out.phnum = info.header.e_phnum;
+    out.e_type = info.header.e_type;
+    find_interp(&info, &out.interp_off, &out.interp_len);
+
+    com1_printf(
+        "[ELF] main loaded: entry=%p phdr=%p phnum=%d interp_len=%d\n",
+        u64_to_ptr_dbg(out.entry),
+        u64_to_ptr_dbg(out.phdr_vaddr),
+        @as(c_int, @intCast(out.phnum)),
+        @as(c_int, @intCast(out.interp_len)),
+    );
+    return info.entry_point;
+}
+pub export fn elf_load_interp(data: *anyopaque, size: u64, load_base: u64) u64 {
+    var info: elf_info_t = undefined;
+    const result = elf_parse(data, size, &info);
+    if (result != .ELF_OK) {
+        com1_printf("[ELF] interp error: %s\n", elf_strerror(result));
+        return 0;
+    }
+
+    const base: u64 = if (info.header.e_type == ET_DYN) load_base else 0;
+
+    if (!load_segments(data, &info, base)) {
+        return 0;
+    }
+
+    const entry = info.header.e_entry + base;
+    com1_printf("[ELF] loaded interp: base=%p entry=%p\n", u64_to_ptr_dbg(base), u64_to_ptr_dbg(entry));
+    return entry;
 }

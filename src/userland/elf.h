@@ -29,42 +29,29 @@
 
 #include <mlibc/mlibc.h>
 
-/* ELF Magic */
-#define ELF_MAGIC 0x464C457F /* "\x7FELF" in little endian */
-
-/* ELF Class (32 or 64 bit) */
+#define ELF_MAGIC 0x464C457F
 #define ELFCLASS32 1
 #define ELFCLASS64 2
-
-/* ELF Data encoding */
-#define ELFDATA2LSB 1 /* Little endian */
-#define ELFDATA2MSB 2 /* Big endian */
-
-/* ELF Type */
-#define ET_NONE 0 /* No file type */
-#define ET_REL 1  /* Relocatable file */
-#define ET_EXEC 2 /* Executable file */
-#define ET_DYN 3  /* Shared object file */
-#define ET_CORE 4 /* Core file */
-
-/* ELF Machine */
-#define EM_386 3     /* Intel 80386 */
-#define EM_X86_64 62 /* AMD x86-64 */
-
-/* Program header types */
-#define PT_NULL 0    /* Unused */
-#define PT_LOAD 1    /* Loadable segment */
-#define PT_DYNAMIC 2 /* Dynamic linking info */
-#define PT_INTERP 3  /* Interpreter info */
-#define PT_NOTE 4    /* Auxiliary info */
-#define PT_SHLIB 5   /* Reserved */
-#define PT_PHDR 6    /* Program header table */
-#define PT_TLS 7     /* Thread-local storage */
-
-/* Program header flags */
-#define PF_X 0x1 /* Executable */
-#define PF_W 0x2 /* Writable */
-#define PF_R 0x4 /* Readable */
+#define ELFDATA2LSB 1 // litle endian
+#define ELFDATA2MSB 2 //big endian
+#define ET_NONE 0
+#define ET_REL 1
+#define ET_EXEC 2
+#define ET_DYN 3
+#define ET_CORE 4
+#define EM_386 3 // i386
+#define EM_X86_64 62 //amd64
+#define PT_NULL 0
+#define PT_LOAD 1
+#define PT_DYNAMIC 2
+#define PT_INTERP 3
+#define PT_NOTE 4
+#define PT_SHLIB 5
+#define PT_PHDR 6
+#define PT_TLS 7
+#define PF_X 0x1
+#define PF_W 0x2
+#define PF_R 0x4
 
 /* ELF64 Header */
 typedef struct {
@@ -129,6 +116,18 @@ typedef struct {
   u64 load_addr_min;
   u64 load_addr_max;
 } elf_info_t;
+typedef struct {
+  u64 entry;    // entry point
+  u64 load_base;
+  u64 phdr_vaddr;  //addres to program headers
+  u64 phent;       //program header entry size
+  u64 phnum;       //number of program headers
+  u64 e_type;      //ET_EXEC or ET_DYN
+  u64 interp_off;  //file offset PT_INTERP string 0 if none
+  u64 interp_len;  //length of interp string incl NULL 0 if none
+} elf_loadinfo_t;
+
+#define ELF_INTERP_BASE 0x40000000ULL
 
 /* Validate ELF file */
 elf_result_t elf_validate(void *data, u64 size);
@@ -138,6 +137,8 @@ elf_result_t elf_parse(void *data, u64 size, elf_info_t *info);
 
 /* Load ELF segments into memory (returns entry point or 0 on error) */
 u64 elf_load(void *data, u64 size);
+u64 elf_load_full(void *data, u64 size, elf_loadinfo_t *out);
+u64 elf_load_interp(void *data, u64 size, u64 load_base);
 
 /* Get error message for result code */
 const char *elf_strerror(elf_result_t result);

@@ -28,7 +28,9 @@
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_page.h>
 #include <kernel/api/api.h>
+#include <kernel/api/auxv.h>
 #include <kernel/api/posix/posix.h>
+#include <kernel/crypto/rng/rng.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/fs/devtmpfs/devtmpfs.h>
 #include <kernel/process.h>
@@ -223,8 +225,11 @@ static u64 allocate_user_stack(void) {
   return USER_STACK_BASE;
 }
 
+#define SPAWN_AUXV_COUNT 8
+
 static int build_user_stack(char **argv, int argc, char **envp, int envc,
-                            u64 *out_rsp, u64 *out_argv, u64 *out_envp) {
+                            const auxv_desc_t *aux, u64 *out_rsp, u64 *out_argv,
+                            u64 *out_envp) {
   u64 sp = USER_STACK_BASE & ~0xFULL;
   u64 stack_min = USER_STACK_TOP;
 
@@ -261,11 +266,50 @@ static int build_user_stack(char **argv, int argc, char **envp, int envc,
   }
 
   sp &= ~0xFULL;
-
-  if (sp < stack_min + (u64)(8 * (argc + envc + 3))) {
+  if (sp < stack_min + 16) {
     kmem_free(argv_ptrs);
     kmem_free(envp_ptrs);
     return -API_ERR_TOO_BIG;
+  }
+  sp -= 16;
+  u64 at_random_addr = sp;
+  if (crypto_rng_bytes((u8 *)sp, 16) != 0) {
+    memset((void *)sp, 0, 16);
+  }
+
+  sp &= ~0xFULL;
+
+
+  u64 words = 1                    /* argc */
+              + (u64)argc + 1      /* argv[] + NULL */
+              + (u64)envc + 1      /* envp[] + NULL */
+              + 2 * SPAWN_AUXV_COUNT; /* auxv pairs incl AT_NULL */
+
+  u64 total = words * 8;
+  if (sp < stack_min + total + 8) {
+    kmem_free(argv_ptrs);
+    kmem_free(envp_ptrs);
+    return -API_ERR_TOO_BIG;
+  }
+  if (((sp - total) & 0xFULL) != 0) {
+    sp -= 8;
+  }
+
+  sp -= 8; *(u64 *)sp = 0;// AT_NULL.a_val
+  sp -= 8; *(u64 *)sp = AT_NULL;// AT_NULL.a_type
+
+  u64 aux_pairs[SPAWN_AUXV_COUNT - 1][2] = {
+      {AT_PHDR, aux->at_phdr},
+      {AT_PHENT, aux->at_phent},
+      {AT_PHNUM, aux->at_phnum},
+      {AT_ENTRY, aux->at_entry},
+      {AT_BASE, aux->at_base},
+      {AT_PAGESZ, aux->at_pagesz},
+      {AT_RANDOM, at_random_addr},
+  };
+  for (int i = SPAWN_AUXV_COUNT - 2; i >= 0; i--) {
+    sp -= 8; *(u64 *)sp = aux_pairs[i][1];
+    sp -= 8; *(u64 *)sp = aux_pairs[i][0];
   }
 
   sp -= 8;
@@ -390,10 +434,11 @@ int api_proc_spawn(const char *path, const char *const *argv,
   u64 old_cr3 = pmap_get_cr3();
   pmap_load(new_cr3);
 
-  u64 entry = elf_load(elf_buf, elf_size);
-  kmem_free(elf_buf);
+  elf_loadinfo_t li;
+  u64 entry = elf_load_full(elf_buf, elf_size, &li);
   if (entry == 0) {
     com1_printf("[SPAWN] Error: elf_load failed for '%s'\n", kpath);
+    kmem_free(elf_buf);
     pmap_load(old_cr3);
     free_spawn_cr3(new_cr3);
     memset(child, 0, sizeof(process_t));
@@ -401,6 +446,61 @@ int api_proc_spawn(const char *path, const char *const *argv,
     free_string_array(kenvp);
     kmem_free(kpath);
     return -API_ERR_BAD_IMAGE;
+  }
+
+  auxv_desc_t aux = {
+      .at_phdr = li.phdr_vaddr,
+      .at_phent = li.phent,
+      .at_phnum = li.phnum,
+      .at_entry = li.entry,
+      .at_base = 0,
+      .at_pagesz = PAGE_SIZE,
+  };
+
+  if (li.interp_off != 0 && li.interp_len != 0) {
+    char interp_path[256];
+    u64 ilen = li.interp_len;
+    if (ilen > sizeof(interp_path)) ilen = sizeof(interp_path);
+    memcpy(interp_path, (char *)elf_buf + li.interp_off, ilen);
+    interp_path[ilen - 1] = '\0';
+    kmem_free(elf_buf);
+    elf_buf = NULL;
+
+    com1_printf("[SPAWN] PT_INTERP '%s'\n", interp_path);
+
+    u8 *interp_buf = NULL;
+    u32 interp_size = 0;
+    int ierr = read_file_into_buffer(interp_path, &interp_buf, &interp_size);
+    if (ierr < 0) {
+      com1_printf("[SPAWN] Error: cannot load interpreter '%s'\n", interp_path);
+      pmap_load(old_cr3);
+      free_spawn_cr3(new_cr3);
+      memset(child, 0, sizeof(process_t));
+      free_string_array(kargv);
+      free_string_array(kenvp);
+      kmem_free(kpath);
+      return ierr;
+    }
+
+    u64 interp_entry =
+        elf_load_interp(interp_buf, interp_size, ELF_INTERP_BASE);
+    kmem_free(interp_buf);
+    if (interp_entry == 0) {
+      com1_printf("[SPAWN] Error: failed to load interpreter image\n");
+      pmap_load(old_cr3);
+      free_spawn_cr3(new_cr3);
+      memset(child, 0, sizeof(process_t));
+      free_string_array(kargv);
+      free_string_array(kenvp);
+      kmem_free(kpath);
+      return -API_ERR_BAD_IMAGE;
+    }
+
+    aux.at_base = ELF_INTERP_BASE;
+    entry = interp_entry;
+  } else {
+    kmem_free(elf_buf);
+    elf_buf = NULL;
   }
 
   u64 user_stack = allocate_user_stack();
@@ -418,7 +518,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
   u64 new_rsp = 0;
   u64 argv_addr = 0;
   u64 envp_addr = 0;
-  err = build_user_stack(kargv, argc, kenvp, envc, &new_rsp, &argv_addr,
+  err = build_user_stack(kargv, argc, kenvp, envc, &aux, &new_rsp, &argv_addr,
                          &envp_addr);
   if (err < 0) {
     com1_printf("[SPAWN] Error: build_user_stack failed\n");
