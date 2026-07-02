@@ -25,6 +25,7 @@
 #define CALL_SYS_INFO   0x500
 #define CALL_SYS_MEMINFO 0x501
 #define CALL_SYS_KMEMINFO 0x502
+#define CALL_SYS_TIMEINFO 0x504
 #define CALL_DRM_CALL    0x600
 
 #define DRM_OP_INFO            1
@@ -124,6 +125,19 @@ struct api_kmeminfo {
   u64 kmem_heap_addr;
 };
 
+struct api_timeinfo {
+  u64 wall_sec;
+  u64 wall_nsec;
+  u64 local_sec;
+  u64 local_nsec;
+  u64 uptime_sec;
+  u64 uptime_nsec;
+  u64 ticks;
+  u64 frequency;
+  long timezone_offset;
+  char clocksource[32];
+};
+
 struct api_drm_driver_entry {
   u32 id;
   char name[32];
@@ -207,6 +221,10 @@ static long sys_meminfo(struct api_meminfo *buf) {
 
 static long sys_kmeminfo(struct api_kmeminfo *buf) {
   return syscall1(CALL_SYS_KMEMINFO, (long)buf);
+}
+
+static long sys_timeinfo(struct api_timeinfo *buf) {
+  return syscall1(CALL_SYS_TIMEINFO, (long)buf);
 }
 
 static long drm_call(u64 op, void *arg) {
@@ -585,6 +603,7 @@ static void cmd_help(void) {
   println("  cd <path>          change directory");
   println("  ls [path]          list directory");
   println("  ps                 list processes");
+  println("  time               show time info");
   println("  mem                show memory info");
   println("  cat <file>         print file contents");
   println("  clear              clear screen");
@@ -691,6 +710,100 @@ static void print_u64(u64 v) {
     v /= 10;
   }
   while (t > 0) printc(tmp[--t]);
+}
+
+static void print_padded(int v, int width) {
+  char tmp[12];
+  int t = 0;
+  if (v == 0) {
+    tmp[t++] = '0';
+  } else {
+    while (v > 0) {
+      tmp[t++] = '0' + (v % 10);
+      v /= 10;
+    }
+  }
+  while (t < width) {
+    printc('0');
+    t++;
+  }
+  while (t > 0) printc(tmp[--t]);
+}
+
+static int is_leap(int y) {
+  return ((y % 4 == 0 && y % 100 != 0) || (y % 400 == 0));
+}
+
+static u32 days_in_month_int(int y, int m) {
+  static const int days[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+  if (m == 2 && is_leap(y)) return 29;
+  return days[m - 1];
+}
+
+static void print_datetime(u64 sec) {
+  u64 days;
+  int sec_of_day;
+  int hour, min, s;
+  int year, month, day;
+  int rem;
+
+  days = sec / 86400ULL;
+  sec_of_day = (int)(sec % 86400ULL);
+  hour = sec_of_day / 3600;
+  rem = sec_of_day % 3600;
+  min = rem / 60;
+  s = rem % 60;
+
+  year = 1970;
+  while (1) {
+    int ydays = is_leap(year) ? 366 : 365;
+    if ((int)days < ydays) break;
+    days -= ydays;
+    year++;
+  }
+
+  month = 1;
+  while (1) {
+    int mdays = days_in_month_int(year, month);
+    if ((int)days < mdays) break;
+    days -= mdays;
+    month++;
+  }
+  day = (int)days + 1;
+
+  print_padded(year, 4);
+  printc('-');
+  print_padded(month, 2);
+  printc('-');
+  print_padded(day, 2);
+  printc(' ');
+  print_padded(hour, 2);
+  printc(':');
+  print_padded(min, 2);
+  printc(':');
+  print_padded(s, 2);
+}
+
+static void print_duration(u64 sec) {
+  int s, m, h, d;
+  int rem;
+
+  d = (int)(sec / 86400ULL);
+  rem = (int)(sec % 86400ULL);
+  h = rem / 3600;
+  rem = rem % 3600;
+  m = rem / 60;
+  s = rem % 60;
+
+  if (d > 0) {
+    print_int(d);
+    print("d ");
+  }
+  print_padded(h, 2);
+  printc(':');
+  print_padded(m, 2);
+  printc(':');
+  print_padded(s, 2);
 }
 
 static void cmd_mem(void) {
@@ -826,6 +939,53 @@ static void cmd_ps(void) {
     printc('\t');
     println(procs[i].name);
   }
+}
+
+/* ------------------------------------------------------------------ */
+/*  built-in: time                                                    */
+/* ------------------------------------------------------------------ */
+
+static void cmd_time(void) {
+  struct api_timeinfo ti;
+  long ret = sys_timeinfo(&ti);
+  if (ret < 0) {
+    print_err("time", ret);
+    return;
+  }
+
+  println("=== Time Info ===");
+  print("Local date     : ");
+  print_datetime(ti.local_sec);
+  printc('\n');
+  print("Wall-clock date: ");
+  print_datetime(ti.wall_sec);
+  printc('\n');
+  print("Timezone offset: ");
+  print_int((int)(ti.timezone_offset / 3600));
+  print(" hours\n");
+  print("Wall-clock sec : ");
+  print_u64(ti.wall_sec);
+  printc('\n');
+  print("Wall-clock ns  : ");
+  print_u64(ti.wall_nsec);
+  printc('\n');
+  print("Uptime         : ");
+  print_duration(ti.uptime_sec);
+  printc('\n');
+  print("Uptime sec     : ");
+  print_u64(ti.uptime_sec);
+  printc('\n');
+  print("Uptime ns      : ");
+  print_u64(ti.uptime_nsec);
+  printc('\n');
+  print("Timer ticks    : ");
+  print_u64(ti.ticks);
+  printc('\n');
+  print("Timer frequency: ");
+  print_u64(ti.frequency);
+  printc('\n');
+  print("Clocksource    : ");
+  println(ti.clocksource);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1010,6 +1170,7 @@ static int exec_builtin(int argc, char **argv) {
   if (strcmp_s(cmd, "cd") == 0)     { cmd_cd(argc, argv); return 0; }
   if (strcmp_s(cmd, "ls") == 0)     { cmd_ls(argc, argv); return 0; }
   if (strcmp_s(cmd, "ps") == 0)     { cmd_ps(); return 0; }
+  if (strcmp_s(cmd, "time") == 0)   { cmd_time(); return 0; }
   if (strcmp_s(cmd, "mem") == 0)    { cmd_mem(); return 0; }
   if (strcmp_s(cmd, "cat") == 0)    { cmd_cat(argc, argv); return 0; }
   if (strcmp_s(cmd, "clear") == 0)  { cmd_clear(); return 0; }

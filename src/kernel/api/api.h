@@ -297,6 +297,19 @@ struct api_drm_driver_switch {
   u32 id;
 };
 
+struct api_timeinfo {
+  u64 wall_sec;
+  u64 wall_nsec;
+  u64 local_sec;
+  u64 local_nsec;
+  u64 uptime_sec;
+  u64 uptime_nsec;
+  u64 ticks;
+  u64 frequency;
+  s64 timezone_offset;
+  char clocksource[32];
+};
+
 int api_term_read(void *buf, u32 count);
 int api_term_write(const void *buf, u32 count);
 int api_data_read(int handle, void *buf, u32 count);
@@ -343,5 +356,7 @@ int api_proc_set_tid_address(u64 tidptr);
 int api_futex_wait(u64 uaddr, u32 expected_val);
 int api_futex_wake(u64 uaddr, u32 max_waiters);
 int api_sys_random(u8 *buf, u32 len);
+int api_timeinfo(struct api_timeinfo *buf);
+int api_time(void);
 
 #endif

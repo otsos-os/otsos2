@@ -66,6 +66,7 @@ $space %export kmain
 #include <kernel/drivers/disk/pata/pata.h>
 #endif
 #include <kernel/drivers/disk/ramdisk/ramdisk.h>
+#include <kernel/drivers/eventtimer.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/fs/devtmpfs/devtmpfs.h>
@@ -73,6 +74,7 @@ $space %export kmain
 #include <kernel/drivers/power/power.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/drivers/tty.h>
+#include <kernel/time.h>
 #include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/init.h>
 #include <kernel/drivers/video/card/virtio-gpu/virtio-gpu.h>
@@ -101,6 +103,7 @@ $space %export kmain
 extern void	cpuid_get(u32 code, u32 *res);
 extern void	cinfo(char *buf);
 extern u64	rinfo(u64 mb_ptr);
+extern void	pit_init(void);
 extern char	start;
 extern char	kernel_end;
 
@@ -356,8 +359,25 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 	    (u64)&kernel_end - KERNEL_VMA);
 	kmem_init();
 	ramdisk_mem = bootmem_alloc(4 * 1024 * 1024, PAGE_SIZE);
+
+	if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
+		mboot2_ptr = (multiboot2_info_t *)addr;
+		mb2_find_module(mboot2_ptr, "config",
+		    &config_mod, &config_sz);
+		if (config_mod && config_sz > 0) {
+			config_init_from_data(
+			    (const char *)config_mod,
+			    config_sz);
+			com1_printf("loaded config from "
+			    "(%u bytes)\n", config_sz);
+		}
+	}
+
 	init_idt();
-	timer_init(1000);
+	pit_init();
+	timer_init(config_get_int("timer", "hz", 1000));
+	time_init();
+	et_clocksource_init();
 	pmap_init();
 	vm_page_init_from_bootmem();
 	vm_object_init();
@@ -392,20 +412,11 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 		mboot2_ptr = (multiboot2_info_t *)addr;
 		debug_multiboot2_tags(mboot2_ptr);
 
-		config_mod = NULL;
-		config_sz = 0;
-		mb2_find_module(mboot2_ptr, "config",
-		    &config_mod, &config_sz);
-		if (config_mod && config_sz > 0) {
-			config_init_from_data(
-			    (const char *)config_mod,
-			    config_sz);
-			com1_printf("get config "
-			    "from module\n",
-			    config_sz);
+		if (config_is_initialized()) {
+			com1_printf("config geted\n");
 		} else {
-			com1_printf("config"
-			    "module doesnt found\n");
+			com1_printf("config not "
+			    "found\n");
 		}
 
 		drm_boot_init_mb2(mboot2_ptr, 0);

@@ -12,6 +12,12 @@ version = "otsos2-kernel-rev2"
 machine = "x86_64"
 domainname = "localdomain"
 
+[timer]
+hz = 1000
+
+[time]
+timezone_offset = 3
+
 [kshell]
 enabled = false
 prompt = "kshell> "

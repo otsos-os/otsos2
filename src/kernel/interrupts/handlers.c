@@ -27,8 +27,8 @@
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/console.h>
 #include <kernel/crypto/rng/rng.h>
+#include <kernel/drivers/eventtimer.h>
 #include <kernel/drivers/power/pbutton.h>
-#include <kernel/drivers/timer.h>
 #include <kernel/drivers/tty.h>
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/event/event.h>
@@ -96,7 +96,7 @@ void isr_handler(registers_t *regs) {
 
 void irq_handler(registers_t *regs) {
   if (regs->int_no == 32) {
-    timer_handler();
+    eventtimer_dispatch();
     power_button_poll();
     watchdog_tick();
     event_timer_tick();

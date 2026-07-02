@@ -269,6 +269,12 @@ void syscall_handler(registers_t *regs) {
   case CALL_SYS_RANDOM:
     regs->rax = (u64)api_sys_random((u8 *)arg1, (u32)arg2);
     break;
+  case CALL_SYS_TIMEINFO:
+    regs->rax = (u64)api_timeinfo((struct api_timeinfo *)arg1);
+    break;
+  case CALL_SYS_TIME:
+    regs->rax = (u64)api_time();
+    break;
   default:
     com1_printf("Unknown syscall: %d\n", syscall_number);
     regs->rax = -API_ERR_NO_CALL;

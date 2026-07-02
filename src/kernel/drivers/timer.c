@@ -28,10 +28,9 @@
 
 $define %type u64 as 64 bit unsigned
 $define %type u32 as 32 bit unsigned
-$define %type u8 as 8 bit unsigned
 $define %type int as 32 bit signed
+$define %type struct eventtimer as event timer descriptor
 
-$define %func timer_handler as procedure with args void
 $define %func timer_init as procedure with args u32
 $define %func timer_get_ticks as function with args void
 $define %func timer_is_initialized as function with args void
@@ -41,39 +40,62 @@ $define %func timer_get_frequency as function with args void
 
 /* !SPACE!
 
-$space %export timer_handler, timer_init, timer_get_ticks
+$space %internal timer_event_cb
+$space %export timer_init, timer_get_ticks
 $space %export timer_is_initialized, timer_get_frequency
 
 */
 
+#include <kernel/drivers/eventtimer.h>
 #include <kernel/drivers/timer.h>
+#include <kernel/time.h>
 #include <lib/com1.h>
 #include <mlibc/mlibc.h>
-static u64	timer_ticks;
-static u32	timer_frequency;
-static int	timer_initialized;
-void
-timer_handler(void)
+
+static struct eventtimer	*timer_et;
+static u64			timer_ticks;
+static u32			timer_frequency;
+static int			timer_initialized;
+
+static void
+timer_event_cb(struct eventtimer *et, void *arg)
 {
+
+	(void)et;
+	(void)arg;
 	timer_ticks++;
+	time_tick();
 }
+
 void
 timer_init(u32 frequency)
 {
-	u32	divisor;
-	u8	l, h;
-	divisor = 1193182 / frequency;
-	outb(0x43, 0x36);
-	l = (u8)(divisor & 0xFF);
-	h = (u8)((divisor >> 8) & 0xFF);
-	outb(0x40, l);
-	outb(0x40, h);
-	com1_write_string("[TIMER] initialized ");
-	com1_write_dec(frequency);
-	com1_write_string(" Hz\n");
+	struct eventtimer	*et;
+	u64			period_ns;
 
+	et = et_find(NULL, ET_FLAGS_PERIODIC, ET_FLAGS_PERIODIC);
+	if (et == NULL) {
+		com1_printf("[TIMER] no periodic event timer available\n");
+		return;
+	}
+
+	if (et_init(et, timer_event_cb, NULL, NULL) != 0) {
+		com1_printf("[TIMER] failed to init event timer\n");
+		return;
+	}
+
+	period_ns = 1000000000ULL / frequency;
+	if (et_start(et, 0, period_ns) != 0) {
+		com1_printf("[TIMER] failed to start event timer\n");
+		et_free(et);
+		return;
+	}
+
+	timer_et = et;
 	timer_frequency = frequency;
 	timer_initialized = 1;
+	com1_printf("[TIMER] using event timer \"%s\" at %u Hz\n",
+	    et->et_name, timer_frequency);
 }
 
 u64

@@ -9,7 +9,7 @@
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
- *    and/or other materials provided with the distribution.
+ * and/or other materials provided with the distribution.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -27,31 +27,39 @@
 /* !DEFINES!
 
 $define %type u64 as 64 bit unsigned
-$define %type u32 as 32 bit unsigned
 $define %type int as 32 bit signed
+$define %type struct timecounter as FreeBSD-style hardware time source
 
-$define %func timer_init as procedure with args u32
-$define %func timer_get_ticks as function with args void
-$define %func timer_is_initialized as function with args void
-$define %func timer_get_frequency as function with args void
+$define %func tc_register as function with args struct timecounter *
+$define %func tc_deregister as function with args struct timecounter *
+$define %func tc_get_current as function with args void
+$define %func tc_best as function with args void
 
 */
 
 /* !SPACE!
 
-$space %export timer_init, timer_get_ticks
-$space %export timer_is_initialized, timer_get_frequency
+$space %export tc_register, tc_deregister, tc_get_current, tc_best
 
 */
 
-#ifndef TIMER_H
-#define TIMER_H
+#ifndef KERNEL_TIME_CLOCKSOURCE_H
+#define KERNEL_TIME_CLOCKSOURCE_H
 
 #include <mlibc/mlibc.h>
+struct timecounter {
+	struct timecounter	*tc_next;
+	u64			tc_counter_mask;
+	u64			tc_frequency;
+	u64			(*tc_get_timecount)(struct timecounter *tc);
+	int			tc_quality;
+	const char		*tc_name;
+	void			*tc_priv;
+};
 
-void	timer_init(u32 frequency);
-u64	timer_get_ticks(void);
-int	timer_is_initialized(void);
-u32	timer_get_frequency(void);
+void		tc_register(struct timecounter *tc);
+void		tc_deregister(struct timecounter *tc);
+struct timecounter *tc_best(void);
+struct timecounter *tc_get_current(void);
 
 #endif
