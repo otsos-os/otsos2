@@ -49,7 +49,7 @@ $space %internal run_shutdown_hooks
 
 #include <kernel/drivers/acpi/acpi.h>
 #include <kernel/drivers/power/power.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define	MAX_SHUTDOWN_HOOKS	16
@@ -66,7 +66,7 @@ power_register_shutdown_hook(shutdown_hook_fn fn)
 		return (-1);
 	}
 	if (g_shutdown_hook_count >= MAX_SHUTDOWN_HOOKS) {
-		com1_printf("[POWER] shutdown hook table full\n");
+		drivers_log("[POWER] shutdown hook table full\n");
 		return (-1);
 	}
 	g_shutdown_hooks[g_shutdown_hook_count++] = fn;
@@ -78,20 +78,20 @@ run_shutdown_hooks(void)
 {
 	int	i;
 
-	com1_printf("[POWER] running %d shutdown hooks...\n",
+	drivers_log("[POWER] running %d shutdown hooks...\n",
 	    g_shutdown_hook_count);
 	for (i = 0; i < g_shutdown_hook_count; i++) {
 		if (g_shutdown_hooks[i]) {
 			g_shutdown_hooks[i]();
 		}
 	}
-	com1_printf("[POWER] all hooks completed\n");
+	drivers_log("[POWER] all hooks completed\n");
 }
 
 void
 power_controller_shutdown(void)
 {
-	com1_printf("[POWER] === SYSTEM SHUTDOWN INITIATED ===\n");
+	drivers_log("[POWER] === SYSTEM SHUTDOWN INITIATED ===\n");
 	run_shutdown_hooks();
 	power_shutdown();
 	__builtin_unreachable();
@@ -100,7 +100,7 @@ power_controller_shutdown(void)
 void
 power_controller_reboot(void)
 {
-	com1_printf("[POWER] === SYSTEM REBOOT INITIATED ===\n");
+	drivers_log("[POWER] === SYSTEM REBOOT INITIATED ===\n");
 	run_shutdown_hooks();
 	power_reboot();
 	__builtin_unreachable();
@@ -113,21 +113,21 @@ power_controller_status(void)
 
 	info = power_get_info();
 
-	com1_printf("[POWER] === Status ===\n");
-	com1_printf("[POWER]   initialized    : %s\n",
+	drivers_log("[POWER] === Status ===\n");
+	drivers_log("[POWER]   initialized    : %s\n",
 	    info.initialized ? "yes" : "no");
-	com1_printf("[POWER]   ACPI available : %s\n",
+	drivers_log("[POWER]   ACPI available : %s\n",
 	    info.acpi_available ? "yes" : "no");
-	com1_printf("[POWER]   reset reg      : %s\n",
+	drivers_log("[POWER]   reset reg      : %s\n",
 	    info.reset_reg_available ? "yes" : "no");
-	com1_printf("[POWER]   PM1a control   : 0x%x\n",
+	drivers_log("[POWER]   PM1a control   : 0x%x\n",
 	    info.pm1a_control);
-	com1_printf("[POWER]   PM1b control   : 0x%x\n",
+	drivers_log("[POWER]   PM1b control   : 0x%x\n",
 	    info.pm1b_control);
-	com1_printf("[POWER]   SLP_TYP S5     : a=%u b=%u\n",
+	drivers_log("[POWER]   SLP_TYP S5     : a=%u b=%u\n",
 	    info.slp_typa_s5, info.slp_typb_s5);
-	com1_printf("[POWER]   SMI cmd port   : 0x%x\n",
+	drivers_log("[POWER]   SMI cmd port   : 0x%x\n",
 	    info.smi_command_port);
-	com1_printf("[POWER]   shutdown hooks : %d\n",
+	drivers_log("[POWER]   shutdown hooks : %d\n",
 	    g_shutdown_hook_count);
 }

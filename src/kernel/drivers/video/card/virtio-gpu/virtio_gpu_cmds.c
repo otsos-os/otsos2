@@ -51,7 +51,7 @@ $space %export virtio_gpu_cmd_detach_backing
 */
 
 #include <kernel/drivers/video/card/virtio-gpu/virtio_gpu_cmds.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static void
@@ -67,7 +67,7 @@ check_response(virtio_gpu_ctrl_hdr_t *resp, u32 expected)
 	if (resp->type == expected) {
 		return (0);
 	}
-	com1_printf("[VIRTIO_GPU] response type 0x%x "
+	drivers_log("[VIRTIO_GPU] response type 0x%x "
 	    "(expected 0x%x)\n", resp->type, expected);
 	return (-1);
 }

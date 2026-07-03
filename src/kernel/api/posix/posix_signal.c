@@ -28,7 +28,7 @@
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 typedef struct {

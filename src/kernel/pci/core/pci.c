@@ -26,7 +26,7 @@
 
 #include <kernel/pci/pci.h>
 #include <kernel/pci/utils/io.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <kernel/panic.h>
 
 #define PCI_CONFIG_ADDRESS 0xCF8
@@ -98,7 +98,7 @@ static void pci_try_attach_device(pci_device_t *dev) {
     pci_driver_t *driver = pci_drivers[i];
     if (pci_probe_with_driver(dev, driver) == 0) {
       if (driver && driver->name) {
-        com1_printf("[PCI] %s bound to %02x:%02x.%u\n", driver->name, dev->bus,
+        printk("[PCI] %s bound to %02x:%02x.%u\n", driver->name, dev->bus,
                     dev->slot, dev->function);
       }
       return;
@@ -123,13 +123,13 @@ int pci_register_driver(pci_driver_t *driver) {
     }
   }
   if (pci_driver_count_val >= PCI_MAX_DRIVERS) {
-    com1_printf("[PCI] driver limit reached (%d)\n", PCI_MAX_DRIVERS);
+    printk("[PCI] driver limit reached (%d)\n", PCI_MAX_DRIVERS);
     return -1;
   }
 
   pci_drivers[pci_driver_count_val++] = driver;
   if (driver->name) {
-    com1_printf("[PCI] driver registered: %s\n", driver->name);
+    printk("[PCI] driver registered: %s\n", driver->name);
   }
 
   if (pci_initialized) {
@@ -173,7 +173,7 @@ int pci_unregister_driver(pci_driver_t *driver) {
   pci_driver_count_val--;
 
   if (driver->name) {
-    com1_printf("[PCI] driver unregistered: %s\n", driver->name);
+    printk("[PCI] driver unregistered: %s\n", driver->name);
   }
 
   return 0;
@@ -190,7 +190,7 @@ void pci_init(void) {
   }
 
   int devices = pci_scan();
-  com1_printf("[PCI] scan complete: %d device(s)\n", devices);
+  printk("[PCI] scan complete: %d device(s)\n", devices);
   pci_attach_all_devices();
   pci_initialized = 1;
 }

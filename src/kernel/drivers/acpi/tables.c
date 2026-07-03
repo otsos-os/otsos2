@@ -58,7 +58,7 @@ $space %export acpi_has_dual_pic, acpi_dump_tables
 */
 
 #include <kernel/drivers/acpi/acpi.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 int
@@ -185,37 +185,37 @@ acpi_dump_tables(void)
 	u32			ioapic;
 
 	if (!acpi_is_initialized()) {
-		com1_printf("[ACPI] not initialized\n");
+		drivers_log("[ACPI] not initialized\n");
 		return;
 	}
 
-	com1_printf("[ACPI] ===== Table Dump =====\n");
-	com1_printf("[ACPI] revision: %u\n", acpi_get_revision());
+	drivers_log("[ACPI] ===== Table Dump =====\n");
+	drivers_log("[ACPI] revision: %u\n", acpi_get_revision());
 
 	fadt = acpi_get_fadt();
 	if (fadt) {
-		com1_printf("[ACPI] FADT:\n");
-		com1_printf("[ACPI]   SCI interrupt   : %u\n",
+		drivers_log("[ACPI] FADT:\n");
+		drivers_log("[ACPI]   SCI interrupt   : %u\n",
 		    fadt->sci_interrupt);
-		com1_printf("[ACPI]   SMI command port: 0x%x\n",
+		drivers_log("[ACPI]   SMI command port: 0x%x\n",
 		    fadt->smi_command_port);
-		com1_printf("[ACPI]   PM1a event      : 0x%x\n",
+		drivers_log("[ACPI]   PM1a event      : 0x%x\n",
 		    fadt->pm1a_event_block);
-		com1_printf("[ACPI]   PM1a control    : 0x%x\n",
+		drivers_log("[ACPI]   PM1a control    : 0x%x\n",
 		    fadt->pm1a_control_block);
-		com1_printf("[ACPI]   PM1b control    : 0x%x\n",
+		drivers_log("[ACPI]   PM1b control    : 0x%x\n",
 		    fadt->pm1b_control_block);
-		com1_printf("[ACPI]   PM timer        : 0x%x\n",
+		drivers_log("[ACPI]   PM timer        : 0x%x\n",
 		    fadt->pm_timer_block);
-		com1_printf("[ACPI]   flags           : 0x%x\n",
+		drivers_log("[ACPI]   flags           : 0x%x\n",
 		    fadt->flags);
-		com1_printf("[ACPI]   century reg     : %u\n",
+		drivers_log("[ACPI]   century reg     : %u\n",
 		    fadt->century);
-		com1_printf("[ACPI]   boot arch flags : 0x%x\n",
+		drivers_log("[ACPI]   boot arch flags : 0x%x\n",
 		    fadt->boot_arch_flags);
 
 		if (fadt->flags & ACPI_FADT_RESET_REG_SUP) {
-			com1_printf("[ACPI]   reset reg addr  : "
+			drivers_log("[ACPI]   reset reg addr  : "
 			    "0x%x (space=%u, val=0x%x)\n",
 			    (u32)fadt->reset_reg.address,
 			    fadt->reset_reg.address_space,
@@ -225,19 +225,19 @@ acpi_dump_tables(void)
 
 	madt = acpi_get_madt();
 	if (madt) {
-		com1_printf("[ACPI] MADT:\n");
-		com1_printf("[ACPI]   local APIC addr : 0x%x\n",
+		drivers_log("[ACPI] MADT:\n");
+		drivers_log("[ACPI]   local APIC addr : 0x%x\n",
 		    madt->local_apic_address);
-		com1_printf("[ACPI]   flags           : 0x%x\n",
+		drivers_log("[ACPI]   flags           : 0x%x\n",
 		    madt->flags);
 
 		cpus = acpi_get_cpu_count();
-		com1_printf("[ACPI]   CPUs (enabled)  : %d\n",
+		drivers_log("[ACPI]   CPUs (enabled)  : %d\n",
 		    cpus);
 
 		ioapic = acpi_get_ioapic_address();
 		if (ioapic) {
-			com1_printf("[ACPI]   I/O APIC addr   : "
+			drivers_log("[ACPI]   I/O APIC addr   : "
 			    "0x%x\n", ioapic);
 		}
 	}
@@ -247,15 +247,15 @@ acpi_dump_tables(void)
 		acpi_hpet_t	*h;
 
 		h = (acpi_hpet_t *)hpet;
-		com1_printf("[ACPI] HPET found at 0x%x\n",
+		drivers_log("[ACPI] HPET found at 0x%x\n",
 		    (u32)h->address.address);
 	}
 
 	mcfg = acpi_find_table("MCFG");
 	if (mcfg) {
-		com1_printf("[ACPI] MCFG (PCIe) found, "
+		drivers_log("[ACPI] MCFG (PCIe) found, "
 		    "len=%u\n", mcfg->length);
 	}
 
-	com1_printf("[ACPI] ===== End Dump =====\n");
+	drivers_log("[ACPI] ===== End Dump =====\n");
 }

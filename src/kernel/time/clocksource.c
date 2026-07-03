@@ -25,7 +25,7 @@
  */
 
 #include <kernel/time/clocksource.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static struct timecounter	*timecounter_list = NULL;
@@ -64,7 +64,7 @@ tc_register(struct timecounter *tc)
 	struct timecounter	*tc_best_new;
 
 	if (tc == NULL || tc->tc_get_timecount == NULL) {
-		com1_printf("[TIMECOUNTER] refusing to register "
+		printk("[TIMECOUNTER] refusing to register "
 		    "invalid source\n");
 		return;
 	}
@@ -74,24 +74,24 @@ tc_register(struct timecounter *tc)
 	}
 
 	if (tc->tc_frequency == 0) {
-		com1_printf("[TIMECOUNTER] %s has zero frequency, "
+		printk("[TIMECOUNTER] %s has zero frequency, "
 		    "refusing registration\n", tc->tc_name);
 		return;
 	}
 	tc->tc_next = timecounter_list;
 	timecounter_list = tc;
 
-	com1_printf("[TIMECOUNTER] registered %s: freq=", tc->tc_name);
-	com1_write_dec(tc->tc_frequency);
-	com1_printf(" Hz, quality=%d\n", tc->tc_quality);
+	printk("[TIMECOUNTER] registered %s: freq=%u Hz, "
+	    "quality=%d\n", tc->tc_name, tc->tc_frequency,
+	    tc->tc_quality);
 	tc_best_new = find_best();
 	if (tc_best_new != timecounter_current) {
 		if (timecounter_current != NULL) {
-			com1_printf("[TIMECOUNTER] switching %s -> %s\n",
+			printk("[TIMECOUNTER] switching %s -> %s\n",
 			    timecounter_current->tc_name,
 			    tc_best_new->tc_name);
 		} else {
-			com1_printf("[TIMECOUNTER] selecting %s\n",
+			printk("[TIMECOUNTER] selecting %s\n",
 			    tc_best_new->tc_name);
 		}
 		timecounter_current = tc_best_new;
@@ -120,7 +120,7 @@ tc_deregister(struct timecounter *tc)
 		tc_best_new = find_best();
 		timecounter_current = tc_best_new;
 		if (tc_best_new != NULL) {
-			com1_printf("[TIMECOUNTER] fallback to %s\n",
+			printk("[TIMECOUNTER] fallback to %s\n",
 			    tc_best_new->tc_name);
 		}
 	}

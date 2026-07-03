@@ -72,7 +72,7 @@ $space %export acpi_is_initialized, acpi_get_revision
 #include <kernel/drivers/acpi/acpi.h>
 #include <kernel/multiboot2.h>
 #include <kernel/panic.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static int			g_acpi_initialized;
@@ -196,7 +196,7 @@ parse_rsdt(acpi_rsdt_t *rsdt)
 
 	num_entries = (rsdt->header.length -
 	    sizeof(acpi_sdt_header_t)) / 4;
-	com1_printf("[ACPI] RSDT has %u entries\n", num_entries);
+	drivers_log("[ACPI] RSDT has %u entries\n", num_entries);
 
 	for (i = 0; i < num_entries; i++) {
 		sdt = (acpi_sdt_header_t *)(u64)rsdt->entries[i];
@@ -204,7 +204,7 @@ parse_rsdt(acpi_rsdt_t *rsdt)
 			continue;
 		}
 
-		com1_printf("[ACPI]   table: %c%c%c%c  len=%u\n",
+		drivers_log("[ACPI]   table: %c%c%c%c  len=%u\n",
 		    sdt->signature[0], sdt->signature[1],
 		    sdt->signature[2], sdt->signature[3],
 		    sdt->length);
@@ -234,7 +234,7 @@ parse_xsdt(acpi_xsdt_t *xsdt)
 
 	num_entries = (xsdt->header.length -
 	    sizeof(acpi_sdt_header_t)) / 8;
-	com1_printf("[ACPI] XSDT has %u entries\n", num_entries);
+	drivers_log("[ACPI] XSDT has %u entries\n", num_entries);
 
 	for (i = 0; i < num_entries; i++) {
 		sdt = (acpi_sdt_header_t *)xsdt->entries[i];
@@ -242,7 +242,7 @@ parse_xsdt(acpi_xsdt_t *xsdt)
 			continue;
 		}
 
-		com1_printf("[ACPI]   table: %c%c%c%c  len=%u\n",
+		drivers_log("[ACPI]   table: %c%c%c%c  len=%u\n",
 		    sdt->signature[0], sdt->signature[1],
 		    sdt->signature[2], sdt->signature[3],
 		    sdt->length);
@@ -269,7 +269,7 @@ acpi_init_from_rsdp(void *rsdp_ptr)
 
 	g_acpi_revision = rsdp->revision;
 
-	com1_printf("[ACPI] RSDP found at %p, revision %u, "
+	drivers_log("[ACPI] RSDP found at %p, revision %u, "
 	    "OEM: %.6s\n", rsdp_ptr, rsdp->revision, rsdp->oem_id);
 
 	if (rsdp->revision >= 2) {
@@ -278,26 +278,26 @@ acpi_init_from_rsdp(void *rsdp_ptr)
 		rsdp2 = (acpi_rsdp_v2_t *)rsdp;
 		if (rsdp2->xsdt_address) {
 			g_xsdt = (acpi_xsdt_t *)rsdp2->xsdt_address;
-			com1_printf("[ACPI] using XSDT at %p\n",
+			drivers_log("[ACPI] using XSDT at %p\n",
 			    (void *)rsdp2->xsdt_address);
 			parse_xsdt(g_xsdt);
 		} else {
 			g_rsdt = (acpi_rsdt_t *)
 			    (u64)rsdp->rsdt_address;
-			com1_printf("[ACPI] XSDT null, using RSDT "
+			drivers_log("[ACPI] XSDT null, using RSDT "
 			    "at %p\n",
 			    (void *)(u64)rsdp->rsdt_address);
 			parse_rsdt(g_rsdt);
 		}
 	} else {
 		g_rsdt = (acpi_rsdt_t *)(u64)rsdp->rsdt_address;
-		com1_printf("[ACPI] using RSDT at %p\n",
+		drivers_log("[ACPI] using RSDT at %p\n",
 		    (void *)(u64)rsdp->rsdt_address);
 		parse_rsdt(g_rsdt);
 	}
 
 	if (g_fadt) {
-		com1_printf("[ACPI] FADT found: SCI int=%u, "
+		drivers_log("[ACPI] FADT found: SCI int=%u, "
 		    "PM1a=0x%x, SMI cmd=0x%x\n",
 		    g_fadt->sci_interrupt,
 		    g_fadt->pm1a_control_block,
@@ -305,7 +305,7 @@ acpi_init_from_rsdp(void *rsdp_ptr)
 	}
 
 	if (g_madt) {
-		com1_printf("[ACPI] MADT found: local APIC at "
+		drivers_log("[ACPI] MADT found: local APIC at "
 		    "0x%x, flags=0x%x\n",
 		    g_madt->local_apic_address, g_madt->flags);
 	}
@@ -329,7 +329,7 @@ acpi_init_from_multiboot2(void *mb2_info)
 		void	*rsdp_ptr;
 
 		rsdp_ptr = (void *)((u8 *)tag_new + 8);
-		com1_printf("[ACPI] found ACPI_NEW multiboot2 tag\n");
+		drivers_log("[ACPI] found ACPI_NEW multiboot2 tag\n");
 		return (acpi_init_from_rsdp(rsdp_ptr));
 	}
 
@@ -339,11 +339,11 @@ acpi_init_from_multiboot2(void *mb2_info)
 		void	*rsdp_ptr;
 
 		rsdp_ptr = (void *)((u8 *)tag_old + 8);
-		com1_printf("[ACPI] found ACPI_OLD multiboot2 tag\n");
+		drivers_log("[ACPI] found ACPI_OLD multiboot2 tag\n");
 		return (acpi_init_from_rsdp(rsdp_ptr));
 	}
 
-	com1_printf("[ACPI] no multiboot2 ACPI tag, scanning "
+	drivers_log("[ACPI] no multiboot2 ACPI tag, scanning "
 	    "BIOS area...\n");
 	rsdp = find_rsdp_bios();
 	if (rsdp) {

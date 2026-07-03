@@ -74,6 +74,7 @@ $space %export kmain
 #include <kernel/drivers/power/power.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/drivers/tty.h>
+#include <kernel/drivers/uart/uart.h>
 #include <kernel/time.h>
 #include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/init.h>
@@ -95,8 +96,8 @@ $space %export kmain
 #include <kernel/other/kusr.h>
 #include <kernel/other/config.h>
 #include <kernel/syscall.h>
-#include <lib/com1.h>
 #include <mlibc/mlibc.h>
+#include <mlibc/stdio.h>
 #include <mlibc/stdlib.h>
 #include <userland/userspace.h>
 
@@ -113,40 +114,28 @@ static int	is_multiboot2;
 static void
 debug_multiboot_info(multiboot_info_t *mb_info)
 {
-	com1_write_string("Flags: 0x");
-	com1_write_hex_dword(mb_info->flags);
-	com1_newline();
+	printk("Flags: 0x%x\n", mb_info->flags);
 
 	if (mb_info->flags & MULTIBOOT_FLAG_MEM) {
-		com1_write_string("mem_lower: ");
-		com1_write_dec(mb_info->mem_lower);
-		com1_write_string(" KB, mem_upper: ");
-		com1_write_dec(mb_info->mem_upper);
-		com1_write_string(" KB\n");
+		printk("mem_lower: %u KB, mem_upper: %u KB\n",
+		    mb_info->mem_lower, mb_info->mem_upper);
 	}
 
 	if (mb_info->flags & MULTIBOOT_FLAG_CMDLINE) {
-		com1_write_string("cmdline: ");
-		com1_write_string((const char *)(u64)
-		    mb_info->cmdline);
-		com1_newline();
+		printk("cmdline: %s\n",
+		    (const char *)(u64)mb_info->cmdline);
 	}
 
 	if (mb_info->flags & MULTIBOOT_FLAG_BOOTLOADER_NAME) {
-		com1_write_string("bootloader: ");
-		com1_write_string((const char *)(u64)
-		    mb_info->boot_loader_name);
-		com1_newline();
+		printk("bootloader: %s\n",
+		    (const char *)(u64)mb_info->boot_loader_name);
 	}
 
 	if (mb_info->flags & MULTIBOOT_FLAG_FRAMEBUFFER) {
-		com1_write_string("framebuffer: ");
-		com1_write_dec(mb_info->framebuffer_width);
-		com1_write_string("x");
-		com1_write_dec(mb_info->framebuffer_height);
-		com1_write_string("x");
-		com1_write_dec(mb_info->framebuffer_bpp);
-		com1_newline();
+		printk("framebuffer: %ux%ux%u\n",
+		    mb_info->framebuffer_width,
+		    mb_info->framebuffer_height,
+		    mb_info->framebuffer_bpp);
 	}
 }
 
@@ -159,41 +148,39 @@ debug_multiboot2_tags(multiboot2_info_t *mb_info)
 	tag = (multiboot2_tag_t *)((u8 *)mb_info + 8);
 
 	while (tag->type != MULTIBOOT2_TAG_TYPE_END) {
-		com1_write_string("Tag type: ");
-		com1_write_dec(tag->type);
-		com1_write_string(", size: ");
-		com1_write_dec(tag->size);
+		printk("Tag type: %u, size: %u", tag->type,
+		    tag->size);
 
 		switch (tag->type) {
 		case MULTIBOOT2_TAG_TYPE_CMDLINE:
-			com1_write_string(" (CMDLINE)");
+			printk(" (CMDLINE)");
 			break;
 		case MULTIBOOT2_TAG_TYPE_BOOT_LOADER_NAME:
-			com1_write_string(" (BOOT_LOADER_NAME)");
+			printk(" (BOOT_LOADER_NAME)");
 			break;
 		case MULTIBOOT2_TAG_TYPE_BASIC_MEMINFO:
-			com1_write_string(" (BASIC_MEMINFO)");
+			printk(" (BASIC_MEMINFO)");
 			break;
 		case MULTIBOOT2_TAG_TYPE_MMAP:
-			com1_write_string(" (MMAP)");
+			printk(" (MMAP)");
 			break;
 		case MULTIBOOT2_TAG_TYPE_FRAMEBUFFER:
-			com1_write_string(" (FRAMEBUFFER)");
+			printk(" (FRAMEBUFFER)");
 			break;
 		case MULTIBOOT2_TAG_TYPE_ELF_SECTIONS:
-			com1_write_string(" (ELF_SECTIONS)");
+			printk(" (ELF_SECTIONS)");
 			break;
 		case MULTIBOOT2_TAG_TYPE_ACPI_OLD:
-			com1_write_string(" (ACPI_OLD)");
+			printk(" (ACPI_OLD)");
 			break;
 		case MULTIBOOT2_TAG_TYPE_ACPI_NEW:
-			com1_write_string(" (ACPI_NEW)");
+			printk(" (ACPI_NEW)");
 			break;
 		default:
-			com1_write_string(" (other)");
+			printk(" (other)");
 			break;
 		}
-		com1_newline();
+		printk("\n");
 
 		next_addr = (u64)tag + tag->size;
 		next_addr = (next_addr + 7) & ~7;
@@ -241,10 +228,10 @@ status_line(const char *label, int ok)
 
 	len = strlen(label);
 	printf("%s", label);
-	com1_printf("%s", label);
+	printk("%s", label);
 	for (i = len; i < pad_col; i++) {
 		console_putchar(' ');
-		com1_printf(" ");
+		printk(" ");
 	}
 	if (ok) {
 		printf("\033[32m[OK]\033[0m\n");
@@ -353,10 +340,9 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 	safe_mode = (boot_option == 1);
 	debug_mode = (boot_option == 2);
 
-	com1_init();
-	com1_set_mirror_callback(tty_com1_mirror);
+	uart_init();
 	bootmem_init(magic, addr, 0x100000,
-	    (u64)&kernel_end - KERNEL_VMA);
+    (u64)&kernel_end - KERNEL_VMA);
 	kmem_init();
 	ramdisk_mem = bootmem_alloc(4 * 1024 * 1024, PAGE_SIZE);
 
@@ -368,7 +354,8 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 			config_init_from_data(
 			    (const char *)config_mod,
 			    config_sz);
-			com1_printf("loaded config from "
+			stdio_init();
+			printk("loaded config from "
 			    "(%u bytes)\n", config_sz);
 		}
 	}
@@ -397,7 +384,7 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 	if (ramdisk_mem) {
 		ramdisk_init(ramdisk_mem, 4 * 1024 * 1024);
 	} else {
-		com1_printf("[RAMDISK] bootmem allocation "
+		printk("[RAMDISK] bootmem allocation "
 		    "failed\n");
 	}
 
@@ -405,17 +392,16 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 
 	if (boot_magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
 		is_multiboot2 = 1;
-		com1_write_string("boot from mb2 (magic: 0x");
-		com1_write_hex_dword(boot_magic);
-		com1_write_string(")\n");
+		printk("boot from mb2 (magic: 0x%x)\n",
+		    boot_magic);
 
 		mboot2_ptr = (multiboot2_info_t *)addr;
 		debug_multiboot2_tags(mboot2_ptr);
 
 		if (config_is_initialized()) {
-			com1_printf("config geted\n");
+			printk("config geted\n");
 		} else {
-			com1_printf("config not "
+			printk("config not "
 			    "found\n");
 		}
 
@@ -425,6 +411,7 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 
 		clear_scr();
 		tty_init();
+		stdio_set_tty_mirror(tty_log_mirror);
 
 		cinfo(cpu_buf);
 		p = cpu_buf;
@@ -434,8 +421,8 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 
 		ram_kb = multiboot2_get_ram_kb(mboot2_ptr);
 
-		com1_printf("CPU: %s\n", p);
-		com1_printf("RAM: %u MB (%u KB)\n",
+		printk("CPU: %s\n", p);
+		printk("RAM: %u MB (%u KB)\n",
 		    ram_kb / 1024, ram_kb);
 
 		if (drm_is_ready()) {
@@ -445,15 +432,15 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 
 	} else if (boot_magic == MULTIBOOT_BOOTLOADER_MAGIC) {
 		is_multiboot2 = 0;
-		com1_write_string("boot from mb1 (magic: 0x");
-		com1_write_hex_dword(boot_magic);
-		com1_write_string(")\n");
+		printk("boot from mb1 (magic: 0x%x)\n",
+		    boot_magic);
 
 		mboot1_ptr = (multiboot_info_t *)addr;
 		debug_multiboot_info(mboot1_ptr);
 		drm_boot_init_mb1(mboot1_ptr, 0);
 		clear_scr();
 		tty_init();
+		stdio_set_tty_mirror(tty_log_mirror);
 
 		cinfo(cpu_buf);
 		p = cpu_buf;
@@ -463,8 +450,8 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 
 		ram_kb = multiboot_get_ram_kb(mboot1_ptr);
 
-		com1_printf("CPU: %s\n", p);
-		com1_printf("RAM: %u MB (%u KB)\n",
+		printk("CPU: %s\n", p);
+		printk("RAM: %u MB (%u KB)\n",
 		    ram_kb / 1024, ram_kb);
 
 		if (drm_is_ready()) {
@@ -482,7 +469,7 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 
 	pci_set_verbose_scan(debug_mode);
 	if (debug_mode) {
-		com1_printf("[BOOT] Debug mode: verbose PCI "
+		printk("[BOOT] Debug mode: verbose PCI "
 		    "scan enabled\n");
 	}
 
@@ -591,7 +578,7 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 	fs_ok = (chainfs_init(selected_disk) == 0);
 	status_line("chainfs init", fs_ok);
 	if (!fs_ok) {
-		com1_printf("[CHAINFS] init failed, formatting "
+		printk("[CHAINFS] init failed, formatting "
 		    "disk...\n");
 		format_blocks = 64;
 		if (selected_disk &&
@@ -614,18 +601,18 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 			vfs_mkdir("/conf/boot");
 			if (config_save_to_file(
 			    CONFIG_PATH_BOOT) == 0) {
-				com1_printf("saved config to "
+				printk("saved config to "
 				    "to %s\n",
 				    CONFIG_PATH_BOOT);
 			} else {
-				com1_printf("fail save config "
+				printk("fail save config "
 				    "to %s\n",
 				    CONFIG_PATH_BOOT);
 			}
 		}
 	}
 	if (!fs_ok) {
-		com1_printf("[CHAINFS] filesystem unavailable, "
+		printk("[CHAINFS] filesystem unavailable, "
 		    "skipping userspace startup\n");
 	}
 
@@ -684,11 +671,11 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 			res = vfs_write_file("/bin/yes",
 			    (const u8 *)yes_mod, yes_sz);
 			if (res == 0) {
-				com1_printf("[KERNEL] Installed "
+				printk("[KERNEL] Installed "
 				    "/bin/yes from module "
 				    "(%u bytes)\n", yes_sz);
 			} else {
-				com1_printf("[KERNEL] Failed to "
+				printk("[KERNEL] Failed to "
 				    "install /bin/yes from "
 				    "module\n");
 			}
@@ -698,11 +685,11 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 			res = vfs_write_file("/bin/fetch",
 			    (const u8 *)fetch_mod, fetch_sz);
 			if (res == 0) {
-				com1_printf("[KERNEL] Installed "
+				printk("[KERNEL] Installed "
 				    "/bin/fetch from module "
 				    "(%u bytes)\n", fetch_sz);
 			} else {
-				com1_printf("[KERNEL] Failed to "
+				printk("[KERNEL] Failed to "
 				    "install /bin/fetch from "
 				    "module\n");
 			}
@@ -712,11 +699,11 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 			res = vfs_write_file("/bin/sh",
 			    (const u8 *)sh_mod, sh_sz);
 			if (res == 0) {
-				com1_printf("[KERNEL] Installed "
+				printk("[KERNEL] Installed "
 				    "/bin/sh from module "
 				    "(%u bytes)\n", sh_sz);
 			} else {
-				com1_printf("[KERNEL] Failed to "
+				printk("[KERNEL] Failed to "
 				    "install /bin/sh from "
 				    "module\n");
 			}
@@ -727,11 +714,11 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 			    (const u8 *)posix_hello_mod,
 			    posix_hello_sz);
 			if (res == 0) {
-				com1_printf("[KERNEL] Installed "
+				printk("[KERNEL] Installed "
 				    "/bin/posix_hello from module "
 				    "(%u bytes)\n", posix_hello_sz);
 			} else {
-				com1_printf("[KERNEL] Failed to "
+				printk("[KERNEL] Failed to "
 				    "install /bin/posix_hello from "
 				    "module\n");
 			}
@@ -742,11 +729,11 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 			    (const u8 *)musl_test_mod,
 			    musl_test_sz);
 			if (res == 0) {
-				com1_printf("[KERNEL] Installed "
+				printk("[KERNEL] Installed "
 				    "/bin/musl_test from module "
 				    "(%u bytes)\n", musl_test_sz);
 			} else {
-				com1_printf("[KERNEL] Failed to "
+				printk("[KERNEL] Failed to "
 				    "install /bin/musl_test from "
 				    "module\n");
 			}
@@ -757,11 +744,11 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 			    (const u8 *)kbdtest_mod,
 			    kbdtest_sz);
 			if (res == 0) {
-				com1_printf("[KERNEL] Installed "
+				printk("[KERNEL] Installed "
 				    "/bin/kbdtest from module "
 				    "(%u bytes)\n", kbdtest_sz);
 			} else {
-				com1_printf("[KERNEL] Failed to "
+				printk("[KERNEL] Failed to "
 				    "install /bin/kbdtest from "
 				    "module\n");
 			}
@@ -778,13 +765,13 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 		tty_power_suspend_all();
 
 		if (init_mod && init_sz > 0) {
-			com1_printf("[KERNEL] Found init module "
+			printk("[KERNEL] Found init module "
 			    "at %p, size %d. Starting init...\n",
 			    init_mod, init_sz);
 			userspace_load_init(init_mod,
 			    (u64)init_sz);
 		} else {
-			com1_printf("[KERNEL] Init module not "
+			printk("[KERNEL] Init module not "
 			    "found! Falling back to kernel "
 			    "loop...\n");
 			while (1) {

@@ -49,13 +49,13 @@ $space %export filter_user_ops
 */
 
 #include <kernel/event/event.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static int
 filt_user_attach(knote_t *kn)
 {
-	com1_printf("[EVFILT_USER] attach: ident=%llu\n",
+	printk("[EVFILT_USER] attach: ident=%llu\n",
 	    kn->ident);
 	return (0);
 }

@@ -30,7 +30,7 @@
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mm/kmem.h>
 
 extern void pmap_destroy_page_tables_only(u64 cr3);

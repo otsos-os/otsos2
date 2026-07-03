@@ -11,7 +11,7 @@
 #include <drm/kms/framebuffer.h>
 #include <drm/kms/plane.h>
 #include <drm/rapi/rapi.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define FONT_W 8
@@ -111,7 +111,7 @@ int kms_console_init(kms_console_t *con) {
   };
   int rc = drm_atomic_commit(&req, 1, DRM_ATOMIC_ALLOW_MODESET);
   if (rc != DRM_OK) {
-    com1_printf("[KMSCON] initial commit failed: %d\n", rc);
+    drivers_log("[KMSCON] initial commit failed: %d\n", rc);
     drm_framebuffer_destroy(con->fb);
     drm_gem_close(con->gem);
     con->fb = DRM_ID_NONE;

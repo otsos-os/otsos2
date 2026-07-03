@@ -64,5 +64,6 @@ void outsw(unsigned short port, void *addr, unsigned long count);
 
 #include <mm/kmem.h>
 #include <mlibc/stdlib.h>
+#include <mlibc/stdio.h>
 
 #endif

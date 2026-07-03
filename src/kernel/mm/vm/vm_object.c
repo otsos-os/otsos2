@@ -58,7 +58,7 @@ $space %export vm_object_set_page, vm_object_get_page
 #include <mm/vm/vm_page.h>
 #include <mm/kmem.h>
 #include <mlibc/mlibc.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 
 #define PAGE_SIZE 4096
 
@@ -68,7 +68,7 @@ void
 vm_object_init(void)
 {
 	vm_object_list = NULL;
-	com1_printf("[vm_object] initialized\n");
+	printk("[vm_object] initialized\n");
 }
 
 vm_object_t *

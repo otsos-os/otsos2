@@ -38,7 +38,7 @@
 #include <kernel/signal.h>
 #include <kernel/useraddr.h>
 #include <kernel/interrupts/idt.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
 #include <mm/vm/pmap.h>
@@ -1131,7 +1131,7 @@ posix_clone(u64 flags_u, u64 stack, u64 ptid, u64 ctid, u64 tls,
 			new_td->tid_address = ctid;
 		}
 
-		com1_printf("[POSIX clone] new thread tid=%d "
+		printk("[POSIX clone] new thread tid=%d "
 		    "PID %d\n", new_td->tid, parent->pid);
 
 		return ((s64)new_td->tid);
@@ -1188,7 +1188,7 @@ posix_futex(u64 uaddr_u, u64 op_u, u64 val_u, u64 timeout, u64 uaddr2,
 		return ((s64)futex_wake(uaddr, val));
 
 	default:
-		com1_printf("[POSIX futex] unsupported op=%d\n",
+		printk("[POSIX futex] unsupported op=%d\n",
 		    op);
 		return (-POSIX_ENOSYS);
 	}

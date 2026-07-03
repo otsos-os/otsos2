@@ -55,7 +55,7 @@ $space %export eventtimer_dispatch
 */
 
 #include <kernel/drivers/eventtimer.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define ET_MAX	8
@@ -104,17 +104,17 @@ et_register(struct eventtimer *et)
 	}
 	if (et_count >= ET_MAX) {
 		ET_UNLOCK();
-		com1_printf("[EVENTTIMER] too many event timers\n");
+		drivers_log("[EVENTTIMER] too many event timers\n");
 		return (-1);
 	}
 	et_list_insert(et);
 	ET_UNLOCK();
 
 	if (et->et_frequency == 0) {
-		com1_printf("[EVENTTIMER] registered \"%s\" quality %d\n",
+		drivers_log("[EVENTTIMER] registered \"%s\" quality %d\n",
 		    et->et_name, et->et_quality);
 	} else {
-		com1_printf("[EVENTTIMER] registered \"%s\" "
+		drivers_log("[EVENTTIMER] registered \"%s\" "
 		    "frequency %u Hz quality %d\n", et->et_name,
 		    (u32)et->et_frequency, et->et_quality);
 	}

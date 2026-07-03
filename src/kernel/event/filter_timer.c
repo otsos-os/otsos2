@@ -54,7 +54,7 @@ $space %export filter_timer_ops, filter_timer_tick
 
 #include <kernel/event/event.h>
 #include <kernel/drivers/timer.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static knote_t	*timer_list[MAX_KQUEUES * MAX_KNOTES];
@@ -98,7 +98,7 @@ filt_timer_attach(knote_t *kn)
 		timer_list[timer_count++] = kn;
 	}
 
-	com1_printf("[EVFILT_TIMER] attach: ident=%llu "
+	printk("[EVFILT_TIMER] attach: ident=%llu "
 	    "period=%llu ticks\n", kn->ident, period_ticks);
 
 	return (0);

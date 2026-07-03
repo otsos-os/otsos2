@@ -29,7 +29,7 @@
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 int
@@ -40,7 +40,7 @@ api_term_read(void *buf, u32 count)
 	}
 
 	if (!is_user_address(buf, count)) {
-		com1_printf("[DEBUG] api_term_read: invalid user buffer %p (%d)\n",
+		printk("[DEBUG] api_term_read: invalid user buffer %p (%d)\n",
 		    buf, (int)count);
 		thread_t *td = thread_current();
 		if (td && (td->context.cs & 3) == 3) {
@@ -64,7 +64,7 @@ api_data_read(int handle, void *buf, u32 count)
 	objects = api_get_object_table();
 
 	if (handle < 0 || handle >= MAX_HANDLES) {
-		com1_printf("[DEBUG] api_data_read: invalid handle %d\n",
+		printk("[DEBUG] api_data_read: invalid handle %d\n",
 		    handle);
 		return (-API_ERR_BAD_HANDLE);
 	}
@@ -78,7 +78,7 @@ api_data_read(int handle, void *buf, u32 count)
 	}
 
 	if (!is_user_address(buf, count)) {
-		com1_printf("[DEBUG] api_data_read: invalid user buffer %p (%d)\n",
+		printk("[DEBUG] api_data_read: invalid user buffer %p (%d)\n",
 		    buf, (int)count);
 		thread_t *td = thread_current();
 		if (td && (td->context.cs & 3) == 3) {

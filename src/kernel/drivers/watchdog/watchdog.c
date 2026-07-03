@@ -65,7 +65,7 @@ $space %export watchdog_ping, watchdog_tick
 #include <kernel/drivers/timer.h>
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/panic.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 
 int	watchdog_i6300esb_init(void);
 int	watchdog_ich_tco_init(void);
@@ -151,14 +151,14 @@ watchdog_register_device(watchdog_device_t *dev)
 	}
 
 	if (watchdog_device_count_val >= WATCHDOG_MAX_DEVICES) {
-		com1_printf("[WDT] device limit reached (%d)\n",
+		drivers_log("[WDT] device limit reached (%d)\n",
 		    WATCHDOG_MAX_DEVICES);
 		return (-1);
 	}
 
 	watchdog_devices[watchdog_device_count_val++] = dev;
 
-	com1_printf("[WDT] registered: %s\n",
+	drivers_log("[WDT] registered: %s\n",
 	    dev->name ? dev->name : "unknown");
 
 	if (!watchdog_active) {

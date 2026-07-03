@@ -10,7 +10,7 @@
 #include <drm/kms/crtc.h>
 #include <drm/kms/framebuffer.h>
 #include <drm/kms/plane.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 int drm_kms_init(void) {
@@ -28,7 +28,7 @@ int drm_kms_init(void) {
   crtc->connector = conn;
   conn->crtc = crtc;
 
-  com1_write_string("[KMS] topology: 1 connector + 1 crtc + 1 primary plane\n");
+  drivers_log("[KMS] topology: 1 connector + 1 crtc + 1 primary plane\n");
   return DRM_OK;
 }
 
@@ -102,7 +102,7 @@ int drm_atomic_commit(const drm_atomic_req_t *reqs, u32 count, u32 flags) {
   for (u32 i = 0; i < count; i++) {
     int rc = apply_req(&reqs[i]);
     if (rc != DRM_OK) {
-      com1_printf("[ATOMIC] req %d (obj=%u prop=%u) failed: %d\n", i,
+      drivers_log("[ATOMIC] req %d (obj=%u prop=%u) failed: %d\n", i,
                   reqs[i].obj_id, reqs[i].prop_id, rc);
       return rc;
     }
@@ -115,7 +115,7 @@ int drm_atomic_commit(const drm_atomic_req_t *reqs, u32 count, u32 flags) {
     if (drv && drv->present) {
       int rc = drv->present(plane->fb);
       if (rc != 0) {
-        com1_printf("[ATOMIC] present failed: %d\n", rc);
+        drivers_log("[ATOMIC] present failed: %d\n", rc);
         return DRM_ERR_NODEV;
       }
     }

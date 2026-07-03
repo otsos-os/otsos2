@@ -28,7 +28,7 @@
 #include <kernel/drivers/tty.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/crypto/rng/rng.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
 
@@ -179,7 +179,7 @@ devfs_init(void)
 	devfs_register("urandom", DEVFS_DEV_URANDOM,
 	    dev_urandom_read, dev_urandom_write);
 
-	com1_printf("[DEVFS] initialized (%d devices)\n",
+	drivers_log("[DEVFS] initialized (%d devices)\n",
 	    devfs_device_count);
 }
 

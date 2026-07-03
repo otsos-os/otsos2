@@ -88,7 +88,7 @@ $space %export event_fork_process, event_notify_pipe_change
 #include <kernel/thread.h>
 #include <kernel/panic.h>
 #include <mm/kmem.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static kqueue_t			kqueue_pool[MAX_KQUEUES];
@@ -114,12 +114,12 @@ filter_register(const filter_ops_t *ops)
 
 	idx = filter_index(ops->filter);
 	if (idx < 0) {
-		com1_printf("[EVENT] filter_register: invalid "
+		printk("[EVENT] filter_register: invalid "
 		    "filter %d\n", ops->filter);
 		return;
 	}
 	filter_table[idx] = ops;
-	com1_printf("[EVENT] registered filter '%s' "
+	printk("[EVENT] registered filter '%s' "
 	    "(id=%d)\n", ops->name, ops->filter);
 }
 
@@ -192,7 +192,7 @@ proc_wakeup_one(void *channel)
 void
 event_init(void)
 {
-	com1_printf("[EVENT] Initializing event subsystem...\n");
+	printk("[EVENT] Initializing event subsystem...\n");
 
 	memset(kqueue_pool, 0, sizeof(kqueue_pool));
 	memset(filter_table, 0, sizeof(filter_table));
@@ -216,7 +216,7 @@ event_init(void)
 	}
 
 	event_initialized = 1;
-	com1_printf("[EVENT] Event subsystem initialized "
+	printk("[EVENT] Event subsystem initialized "
 	    "(%d kqueue slots)\n", MAX_KQUEUES);
 }
 
@@ -238,7 +238,7 @@ kqueue_create(void)
 			    process_current();
 			kqueue_pool[i].wait_channel =
 			    &kqueue_pool[i];
-			com1_printf("[EVENT] Created kqueue idx=%d "
+			printk("[EVENT] Created kqueue idx=%d "
 			    "owner_pid=%d\n", i,
 			    process_current() ?
 			    (int)process_current()->pid : 0);
@@ -246,7 +246,7 @@ kqueue_create(void)
 		}
 	}
 
-	com1_printf("[EVENT] kqueue_create: no free slots\n");
+	printk("[EVENT] kqueue_create: no free slots\n");
 	return (-1);
 }
 
@@ -284,7 +284,7 @@ kqueue_destroy(int kq_idx)
 	proc_wakeup(kq->wait_channel);
 
 	memset(kq, 0, sizeof(kqueue_t));
-	com1_printf("[EVENT] Destroyed kqueue idx=%d\n", kq_idx);
+	printk("[EVENT] Destroyed kqueue idx=%d\n", kq_idx);
 	return (0);
 }
 
@@ -450,7 +450,7 @@ process_change(kqueue_t *kq, struct kevent *kev)
 
 	ops = filter_lookup(kev->filter);
 	if (!ops) {
-		com1_printf("[EVENT] unknown filter %d\n",
+		printk("[EVENT] unknown filter %d\n",
 		    kev->filter);
 		return (-API_ERR_INVAL);
 	}
@@ -489,7 +489,7 @@ process_change(kqueue_t *kq, struct kevent *kev)
 		} else {
 			kn = knote_alloc(kq);
 			if (!kn) {
-				com1_printf("[EVENT] no free knote "
+				printk("[EVENT] no free knote "
 				    "slots\n");
 				return (-API_ERR_NO_MEMORY);
 			}
@@ -513,14 +513,14 @@ process_change(kqueue_t *kq, struct kevent *kev)
 				if (ret != 0) {
 					memset(kn, 0,
 					    sizeof(knote_t));
-					com1_printf("[EVENT] filter "
+					printk("[EVENT] filter "
 					    "attach failed: %d\n",
 					    ret);
 					return (ret);
 				}
 			}
 
-			com1_printf("[EVENT] added knote "
+			printk("[EVENT] added knote "
 			    "ident=%llu filter=%d\n",
 			    kev->ident, kev->filter);
 

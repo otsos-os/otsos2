@@ -63,7 +63,7 @@ $space %export uma_zfind, uma_init, uma_dump
 #include <mm/uma.h>
 #include <mm/kmem.h>
 #include <mlibc/mlibc.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 
 struct uma_zone {
 	char		name[32];
@@ -371,7 +371,7 @@ uma_dump(void)
 {
 	u32	i;
 
-	com1_printf("[uma] zone dump:\n");
+	printk("[uma] zone dump:\n");
 	for (i = 0; i < UMA_ZONE_MAX; i++) {
 		struct uma_zone	*z;
 
@@ -379,7 +379,7 @@ uma_dump(void)
 		if (z == NULL) {
 			continue;
 		}
-		com1_printf("  %-8s item_size=%lu nitems=%u "
+		printk("  %-8s item_size=%lu nitems=%u "
 		    "nfree=%u nslabs=%u\n", z->name,
 		    z->item_size, z->nitems, z->nfree,
 		    z->nslabs);

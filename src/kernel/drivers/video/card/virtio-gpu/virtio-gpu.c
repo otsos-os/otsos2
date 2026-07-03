@@ -61,7 +61,7 @@ $space %export drm_virtio_gpu_driver_get
 #include <kernel/pci/pci.h>
 #include <kernel/pci/utils/bar.h>
 #include <kernel/mm/vm/pmap.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define	VIRTIO_GPU_QUEUE_SIZE		64
@@ -107,7 +107,7 @@ virtio_gpu_setup_queues(virtio_gpu_state_t *st)
 		}
 
 		if (virtio_vq_create(&st->vqs[i], qsize) != 0) {
-			com1_printf("[VIRTIO_GPU] vq %d create "
+			drivers_log("[VIRTIO_GPU] vq %d create "
 			    "failed\n", i);
 			return (-1);
 		}
@@ -123,7 +123,7 @@ virtio_gpu_setup_queues(virtio_gpu_state_t *st)
 		    st->vqs[i].phys_used);
 		virtio_hw_enable_queue(hw);
 
-		com1_printf("[VIRTIO_GPU] vq %d: size=%u\n",
+		drivers_log("[VIRTIO_GPU] vq %d: size=%u\n",
 		    i, qsize);
 	}
 	return (0);
@@ -142,14 +142,14 @@ virtio_gpu_query_display(virtio_gpu_state_t *st)
 	if (crtc_w > 0 && crtc_h > 0) {
 		st->width = crtc_w;
 		st->height = crtc_h;
-		com1_printf("[VIRTIO_GPU] using KMS mode: "
+		drivers_log("[VIRTIO_GPU] using KMS mode: "
 		    "%ux%u\n", st->width, st->height);
 	} else {
 		rc = virtio_gpu_cmd_get_display_info(
 		    &st->hw,
 		    &st->vqs[VIRTIO_GPU_CONTROLQ], &info);
 		if (rc != 0) {
-			com1_write_string(
+			drivers_log(
 			    "[VIRTIO_GPU] GET_DISPLAY_INFO "
 			    "failed\n");
 			st->width = VIRTIO_GPU_FALLBACK_W;
@@ -163,14 +163,14 @@ virtio_gpu_query_display(virtio_gpu_state_t *st)
 				    info.pmodes[i].r.width;
 				st->height =
 				    info.pmodes[i].r.height;
-				com1_printf("[VIRTIO_GPU] device "
+				drivers_log("[VIRTIO_GPU] device "
 				    "display %d: %ux%u\n", i,
 				    st->width, st->height);
 				return (0);
 			}
 		}
 
-		com1_write_string("[VIRTIO_GPU] scanout doesnt "
+		drivers_log("[VIRTIO_GPU] scanout doesnt "
 		    "enabled\n");
 		st->width = VIRTIO_GPU_FALLBACK_W;
 		st->height = VIRTIO_GPU_FALLBACK_H;
@@ -186,16 +186,16 @@ virtio_gpu_pci_probe(pci_device_t *dev, const pci_match_t *match)
 		return (-1);
 	}
 
-	com1_write_string("[VIRTIO_GPU] probing PCI\n");
+	drivers_log("[VIRTIO_GPU] probing PCI\n");
 	memset(&g_state, 0, sizeof(g_state));
 	g_state.backing_resource_id = VIRTIO_GPU_RESOURCE_ID;
 	if (virtio_hw_init(&g_state.hw, dev) != 0) {
-		com1_write_string("[VIRTIO_GPU] transport init "
+		drivers_log("[VIRTIO_GPU] transport init "
 		    "failed\n");
 		return (-1);
 	}
 	if (virtio_gpu_setup_queues(&g_state) != 0) {
-		com1_write_string("[VIRTIO_GPU] queue setup "
+		drivers_log("[VIRTIO_GPU] queue setup "
 		    "failed\n");
 		return (-1);
 	}
@@ -207,7 +207,7 @@ virtio_gpu_pci_probe(pci_device_t *dev, const pci_match_t *match)
 	    VIRTIO_STATUS_DRIVER_OK);
 
 	if (virtio_gpu_query_display(&g_state) != 0) {
-		com1_write_string("[VIRTIO_GPU] display query "
+		drivers_log("[VIRTIO_GPU] display query "
 		    "failed\n");
 		return (-1);
 	}
@@ -216,7 +216,7 @@ virtio_gpu_pci_probe(pci_device_t *dev, const pci_match_t *match)
 	g_state.bpp = VIRTIO_GPU_BPP;
 	g_state.hw_ready = 1;
 
-	com1_printf("[VIRTIO_GPU] hardware ready: %ux%u "
+	drivers_log("[VIRTIO_GPU] hardware ready: %ux%u "
 	    "x%u bpp\n",
 	    g_state.width, g_state.height, g_state.bpp);
 	return (0);
@@ -266,7 +266,7 @@ attach_backing_store(virtio_gpu_state_t *st)
 	st->backing = (u8 *)kmem_alloc_aligned(aligned,
 	    PAGE_SIZE);
 	if (!st->backing) {
-		com1_write_string("[VIRTIO_GPU] backing alloc "
+		drivers_log("[VIRTIO_GPU] backing alloc "
 		    "failed\n");
 		return (-1);
 	}
@@ -274,7 +274,7 @@ attach_backing_store(virtio_gpu_state_t *st)
 	st->backing_size = aligned;
 
 	backing_phys = virtio_virt_to_phys(st->backing);
-	com1_printf("[VIRTIO_GPU] backing: virt=%p "
+	drivers_log("[VIRTIO_GPU] backing: virt=%p "
 	    "phys=%p size=%u\n",
 	    st->backing, (void *)backing_phys, (u32)aligned);
 
@@ -286,14 +286,14 @@ attach_backing_store(virtio_gpu_state_t *st)
 	    &st->vqs[VIRTIO_GPU_CONTROLQ],
 	    st->backing_resource_id, &entry, 1);
 	if (rc != 0) {
-		com1_write_string("[VIRTIO_GPU] attach backing "
+		drivers_log("[VIRTIO_GPU] attach backing "
 		    "failed\n");
 		kmem_free(st->backing);
 		st->backing = NULL;
 		return (-1);
 	}
 
-	com1_write_string("[VIRTIO_GPU] backing attached\n");
+	drivers_log("[VIRTIO_GPU] backing attached\n");
 	return (0);
 }
 
@@ -305,7 +305,7 @@ drm_virtio_gpu_display_init(void)
 	st = &g_state;
 
 	if (!st->hw_ready) {
-		com1_write_string("[VIRTIO_GPU] display_init: "
+		drivers_log("[VIRTIO_GPU] display_init: "
 		    "hw not ready\n");
 		return (-1);
 	}
@@ -313,31 +313,31 @@ drm_virtio_gpu_display_init(void)
 		return (0);
 	}
 
-	com1_write_string("[VIRTIO_GPU] display_init: "
+	drivers_log("[VIRTIO_GPU] display_init: "
 	    "creating 2D resource\n");
 	if (virtio_gpu_cmd_resource_create_2d(&st->hw,
 	    &st->vqs[VIRTIO_GPU_CONTROLQ],
 	    st->backing_resource_id,
 	    VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM,
 	    st->width, st->height) != 0) {
-		com1_write_string("[VIRTIO_GPU] resource create "
+		drivers_log("[VIRTIO_GPU] resource create "
 		    "failed\n");
 		return (-1);
 	}
 
-	com1_write_string("[VIRTIO_GPU] display_init: "
+	drivers_log("[VIRTIO_GPU] display_init: "
 	    "attaching backing\n");
 	if (attach_backing_store(st) != 0) {
 		return (-1);
 	}
 
-	com1_write_string("[VIRTIO_GPU] display_init: "
+	drivers_log("[VIRTIO_GPU] display_init: "
 	    "setting scanout\n");
 	if (virtio_gpu_cmd_set_scanout(&st->hw,
 	    &st->vqs[VIRTIO_GPU_CONTROLQ],
 	    VIRTIO_GPU_SCANOUT_ID, st->backing_resource_id,
 	    0, 0, st->width, st->height) != 0) {
-		com1_write_string("[VIRTIO_GPU] set scanout "
+		drivers_log("[VIRTIO_GPU] set scanout "
 		    "failed\n");
 		return (-1);
 	}
@@ -345,13 +345,13 @@ drm_virtio_gpu_display_init(void)
 	drm_crtc_set_mode_geometry(st->width, st->height,
 	    st->pitch, st->bpp, 0);
 
-	com1_write_string("[VIRTIO_GPU] display_init: "
+	drivers_log("[VIRTIO_GPU] display_init: "
 	    "initial transfer+flush\n");
 	if (virtio_gpu_cmd_transfer_to_host_2d(&st->hw,
 	    &st->vqs[VIRTIO_GPU_CONTROLQ],
 	    st->backing_resource_id,
 	    0, 0, st->width, st->height, 0) != 0) {
-		com1_write_string("[VIRTIO_GPU] initial "
+		drivers_log("[VIRTIO_GPU] initial "
 		    "transfer failed\n");
 		return (-1);
 	}
@@ -359,13 +359,13 @@ drm_virtio_gpu_display_init(void)
 	    &st->vqs[VIRTIO_GPU_CONTROLQ],
 	    st->backing_resource_id,
 	    0, 0, st->width, st->height) != 0) {
-		com1_write_string("[VIRTIO_GPU] initial flush "
+		drivers_log("[VIRTIO_GPU] initial flush "
 		    "failed\n");
 		return (-1);
 	}
 
 	st->display_ready = 1;
-	com1_write_string("[VIRTIO_GPU] display ready\n");
+	drivers_log("[VIRTIO_GPU] display ready\n");
 	return (0);
 }
 

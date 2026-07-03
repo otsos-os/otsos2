@@ -4,7 +4,7 @@
 
 #include <drm/drm.h>
 #include <drm/gem.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define GEM_MAX_BUFFERS 128
@@ -30,7 +30,7 @@ drm_handle_t drm_gem_create(u64 size) {
 
   int slot = gem_alloc_slot();
   if (slot < 0) {
-    com1_write_string("[GEM] table full\n");
+    drivers_log("[GEM] table full\n");
     return 0;
   }
 
@@ -38,7 +38,7 @@ drm_handle_t drm_gem_create(u64 size) {
   u64 aligned = (size + 4095) & ~4095ULL;
   void *data = kmem_alloc_aligned(aligned, 4096);
   if (!data) {
-    com1_write_string("[GEM] alloc failed\n");
+    drivers_log("[GEM] alloc failed\n");
     return 0;
   }
   memset(data, 0, aligned);

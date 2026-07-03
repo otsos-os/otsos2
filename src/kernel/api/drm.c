@@ -16,7 +16,7 @@
 #include <kernel/drivers/video/drm/rapi/rapi.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static int drm_op_info(struct api_drm_info *out) {

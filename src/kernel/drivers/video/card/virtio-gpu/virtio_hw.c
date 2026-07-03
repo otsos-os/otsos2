@@ -92,7 +92,7 @@ $space %export virtio_hw_read_isr, virtio_hw_read_gpu_config
 #include <kernel/pci/utils/bar.h>
 #include <kernel/pci/utils/io.h>
 #include <kernel/mm/vm/pmap.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static u64
@@ -213,7 +213,7 @@ parse_capability(virtio_hw_t *hw, u8 cfg_type, u8 bar,
 
 	if (pci_read_bar(hw->pci_dev, bar, &bar_info) != 0 ||
 	    bar_info.base == 0) {
-		com1_printf("[VIRTIO] cap type %u: BAR %u "
+		drivers_log("[VIRTIO] cap type %u: BAR %u "
 		    "unreadable\n", cfg_type, bar);
 		return;
 	}
@@ -233,7 +233,7 @@ parse_capability(virtio_hw_t *hw, u8 cfg_type, u8 bar,
 		}
 		hw->common_offset = offset;
 		hw->common_length = length;
-		com1_printf("[VIRTIO] common cfg: %s %p+0x%x\n",
+		drivers_log("[VIRTIO] common cfg: %s %p+0x%x\n",
 		    bar_info.is_io ? "IO" : "MMIO",
 		    (void *)(bar_info.is_io ? struct_phys :
 		    (MMIO_VBASE + struct_phys)), length);
@@ -249,7 +249,7 @@ parse_capability(virtio_hw_t *hw, u8 cfg_type, u8 bar,
 		}
 		hw->notify_offset = offset;
 		hw->notify_multiplier = notify_multiplier;
-		com1_printf("[VIRTIO] notify: %s %p+0x%x "
+		drivers_log("[VIRTIO] notify: %s %p+0x%x "
 		    "(mult=%u)\n",
 		    bar_info.is_io ? "IO" : "MMIO",
 		    (void *)(bar_info.is_io ? struct_phys :
@@ -266,7 +266,7 @@ parse_capability(virtio_hw_t *hw, u8 cfg_type, u8 bar,
 			hw->isr_base = bar_info.base;
 		}
 		hw->isr_offset = offset;
-		com1_printf("[VIRTIO] isr: %s %p+0x%x\n",
+		drivers_log("[VIRTIO] isr: %s %p+0x%x\n",
 		    bar_info.is_io ? "IO" : "MMIO",
 		    (void *)(bar_info.is_io ? struct_phys :
 		    (MMIO_VBASE + struct_phys)), length);
@@ -283,7 +283,7 @@ parse_capability(virtio_hw_t *hw, u8 cfg_type, u8 bar,
 			hw->dev_base = bar_info.base;
 		}
 		hw->dev_offset = offset;
-		com1_printf("[VIRTIO] device cfg: %s %p+0x%x\n",
+		drivers_log("[VIRTIO] device cfg: %s %p+0x%x\n",
 		    bar_info.is_io ? "IO" : "MMIO",
 		    (void *)(bar_info.is_io ? struct_phys :
 		    (MMIO_VBASE + struct_phys)), length);
@@ -471,7 +471,7 @@ virtio_hw_init(virtio_hw_t *hw, pci_device_t *dev)
 
 	if (hw->common_base == 0 || hw->notify_base == 0 ||
 	    hw->isr_base == 0 || hw->dev_base == 0) {
-		com1_write_string("[VIRTIO] missing required "
+		drivers_log("[VIRTIO] missing required "
 		    "capabilities\n");
 		return (-1);
 	}
@@ -496,14 +496,14 @@ virtio_hw_init(virtio_hw_t *hw, pci_device_t *dev)
 	    VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK);
 	status = virtio_hw_get_status(hw);
 	if ((status & VIRTIO_STATUS_FEATURES_OK) == 0) {
-		com1_write_string("[VIRTIO] feature negotiation "
+		drivers_log("[VIRTIO] feature negotiation "
 		    "failed\n");
 		virtio_hw_set_status(hw, VIRTIO_STATUS_FAILED);
 		return (-1);
 	}
 
 	hw->ready = 1;
-	com1_write_string("[VIRTIO] transport initialised\n");
+	drivers_log("[VIRTIO] transport initialised\n");
 	return (0);
 }
 

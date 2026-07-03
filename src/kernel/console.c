@@ -117,66 +117,11 @@ void clear_scr(void) {
   early_y = 0;
 }
 
-static void console_write_dec(u64 value) {
-  if (value == 0) { console_putchar('0'); return; }
-  char buffer[32];
-  int i = 0;
-  while (value > 0) { buffer[i++] = '0' + (value % 10); value /= 10; }
-  while (i > 0) console_putchar(buffer[--i]);
-}
-
-static void console_write_hex(u64 value, int width) {
-  const char hex[] = "0123456789ABCDEF";
-  for (int i = (width - 1) * 4; i >= 0; i -= 4)
-    console_putchar(hex[(value >> i) & 0xF]);
-}
-
 void printf(const char *fmt, ...) {
+  char buffer[512];
   va_list args;
   va_start(args, fmt);
-  for (int i = 0; fmt[i] != '\0'; i++) {
-    if (fmt[i] == '%') {
-      i++;
-      switch (fmt[i]) {
-      case 's': {
-        const char *s = va_arg(args, const char *);
-        if (!s) s = "(null)";
-        console_puts(s);
-        break;
-      }
-      case 'd': {
-        int d = va_arg(args, int);
-        if (d < 0) { console_putchar('-'); console_write_dec((u64)-d); }
-        else console_write_dec((u64)d);
-        break;
-      }
-      case 'u': {
-        u64 u = va_arg(args, u64);
-        console_write_dec(u);
-        break;
-      }
-      case 'x': {
-        u64 x = va_arg(args, u64);
-        console_write_hex(x, 8);
-        break;
-      }
-      case 'p': {
-        void *p = va_arg(args, void *);
-        console_puts("0x");
-        console_write_hex((u64)p, 16);
-        break;
-      }
-      case 'c': {
-        char c = (char)va_arg(args, int);
-        console_putchar(c);
-        break;
-      }
-      case '%': console_putchar('%'); break;
-      default: console_putchar('%'); console_putchar(fmt[i]); break;
-      }
-    } else {
-      console_putchar(fmt[i]);
-    }
-  }
+  vsnprintf(buffer, sizeof(buffer), fmt, args);
   va_end(args);
+  console_puts(buffer);
 }

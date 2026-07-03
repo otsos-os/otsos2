@@ -54,7 +54,7 @@ $space %export filter_signal_ops, event_notify_signal
 #include <kernel/event/event.h>
 #include <kernel/signal.h>
 #include <kernel/process.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define	MAX_SIGNAL_SLOTS	64
@@ -69,7 +69,7 @@ filt_signal_attach(knote_t *kn)
 
 	sig = (int)kn->ident;
 	if (sig < 0 || sig >= MAX_SIGNALS) {
-		com1_printf("[EVFILT_SIGNAL] attach: invalid "
+		printk("[EVFILT_SIGNAL] attach: invalid "
 		    "signal %d\n", sig);
 		return (-API_ERR_INVAL);
 	}

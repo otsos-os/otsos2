@@ -29,7 +29,7 @@
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static api_handle_t	kernel_handles[MAX_HANDLES];
@@ -118,7 +118,7 @@ api_release_object(int index)
 void
 api_init(void)
 {
-	com1_printf("[API] Initializing handle tables at %p\n",
+	printk("[API] Initializing handle tables at %p\n",
 	    kernel_handles);
 	memset(kernel_handles, 0, sizeof(kernel_handles));
 	memset(api_objects, 0, sizeof(api_objects));

@@ -7,7 +7,7 @@
 #include <kernel/bootmem.h>
 #include <kernel/multiboot.h>
 #include <kernel/multiboot2.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define BOOTMEM_MAX_RANGES 64
@@ -181,7 +181,7 @@ void bootmem_init(u64 magic, u64 info_addr, u64 kernel_start, u64 kernel_end) {
   reserve_range(kernel_start, kernel_end);
 
   initialized = 1;
-  com1_printf("[BOOTMEM] initialized: %u ranges, free=%u KB\n", free_count,
+  printk("[BOOTMEM] initialized: %u ranges, free=%u KB\n", free_count,
               bootmem_free_bytes() / 1024);
 }
 
@@ -223,11 +223,11 @@ u32 bootmem_range_count(void) { return free_count; }
 const bootmem_range_t *bootmem_ranges(void) { return free_ranges; }
 
 void bootmem_dump(void) {
-  com1_printf("--- bootmem ranges ---\n");
+  printk("--- bootmem ranges ---\n");
   for (u32 i = 0; i < free_count; i++) {
-    com1_printf("%u: %p - %p (%u KB)\n", i, (void *)free_ranges[i].start,
+    printk("%u: %p - %p (%u KB)\n", i, (void *)free_ranges[i].start,
                 (void *)free_ranges[i].end,
                 (free_ranges[i].end - free_ranges[i].start) / 1024);
   }
-  com1_printf("----------------------\n");
+  printk("----------------------\n");
 }

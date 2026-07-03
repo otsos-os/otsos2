@@ -29,7 +29,7 @@
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
 
@@ -367,7 +367,7 @@ posix_syscall_handler(registers_t *regs)
 		ret = posix_arch_prctl(a1, a2, a3, a4, a5, a6, regs);
 		break;
 	default:
-		com1_printf("[POSIX] unknown syscall: %d\n", (int)num);
+		printk("[POSIX] unknown syscall: %d\n", (int)num);
 		ret = -POSIX_ENOSYS;
 		break;
 	}

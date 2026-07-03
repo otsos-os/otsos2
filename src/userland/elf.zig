@@ -123,7 +123,7 @@ pub const elf_loadinfo_t = extern struct {
     data_end: u64,
 };
 
-extern fn com1_printf(fmt: [*:0]const u8, ...) void;
+extern fn printk(fmt: [*:0]const u8, ...) void;
 extern fn vm_page_alloc_phys(flags: u32) u64;
 extern fn memset(s: *anyopaque, c: c_int, n: usize) *anyopaque;
 extern fn pmap_enter(vaddr: u64, paddr: u64, flags: u64) void;
@@ -251,7 +251,7 @@ fn load_segments(data: *anyopaque, info: *const elf_info_t, load_base: u64) bool
         const memsz = phdr.p_memsz;
         const offset = phdr.p_offset;
 
-        com1_printf(
+        printk(
             "[ELF] Loading segment: vaddr=%p filesz=%d memsz=%d flags=%x\n",
             u64_to_ptr(vaddr),
             @as(c_int, @intCast(filesz)),
@@ -286,7 +286,7 @@ fn load_segments(data: *anyopaque, info: *const elf_info_t, load_base: u64) bool
 
             const phys_page = vm_page_alloc_phys(0);
             if (phys_page == 0) {
-                com1_printf("[ELF] Error: Failed to allocate page at %p\n", u64_to_ptr(page));
+                printk("[ELF] Error: Failed to allocate page at %p\n", u64_to_ptr(page));
                 return false;
             }
             _ = memset(u64_to_ptr(phys_page), 0, u64_to_usize(PAGE_SIZE));
@@ -383,7 +383,7 @@ fn map_elf_headers(data: *anyopaque, info: *const elf_info_t, load_base: u64) bo
     while (page < map_end) : (page += PAGE_SIZE) {
         const phys = vm_page_alloc_phys(0);
         if (phys == 0) {
-            com1_printf("[ELF] Failed to allocate header page at %p\n", u64_to_ptr(page));
+            printk("[ELF] Failed to allocate header page at %p\n", u64_to_ptr(page));
             return false;
         }
         _ = memset(u64_to_ptr(phys), 0, u64_to_usize(PAGE_SIZE));
@@ -418,18 +418,18 @@ pub export fn elf_load(data: *anyopaque, size: u64) u64 {
     const result = elf_parse(data, size, &info);
 
     if (result != .ELF_OK) {
-        com1_printf("[ELF] error: %s\n", elf_strerror(result));
+        printk("[ELF] error: %s\n", elf_strerror(result));
         return 0;
     }
 
     const load_base: u64 = if (info.header.e_type == ET_DYN) 0x400000 else 0;
 
-    com1_printf(
+    printk(
         "[ELF] loading: entry=%p, segments=%d\n",
         u64_to_ptr(info.entry_point),
         @as(c_int, @intCast(info.header.e_phnum)),
     );
-    com1_printf(
+    printk(
         "[ELF] Load range: %p - %p\n",
         u64_to_ptr(info.load_addr_min),
         u64_to_ptr(info.load_addr_max),
@@ -440,11 +440,11 @@ pub export fn elf_load(data: *anyopaque, size: u64) u64 {
     }
 
     if (!map_elf_headers(data, &info, load_base)) {
-        com1_printf("[ELF] Error: Failed to map ELF headers\n");
+        printk("[ELF] Error: Failed to map ELF headers\n");
         return 0;
     }
 
-    com1_printf("[ELF] Load complete, entry point: %p\n", u64_to_ptr(info.entry_point));
+    printk("[ELF] Load complete, entry point: %p\n", u64_to_ptr(info.entry_point));
     return info.entry_point;
 }
 
@@ -453,7 +453,7 @@ pub export fn elf_load_full(data: *anyopaque, size: u64, out: *elf_loadinfo_t) u
     var info: elf_info_t = undefined;
     const result = elf_parse(data, size, &info);
     if (result != .ELF_OK) {
-        com1_printf("[ELF] error: %s\n", elf_strerror(result));
+        printk("[ELF] error: %s\n", elf_strerror(result));
         return 0;
     }
 
@@ -464,7 +464,7 @@ pub export fn elf_load_full(data: *anyopaque, size: u64, out: *elf_loadinfo_t) u
     }
 
     if (!map_elf_headers(data, &info, load_base)) {
-        com1_printf("[ELF] Error: Failed to map ELF headers\n");
+        printk("[ELF] Error: Failed to map ELF headers\n");
         return 0;
     }
 
@@ -497,7 +497,7 @@ pub export fn elf_load_full(data: *anyopaque, size: u64, out: *elf_loadinfo_t) u
         }
     }
 
-    com1_printf(
+    printk(
         "[ELF] main loaded: entry=%p phdr=%p phnum=%d interp_len=%d data=[%p, %p)\n",
         u64_to_ptr_dbg(out.entry),
         u64_to_ptr_dbg(out.phdr_vaddr),
@@ -512,7 +512,7 @@ pub export fn elf_load_interp(data: *anyopaque, size: u64, load_base: u64) u64 {
     var info: elf_info_t = undefined;
     const result = elf_parse(data, size, &info);
     if (result != .ELF_OK) {
-        com1_printf("[ELF] interp error: %s\n", elf_strerror(result));
+        printk("[ELF] interp error: %s\n", elf_strerror(result));
         return 0;
     }
 
@@ -523,6 +523,6 @@ pub export fn elf_load_interp(data: *anyopaque, size: u64, load_base: u64) u64 {
     }
 
     const entry = info.header.e_entry + base;
-    com1_printf("[ELF] loaded interp: base=%p entry=%p\n", u64_to_ptr_dbg(base), u64_to_ptr_dbg(entry));
+    printk("[ELF] loaded interp: base=%p entry=%p\n", u64_to_ptr_dbg(base), u64_to_ptr_dbg(entry));
     return entry;
 }

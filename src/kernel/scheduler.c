@@ -85,7 +85,7 @@ scheduler_tick(registers_t *regs)
 		last_magic = g_chainfs.superblock.magic;
 	} else if (g_chainfs.superblock.magic != last_magic) {
 		process_t *proc = process_current();
-		com1_printf("[CHAINFS] magic changed in tick "
+		printk("[CHAINFS] magic changed in tick "
 		    "(pid=%d) old=0x%x new=0x%x "
 		    "rip=%p cs=0x%x cr3=%p phys=%p init_phys=%p\n",
 		    proc ? proc->pid : -1, last_magic,

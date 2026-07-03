@@ -81,7 +81,7 @@ $space %export vm_page_lookup, vm_page_dump
 #include <kernel/bootmem.h>
 #include <mm/kmem.h>
 #include <mlibc/mlibc.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 
 #define PAGE_SIZE 4096
 #define VM_PAGE_MAX 4096
@@ -220,7 +220,7 @@ vm_page_init_from_bootmem(void)
 		pages = bootstrap_pages;
 		page_capacity = VM_PAGE_MAX;
 		metadata_bytes = sizeof(bootstrap_pages);
-		com1_printf("[VM_PAGE] metadata bootmem "
+		printk("[VM_PAGE] metadata bootmem "
 		    "allocation failed, using %u pages\n",
 		    (u32)page_capacity);
 	} else {
@@ -261,7 +261,7 @@ vm_page_init_from_bootmem(void)
 		}
 	}
 
-	com1_printf("[VM_PAGE] initialized: %u pages from "
+	printk("[VM_PAGE] initialized: %u pages from "
 	    "bootmem (%u KB metadata)\n",
 	    (u32)page_count, (u32)(metadata_bytes / 1024));
 }
@@ -510,15 +510,15 @@ vm_page_dump(void)
 		}
 	}
 
-	com1_printf("--- vm_page dump ---\n");
-	com1_printf("total pages : %u\n", (u32)page_count);
+	printk("--- vm_page dump ---\n");
+	printk("total pages : %u\n", (u32)page_count);
 	for (i = 0; i < PQ_COUNT; i++) {
 		if (i == PQ_NONE)
 			continue;
-		com1_printf("%-10s  : %u\n", qnames[i],
+		printk("%-10s  : %u\n", qnames[i],
 		    (u32)qcount[i]);
 	}
-	com1_printf("wired       : %u\n", (u32)wired_count);
-	com1_printf("reserved    : %u\n", (u32)reserved_count);
-	com1_printf("--------------------\n");
+	printk("wired       : %u\n", (u32)wired_count);
+	printk("reserved    : %u\n", (u32)reserved_count);
+	printk("--------------------\n");
 }

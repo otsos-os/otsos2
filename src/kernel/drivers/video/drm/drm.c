@@ -12,7 +12,7 @@
 #include <drm/kms/crtc.h>
 #include <drm/kms/framebuffer.h>
 #include <drm/kms/plane.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static const drm_driver_t *g_selected_driver;
@@ -153,11 +153,11 @@ const drm_driver_t *drm_driver_select(const void *boot_info,
           g_selected_driver = d;
           return d;
         }
-        com1_printf("[DRM] preferred '%s' probe failed\n", preferred);
+        drivers_log("[DRM] preferred '%s' probe failed\n", preferred);
         return NULL;
       }
     }
-    com1_printf("[DRM] preferred '%s' not found\n", preferred);
+    drivers_log("[DRM] preferred '%s' not found\n", preferred);
     return NULL;
   }
 
@@ -203,7 +203,7 @@ int drm_init(const drm_driver_t *driver, const void *boot_info) {
   }
 
   if (driver->init(boot_info) != 0) {
-    com1_write_string("[DRM] driver init failed\n");
+    drivers_log("[DRM] driver init failed\n");
     return DRM_ERR_NODEV;
   }
 
@@ -217,7 +217,7 @@ int drm_init(const drm_driver_t *driver, const void *boot_info) {
   drm_kms_init();
 
   g_ready = 1;
-  com1_printf("[DRM] ready, driver '%s'\n", driver->name ? driver->name : "?");
+  drivers_log("[DRM] ready, driver '%s'\n", driver->name ? driver->name : "?");
   return DRM_OK;
 }
 
@@ -235,18 +235,18 @@ int drm_reinit(const drm_driver_t *new_driver, const void *boot_info) {
 
   const drm_driver_t *old_driver = g_selected_driver;
 
-  com1_write_string("[DRM] reinit: trying new driver '");
-  com1_write_string(new_driver->name ? new_driver->name : "?");
-  com1_write_string("'\n");
+  drivers_log("[DRM] reinit: trying new driver '");
+  drivers_log(new_driver->name ? new_driver->name : "?");
+  drivers_log("'\n");
 
   /* Try the new driver's init FIRST, before tearing anything down.
    * This way if it fails, the old display is still active. */
   if (new_driver->init(boot_info) != 0) {
-    com1_write_string("[DRM] reinit: new driver init failed, keeping old\n");
+    drivers_log("[DRM] reinit: new driver init failed, keeping old\n");
     return DRM_ERR_NODEV;
   }
 
-  com1_write_string("[DRM] reinit: new driver init OK, switching\n");
+  drivers_log("[DRM] reinit: new driver init OK, switching\n");
 
   /* New driver initialised successfully — now safe to tear down old state. */
   kms_kernel_console_reset();
@@ -265,7 +265,7 @@ int drm_reinit(const drm_driver_t *new_driver, const void *boot_info) {
   drm_kms_init();
 
   g_ready = 1;
-  com1_printf("[DRM] reinit complete, driver '%s'\n",
+  drivers_log("[DRM] reinit complete, driver '%s'\n",
               new_driver->name ? new_driver->name : "?");
   return DRM_OK;
 }

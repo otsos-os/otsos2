@@ -60,7 +60,7 @@ $space %export pata_identify, pata_read_sector, pata_write_sector
 #include <kernel/drivers/disk/disk.h>
 #include <kernel/drivers/disk/pata/pata.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static int	pata_registered;
@@ -131,7 +131,7 @@ pata_guard_check(const char *where)
 	for (i = 0; i < 16; ++i) {
 		expected = (u16)(0xBEEF ^ (i * 0x1111));
 		if (pata_dummy_area.guard[i] != expected) {
-			com1_printf("[PATA] dummy guard corrupted "
+			drivers_log("[PATA] dummy guard corrupted "
 			    "at %s idx=%u val=0x%x exp=0x%x\n",
 			    where, i, pata_dummy_area.guard[i],
 			    expected);
@@ -150,7 +150,7 @@ debug_chainfs_overlap(const void *buffer, u32 words, const char *op)
 	magic = (const u8 *)&g_chainfs.superblock.magic;
 
 	if (start <= magic && magic < end) {
-		com1_printf("[CHAINFS] magic overlap in %s: "
+		drivers_log("[CHAINFS] magic overlap in %s: "
 		    "buf=%p words=%u\n", op, buffer, words);
 	}
 }
@@ -162,7 +162,7 @@ debug_chainfs_magic_change(u32 before, const char *op)
 
 	after = g_chainfs.superblock.magic;
 	if (after != before) {
-		com1_printf("[CHAINFS] magic changed during %s: "
+		drivers_log("[CHAINFS] magic changed during %s: "
 		    "old=0x%x new=0x%x ra=%p\n", before, after,
 		    op, __builtin_return_address(0));
 	}
@@ -176,7 +176,7 @@ pata_identify(u16 *target_buf)
 	int	i;
 	const char	*name;
 
-	com1_printf("PATA: Identifying drive...\n");
+	drivers_log("PATA: Identifying drive...\n");
 	outb(IDE_DRIVE_SEL, 0xA0);
 	outb(IDE_SEC_COUNT, 0);
 	outb(IDE_LBA_LOW, 0);
@@ -186,24 +186,24 @@ pata_identify(u16 *target_buf)
 
 	status = inb(IDE_STATUS);
 	if (status == 0 || status == 0xFF) {
-		com1_printf("PATA: No drive found.\n");
+		drivers_log("PATA: No drive found.\n");
 		return;
 	}
 
 	if (pata_wait_not_bsy(1000000) != 0) {
-		com1_printf("PATA: Identify timeout/error "
+		drivers_log("PATA: Identify timeout/error "
 		    "(BSY)\n");
 		return;
 	}
 
 	if (inb(IDE_LBA_MID) != 0 || inb(IDE_LBA_HIGH) != 0) {
-		com1_printf("PATA: Device is not ATA/PATA "
+		drivers_log("PATA: Device is not ATA/PATA "
 		    "(ATAPI or unsupported)\n");
 		return;
 	}
 
 	if (pata_wait_drq(1000000) != 0) {
-		com1_printf("PATA: Identify timeout/error "
+		drivers_log("PATA: Identify timeout/error "
 		    "(DRQ)\n");
 		return;
 	}
@@ -222,7 +222,7 @@ pata_identify(u16 *target_buf)
 	}
 	debug_chainfs_magic_change(magic_before, "pata_identify");
 
-	com1_printf("PATA: Drive identified successfully.\n");
+	drivers_log("PATA: Drive identified successfully.\n");
 	if (pata_registered) {
 		return;
 	}
@@ -240,7 +240,7 @@ pata_identify(u16 *target_buf)
 			capa = 20480;
 		}
 		pata_disk.total_sectors = capa;
-		com1_printf("[PATA] capacity: %u sectors (%u MB)\n",
+		drivers_log("[PATA] capacity: %u sectors (%u MB)\n",
 		    capa, capa / 2048);
 	}
 
@@ -285,7 +285,7 @@ pata_read_sector(u32 lba, u8 *buffer)
 	u32	magic_before;
 
 	if (pata_wait_not_bsy(1000000) != 0) {
-		com1_printf("[PATA] read_sector(%u): BSY timeout\n", lba);
+		drivers_log("[PATA] read_sector(%u): BSY timeout\n", lba);
 		if (buffer) {
 			memset(buffer, 0, 512);
 		}
@@ -301,7 +301,7 @@ pata_read_sector(u32 lba, u8 *buffer)
 	outb(IDE_COMMAND, IDE_CMD_READ);
 
 	if (pata_wait_not_bsy(1000000) != 0) {
-		com1_printf("[PATA] read_sector(%u): BSY timeout "
+		drivers_log("[PATA] read_sector(%u): BSY timeout "
 		    "after cmd\n", lba);
 		if (buffer) {
 			memset(buffer, 0, 512);
@@ -309,7 +309,7 @@ pata_read_sector(u32 lba, u8 *buffer)
 		return;
 	}
 	if (pata_wait_drq(1000000) != 0) {
-		com1_printf("[PATA] read_sector(%u): DRQ timeout\n",
+		drivers_log("[PATA] read_sector(%u): DRQ timeout\n",
 		    lba);
 		if (buffer) {
 			memset(buffer, 0, 512);

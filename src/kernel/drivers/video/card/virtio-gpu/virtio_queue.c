@@ -46,7 +46,7 @@ $space %export virtio_vq_send_recv
 #include <kernel/drivers/video/card/virtio-gpu/virtio_queue.h>
 #include <kernel/drivers/video/card/virtio-gpu/virtio_hw.h>
 #include <kernel/mm/vm/pmap.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define	VIRTIO_VQ_POLL_LIMIT	2000000
@@ -106,7 +106,7 @@ virtio_vq_create(virtio_vq_t *vq, u16 queue_size)
 
 	mem = kmem_alloc_aligned(total, PAGE_SIZE);
 	if (!mem) {
-		com1_write_string("[VIRTQ] alloc failed\n");
+		drivers_log("[VIRTQ] alloc failed\n");
 		return (-1);
 	}
 	memset(mem, 0, total);
@@ -133,7 +133,7 @@ virtio_vq_create(virtio_vq_t *vq, u16 queue_size)
 	vq->dma_cmd = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
 	vq->dma_resp = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
 	if (!vq->dma_cmd || !vq->dma_resp) {
-		com1_write_string("[VIRTQ] DMA scratch alloc "
+		drivers_log("[VIRTQ] DMA scratch alloc "
 		    "failed\n");
 		kmem_free(mem);
 		if (vq->dma_cmd) {
@@ -295,13 +295,13 @@ virtio_vq_send_recv(virtio_vq_t *vq, const void *cmd, u32 cmd_size,
 		return (-1);
 	}
 	if (cmd_size > PAGE_SIZE || resp_size > PAGE_SIZE) {
-		com1_printf("[VIRTQ] cmd/resp too large: "
+		drivers_log("[VIRTQ] cmd/resp too large: "
 		    "cmd=%u resp=%u\n", cmd_size, resp_size);
 		return (-1);
 	}
 
 	if (vq->num_free < 2) {
-		com1_write_string("[VIRTQ] not enough free "
+		drivers_log("[VIRTQ] not enough free "
 		    "descriptors\n");
 		return (-1);
 	}
@@ -332,7 +332,7 @@ virtio_vq_send_recv(virtio_vq_t *vq, const void *cmd, u32 cmd_size,
 
 	used_head = virtio_vq_poll(vq);
 	if (used_head == (u16)-1) {
-		com1_printf("[VIRTQ] timeout: cmd_size=%u "
+		drivers_log("[VIRTQ] timeout: cmd_size=%u "
 		    "avail_idx=%u used_idx=%u used->idx=%u\n",
 		    cmd_size, vq->avail_idx, vq->used_idx,
 		    vq->used->idx);

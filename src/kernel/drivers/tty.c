@@ -28,11 +28,11 @@
 #include <kernel/api/errno.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/tty.h>
+#include <kernel/drivers/uart/uart.h>
 #include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/kms/console.h>
 #include <kernel/event/event.h>
 #include <kernel/process.h>
-#include <lib/com1.h>
 #include <mlibc/mlibc.h>
 
 #define TTY_COUNT 10
@@ -412,7 +412,7 @@ static void tty_putc_internal(tty_state_t *tty, char c, int active) {
 static void tty_emit(char c) {
   tty_putc_internal(&ttys[tty_active], c, 1);
   tty_suppress_com1_mirror = 1;
-  com1_write_byte((u8)c);
+  uart_write_byte((u8)c);
   tty_suppress_com1_mirror = 0;
 }
 
@@ -719,7 +719,7 @@ void tty_putc_from_kernel(char c) {
   }
 }
 
-void tty_com1_mirror(char c) {
+void tty_log_mirror(char c) {
   if (tty_suppress_com1_mirror) {
     return;
   }
@@ -817,7 +817,7 @@ static void tty_emit_to(int tty_idx, char c) {
   tty_putc_internal(&ttys[tty_idx], c, tty_idx == tty_active);
   if (tty_idx == tty_active) {
     tty_suppress_com1_mirror = 1;
-    com1_write_byte((u8)c);
+    uart_write_byte((u8)c);
     tty_suppress_com1_mirror = 0;
   }
 }

@@ -52,7 +52,7 @@ $space %export filter_write_ops
 
 #include <kernel/event/event.h>
 #include <kernel/api/api.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static int
@@ -73,7 +73,7 @@ filt_write_attach(knote_t *kn)
 	}
 
 	if (fd < 0 || fd >= MAX_HANDLES || !handles[fd].used) {
-		com1_printf("[EVFILT_WRITE] attach: bad fd %d\n",
+		printk("[EVFILT_WRITE] attach: bad fd %d\n",
 		    fd);
 		return (-API_ERR_BAD_HANDLE);
 	}

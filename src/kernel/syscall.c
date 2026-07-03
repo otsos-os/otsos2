@@ -34,7 +34,7 @@
 #include <kernel/syscall.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mm/vm/pmap.h>
 
 #define MSR_EFER 0xC0000080
@@ -77,7 +77,7 @@ void syscall_init(void) {
    */
   wrmsr(MSR_SFMASK, 0x200); /* Mask interrupts (IF) */
 
-  com1_printf("[SYSCALL] syscall/sysret initialized\n");
+  printk("[SYSCALL] syscall/sysret initialized\n");
   syscall_initialized = 1;
 }
 
@@ -89,7 +89,7 @@ void syscall_handler(registers_t *regs) {
     last_magic = g_chainfs.superblock.magic;
   } else if (g_chainfs.superblock.magic != last_magic) {
     process_t *proc = process_current();
-    com1_printf("[CHAINFS] magic changed in syscall (pid=%d) old=0x%x new=0x%x "
+    printk("[CHAINFS] magic changed in syscall (pid=%d) old=0x%x new=0x%x "
                 "rip=%p cs=0x%x cr3=%p phys=%p init_phys=%p\n",
                 proc ? proc->pid : -1, last_magic, g_chainfs.superblock.magic,
                 (void *)(regs ? regs->rip : 0), regs ? regs->cs : 0,
@@ -114,7 +114,7 @@ void syscall_handler(registers_t *regs) {
     u64 new_personality = arg1;
     if (new_personality <= 1) {
       proc->personality = (int)new_personality;
-      com1_printf("[SYSCALL] PID %d personality: %d -> %d\n",
+      printk("[SYSCALL] PID %d personality: %d -> %d\n",
                   proc->pid, (int)old_personality,
                   (int)new_personality);
     }
@@ -279,7 +279,7 @@ void syscall_handler(registers_t *regs) {
     regs->rax = (u64)api_time();
     break;
   default:
-    com1_printf("Unknown syscall: %d\n", syscall_number);
+    printk("Unknown syscall: %d\n", syscall_number);
     regs->rax = -API_ERR_NO_CALL;
     break;
   }

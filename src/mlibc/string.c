@@ -58,7 +58,7 @@ int strlen(const char *str) {
 }
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
-#include <lib/com1.h>
+#include <mlibc/mlibc.h>
 
 static void debug_chainfs_write(const void *dest, unsigned long n,
                                 const char *op) {
@@ -74,7 +74,7 @@ static void debug_chainfs_write(const void *dest, unsigned long n,
 
   if (start <= magic && magic < end) {
     hits++;
-    com1_printf("[CHAINFS] magic overwritten by %s at %p len=%u ra=%p\n", op,
+    printk("[CHAINFS] magic overwritten by %s at %p len=%u ra=%p\n", op,
                 dest, (unsigned int)n, __builtin_return_address(0));
   }
 }

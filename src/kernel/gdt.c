@@ -25,7 +25,7 @@
  */
 
 #include <kernel/gdt.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 /*
@@ -116,7 +116,7 @@ extern void gdt_flush(u64 gdt_ptr_addr);
 extern void tss_load(u16 selector);
 
 void gdt_init(void) {
-  com1_printf("[GDT] Initializing GDT with Ring 3 support...\n");
+  printk("[GDT] Initializing GDT with Ring 3 support...\n");
 
   /* Initialize TSS */
   memset(&tss, 0, sizeof(tss_t));
@@ -161,8 +161,8 @@ void gdt_init(void) {
   tss_load(GDT_TSS);
   gdt_initialized = 1;
 
-  com1_printf("[GDT] GDT loaded at %p, TSS at %p\n", &gdt, &tss);
-  com1_printf("[GDT] Kernel stack RSP0: %p\n", (void *)tss.rsp0);
+  printk("[GDT] GDT loaded at %p, TSS at %p\n", &gdt, &tss);
+  printk("[GDT] Kernel stack RSP0: %p\n", (void *)tss.rsp0);
 }
 
 void tss_set_rsp0(u64 stack) { tss.rsp0 = stack; }

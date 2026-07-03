@@ -49,7 +49,7 @@ $space %export timer_is_initialized, timer_get_frequency
 #include <kernel/drivers/eventtimer.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/time.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static struct eventtimer	*timer_et;
@@ -75,18 +75,18 @@ timer_init(u32 frequency)
 
 	et = et_find(NULL, ET_FLAGS_PERIODIC, ET_FLAGS_PERIODIC);
 	if (et == NULL) {
-		com1_printf("[TIMER] no periodic event timer available\n");
+		drivers_log("[TIMER] no periodic event timer available\n");
 		return;
 	}
 
 	if (et_init(et, timer_event_cb, NULL, NULL) != 0) {
-		com1_printf("[TIMER] failed to init event timer\n");
+		drivers_log("[TIMER] failed to init event timer\n");
 		return;
 	}
 
 	period_ns = 1000000000ULL / frequency;
 	if (et_start(et, 0, period_ns) != 0) {
-		com1_printf("[TIMER] failed to start event timer\n");
+		drivers_log("[TIMER] failed to start event timer\n");
 		et_free(et);
 		return;
 	}
@@ -94,7 +94,7 @@ timer_init(u32 frequency)
 	timer_et = et;
 	timer_frequency = frequency;
 	timer_initialized = 1;
-	com1_printf("[TIMER] using event timer \"%s\" at %u Hz\n",
+	drivers_log("[TIMER] using event timer \"%s\" at %u Hz\n",
 	    et->et_name, timer_frequency);
 }
 

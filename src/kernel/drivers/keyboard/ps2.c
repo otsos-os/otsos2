@@ -69,7 +69,7 @@ $space %export ps2_keyboard_reset_state, ps2Scanf
 #include <kernel/drivers/keyboard/ps2.h>
 #include <kernel/kshell/kshell.h>
 #include <kernel/drivers/power/power.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 const char kbd_us[128] = {
@@ -129,7 +129,7 @@ ps2_debug_status(const char *tag, u8 status, u8 data)
 	if (!ps2_debug) {
 		return;
 	}
-	com1_printf("[PS2] %s: status=0x%x data=0x%x\n", tag,
+	drivers_log("[PS2] %s: status=0x%x data=0x%x\n", tag,
 	    status, data);
 }
 
@@ -256,24 +256,24 @@ ps2_keyboard_init(void)
 	scancode_extended = 0;
 
 	if (ps2_write_cmd(0xAD) != 0) {
-		com1_write_string("[PS2] timeout disabling port1\n");
+		drivers_log("[PS2] timeout disabling port1\n");
 		return (-1);
 	}
 	ps2_write_cmd(0xA7);
 	ps2_flush_output();
 
 	if (ps2_write_cmd(0x20) != 0) {
-		com1_write_string("[PS2] timeout reading config\n");
+		drivers_log("[PS2] timeout reading config\n");
 		return (-1);
 	}
 
 	config = 0;
 	if (ps2_read_data(&config) != 0) {
-		com1_write_string("[PS2] timeout waiting config\n");
+		drivers_log("[PS2] timeout waiting config\n");
 		return (-1);
 	}
 	if (ps2_debug) {
-		com1_printf("[PS2] config before: 0x%x\n", config);
+		drivers_log("[PS2] config before: 0x%x\n", config);
 	}
 
 	config |= 0x01;
@@ -281,7 +281,7 @@ ps2_keyboard_init(void)
 	config |= 0x40;
 
 	if (ps2_write_cmd(0x60) != 0 || ps2_write_data(config) != 0) {
-		com1_write_string("[PS2] timeout writing config\n");
+		drivers_log("[PS2] timeout writing config\n");
 		return (-1);
 	}
 
@@ -290,7 +290,7 @@ ps2_keyboard_init(void)
 
 		verify = 0;
 		if (ps2_read_data(&verify) == 0 && ps2_debug) {
-			com1_printf("[PS2] config after: 0x%x\n",
+			drivers_log("[PS2] config after: 0x%x\n",
 			    verify);
 		}
 	}
@@ -301,13 +301,13 @@ ps2_keyboard_init(void)
 		self_test = 0;
 		if (ps2_read_data(&self_test) == 0 &&
 		    self_test != 0x55) {
-			com1_printf("[PS2] controller self-test "
+			drivers_log("[PS2] controller self-test "
 			    "failed: 0x%x\n", self_test);
 		}
 	}
 
 	if (ps2_write_cmd(0xAE) != 0) {
-		com1_write_string("[PS2] timeout enabling "
+		drivers_log("[PS2] timeout enabling "
 		    "port1\n");
 		return (-1);
 	}
@@ -318,20 +318,20 @@ ps2_keyboard_init(void)
 		resp = 0;
 		if (ps2_read_data(&resp) == 0) {
 			if (resp != 0xFA) {
-				com1_printf("[PS2] reset ack "
+				drivers_log("[PS2] reset ack "
 				    "unexpected: 0x%x\n", resp);
 			}
 		} else {
-			com1_write_string("[PS2] reset ack "
+			drivers_log("[PS2] reset ack "
 			    "timeout\n");
 		}
 		if (ps2_read_data(&resp) == 0) {
 			if (resp != 0xAA) {
-				com1_printf("[PS2] reset self-test "
+				drivers_log("[PS2] reset self-test "
 				    "failed: 0x%x\n", resp);
 			}
 		} else {
-			com1_write_string("[PS2] reset self-test "
+			drivers_log("[PS2] reset self-test "
 			    "timeout\n");
 		}
 	}
@@ -342,11 +342,11 @@ ps2_keyboard_init(void)
 		resp = 0;
 		if (ps2_read_data(&resp) == 0) {
 			if (resp != 0xFA) {
-				com1_printf("[PS2] enable scan ack "
+				drivers_log("[PS2] enable scan ack "
 				    "unexpected: 0x%x\n", resp);
 			}
 		} else {
-			com1_write_string("[PS2] enable scan ack "
+			drivers_log("[PS2] enable scan ack "
 			    "timeout\n");
 		}
 	}
@@ -481,7 +481,7 @@ ps2_process_scancode(u8 scancode)
 
 	if (ctrl_pressed && alt_pressed && shift_pressed &&
 	    scancode == 0x2C) {
-		com1_printf("[PS2] Ctrl+Alt+Shift+Z pressed, "
+		drivers_log("[PS2] Ctrl+Alt+Shift+Z pressed, "
 		    "rebooting...\n");
 		power_controller_reboot();
 	}

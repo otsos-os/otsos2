@@ -71,7 +71,7 @@ $space %export pmap_destroy_page_tables_only
 */
 
 #include <mm/vm/pmap.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mm/kmem.h>
 #include <mm/vm/vm_page.h>
 
@@ -159,7 +159,7 @@ split_huge_pde(u64 *pd, u16 pd_index, u64 flags)
 
 	pt = pmap_alloc_table();
 	if (pt == NULL) {
-		com1_printf("[PMAP] split huge page failed\n");
+		printk("[PMAP] split huge page failed\n");
 		return (NULL);
 	}
 	memset(pt, 0, PAGE_SIZE);
@@ -194,7 +194,7 @@ pmap_init(void)
 	if (g_kernel_cr3 == 0) {
 		g_kernel_cr3 = cr3;
 	}
-	com1_printf("[PMAP] Initialized. CR3: %p\n",
+	printk("[PMAP] Initialized. CR3: %p\n",
 	    (void *)cr3);
 	pmap_initialized = 1;
 }
@@ -232,7 +232,7 @@ get_next_level_from(u64 *current_table, u16 index, int alloc,
 				    PTE_ADDR_MASK);
 				new_table = pmap_alloc_table();
 				if (new_table == NULL) {
-					com1_printf("[PMAP] alloc "
+					printk("[PMAP] alloc "
 					    "table failed\n");
 					return (NULL);
 				}
@@ -256,7 +256,7 @@ get_next_level_from(u64 *current_table, u16 index, int alloc,
 
 	new_table = pmap_alloc_table();
 	if (new_table == NULL) {
-		com1_printf("[PMAP] alloc table failed\n");
+		printk("[PMAP] alloc table failed\n");
 		return (NULL);
 	}
 
@@ -666,7 +666,7 @@ pmap_share_user_pages_cow(u64 *dst_pml4, u64 *src_pml4)
 					dst_pdpt[j] = pdpte;
 					continue;
 				}
-				com1_printf("[PMAP] 1GB huge not "
+				printk("[PMAP] 1GB huge not "
 				    "supported in clone\n");
 				return (-1);
 			}

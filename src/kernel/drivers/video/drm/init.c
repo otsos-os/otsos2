@@ -7,7 +7,7 @@
 #include <drm/init.h>
 #include <kernel/multiboot.h>
 #include <kernel/multiboot2.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 
 static drm_fbdev_boot_t g_boot;
 static int g_boot_ready;
@@ -26,7 +26,7 @@ static int boot_init_common(const drm_fbdev_boot_t *boot,
   }
   const drm_driver_t *drv = drm_driver_select(boot, preferred);
   if (!drv) {
-    com1_write_string("[DRM] no suitable driver\n");
+    drivers_log("[DRM] no suitable driver\n");
     return -1;
   }
   g_boot = *boot;
@@ -39,7 +39,7 @@ int drm_boot_init_mb2(multiboot2_info_t *mb_info, const char *preferred) {
       (multiboot2_tag_framebuffer_t *)multiboot2_find_tag(
           mb_info, MULTIBOOT2_TAG_TYPE_FRAMEBUFFER);
   if (!fb_tag) {
-    com1_write_string("[DRM] MB2 framebuffer tag not found\n");
+    drivers_log("[DRM] MB2 framebuffer tag not found\n");
     return -1;
   }
   drm_fbdev_boot_t boot = {
@@ -55,7 +55,7 @@ int drm_boot_init_mb2(multiboot2_info_t *mb_info, const char *preferred) {
 int drm_boot_init_mb1(multiboot_info_t *mb_info, const char *preferred) {
   if ((mb_info->flags & MULTIBOOT_FLAG_FRAMEBUFFER) == 0 ||
       mb_info->framebuffer_addr == 0) {
-    com1_write_string("[DRM] MB1 framebuffer info not available\n");
+    drivers_log("[DRM] MB1 framebuffer info not available\n");
     return -1;
   }
   drm_fbdev_boot_t boot = {

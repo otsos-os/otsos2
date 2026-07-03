@@ -31,7 +31,7 @@
 #include <kernel/event/event.h>
 #include <kernel/other/config.h>
 #include <kernel/thread.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static struct bintime	boottime;
@@ -330,9 +330,8 @@ time_windup(void)
 		th->th_offset_count = tc->tc_get_timecount(tc);
 		th->th_counter_mask = tc->tc_counter_mask;
 		th->th_scale = (~0ULL / tc->tc_frequency) + 1;
-		com1_printf("[TIME] windup with %s: scale=0x", tc->tc_name);
-		com1_write_hex_qword(th->th_scale);
-		com1_printf("\n");
+		printk("[TIME] windup with %s: scale=0x%lx\n",
+		    tc->tc_name, th->th_scale);
 	}
 }
 
@@ -365,9 +364,8 @@ time_init(void)
 
 	zone_hours = config_get_int("time", "timezone_offset", 0);
 	time_zone_offset = (s64)zone_hours * 3600;
-	com1_printf("[TIME] timezone offset: ");
-	com1_write_dec(zone_hours);
-	com1_printf(" hours\n");
+	printk("[TIME] timezone offset: %d hours\n",
+	    zone_hours);
 
 	th0.th_offset.sec = 0;
 	th0.th_offset.frac = 0;
@@ -383,10 +381,10 @@ time_init(void)
 	tc = tc_get_current();
 	if (tc != NULL) {
 		time_windup();
-		com1_printf("[TIME] initialized with %s\n",
+		printk("[TIME] initialized with %s\n",
 		    tc->tc_name);
 	} else {
-		com1_printf("[TIME] initialized, waiting for "
+		printk("[TIME] initialized, waiting for "
 		    "clocksource\n");
 	}
 }

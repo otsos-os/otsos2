@@ -27,7 +27,7 @@
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/fs/devtmpfs/devtmpfs.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
 
@@ -83,7 +83,7 @@ vfs_init(void)
 
 	devtmpfs_init();
 	vfs_initialized = 1;
-	com1_printf("[VFS] initialized (vnode pool: %d slots)\n",
+	drivers_log("[VFS] initialized (vnode pool: %d slots)\n",
 	    VFS_MAX_VNODES);
 }
 

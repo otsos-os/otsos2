@@ -30,7 +30,7 @@
 #include <kernel/api/posix/posix.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mm/vm/vm_map.h>
 #include <mm/kmem.h>
 
@@ -66,7 +66,7 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
     new_td->context.rax = 0;
     new_td->context.rsp = child_stack & ~0xFULL;
 
-    com1_printf("[CLONE] new thread tid=%d in PID %d\n",
+    printk("[CLONE] new thread tid=%d in PID %d\n",
         new_td->tid, parent->pid);
 
     return (long)new_td->tid;

@@ -36,7 +36,7 @@
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <userland/elf.h>
 #include <userland/userspace.h>
@@ -367,19 +367,19 @@ int api_proc_spawn(const char *path, const char *const *argv,
                    const char *const *envp) {
   process_t *parent = process_current();
   if (!parent) {
-    com1_printf("[SPAWN] Error: no current process\n");
+    printk("[SPAWN] Error: no current process\n");
     return -API_ERR_BAD_VALUE;
   }
 
   if (!is_user_address(path, 1)) {
-    com1_printf("[SPAWN] Error: invalid user path pointer %p\n",
+    printk("[SPAWN] Error: invalid user path pointer %p\n",
                 (void *)path);
     return -API_ERR_BAD_ADDR;
   }
 
   char *kpath = copy_user_string(path, SPAWN_MAX_STR);
   if (!kpath) {
-    com1_printf("[SPAWN] Error: failed to copy user path\n");
+    printk("[SPAWN] Error: failed to copy user path\n");
     return -API_ERR_BAD_ADDR;
   }
 
@@ -387,13 +387,13 @@ int api_proc_spawn(const char *path, const char *const *argv,
   char **kenvp = NULL;
   int argc = copy_user_string_array(argv, &kargv, SPAWN_MAX_ARGS);
   if (argc < 0) {
-    com1_printf("[SPAWN] Error: failed to copy argv\n");
+    printk("[SPAWN] Error: failed to copy argv\n");
     kmem_free(kpath);
     return argc;
   }
   int envc = copy_user_string_array(envp, &kenvp, SPAWN_MAX_ENVP);
   if (envc < 0) {
-    com1_printf("[SPAWN] Error: failed to copy envp\n");
+    printk("[SPAWN] Error: failed to copy envp\n");
     free_string_array(kargv);
     kmem_free(kpath);
     return envc;
@@ -403,7 +403,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
   u32 elf_size = 0;
   int err = read_file_into_buffer(kpath, &elf_buf, &elf_size);
   if (err < 0) {
-    com1_printf("[SPAWN] Error: failed to read file '%s'\n", kpath);
+    printk("[SPAWN] Error: failed to read file '%s'\n", kpath);
     free_string_array(kargv);
     free_string_array(kenvp);
     kmem_free(kpath);
@@ -422,7 +422,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
 
   u64 new_cr3 = pmap_create();
   if (!new_cr3) {
-    com1_printf("[SPAWN] Error: failed to create address space\n");
+    printk("[SPAWN] Error: failed to create address space\n");
     memset(child, 0, sizeof(process_t));
     kmem_free(elf_buf);
     free_string_array(kargv);
@@ -437,7 +437,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
   elf_loadinfo_t li;
   u64 entry = elf_load_full(elf_buf, elf_size, &li);
   if (entry == 0) {
-    com1_printf("[SPAWN] Error: elf_load failed for '%s'\n", kpath);
+    printk("[SPAWN] Error: elf_load failed for '%s'\n", kpath);
     kmem_free(elf_buf);
     pmap_load(old_cr3);
     free_spawn_cr3(new_cr3);
@@ -466,13 +466,13 @@ int api_proc_spawn(const char *path, const char *const *argv,
     kmem_free(elf_buf);
     elf_buf = NULL;
 
-    com1_printf("[SPAWN] PT_INTERP '%s'\n", interp_path);
+    printk("[SPAWN] PT_INTERP '%s'\n", interp_path);
 
     u8 *interp_buf = NULL;
     u32 interp_size = 0;
     int ierr = read_file_into_buffer(interp_path, &interp_buf, &interp_size);
     if (ierr < 0) {
-      com1_printf("[SPAWN] Error: cannot load interpreter '%s'\n", interp_path);
+      printk("[SPAWN] Error: cannot load interpreter '%s'\n", interp_path);
       pmap_load(old_cr3);
       free_spawn_cr3(new_cr3);
       memset(child, 0, sizeof(process_t));
@@ -486,7 +486,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
         elf_load_interp(interp_buf, interp_size, ELF_INTERP_BASE);
     kmem_free(interp_buf);
     if (interp_entry == 0) {
-      com1_printf("[SPAWN] Error: failed to load interpreter image\n");
+      printk("[SPAWN] Error: failed to load interpreter image\n");
       pmap_load(old_cr3);
       free_spawn_cr3(new_cr3);
       memset(child, 0, sizeof(process_t));
@@ -505,7 +505,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
 
   u64 user_stack = allocate_user_stack();
   if (user_stack == 0) {
-    com1_printf("[SPAWN] Error: allocate_user_stack failed\n");
+    printk("[SPAWN] Error: allocate_user_stack failed\n");
     pmap_load(old_cr3);
     free_spawn_cr3(new_cr3);
     memset(child, 0, sizeof(process_t));
@@ -521,7 +521,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
   err = build_user_stack(kargv, argc, kenvp, envc, &aux, &new_rsp, &argv_addr,
                          &envp_addr);
   if (err < 0) {
-    com1_printf("[SPAWN] Error: build_user_stack failed\n");
+    printk("[SPAWN] Error: build_user_stack failed\n");
     pmap_load(old_cr3);
     free_spawn_cr3(new_cr3);
     memset(child, 0, sizeof(process_t));
@@ -563,7 +563,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
   thread_t *td = thread_create(child, entry, new_rsp,
                                USER_CS, USER_DS);
   if (!td) {
-    com1_printf("[SPAWN] Error: failed to create thread\n");
+    printk("[SPAWN] Error: failed to create thread\n");
     pmap_destroy(new_cr3);
     memset(child, 0, sizeof(process_t));
     kmem_free(kpath);
@@ -578,7 +578,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
   child->main_thread = td;
   child->cur_thread = td;
 
-  com1_printf("[SPAWN] Created '%s' (PID %d) from '%s'\n", child->name,
+  printk("[SPAWN] Created '%s' (PID %d) from '%s'\n", child->name,
               child->pid, kpath);
   kmem_free(kpath);
 

@@ -30,7 +30,7 @@
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/tty.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/toml.h>
 
@@ -180,13 +180,13 @@ static int kusr_first_boot_setup(void) {
 }
 
 void kusr_init(void) {
-  com1_printf("[KUSR] Initializing...\n");
+  printk("[KUSR] Initializing...\n");
   crypto_rng_init();
 
 	vnode_t *vn;
 	if (vfs_resolve(KUSR_CONFIG_PATH, &vn) == 0 && vn != NULL) {
 		vnode_release(vn);
-		com1_printf("[KUSR] Config exists, skipping first-boot setup\n");
+		printk("[KUSR] Config exists, skipping first-boot setup\n");
 		g_kusr_authenticated = 0;
 		return;
 	}
@@ -194,6 +194,6 @@ void kusr_init(void) {
 	/* TESTING: auto-authenticate to allow feature testing without
 	 * interactive password setup.  Revert before release. */
 	g_kusr_authenticated = 1;
-	com1_printf("[KUSR] TEST MODE: auto-authenticated\n");
+	printk("[KUSR] TEST MODE: auto-authenticated\n");
 	return;
 }

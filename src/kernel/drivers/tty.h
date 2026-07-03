@@ -39,7 +39,9 @@ $define %func tty_putc_from_kernel as procedure with args char
 $define %func tty_flush_kernel as procedure with args void
 $define %func tty_set_color as procedure with args u8
 $define %func tty_clear_active as procedure with args void
-$define %func tty_com1_mirror as procedure with args char
+$define %func tty_log_mirror as procedure with args char
+$define %func tty_putc_to as procedure with args int, char
+$define %func tty_puts_to as procedure with args int, const char *
 $define %func tty_set_active as procedure with args int
 $define %func tty_restore_active_display as procedure with args void
 $define %func tty_update as procedure with args void
@@ -54,7 +56,8 @@ $define %func tty_power_reset as function with args int
 
 $space %export tty_read, tty_write, tty_init, tty_is_initialized
 $space %export tty_reinit, tty_putc_from_kernel, tty_flush_kernel
-$space %export tty_set_color, tty_clear_active, tty_com1_mirror
+$space %export tty_set_color, tty_clear_active, tty_log_mirror
+$space %export tty_putc_to, tty_puts_to
 $space %export tty_set_active, tty_restore_active_display
 $space %export tty_update, tty_get_input_channel
 $space %export tty_power_get, tty_power_set, tty_power_reset
@@ -75,7 +78,9 @@ void	tty_putc_from_kernel(char c);
 void	tty_flush_kernel(void);
 void	tty_set_color(u8 color);
 void	tty_clear_active(void);
-void	tty_com1_mirror(char c);
+void	tty_log_mirror(char c);
+void	tty_putc_to(int index, char c);
+void	tty_puts_to(int index, const char *s);
 void	tty_set_active(int index);
 void	tty_restore_active_display(void);
 void	tty_update(void);

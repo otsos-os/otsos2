@@ -45,7 +45,7 @@ extern void pic_send_eoi(unsigned char irq);
 #include <kernel/syscall.h>
 
 #include <kernel/process.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 
 void isr_handler(registers_t *regs) {
   if (regs->int_no == 128) {
@@ -63,7 +63,7 @@ void isr_handler(registers_t *regs) {
         if (vm_cow_fault(cr2, regs->err_code) == 0) {
             return;
         }
-        com1_printf("\n[KERNEL] Page Fault in process %d (%s) RIP=%p CR2=%p ERR=0x%x\n",
+        printk("\n[KERNEL] Page Fault in process %d (%s) RIP=%p CR2=%p ERR=0x%x\n",
                     proc ? (int)proc->pid : -1,
                     proc ? proc->name : "???", (void *)regs->rip,
                     (void *)cr2, (unsigned)regs->err_code);
@@ -71,16 +71,16 @@ void isr_handler(registers_t *regs) {
     } else if (regs->int_no == 13) {
         printf("\033[31m[KERNEL] General Protection Fault ERR=0x%x\033[0m\n",
                (unsigned)regs->err_code);
-        com1_printf("[KERNEL] General Protection Fault ERR=0x%x\n",
+        printk("[KERNEL] General Protection Fault ERR=0x%x\n",
                     (unsigned)regs->err_code);
     } else if (regs->int_no == 6) {
         printf("\033[31m[KERNEL] Invalid Opcode\033[0m\n");
-        com1_printf("[KERNEL] Invalid Opcode\n");
+        printk("[KERNEL] Invalid Opcode\n");
     } else if (regs->int_no == 0) {
         printf("\033[31m[KERNEL] Division by Zero\033[0m\n");
-        com1_printf("[KERNEL] Division by Zero\n");
+        printk("[KERNEL] Division by Zero\n");
     } else {
-        com1_printf("\n[KERNEL] Exception %d in process %d (%s) RIP=%p\n",
+        printk("\n[KERNEL] Exception %d in process %d (%s) RIP=%p\n",
                     regs->int_no, proc ? (int)proc->pid : -1,
                     proc ? proc->name : "???", (void *)regs->rip);
     }

@@ -54,8 +54,8 @@ $space %export print_panic_logo, kernel_panic, panic
 #include <kernel/drivers/tty.h>
 #include <kernel/drivers/video/drm/kms/console.h>
 #include <kernel/interrupts/idt.h>
-#include <lib/com1.h>
 #include <mlibc/mlibc.h>
+#include <mlibc/stdio.h>
 
 static const char *exception_messages[] = {
 	"Division By Zero",
@@ -103,21 +103,21 @@ dump_memory(u64 addr, int count)
 	ptr = (u8 *)addr;
 	for (i = 0; i < count; i++) {
 		if (i > 0 && i % 16 == 0) {
-			com1_printf("\n\r");
-			printf("\n");
+			klog("\n\r");
+			klog("\n");
 		}
 
 		itoa(ptr[i], buf, 16);
 
 		if (ptr[i] < 16) {
-			com1_printf("0");
-			printf("0");
+			klog("0");
+			klog("0");
 		}
-		com1_printf("%s ", buf);
-		printf("%s ", buf);
+		klog("%s ", buf);
+		klog("%s ", buf);
 	}
-	com1_printf("\n\r");
-	printf("\n");
+	klog("\n\r");
+	klog("\n");
 }
 
 void
@@ -126,8 +126,8 @@ print_stack_trace(u64 rbp)
 	u64	*frame;
 	int	i;
 
-	com1_printf("\n\rStack Trace:\n\r");
-	printf("\nStack Trace:\n");
+	klog("\n\rStack Trace:\n\r");
+	klog("\nStack Trace:\n");
 
 	frame = (u64 *)rbp;
 	for (i = 0; i < 8 && frame; i++) {
@@ -138,8 +138,8 @@ print_stack_trace(u64 rbp)
 			break;
 		}
 		rip = frame[1];
-		com1_printf("  [%d] %p\n\r", i, (void *)rip);
-		printf("  [%d] %p\n", i, (void *)rip);
+		klog("  [%d] %p\n\r", i, (void *)rip);
+		klog("  [%d] %p\n", i, (void *)rip);
 		frame = (u64 *)frame[0];
 	}
 }
@@ -302,7 +302,6 @@ kernel_panic(registers_t *regs)
 		u64	base;
 	} __attribute__((packed)) gdtr, idtr;
 
-	com1_off_mirror_callback();
 	__asm__ volatile("cli");
 
 	console_set_color(0x1F);
@@ -312,32 +311,32 @@ kernel_panic(registers_t *regs)
 	    exception_messages[regs->int_no] :
 	    "Unexpected Interrupt";
 
-	com1_printf("\n\r:::::::::::::::::::::::: KERNEL "
+	klog("\n\r:::::::::::::::::::::::: KERNEL "
 	    "PANIC ::::::::::::::::::::::::\n\r");
-	printf(":::::::::::::::::::::::: KERNEL PANIC "
+	klog(":::::::::::::::::::::::: KERNEL PANIC "
 	    "::::::::::::::::::::::::\n");
 
-	com1_printf("Exception: %s\n\r", msg);
-	printf("Exception: %s\n", msg);
+	klog("Exception: %s\n\r", msg);
+	klog("Exception: %s\n", msg);
 
-	com1_printf("RIP: %p  CS: %x  RFLAGS: %p  ERR: %x\n\r",
+	klog("RIP: %p  CS: %x  RFLAGS: %p  ERR: %x\n\r",
 	    (void *)regs->rip, (int)regs->cs,
 	    (void *)regs->rflags, (int)regs->err_code);
-	printf("RIP: %p  CS: %x  RFLAGS: %p  ERR: %x\n",
+	klog("RIP: %p  CS: %x  RFLAGS: %p  ERR: %x\n",
 	    (void *)regs->rip, (int)regs->cs,
 	    (void *)regs->rflags, (int)regs->err_code);
 
-	com1_printf("RAX: %p RBX: %p RCX: %p RDX: %p\n\r",
+	klog("RAX: %p RBX: %p RCX: %p RDX: %p\n\r",
 	    (void *)regs->rax, (void *)regs->rbx,
 	    (void *)regs->rcx, (void *)regs->rdx);
-	printf("RAX: %p RBX: %p RCX: %p RDX: %p\n",
+	klog("RAX: %p RBX: %p RCX: %p RDX: %p\n",
 	    (void *)regs->rax, (void *)regs->rbx,
 	    (void *)regs->rcx, (void *)regs->rdx);
 
-	com1_printf("RSI: %p RDI: %p RBP: %p RSP: %p\n\r",
+	klog("RSI: %p RDI: %p RBP: %p RSP: %p\n\r",
 	    (void *)regs->rsi, (void *)regs->rdi,
 	    (void *)regs->rbp, (void *)regs->rsp);
-	printf("RSI: %p RDI: %p RBP: %p RSP: %p\n",
+	klog("RSI: %p RDI: %p RBP: %p RSP: %p\n",
 	    (void *)regs->rsi, (void *)regs->rdi,
 	    (void *)regs->rbp, (void *)regs->rsp);
 
@@ -346,65 +345,65 @@ kernel_panic(registers_t *regs)
 	__asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
 	__asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
 
-	com1_printf("CR0: %p  CR2: %p  CR3: %p  CR4: %p\n\r",
+	klog("CR0: %p  CR2: %p  CR3: %p  CR4: %p\n\r",
 	    (void *)cr0, (void *)cr2, (void *)cr3,
 	    (void *)cr4);
-	printf("CR0: %p  CR2: %p  CR3: %p  CR4: %p\n",
+	klog("CR0: %p  CR2: %p  CR3: %p  CR4: %p\n",
 	    (void *)cr0, (void *)cr2, (void *)cr3,
 	    (void *)cr4);
 
 	if (regs->int_no == 14) {
-		com1_printf("PF Details: ");
+		klog("PF Details: ");
 		if (!(regs->err_code & 1)) {
-			com1_printf("Not-Present ");
+			klog("Not-Present ");
 		} else {
-			com1_printf("Protection-Violation ");
+			klog("Protection-Violation ");
 		}
 		if (regs->err_code & 2) {
-			com1_printf("Write ");
+			klog("Write ");
 		}
 		if (regs->err_code & 16) {
-			com1_printf("Instruction-Fetch ");
+			klog("Instruction-Fetch ");
 		}
-		com1_printf("\n\r");
+		klog("\n\r");
 
-		printf("PF Details: ");
+		klog("PF Details: ");
 		if (!(regs->err_code & 1)) {
-			printf("Not-Present ");
+			klog("Not-Present ");
 		} else {
-			printf("Protection-Violation ");
+			klog("Protection-Violation ");
 		}
 		if (regs->err_code & 2) {
-			printf("Write ");
+			klog("Write ");
 		}
 		if (regs->err_code & 16) {
-			printf("Instruction-Fetch ");
+			klog("Instruction-Fetch ");
 		}
-		printf("\n");
+		klog("\n");
 	}
 
 	__asm__ volatile("sgdt %0" : "=m"(gdtr));
 	__asm__ volatile("sidt %0" : "=m"(idtr));
-	com1_printf("GDTR: %p (Limit: %x)  IDTR: %p "
+	klog("GDTR: %p (Limit: %x)  IDTR: %p "
 	    "(Limit: %x)\n\r",
 	    (void *)gdtr.base, gdtr.limit,
 	    (void *)idtr.base, idtr.limit);
-	printf("GDTR: %p (Limit: %x)  IDTR: %p (Limit: %x)\n",
+	klog("GDTR: %p (Limit: %x)  IDTR: %p (Limit: %x)\n",
 	    (void *)gdtr.base, gdtr.limit,
 	    (void *)idtr.base, idtr.limit);
 
-	com1_printf("\n\rCode dump at RIP:\n\r");
-	printf("\nCode dump at RIP:\n");
+	klog("\n\rCode dump at RIP:\n\r");
+	klog("\nCode dump at RIP:\n");
 	dump_memory(regs->rip, 16);
 
-	com1_printf("\n\rStack dump at RSP:\n\r");
-	printf("\nStack dump at RSP:\n");
+	klog("\n\rStack dump at RSP:\n\r");
+	klog("\nStack dump at RSP:\n");
 	dump_memory(regs->rsp, 32);
 
 	print_stack_trace(regs->rbp);
 
-	com1_printf("\n\rSystem Halted.\n\r");
-	printf("\nSystem Halted.\n");
+	klog("\n\rSystem Halted.\n\r");
+	klog("\nSystem Halted.\n");
 
 	tty_flush_kernel();
 	print_panic_logo();
@@ -427,13 +426,13 @@ panic(const char *format, ...)
 	console_set_color(0x1F);
 	clear_scr();
 
-	com1_printf("\n\r:::::::::::::::::::::::: KERNEL "
+	klog("\n\r:::::::::::::::::::::::: KERNEL "
 	    "PANIC ::::::::::::::::::::::::\n\r");
-	printf(":::::::::::::::::::::::: KERNEL PANIC "
+	klog(":::::::::::::::::::::::: KERNEL PANIC "
 	    "::::::::::::::::::::::::\n");
 
-	com1_printf("Message: ");
-	printf("Message: ");
+	klog("Message: ");
+	klog("Message: ");
 
 	__builtin_va_start(args, format);
 
@@ -511,11 +510,11 @@ panic(const char *format, ...)
 
 	__builtin_va_end(args);
 
-	com1_printf("%s\n\r", buffer);
-	printf("%s\n", buffer);
+	klog("%s\n\r", buffer);
+	klog("%s\n", buffer);
 
-	com1_printf("\n\rSystem Halted.\n\r");
-	printf("\nSystem Halted.\n");
+	klog("\n\rSystem Halted.\n\r");
+	klog("\nSystem Halted.\n");
 
 	tty_flush_kernel();
 	print_panic_logo();

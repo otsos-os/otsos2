@@ -61,7 +61,7 @@ $space %export keyboard_get_driver_name
 #include <kernel/event/event.h>
 #include <kernel/kshell/kshell.h>
 #include <kernel/process.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define	KBD_STATUS_PORT	0x64
@@ -88,24 +88,21 @@ keyboard_manager_init(void)
 
 	status = inb(KBD_STATUS_PORT);
 	if (status == 0xFF) {
-		com1_write_string("[KEYBOARD] no ps/2 detected "
+		drivers_log("[KEYBOARD] no ps/2 detected "
 		    "(Status 0xFF).\n");
 		return;
 	}
 
 	current_driver = &ps2_driver;
 
-	com1_write_string("[KEYBOARD] detected: ");
-	com1_write_string((char *)current_driver->name);
-	com1_write_string("\n");
-
-	com1_write_string("[KEYBOARD] switch to driver: ");
-	com1_write_string((char *)current_driver->name);
-	com1_write_string("\n");
+	drivers_log("[KEYBOARD] detected: %s\n",
+	    (char *)current_driver->name);
+	drivers_log("[KEYBOARD] switch to driver: %s\n",
+	    (char *)current_driver->name);
 
 	if (current_driver->init) {
 		if (current_driver->init() != 0) {
-			com1_write_string("[KEYBOARD] init failed, "
+			drivers_log("[KEYBOARD] init failed, "
 			    "driver disabled.\n");
 			current_driver = NULL;
 		}

@@ -47,7 +47,7 @@ $space %export power_button_is_initialized
 #include <kernel/drivers/acpi/acpi.h>
 #include <kernel/drivers/power/pbutton.h>
 #include <kernel/drivers/power/power.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define	PM1_STS_PWRBTN	(1 << 8)
@@ -75,7 +75,7 @@ pbutton_handle_event(u16 pm1_event_port)
 
 	if (!g_pbutton_shutdown_in_progress) {
 		g_pbutton_shutdown_in_progress = 1;
-		com1_printf("[PWRBTN] Power button pressed, "
+		drivers_log("[PWRBTN] Power button pressed, "
 		    "shutting down...\n");
 		power_controller_shutdown();
 	}
@@ -110,7 +110,7 @@ power_button_init(void)
 	}
 
 	g_pbutton_initialized = 1;
-	com1_printf("[PWRBTN] initialized: PM1a_EVT=0x%x "
+	drivers_log("[PWRBTN] initialized: PM1a_EVT=0x%x "
 	    "PM1b_EVT=0x%x\n", g_pm1a_event, g_pm1b_event);
 	return (0);
 }

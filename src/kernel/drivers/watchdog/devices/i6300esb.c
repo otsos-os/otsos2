@@ -58,7 +58,7 @@ $space %export watchdog_i6300esb_init
 #include <mm/vm/pmap.h>
 #include <kernel/pci/utils/bar.h>
 #include <kernel/pci/utils/io.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 
 #define	I6300ESB_VENDOR_ID	0x8086
 #define	I6300ESB_DEVICE_ID	0x25AB
@@ -218,7 +218,7 @@ i6300esb_probe(pci_device_t *dev, const pci_match_t *match)
 	}
 
 	if (pci_read_bar(dev, 0, &bar0) != 0 || bar0.base == 0) {
-		com1_printf("[WDT] i6300esb: BAR0 missing\n");
+		drivers_log("[WDT] i6300esb: BAR0 missing\n");
 		return (-1);
 	}
 

@@ -79,7 +79,7 @@ $space %export g_chainfs, g_chainfs_phys
 #ifndef CHAINFS_H
 #define CHAINFS_H
 
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define	CHAINFS_MAGIC		0xCAFEBABE

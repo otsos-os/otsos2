@@ -68,7 +68,7 @@ $space %export process_get, process_create, process_create_kernel
 #include <kernel/thread.h>
 #include <kernel/event/event.h>
 #include <mm/vm/vm_map.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mm/kmem.h>
 
 #include <kernel/api/posix/posix.h>
@@ -80,12 +80,12 @@ static int	process_initialized = 0;
 void
 process_init(void)
 {
-	com1_printf("[PROC] Initializing process subsystem...\n");
+	printk("[PROC] Initializing process subsystem...\n");
 	memset(process_table, 0, sizeof(process_table));
 	next_pid = 1;
 	thread_init();
 	process_initialized = 1;
-	com1_printf("[PROC] Process table initialized "
+	printk("[PROC] Process table initialized "
 	    "(%d slots)\n", MAX_PROCESSES);
 }
 
@@ -110,7 +110,7 @@ process_create_kernel(const char *name, void (*entry)(void))
 
 	proc = alloc_process();
 	if (!proc) {
-		com1_printf("[PROC] Error: no free process slots\n");
+		printk("[PROC] Error: no free process slots\n");
 		return (NULL);
 	}
 
@@ -138,7 +138,7 @@ process_create_kernel(const char *name, void (*entry)(void))
 	td = thread_create(proc, (u64)entry, 0, KERNEL_CS,
 	    KERNEL_DS);
 	if (!td) {
-		com1_printf("[PROC] Error: failed to create thread "
+		printk("[PROC] Error: failed to create thread "
 		    "for kernel process\n");
 		memset(proc, 0, sizeof(process_t));
 		return (NULL);
@@ -149,7 +149,7 @@ process_create_kernel(const char *name, void (*entry)(void))
 	proc->main_thread = td;
 	proc->cur_thread = td;
 
-	com1_printf("[PROC] Created kernel process '%s' "
+	printk("[PROC] Created kernel process '%s' "
 	    "(PID %d) entry=%p\n", proc->name, proc->pid,
 	    (void *)proc->entry_point);
 
@@ -220,7 +220,7 @@ process_exit(int code)
 
 	proc = process_current();
 	if (!proc) {
-		com1_printf("[PROC] Error: no current process "
+		printk("[PROC] Error: no current process "
 		    "to exit\n");
 		return;
 	}
@@ -230,7 +230,7 @@ process_exit(int code)
 		td = proc->main_thread;
 	}
 
-	com1_printf("[PROC] Process '%s' (PID %d) exited "
+	printk("[PROC] Process '%s' (PID %d) exited "
 	    "with code %d\n", proc->name, proc->pid, code);
 
 	if (proc->pid == 1) {
@@ -284,7 +284,7 @@ process_dump(process_t *proc)
 	thread_t	*td;
 
 	if (!proc) {
-		com1_printf("[PROC] NULL process\n");
+		printk("[PROC] NULL process\n");
 		return;
 	}
 
@@ -293,26 +293,26 @@ process_dump(process_t *proc)
 	const char	*state_names[] = {"UNUSED", "EMBRYO",
 	    "RUNNABLE", "RUNNING", "SLEEPING", "ZOMBIE"};
 
-	com1_printf("=== Process Dump ===\n");
-	com1_printf("  PID: %d, PPID: %d\n", proc->pid,
+	printk("=== Process Dump ===\n");
+	printk("  PID: %d, PPID: %d\n", proc->pid,
 	    proc->ppid);
-	com1_printf("  Name: %s\n", proc->name);
+	printk("  Name: %s\n", proc->name);
 	if (td) {
-		com1_printf("  State: %s\n",
+		printk("  State: %s\n",
 		    state_names[td->state]);
-		com1_printf("  TID: %d\n", td->tid);
-		com1_printf("  Kernel Stack: %p\n",
+		printk("  TID: %d\n", td->tid);
+		printk("  Kernel Stack: %p\n",
 		    (void *)td->kernel_stack);
-		com1_printf("  Context RIP: %p\n",
+		printk("  Context RIP: %p\n",
 		    (void *)td->context.rip);
-		com1_printf("  Context RSP: %p\n",
+		printk("  Context RSP: %p\n",
 		    (void *)td->context.rsp);
 	}
-	com1_printf("  Entry: %p\n", (void *)proc->entry_point);
-	com1_printf("  CR3: %p\n", (void *)proc->cr3);
-	com1_printf("  User Stack: %p\n",
+	printk("  Entry: %p\n", (void *)proc->entry_point);
+	printk("  CR3: %p\n", (void *)proc->cr3);
+	printk("  User Stack: %p\n",
 	    (void *)proc->user_stack);
-	com1_printf("====================\n");
+	printk("====================\n");
 }
 
 void

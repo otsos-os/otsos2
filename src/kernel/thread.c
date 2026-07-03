@@ -71,7 +71,7 @@ $space %export thread_count_alive, thread_kill_all
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/event/event.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
 
@@ -109,12 +109,12 @@ static void	thread_unlink(thread_t *td);
 void
 thread_init(void)
 {
-	com1_printf("[THREAD] Initializing thread subsystem...\n");
+	printk("[THREAD] Initializing thread subsystem...\n");
 	memset(thread_table, 0, sizeof(thread_table));
 	next_tid = 1;
 	current_thread = NULL;
 	thread_initialized = 1;
-	com1_printf("[THREAD] Thread table initialized "
+	printk("[THREAD] Thread table initialized "
 	    "(%d slots)\n", MAX_THREADS);
 }
 
@@ -154,13 +154,13 @@ thread_create(process_t *proc, u64 rip, u64 rsp, u64 cs, u64 ss)
 
 	td = thread_alloc();
 	if (!td) {
-		com1_printf("[THREAD] Error: no free thread slots\n");
+		printk("[THREAD] Error: no free thread slots\n");
 		return (NULL);
 	}
 
 	kstack = (u8 *)kmem_alloc_aligned(KERNEL_STACK_SIZE, 16);
 	if (!kstack) {
-		com1_printf("[THREAD] Error: failed to allocate "
+		printk("[THREAD] Error: failed to allocate "
 		    "kernel stack\n");
 		td->used = 0;
 		return (NULL);
@@ -188,7 +188,7 @@ thread_create(process_t *proc, u64 rip, u64 rsp, u64 cs, u64 ss)
 
 	thread_link(proc, td);
 
-	com1_printf("[THREAD] Created thread tid=%d for PID %d "
+	printk("[THREAD] Created thread tid=%d for PID %d "
 	    "rip=%p\n", td->tid, proc->pid, (void *)rip);
 
 	return (td);
@@ -371,7 +371,7 @@ thread_exit(int code)
 
 	proc = td->proc;
 
-	com1_printf("[THREAD] tid=%d (PID %d) exiting code=%d\n",
+	printk("[THREAD] tid=%d (PID %d) exiting code=%d\n",
 	    td->tid, proc ? (int)proc->pid : 0, code);
 
 	td->exit_code = code;
@@ -392,7 +392,7 @@ thread_exit(int code)
 
 	/* If this was the last alive thread, kill the whole process */
 	if (proc && thread_count_alive(proc) == 0) {
-		com1_printf("[THREAD] last thread exited, "
+		printk("[THREAD] last thread exited, "
 		    "process PID %d terminating\n",
 		    (int)proc->pid);
 		process_exit(code);

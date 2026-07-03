@@ -52,7 +52,7 @@ $space %internal parse_s5_from_dsdt
 #include <kernel/drivers/power/pbutton.h>
 #include <kernel/drivers/power/power.h>
 #include <kernel/panic.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define	PM1_SLP_EN	(1 << 13)
@@ -83,7 +83,7 @@ parse_s5_from_dsdt(acpi_fadt_t *fadt)
 	}
 
 	if (!dsdt_addr) {
-		com1_printf("[POWER] no DSDT found\n");
+		drivers_log("[POWER] no DSDT found\n");
 		return (-1);
 	}
 
@@ -91,11 +91,11 @@ parse_s5_from_dsdt(acpi_fadt_t *fadt)
 
 	if (dsdt->signature[0] != 'D' || dsdt->signature[1] != 'S' ||
 	    dsdt->signature[2] != 'D' || dsdt->signature[3] != 'T') {
-		com1_printf("[POWER] invalid DSDT signature\n");
+		drivers_log("[POWER] invalid DSDT signature\n");
 		return (-1);
 	}
 
-	com1_printf("[POWER] DSDT at %p, length %u\n", (void *)dsdt_addr,
+	drivers_log("[POWER] DSDT at %p, length %u\n", (void *)dsdt_addr,
 	    dsdt->length);
 
 	aml = (u8 *)dsdt + sizeof(acpi_sdt_header_t);
@@ -104,7 +104,7 @@ parse_s5_from_dsdt(acpi_fadt_t *fadt)
 	for (i = 0; i < aml_length - 4; i++) {
 		if (aml[i] == '_' && aml[i + 1] == 'S' &&
 		    aml[i + 2] == '5' && aml[i + 3] == '_') {
-			com1_printf("[POWER] found _S5_ at DSDT "
+			drivers_log("[POWER] found _S5_ at DSDT "
 			    "offset %u\n", i);
 
 			s5_ptr = aml + i + 4;
@@ -128,7 +128,7 @@ parse_s5_from_dsdt(acpi_fadt_t *fadt)
 				}
 				g_power.slp_typb_s5 = *s5_ptr;
 
-				com1_printf("[POWER] S5 SLP_TYP: a=%u, "
+				drivers_log("[POWER] S5 SLP_TYP: a=%u, "
 				    "b=%u\n", g_power.slp_typa_s5,
 				    g_power.slp_typb_s5);
 				(void)pkg_len;
@@ -137,7 +137,7 @@ parse_s5_from_dsdt(acpi_fadt_t *fadt)
 		}
 	}
 
-	com1_printf("[POWER] _S5_ object not found in DSDT\n");
+	drivers_log("[POWER] _S5_ object not found in DSDT\n");
 	return (-1);
 }
 
@@ -149,7 +149,7 @@ power_init(void)
 	memset(&g_power, 0, sizeof(g_power));
 
 	if (!acpi_is_initialized()) {
-		com1_printf("[POWER] ACPI not available, "
+		drivers_log("[POWER] ACPI not available, "
 		    "limited power management\n");
 		g_power.initialized = 1;
 		return (-1);
@@ -157,7 +157,7 @@ power_init(void)
 
 	fadt = acpi_get_fadt();
 	if (!fadt) {
-		com1_printf("[POWER] FADT not found, "
+		drivers_log("[POWER] FADT not found, "
 		    "limited power management\n");
 		g_power.initialized = 1;
 		return (-1);
@@ -171,7 +171,7 @@ power_init(void)
 
 	if (fadt->flags & ACPI_FADT_RESET_REG_SUP) {
 		g_power.reset_reg_available = 1;
-		com1_printf("[POWER] ACPI reset register available "
+		drivers_log("[POWER] ACPI reset register available "
 		    "at 0x%x\n",
 		    (u32)fadt->reset_reg.address);
 	}
@@ -180,7 +180,7 @@ power_init(void)
 
 	g_power.initialized = 1;
 
-	com1_printf("[POWER] initialized: PM1a=0x%x PM1b=0x%x "
+	drivers_log("[POWER] initialized: PM1a=0x%x PM1b=0x%x "
 	    "SLP_TYP_S5=%u/%u\n",
 	    g_power.pm1a_control, g_power.pm1b_control,
 	    g_power.slp_typa_s5, g_power.slp_typb_s5);
@@ -195,7 +195,7 @@ power_shutdown(void)
 {
 	u16	slp_typa;
 
-	com1_printf("[POWER] shutting down...\n");
+	drivers_log("[POWER] shutting down...\n");
 
 	__asm__ volatile("cli");
 
@@ -203,7 +203,7 @@ power_shutdown(void)
 		volatile int	i;
 
 		slp_typa = (g_power.slp_typa_s5 << 10) | PM1_SLP_EN;
-		com1_printf("[POWER] writing 0x%x to PM1a control "
+		drivers_log("[POWER] writing 0x%x to PM1a control "
 		    "(0x%x)\n", slp_typa, g_power.pm1a_control);
 		outw(g_power.pm1a_control, slp_typa);
 
@@ -230,7 +230,7 @@ power_reboot(void)
 	volatile int	i;
 	u8		good;
 
-	com1_printf("[POWER] rebooting...\n");
+	drivers_log("[POWER] rebooting...\n");
 
 	__asm__ volatile("cli");
 
@@ -241,7 +241,7 @@ power_reboot(void)
 		if (fadt) {
 			if (fadt->reset_reg.address_space ==
 			    ACPI_GAS_SYSTEM_IO) {
-				com1_printf("[POWER] ACPI reset via "
+				drivers_log("[POWER] ACPI reset via "
 				    "I/O port 0x%x = 0x%x\n",
 				    (u32)fadt->reset_reg.address,
 				    fadt->reset_value);
@@ -251,7 +251,7 @@ power_reboot(void)
 			    ACPI_GAS_SYSTEM_MEMORY) {
 				volatile u8	*reg;
 
-				com1_printf("[POWER] ACPI reset via "
+				drivers_log("[POWER] ACPI reset via "
 				    "MMIO 0x%x = 0x%x\n",
 				    (u32)fadt->reset_reg.address,
 				    fadt->reset_value);
@@ -266,7 +266,7 @@ power_reboot(void)
 		}
 	}
 
-	com1_printf("[POWER] trying PS/2 keyboard controller "
+	drivers_log("[POWER] trying PS/2 keyboard controller "
 	    "reset\n");
 
 	good = 0x02;
@@ -279,7 +279,7 @@ power_reboot(void)
 		__asm__ volatile("pause");
 	}
 
-	com1_printf("[POWER] triple-faulting...\n");
+	drivers_log("[POWER] triple-faulting...\n");
 	struct {
 		u16	limit;
 		u64	base;
@@ -299,18 +299,18 @@ power_acpi_enable(void)
 	int	i;
 
 	if (!g_power.acpi_available || !g_power.smi_command_port) {
-		com1_printf("[POWER] SMI command port not "
+		drivers_log("[POWER] SMI command port not "
 		    "available\n");
 		return (-1);
 	}
 
 	pm1a = inw(g_power.pm1a_control);
 	if (pm1a & 1) {
-		com1_printf("[POWER] ACPI already enabled\n");
+		drivers_log("[POWER] ACPI already enabled\n");
 		return (0);
 	}
 
-	com1_printf("[POWER] enabling ACPI via SMI cmd port "
+	drivers_log("[POWER] enabling ACPI via SMI cmd port "
 	    "0x%x, value 0x%x\n",
 	    g_power.smi_command_port, g_power.acpi_enable_value);
 	outb((u16)g_power.smi_command_port, g_power.acpi_enable_value);
@@ -320,7 +320,7 @@ power_acpi_enable(void)
 
 		pm1a = inw(g_power.pm1a_control);
 		if (pm1a & 1) {
-			com1_printf("[POWER] ACPI mode enabled "
+			drivers_log("[POWER] ACPI mode enabled "
 			    "successfully\n");
 			return (0);
 		}

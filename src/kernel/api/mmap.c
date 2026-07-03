@@ -11,7 +11,7 @@
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mm/vm/vm_map.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define PAGE_SIZE 4096

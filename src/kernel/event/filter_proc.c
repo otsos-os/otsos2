@@ -56,7 +56,7 @@ $space %export event_notify_proc_exit, event_notify_proc_fork
 #include <kernel/event/event.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static int
@@ -69,12 +69,12 @@ filt_proc_attach(knote_t *kn)
 
 	proc = process_get(pid);
 	if (!proc) {
-		com1_printf("[EVFILT_PROC] attach: pid %d not "
+		printk("[EVFILT_PROC] attach: pid %d not "
 		    "found\n", pid);
 		return (-API_ERR_NO_PROC);
 	}
 
-	com1_printf("[EVFILT_PROC] attach: monitoring "
+	printk("[EVFILT_PROC] attach: monitoring "
 	    "pid=%d\n", pid);
 
 	if (proc->main_thread &&

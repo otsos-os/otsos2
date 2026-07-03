@@ -71,7 +71,7 @@ $space %export crypto_rng_tick
 #include <kernel/crypto/util/crypto_util.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/event/event.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define ENTROPY_POOL_SIZE	256
@@ -385,7 +385,7 @@ crypto_rng_init(void)
 		return;
 	}
 
-	com1_printf("[RNG] initializing ChaCha20-DRBG...\n");
+	printk("[RNG] initializing ChaCha20-DRBG...\n");
 
 	entropy_pool_init();
 
@@ -399,7 +399,7 @@ crypto_rng_init(void)
 	drbg_reseed();
 	g_rng_ready = 1;
 
-	com1_printf("[RNG] CSPRNG ready (pool=%d bytes, "
+	printk("[RNG] CSPRNG ready (pool=%d bytes, "
 	    "reseed threshold=%d bytes)\n",
 	    ENTROPY_POOL_SIZE, DRBG_RESEED_THRESHOLD);
 }

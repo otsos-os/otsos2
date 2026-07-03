@@ -34,7 +34,7 @@
 #include <kernel/api/api.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
-#include <lib/com1.h>
+#include <mlibc/mlibc.h>
 #include <mlibc/mlibc.h>
 #include <userland/elf.h>
 #include <userland/userspace.h>
@@ -54,7 +54,7 @@ static void status_line(const char *label, int ok) {
 }
 
 void userspace_init(void) {
-  com1_printf("[USERSPACE] Initializing userspace subsystem...\n");
+  printk("[USERSPACE] Initializing userspace subsystem...\n");
 
   /* Initialize GDT with Ring 3 support */
   gdt_init();
@@ -64,7 +64,7 @@ void userspace_init(void) {
   process_init();
   status_line("process", process_is_initialized());
 
-  com1_printf("[USERSPACE] Userspace ready\n");
+  printk("[USERSPACE] Userspace ready\n");
 }
 
 /* Allocate and map user stack */
@@ -73,13 +73,13 @@ static u64 allocate_user_stack(void) {
   u64 stack_pages = (USER_STACK_SIZE + PAGE_SIZE - 1) / PAGE_SIZE;
   u64 stack_bottom = USER_STACK_TOP;
 
-  com1_printf("[USERSPACE] Allocating user stack: %d pages at %p\n",
+  printk("[USERSPACE] Allocating user stack: %d pages at %p\n",
               (int)stack_pages, (void *)stack_bottom);
 
   for (u64 i = 0; i < stack_pages; i++) {
     u64 page = vm_page_alloc_phys(0);
     if (!page) {
-      com1_printf("[USERSPACE] Error: Failed to allocate stack page\n");
+      printk("[USERSPACE] Error: Failed to allocate stack page\n");
       for (u64 j = 0; j < i; j++) {
         u64 vaddr = stack_bottom + (j * PAGE_SIZE);
         u64 paddr = pmap_extract(vaddr);
@@ -113,7 +113,7 @@ register_data_bss(process_t *proc, u64 data_start, u64 data_end)
 
   obj = vm_object_create(VM_OBJ_ANON, data_end - data_start, NULL);
   if (!obj) {
-    com1_printf("[USERSPACE] Error: failed to create data/BSS object\n");
+    printk("[USERSPACE] Error: failed to create data/BSS object\n");
     return;
   }
 
@@ -122,7 +122,7 @@ register_data_bss(process_t *proc, u64 data_start, u64 data_end)
     if (phys == 0) {
       phys = vm_page_alloc_phys(0);
       if (phys == 0) {
-        com1_printf("[USERSPACE] Error: failed to allocate data/BSS page at %p\n", (void *)va);
+        printk("[USERSPACE] Error: failed to allocate data/BSS page at %p\n", (void *)va);
         break;
       }
       memset((void *)phys, 0, PAGE_SIZE);
@@ -137,12 +137,12 @@ register_data_bss(process_t *proc, u64 data_start, u64 data_end)
 }
 
 process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
-  com1_printf("[USERSPACE] Loading ELF process '%s' (%d bytes)\n", name,
+  printk("[USERSPACE] Loading ELF process '%s' (%d bytes)\n", name,
               (int)elf_size);
 
   u64 new_cr3 = pmap_create();
   if (new_cr3 == 0) {
-    com1_printf("[USERSPACE] Error: Failed to create address space\n");
+    printk("[USERSPACE] Error: Failed to create address space\n");
     return NULL;
   }
 
@@ -153,7 +153,7 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   elf_loadinfo_t li;
   u64 entry = elf_load_full(elf_data, elf_size, &li);
   if (entry == 0) {
-    com1_printf("[USERSPACE] Error: Failed to load ELF\n");
+    printk("[USERSPACE] Error: Failed to load ELF\n");
     pmap_load(old_cr3);
     pmap_destroy(new_cr3);
     return NULL;
@@ -172,7 +172,7 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   /* Allocate a new process slot */
   process_t *new_proc = alloc_process();
   if (!new_proc) {
-    com1_printf("[USERSPACE] Error: No free process slots\n");
+    printk("[USERSPACE] Error: No free process slots\n");
     pmap_destroy(new_cr3);
     return NULL;
   }
@@ -216,7 +216,7 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   thread_t *td = thread_create(new_proc, entry, user_stack,
                                USER_CS, USER_DS);
   if (!td) {
-    com1_printf("[USERSPACE] error: Failed to create thread\n");
+    printk("[USERSPACE] error: Failed to create thread\n");
     pmap_destroy(new_cr3);
     memset(new_proc, 0, sizeof(process_t));
     return NULL;
@@ -225,35 +225,35 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   new_proc->main_thread = td;
   new_proc->cur_thread = td;
 
-  com1_printf("[USERSPACE] Created process '%s' (PID %d)\n", new_proc->name,
+  printk("[USERSPACE] Created process '%s' (PID %d)\n", new_proc->name,
               new_proc->pid);
-  com1_printf("[USERSPACE]   Entry: %p\n", (void *)entry);
-  com1_printf("[USERSPACE]   User stack: %p\n", (void *)user_stack);
-  com1_printf("[USERSPACE]   Kernel stack: %p\n",
+  printk("[USERSPACE]   Entry: %p\n", (void *)entry);
+  printk("[USERSPACE]   User stack: %p\n", (void *)user_stack);
+  printk("[USERSPACE]   Kernel stack: %p\n",
               (void *)td->kernel_stack);
 
   return new_proc;
 }
 
 void userspace_load_init(void *module_start, u64 module_size) {
-  com1_printf("[USERSPACE] Loading init process from module...\n");
-  com1_printf("[USERSPACE] Module at %p, size %d bytes\n", module_start,
+  printk("[USERSPACE] Loading init process from module...\n");
+  printk("[USERSPACE] Module at %p, size %d bytes\n", module_start,
               (int)module_size);
 
   process_t *init = userspace_load_elf("init", module_start, module_size);
   if (!init) {
-    com1_printf("[USERSPACE] FATAL: Failed to load init!\n");
+    printk("[USERSPACE] FATAL: Failed to load init!\n");
     while (1)
       __asm__ volatile("hlt");
   }
 
   /* Init always has kusr rights */
   init->kusr_auth = 1;
-  com1_printf("[USERSPACE] Granted kusr rights to init (PID %d)\n", init->pid);
+  printk("[USERSPACE] Granted kusr rights to init (PID %d)\n", init->pid);
 
   /* Init must be PID 1 */
   if (init->pid != 1) {
-    com1_printf("[USERSPACE] Warning: init is not PID 1 (got %d)\n", init->pid);
+    printk("[USERSPACE] Warning: init is not PID 1 (got %d)\n", init->pid);
   }
 
   process_dump(init);
@@ -264,21 +264,21 @@ void userspace_load_init(void *module_start, u64 module_size) {
 
 void userspace_jump(process_t *proc) {
   if (!proc) {
-    com1_printf("[USERSPACE] Error: Cannot jump to NULL process\n");
+    printk("[USERSPACE] Error: Cannot jump to NULL process\n");
     return;
   }
 
   thread_t *td = proc->main_thread;
   if (!td) {
-    com1_printf("[USERSPACE] Error: No main thread for process\n");
+    printk("[USERSPACE] Error: No main thread for process\n");
     return;
   }
 
-  com1_printf("[USERSPACE] Jumping to userspace: %s (PID %d)\n", proc->name,
+  printk("[USERSPACE] Jumping to userspace: %s (PID %d)\n", proc->name,
               proc->pid);
-  com1_printf("[USERSPACE]   Entry: %p\n", (void *)proc->entry_point);
-  com1_printf("[USERSPACE]   Stack: %p\n", (void *)proc->user_stack);
-  com1_printf("[USERSPACE]   CS: 0x%x, SS: 0x%x\n", (u32)td->context.cs,
+  printk("[USERSPACE]   Entry: %p\n", (void *)proc->entry_point);
+  printk("[USERSPACE]   Stack: %p\n", (void *)proc->user_stack);
+  printk("[USERSPACE]   CS: 0x%x, SS: 0x%x\n", (u32)td->context.cs,
               (u32)td->context.ss);
 
   /* Set as current process */
@@ -290,7 +290,7 @@ void userspace_jump(process_t *proc) {
                   td->context.ss);
 
   /* Should never return */
-  com1_printf("[USERSPACE] FATAL: Returned from userspace!\n");
+  printk("[USERSPACE] FATAL: Returned from userspace!\n");
   while (1)
     __asm__ volatile("hlt");
 }

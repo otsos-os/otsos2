@@ -54,7 +54,7 @@
 
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_page.h>
-#include <lib/com1.h>
+#include <mlibc/mlibc.h>
 #include <mm/kmem.h>
 #include <userland/elf.h>
 
@@ -159,13 +159,13 @@ u64 elf_load(void *data, u64 size) {
   elf_result_t result = elf_parse(data, size, &info);
 
   if (result != ELF_OK) {
-    com1_printf("[ELF] Error: %s\n", elf_strerror(result));
+    printk("[ELF] Error: %s\n", elf_strerror(result));
     return 0;
   }
 
-  com1_printf("[ELF] Loading ELF: entry=%p, segments=%d\n",
+  printk("[ELF] Loading ELF: entry=%p, segments=%d\n",
               (void *)info.entry_point, info.header->e_phnum);
-  com1_printf("[ELF] Load range: %p - %p\n", (void *)info.load_addr_min,
+  printk("[ELF] Load range: %p - %p\n", (void *)info.load_addr_min,
               (void *)info.load_addr_max);
 
   /* Load each PT_LOAD segment */
@@ -181,7 +181,7 @@ u64 elf_load(void *data, u64 size) {
     u64 memsz = phdr->p_memsz;
     u64 offset = phdr->p_offset;
 
-    com1_printf("[ELF] Loading segment: vaddr=%p filesz=%d memsz=%d flags=%x\n",
+    printk("[ELF] Loading segment: vaddr=%p filesz=%d memsz=%d flags=%x\n",
                 (void *)vaddr, (int)filesz, (int)memsz, phdr->p_flags);
 
     /* Determine page flags.
@@ -216,7 +216,7 @@ u64 elf_load(void *data, u64 size) {
       /* Allocate physical page */
       u64 phys_page = vm_page_alloc_phys(0);
       if (!phys_page) {
-        com1_printf("[ELF] Error: Failed to allocate page at %p\n",
+        printk("[ELF] Error: Failed to allocate page at %p\n",
                     (void *)page);
         return 0;
       }
@@ -259,7 +259,7 @@ u64 elf_load(void *data, u64 size) {
     }
   }
 
-  com1_printf("[ELF] Load complete, entry point: %p\n",
+  printk("[ELF] Load complete, entry point: %p\n",
               (void *)info.entry_point);
 
   return info.entry_point;

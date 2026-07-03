@@ -53,7 +53,7 @@ $space %export watchdog_ich_tco_init
 */
 
 #include <kernel/drivers/watchdog/watchdog.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define	ICH_VENDOR_ID		0x8086
@@ -187,7 +187,7 @@ ich_tco_probe(pci_device_t *dev, const pci_match_t *match)
 	    dev->function, ICH_PMBASE);
 	pmbase &= 0xFF80;
 	if (pmbase == 0) {
-		com1_printf("[WDT] ich_tco: PMBASE not set\n");
+		drivers_log("[WDT] ich_tco: PMBASE not set\n");
 		return (-1);
 	}
 

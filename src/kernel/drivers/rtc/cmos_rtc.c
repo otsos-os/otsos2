@@ -26,7 +26,7 @@
 
 #include <kernel/drivers/rtc/rtc.h>
 #include <kernel/time.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define	CMOS_ADDR	0x70
@@ -171,7 +171,7 @@ rtc_read_time(struct bintime *bt)
 
 	full_year = (u32)century * 100 + (u32)year;
 	if (full_year < 1970) {
-		com1_printf("[RTC] CMOS year %u is before 1970, "
+		drivers_log("[RTC] CMOS year %u is before 1970, "
 		    "falling back to epoch\n", full_year);
 		bt->sec = 0;
 		bt->frac = 0;
@@ -184,21 +184,9 @@ rtc_read_time(struct bintime *bt)
 	bt->sec = epoch_sec;
 	bt->frac = 0;
 
-	com1_printf("[RTC] CMOS time: ");
-	com1_write_dec(full_year);
-	com1_printf("-");
-	com1_write_dec(month);
-	com1_printf("-");
-	com1_write_dec(mday);
-	com1_printf(" ");
-	com1_write_dec(hour);
-	com1_printf(":");
-	com1_write_dec(min);
-	com1_printf(":");
-	com1_write_dec(sec);
-	com1_printf(" (epoch ");
-	com1_write_dec(epoch_sec);
-	com1_printf(")\n");
+	drivers_log("[RTC] CMOS time: %u-%u-%u %u:%u:%u "
+	    "(epoch %u)\n", full_year, month, mday, hour,
+	    min, sec, epoch_sec);
 
 	return (0);
 }

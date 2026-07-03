@@ -6,7 +6,7 @@
 #include <drm/fbdev.h>
 #include <drm/kms/crtc.h>
 #include <mm/vm/pmap.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define PAGE_SIZE 4096
@@ -56,11 +56,8 @@ static int fbdev_init(const void *boot_info) {
   drm_crtc_set_mode_geometry(boot->width, boot->height, boot->pitch,
                              boot->bpp, boot->hw_address);
 
-  com1_write_string("[FBDEV] hw fb mapped: ");
-  com1_write_dec(boot->width);
-  com1_write_string("x");
-  com1_write_dec(boot->height);
-  com1_write_string("\n");
+  drivers_log("[FBDEV] hw fb mapped: %ux%u\n",
+      boot->width, boot->height);
   return 0;
 }
 

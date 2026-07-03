@@ -76,7 +76,7 @@ $space %export kmem_is_initialized, kmem_dump
 
 */
 
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <kernel/bootmem.h>
 #include <mm/kmem.h>
 #include <mlibc/mlibc.h>
@@ -172,7 +172,7 @@ kmem_init_internal(void)
 	kmem_heap_start = (char *)bootmem_alloc(
 	    KMEM_HEAP_SIZE_VAL, 4096);
 	if (kmem_heap_start == NULL) {
-		com1_printf("KMEM: bootmem failed to allocate "
+		printk("KMEM: bootmem failed to allocate "
 		    "heap\n");
 		return;
 	}
@@ -187,9 +187,9 @@ kmem_init_internal(void)
 	kmem_heap_head->prev = NULL;
 	kmem_heap_head->is_free = 1;
 
-	com1_printf("Heap initialized at %p header size: %d\n",
+	printk("Heap initialized at %p header size: %d\n",
 	    kmem_heap_start, (int)sizeof(header_t));
-	com1_printf("free block size: %d\n",
+	printk("free block size: %d\n",
 	    (int)kmem_heap_head->size);
 	kmem_heap_init = 1;
 }
@@ -216,7 +216,7 @@ kmem_alloc_internal(size_t size)
 	current = kmem_heap_head;
 	while (current != NULL) {
 		if (current->magic != KMEM_MAGIC) {
-			com1_printf("HEAP CORRUPTION at %p "
+			printk("HEAP CORRUPTION at %p "
 			    "magic=%x\n", current,
 			    current->magic);
 			return (NULL);
@@ -239,7 +239,7 @@ kmem_alloc_internal(size_t size)
 		current = current->next;
 	}
 
-	com1_printf("KMALLOC FAILED! request size: %d\n",
+	printk("KMALLOC FAILED! request size: %d\n",
 	    (int)size);
 	return (NULL);
 }
@@ -264,16 +264,16 @@ kmem_free_internal(void *ptr)
 
 	if ((char *)header < kmem_heap_start ||
 	    (char *)header >= kmem_heap_end) {
-		com1_printf("KFREE: invalid pointer %p\n", ptr);
+		printk("KFREE: invalid pointer %p\n", ptr);
 		return;
 	}
 	if (header->magic != KMEM_MAGIC) {
-		com1_printf("KFREE: invalid pointer or heap "
+		printk("KFREE: invalid pointer or heap "
 		    "corrupt %p\n", ptr);
 		return;
 	}
 	if (header->is_free) {
-		com1_printf("KFREE: double free %p\n", ptr);
+		printk("KFREE: double free %p\n", ptr);
 		return;
 	}
 
@@ -281,7 +281,7 @@ kmem_free_internal(void *ptr)
 	payload = base + KMEM_REDZONE_SZ;
 	for (i = 0; i < KMEM_REDZONE_SZ; i++) {
 		if (base[i] != KMEM_REDZONE_PAT) {
-			com1_printf("KFREE: left redzone "
+			printk("KFREE: left redzone "
 			    "corrupted %p\n", ptr);
 			break;
 		}
@@ -289,7 +289,7 @@ kmem_free_internal(void *ptr)
 	for (i = 0; i < KMEM_REDZONE_SZ; i++) {
 		if (payload[header->payload_size + i] !=
 		    KMEM_REDZONE_PAT) {
-			com1_printf("KFREE: right redzone "
+			printk("KFREE: right redzone "
 			    "corrupted %p\n", ptr);
 			break;
 		}
@@ -455,7 +455,7 @@ kmem_alloc_aligned_internal(size_t size, size_t align)
 		current = current->next;
 	}
 
-	com1_printf("KMALLOC_ALIGNED FAILED! size=%d "
+	printk("KMALLOC_ALIGNED FAILED! size=%d "
 	    "align=%d\n", (int)size, (int)align);
 	return (NULL);
 }
@@ -511,20 +511,20 @@ kmem_dump_internal(void)
 	header_t	*current;
 	int		i;
 
-	com1_printf("--- HEAP DUMP ---\n");
+	printk("--- HEAP DUMP ---\n");
 	current = kmem_heap_head;
 	i = 0;
 	while (current != NULL) {
-		com1_printf("Block %d: %p size=%d free=%d "
+		printk("Block %d: %p size=%d free=%d "
 		    "next=%p prev=%p\n", i++, current,
 		    (int)current->size,
 		    (int)current->is_free,
 		    current->next, current->prev);
 		current = current->next;
 	}
-	com1_printf("Total free: %d\n",
+	printk("Total free: %d\n",
 	    (int)kmem_free_bytes_internal());
-	com1_printf("-----------------\n");
+	printk("-----------------\n");
 }
 
 void

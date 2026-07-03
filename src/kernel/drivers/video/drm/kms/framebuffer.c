@@ -7,7 +7,7 @@
 #include <drm/object.h>
 #include <drm/kms/framebuffer.h>
 #include <drm/kms/plane.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 drm_id_t drm_framebuffer_create(drm_handle_t gem, u32 width, u32 height,
@@ -17,7 +17,7 @@ drm_id_t drm_framebuffer_create(drm_handle_t gem, u32 width, u32 height,
     return DRM_ID_NONE;
   }
   if ((u64)pitch * height > buf->size) {
-    com1_write_string("[FB] gem buffer too small for framebuffer\n");
+    drivers_log("[FB] gem buffer too small for framebuffer\n");
     return DRM_ID_NONE;
   }
 

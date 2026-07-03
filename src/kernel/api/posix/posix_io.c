@@ -31,7 +31,7 @@
 #include <kernel/drivers/tty.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
 

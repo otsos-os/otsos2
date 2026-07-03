@@ -50,7 +50,7 @@ $space %export disk_read, disk_write
 */
 
 #include "disk.h"
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 
 #define	MAX_DISKS	8
 
@@ -68,7 +68,7 @@ disk_manager_init(void)
 	}
 	disk_count_val = 0;
 	disk_manager_initialized_val = 1;
-	com1_printf("[DISK] Disk manager initialized\n");
+	drivers_log("[DISK] Disk manager initialized\n");
 }
 
 int
@@ -81,11 +81,11 @@ int
 disk_register(disk_t *disk)
 {
 	if (disk_count_val >= MAX_DISKS) {
-		com1_printf("[DISK] Error: Max disks reached\n");
+		drivers_log("[DISK] Error: Max disks reached\n");
 		return (-1);
 	}
 	disks[disk_count_val] = disk;
-	com1_printf("[DISK] Registered disk %d: %s "
+	drivers_log("[DISK] Registered disk %d: %s "
 	    "(Type: %d, Sectors: %u)\n",
 	    disk_count_val, disk->name, disk->type,
 	    disk->total_sectors);

@@ -47,7 +47,7 @@ $space %export pit_init
 */
 
 #include <kernel/drivers/eventtimer.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define PIT_FREQUENCY	1193182ULL

@@ -27,7 +27,7 @@
 #include <kernel/drivers/fs/devtmpfs/devtmpfs.h>
 #include <kernel/drivers/tty.h>
 #include <kernel/crypto/rng/rng.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
 
@@ -309,7 +309,7 @@ devtmpfs_init(void)
 	devtmpfs_register("urandom", DEVTMPFS_DEV_URANDOM,
 	    dev_urandom_read, dev_urandom_write);
 
-	com1_printf("[DEVTMPFS] mounted at /dev (%d devices, RAM-backed)\n",
+	drivers_log("[DEVTMPFS] mounted at /dev (%d devices, RAM-backed)\n",
 	    devtmpfs_count);
 }
 

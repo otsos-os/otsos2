@@ -28,7 +28,7 @@
 #include <kernel/api/api.h>
 #include <kernel/other/restrict.h>
 #include <kernel/useraddr.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static char *

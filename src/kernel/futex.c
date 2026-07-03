@@ -49,7 +49,7 @@ $space %export futex_wait, futex_wake, futex_wake_all
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define MAX_FUTEX_ENTRIES 64

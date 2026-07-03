@@ -93,11 +93,11 @@ chainfs_init(disk_t *disk)
 	chainfs_superblock_t	*sb;
 
 	if (!disk) {
-		com1_printf("ChainFS: init failed, disk is NULL\n");
+		drivers_log("ChainFS: init failed, disk is NULL\n");
 		return (-1);
 	}
 	g_chainfs.disk = disk;
-	com1_printf("ChainFS: Initializing... "
+	drivers_log("ChainFS: Initializing... "
 	    "(g_chainfs at %p, disk: %s)\n",
 	    &g_chainfs, disk ? disk->name : "NULL");
 
@@ -106,7 +106,7 @@ chainfs_init(disk_t *disk)
 	sb = (chainfs_superblock_t *)g_chainfs.sector_buffer;
 
 	if (sb->magic != CHAINFS_MAGIC) {
-		com1_printf("ChainFS: Invalid magic number "
+		drivers_log("ChainFS: Invalid magic number "
 		    "0x%x, expected 0x%x\n",
 		    sb->magic, CHAINFS_MAGIC);
 		return (-1);
@@ -121,19 +121,19 @@ chainfs_init(disk_t *disk)
 	g_chainfs.current_dir_block =
 	    g_chainfs.superblock.root_dir_block;
 	g_chainfs_phys = pmap_extract((u64)&g_chainfs);
-	com1_printf("[CHAINFS] g_chainfs phys=%p\n",
+	drivers_log("[CHAINFS] g_chainfs phys=%p\n",
 	    (void *)g_chainfs_phys);
 
-	com1_printf("ChainFS: Initialized successfully\n");
-	com1_printf("  Total blocks: %u\n",
+	drivers_log("ChainFS: Initialized successfully\n");
+	drivers_log("  Total blocks: %u\n",
 	    g_chainfs.superblock.block_count);
-	com1_printf("  File table blocks: %u\n",
+	drivers_log("  File table blocks: %u\n",
 	    g_chainfs.superblock.file_table_block_count);
-	com1_printf("  Block map blocks: %u\n",
+	drivers_log("  Block map blocks: %u\n",
 	    g_chainfs.superblock.block_map_block_count);
-	com1_printf("  Data area start: %u\n",
+	drivers_log("  Data area start: %u\n",
 	    g_chainfs.data_area_start);
-	com1_printf("  Root directory block: %u\n",
+	drivers_log("  Root directory block: %u\n",
 	    g_chainfs.superblock.root_dir_block);
 
 	return (0);
@@ -152,16 +152,16 @@ chainfs_format(u32 total_blocks, u32 max_files)
 	u32	block;
 
 	if (!g_chainfs.disk) {
-		com1_printf("ChainFS: format failed, disk is NULL\n");
+		drivers_log("ChainFS: format failed, disk is NULL\n");
 		return (-1);
 	}
 	if (total_blocks < 8 || max_files == 0) {
-		com1_printf("ChainFS: format failed, invalid params "
+		drivers_log("ChainFS: format failed, invalid params "
 		    "blocks=%u files=%u\n", total_blocks, max_files);
 		return (-1);
 	}
 
-	com1_printf("ChainFS: Formatting disk with %u blocks, "
+	drivers_log("ChainFS: Formatting disk with %u blocks, "
 	    "%u max files\n", total_blocks, max_files);
 
 	entries_per_block =
@@ -169,7 +169,7 @@ chainfs_format(u32 total_blocks, u32 max_files)
 	file_table_blocks =
 	    (max_files + entries_per_block - 1) / entries_per_block;
 	if (file_table_blocks >= (total_blocks - 2)) {
-		com1_printf("ChainFS: format failed, file table too "
+		drivers_log("ChainFS: format failed, file table too "
 		    "large (%u blocks)\n", file_table_blocks);
 		return (-1);
 	}
@@ -181,7 +181,7 @@ chainfs_format(u32 total_blocks, u32 max_files)
 	    map_entries_per_block;
 	if (1 + file_table_blocks + block_map_blocks >=
 	    total_blocks) {
-		com1_printf("ChainFS: format failed, no data area "
+		drivers_log("ChainFS: format failed, no data area "
 		    "left\n");
 		return (-1);
 	}
@@ -239,7 +239,7 @@ chainfs_format(u32 total_blocks, u32 max_files)
 		    g_chainfs.sector_buffer);
 	}
 
-	com1_printf("ChainFS: Format complete\n");
+	drivers_log("ChainFS: Format complete\n");
 
 	return (chainfs_init(g_chainfs.disk));
 }
@@ -396,7 +396,7 @@ chainfs_read_file(const char *filename, u8 *buffer, u32 buffer_size,
 
 	if (chainfs_find_file(filename, &entry, &entry_block,
 	    &entry_offset) != 0) {
-		com1_printf("ChainFS: File '%s' not found\n",
+		drivers_log("ChainFS: File '%s' not found\n",
 		    filename);
 		return (-1);
 	}
@@ -438,7 +438,7 @@ chainfs_read_file(const char *filename, u8 *buffer, u32 buffer_size,
 	}
 
 	*bytes_read = copied;
-	com1_printf("ChainFS: Read %u bytes from '%s'\n",
+	drivers_log("ChainFS: Read %u bytes from '%s'\n",
 	    copied, filename);
 	return (0);
 }
@@ -524,7 +524,7 @@ chainfs_read_file_range(const char *filename, u8 *buffer,
 	}
 
 	*bytes_read = copied;
-	com1_printf("ChainFS: Read %u bytes from '%s' "
+	drivers_log("ChainFS: Read %u bytes from '%s' "
 	    "(offset %u)\n", copied, filename, offset);
 	return (0);
 }
@@ -546,7 +546,7 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size)
 	chainfs_file_entry_t	*entries;
 
 	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
-		com1_printf("ChainFS: write failed, filesystem "
+		drivers_log("ChainFS: write failed, filesystem "
 		    "not initialized\n");
 		return (-1);
 	}
@@ -583,12 +583,12 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size)
 			if (chainfs_resolve_path(parent_path,
 			    &parent_entry, &parent_entry_block,
 			    &parent_entry_offset) != 0) {
-				com1_printf("ChainFS: Parent directory "
+				drivers_log("ChainFS: Parent directory "
 				    "not found: %s\n", parent_path);
 				return (-1);
 			}
 			if (parent_entry.type != CHAINFS_TYPE_DIR) {
-				com1_printf("ChainFS: Parent is not "
+				drivers_log("ChainFS: Parent is not "
 				    "a directory: %s\n",
 				    parent_path);
 				return (-1);
@@ -610,11 +610,11 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size)
 		res = chainfs_find_free_file_entry(&entry_block,
 		    &entry_offset);
 		if (res == -2) {
-			com1_printf("ChainFS: Filesystem not "
+			drivers_log("ChainFS: Filesystem not "
 			    "initialized!\n");
 			return (-2);
 		} else if (res != 0) {
-			com1_printf("ChainFS: No free file entries "
+			drivers_log("ChainFS: No free file entries "
 			    "(disk full or too many files)\n");
 			return (-1);
 		}
@@ -629,13 +629,13 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size)
 	allocated_blocks = (u32 *)kmem_alloc(
 	    blocks_needed * sizeof(u32));
 	if (!allocated_blocks) {
-		com1_printf("ChainFS: Memory allocation failed\n");
+		drivers_log("ChainFS: Memory allocation failed\n");
 		return (-1);
 	}
 
 	if (chainfs_find_free_blocks(blocks_needed,
 	    allocated_blocks) != 0) {
-		com1_printf("ChainFS: Not enough free blocks\n");
+		drivers_log("ChainFS: Not enough free blocks\n");
 		kmem_free(allocated_blocks);
 		return (-1);
 	}
@@ -700,7 +700,7 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size)
 
 	kmem_free(allocated_blocks);
 
-	com1_printf("ChainFS: Wrote %u bytes to '%s' using "
+	drivers_log("ChainFS: Wrote %u bytes to '%s' using "
 	    "%u blocks\n", size, filename, blocks_needed);
 	return (0);
 }
@@ -714,7 +714,7 @@ chainfs_delete_file(const char *filename)
 
 	if (chainfs_find_file(filename, &entry, &entry_block,
 	    &entry_offset) != 0) {
-		com1_printf("ChainFS: File '%s' not found\n",
+		drivers_log("ChainFS: File '%s' not found\n",
 		    filename);
 		return (-1);
 	}
@@ -729,7 +729,7 @@ chainfs_delete_file(const char *filename)
 	disk_write(g_chainfs.disk, entry_block,
 	    g_chainfs.sector_buffer);
 
-	com1_printf("ChainFS: Deleted file '%s'\n", filename);
+	drivers_log("ChainFS: Deleted file '%s'\n", filename);
 	return (0);
 }
 
@@ -902,7 +902,7 @@ chainfs_mkdir(const char *path)
 	chainfs_file_entry_t	*entries;
 
 	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
-		com1_printf("ChainFS: mkdir failed, filesystem "
+		drivers_log("ChainFS: mkdir failed, filesystem "
 		    "not initialized\n");
 		return (-1);
 	}
@@ -938,12 +938,12 @@ chainfs_mkdir(const char *path)
 		if (chainfs_resolve_path(parent_path,
 		    &parent_entry, &parent_block,
 		    &parent_offset) != 0) {
-			com1_printf("ChainFS: Parent directory "
+			drivers_log("ChainFS: Parent directory "
 			    "not found: %s\n", parent_path);
 			return (-1);
 		}
 		if (parent_entry.type != CHAINFS_TYPE_DIR) {
-			com1_printf("ChainFS: Parent is not "
+			drivers_log("ChainFS: Parent is not "
 			    "a directory: %s\n", parent_path);
 			return (-1);
 		}
@@ -954,14 +954,14 @@ chainfs_mkdir(const char *path)
 	if (chainfs_find_in_directory(parent_block, dir_name,
 	    &existing_entry, &existing_block,
 	    &existing_offset) == 0) {
-		com1_printf("ChainFS: Directory already exists: "
+		drivers_log("ChainFS: Directory already exists: "
 		    "%s\n", path);
 		return (-1);
 	}
 
 	if (chainfs_find_free_file_entry(&entry_block,
 	    &entry_offset) != 0) {
-		com1_printf("ChainFS: No free file entries\n");
+		drivers_log("ChainFS: No free file entries\n");
 		return (-1);
 	}
 
@@ -980,7 +980,7 @@ chainfs_mkdir(const char *path)
 	disk_write(g_chainfs.disk, entry_block,
 	    g_chainfs.sector_buffer);
 
-	com1_printf("ChainFS: Created directory: %s\n", path);
+	drivers_log("ChainFS: Created directory: %s\n", path);
 	return (0);
 }
 
@@ -992,13 +992,13 @@ chainfs_chdir(const char *path)
 
 	if (chainfs_resolve_path(path, &entry, &entry_block,
 	    &entry_offset) != 0) {
-		com1_printf("ChainFS: Directory not found: %s\n",
+		drivers_log("ChainFS: Directory not found: %s\n",
 		    path);
 		return (-API_ERR_NOT_FOUND);
 	}
 
 	if (entry.type != CHAINFS_TYPE_DIR) {
-		com1_printf("ChainFS: Not a directory: %s\n",
+		drivers_log("ChainFS: Not a directory: %s\n",
 		    path);
 		return (-API_ERR_NOT_DIR);
 	}
@@ -1006,7 +1006,7 @@ chainfs_chdir(const char *path)
 	g_chainfs.current_dir_block =
 	    (entry_block - 1) * ENTRIES_PER_BLOCK +
 	    entry_offset;
-	com1_printf("ChainFS: Changed directory to: %s\n",
+	drivers_log("ChainFS: Changed directory to: %s\n",
 	    path);
 	return (0);
 }
@@ -1025,13 +1025,13 @@ chainfs_list_dir(const char *path, chainfs_file_entry_t *files,
 	} else {
 		if (chainfs_resolve_path(path, &dir_entry,
 		    &dir_block, &dir_offset) != 0) {
-			com1_printf("ChainFS: Directory not "
+			drivers_log("ChainFS: Directory not "
 			    "found: %s\n", path);
 			return (-API_ERR_NOT_FOUND);
 		}
 
 		if (dir_entry.type != CHAINFS_TYPE_DIR) {
-			com1_printf("ChainFS: Not a directory: "
+			drivers_log("ChainFS: Not a directory: "
 			    "%s\n", path);
 			return (-API_ERR_NOT_DIR);
 		}
@@ -1125,27 +1125,27 @@ chainfs_rmdir(const char *path)
 
 	if (chainfs_resolve_path(path, &entry, &entry_block,
 	    &entry_offset) != 0) {
-		com1_printf("ChainFS: Directory not found: %s\n",
+		drivers_log("ChainFS: Directory not found: %s\n",
 		    path);
 		return (-1);
 	}
 
 	if (entry.type != CHAINFS_TYPE_DIR) {
-		com1_printf("ChainFS: Not a directory: %s\n",
+		drivers_log("ChainFS: Not a directory: %s\n",
 		    path);
 		return (-1);
 	}
 
 	if (entry_block ==
 	    g_chainfs.superblock.root_dir_block) {
-		com1_printf("ChainFS: Cannot remove root "
+		drivers_log("ChainFS: Cannot remove root "
 		    "directory\n");
 		return (-1);
 	}
 
 	if (chainfs_list_dir(path, files, 1, &file_count) == 0 &&
 	    file_count > 0) {
-		com1_printf("ChainFS: Directory not empty: %s\n",
+		drivers_log("ChainFS: Directory not empty: %s\n",
 		    path);
 		return (-1);
 	}
@@ -1158,6 +1158,6 @@ chainfs_rmdir(const char *path)
 	disk_write(g_chainfs.disk, entry_block,
 	    g_chainfs.sector_buffer);
 
-	com1_printf("ChainFS: Removed directory: %s\n", path);
+	drivers_log("ChainFS: Removed directory: %s\n", path);
 	return (0);
 }

@@ -46,7 +46,7 @@ $space %export ramdisk_init
 
 #include "ramdisk.h"
 #include "../disk.h"
-#include <lib/com1.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static void
@@ -63,7 +63,7 @@ ramdisk_read_sector(disk_t *self, u32 lba, u8 *buffer)
 
 	if (offset + self->sector_size >
 	    self->total_sectors * self->sector_size) {
-		com1_printf("[RAMDISK] Read out of bounds: "
+		drivers_log("[RAMDISK] Read out of bounds: "
 		    "lba=%u\n", lba);
 		return;
 	}
@@ -85,7 +85,7 @@ ramdisk_write_sector(disk_t *self, u32 lba, u8 *buffer)
 
 	if (offset + self->sector_size >
 	    self->total_sectors * self->sector_size) {
-		com1_printf("[RAMDISK] Write out of bounds: "
+		drivers_log("[RAMDISK] Write out of bounds: "
 		    "lba=%u\n", lba);
 		return;
 	}
@@ -98,7 +98,7 @@ static disk_t	ram_disk;
 void
 ramdisk_init(void *location, u32 size)
 {
-	com1_printf("[RAMDISK] Initializing at %p, size %u "
+	drivers_log("[RAMDISK] Initializing at %p, size %u "
 	    "bytes\n", location, size);
 
 	strcpy(ram_disk.name, "ramdisk0");

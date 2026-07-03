@@ -24,6 +24,9 @@ prompt = "kshell> "
 
 [disk.pata]
 enabled = false
+[log]
+enabled = false
+drivers = true
 [libc]
 enabled = true
 type = "musl"
