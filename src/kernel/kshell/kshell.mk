@@ -50,7 +50,7 @@ endif
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 ../bin/kshell_drm.o: kernel/kshell/commands/drm.c kernel/kshell/kshell.h \
-    kernel/drivers/tty.h
+    kernel/console/terminal.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

@@ -4,7 +4,7 @@
 
 #include <kernel/api/api.h>
 #include <kernel/api/errno.h>
-#include <kernel/drivers/tty.h>
+#include <kernel/console/terminal.h>
 #include <kernel/drivers/video/drm/auth.h>
 #include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/gem.h>
@@ -236,7 +236,7 @@ drm_op_driver_switch(struct api_drm_driver_switch *arg)
 		return (-API_ERR_NODEV);
 	}
 
-	tty_reinit();
+	terminal_reinit();
 
 	return (0);
 }

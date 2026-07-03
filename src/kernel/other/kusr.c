@@ -24,12 +24,12 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/console.h>
+#include <kernel/console/console.h>
 #include <kernel/other/kusr.h>
 #include <kernel/crypto/crypto.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/keyboard/keyboard.h>
-#include <kernel/drivers/tty.h>
+#include <kernel/console/terminal.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/toml.h>
@@ -48,7 +48,7 @@ int kusr_is_authenticated(void) { return g_kusr_authenticated; }
 void kusr_set_authenticated(int auth) { g_kusr_authenticated = auth ? 1 : 0; }
 
 static void kusr_flush(void) {
-  tty_flush_kernel();
+  terminal_flush_kernel();
 }
 
 static void kusr_hash_password(const char *pass, u32 pass_len,

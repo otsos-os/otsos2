@@ -39,7 +39,7 @@ $space %export api_term_power
 */
 
 #include <kernel/api/api.h>
-#include <kernel/drivers/tty.h>
+#include <kernel/console/terminal.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
@@ -62,17 +62,17 @@ api_term_power(struct api_term_power *uargs)
 	memcpy(&args, uargs, sizeof(args));
 	switch (args.op) {
 	case API_TERM_POWER_GET:
-		return (tty_power_get(args.tty));
+		return (terminal_power_get(args.tty));
 	case API_TERM_POWER_CHANGE:
-		if (args.state == TTY_STATE_DISABLED && !proc->kusr_auth) {
+		if (args.state == TERM_STATE_DISABLED && !proc->kusr_auth) {
 			return (-API_ERR_PERM);
 		}
-		return (tty_power_set(args.tty, args.state));
+		return (terminal_power_set(args.tty, args.state));
 	case API_TERM_POWER_RESET:
 		if (!proc->kusr_auth) {
 			return (-API_ERR_PERM);
 		}
-		return (tty_power_reset(args.tty));
+		return (terminal_power_reset(args.tty));
 	default:
 		return (-API_ERR_INVAL);
 	}

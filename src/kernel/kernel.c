@@ -73,7 +73,7 @@ $space %export kmain
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/power/power.h>
 #include <kernel/drivers/timer.h>
-#include <kernel/drivers/tty.h>
+#include <kernel/console/terminal.h>
 #include <kernel/drivers/uart/uart.h>
 #include <kernel/time.h>
 #include <kernel/drivers/video/drm/drm.h>
@@ -82,7 +82,7 @@ $space %export kmain
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/event/event.h>
 #include <kernel/interrupts/idt.h>
-#include <kernel/console.h>
+#include <kernel/console/console.h>
 #include <mm/vm/pmap.h>
 #include <mm/mm.h>
 #include <kernel/multiboot.h>
@@ -410,8 +410,8 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 		acpi_init_from_multiboot2(mboot2_ptr);
 
 		clear_scr();
-		tty_init();
-		stdio_set_tty_mirror(tty_log_mirror);
+		terminal_init();
+		stdio_set_terminal_mirror(terminal_log_mirror);
 
 		cinfo(cpu_buf);
 		p = cpu_buf;
@@ -439,8 +439,8 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 		debug_multiboot_info(mboot1_ptr);
 		drm_boot_init_mb1(mboot1_ptr, 0);
 		clear_scr();
-		tty_init();
-		stdio_set_tty_mirror(tty_log_mirror);
+		terminal_init();
+		stdio_set_terminal_mirror(terminal_log_mirror);
 
 		cinfo(cpu_buf);
 		p = cpu_buf;
@@ -529,7 +529,7 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 	keyboard_manager_init();
 	kshell_set_boot_info(is_multiboot2);
 
-	tty_set_active(1);
+	terminal_set_active(1);
 
 	selected_disk = NULL;
 	ram_disk = disk_find_type(DISK_TYPE_RAM);
@@ -762,7 +762,7 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 		 * wants to use.  The boot menu / disk selection remains
 		 * visible up to this point.
 		 */
-		tty_power_suspend_all();
+		terminal_power_suspend_all();
 
 		if (init_mod && init_sz > 0) {
 			printk("[KERNEL] Found init module "

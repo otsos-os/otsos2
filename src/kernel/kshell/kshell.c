@@ -81,10 +81,10 @@ $space %export kshell_try_open_if_requested, kshell_run
 
 */
 
-#include <kernel/console.h>
+#include <kernel/console/console.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
-#include <kernel/drivers/tty.h>
+#include <kernel/console/terminal.h>
 #include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/kms/console.h>
 #include <kernel/kshell/kshell.h>
@@ -239,7 +239,7 @@ kshell_set_visible(int visible)
 	if (kshell_visible) {
 		kshell_redraw();
 	} else {
-		tty_restore_active_display();
+		terminal_restore_active_display();
 	}
 }
 

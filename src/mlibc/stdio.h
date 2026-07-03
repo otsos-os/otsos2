@@ -37,6 +37,6 @@ void	drivers_log(const char *fmt, ...);
 void	klog(const char *fmt, ...);
 
 void	stdio_init(void);
-void	stdio_set_tty_mirror(void (*callback)(char));
+void	stdio_set_terminal_mirror(void (*callback)(char));
 
 #endif

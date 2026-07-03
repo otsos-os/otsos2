@@ -87,9 +87,9 @@ typedef struct {
 #define API_TERM_POWER_CHANGE	1
 #define API_TERM_POWER_RESET	2
 
-#define TTY_STATE_ACTIVE	0
-#define TTY_STATE_SUSPENDED	1
-#define TTY_STATE_DISABLED	2
+#define TERM_STATE_ACTIVE	0
+#define TERM_STATE_SUSPENDED	1
+#define TERM_STATE_DISABLED	2
 
 struct api_term_power {
 	int	op;

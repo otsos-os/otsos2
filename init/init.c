@@ -75,7 +75,7 @@ $space %internal strlen, print, trim_newline, strcmp
 #define	CALL_EVENT_CLOSE	0x702
 
 #define	API_TERM_POWER_CHANGE	1
-#define	TTY_STATE_ACTIVE	0
+#define	TERM_STATE_ACTIVE	0
 
 #define	EVFILT_READ	(-1)
 #define	EVFILT_TIMER	(-3)
@@ -258,7 +258,7 @@ _start(void)
 
 	/* Wake the system terminal before using it.
 	 * The kernel boots with all TTYs suspended. */
-	termPower(API_TERM_POWER_CHANGE, 1, TTY_STATE_ACTIVE);
+	termPower(API_TERM_POWER_CHANGE, 1, TERM_STATE_ACTIVE);
 
 	print("\n");
 	print("Hello init (event-driven)\n");

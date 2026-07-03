@@ -24,7 +24,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/tty.h>
+#include <kernel/console/terminal.h>
 #include <kernel/api/api.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
@@ -197,7 +197,7 @@ api_term_write(const void *buf, u32 count)
 		return (-API_ERR_BAD_ADDR);
 	}
 
-	return (tty_write(buf, count));
+	return (terminal_write(buf, count));
 }
 
 int

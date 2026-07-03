@@ -55,6 +55,7 @@ $space %export keyboard_get_driver_name
 
 */
 
+#include <kernel/console/terminal.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/keyboard/ps2.h>
 #include <kernel/drivers/timer.h>
@@ -160,11 +161,9 @@ keyboard_common_handler(void)
 
 	current_driver->handler();
 
-	/* IRQ1 means a key was pressed — wake tty sleepers. */
-	extern void *tty_get_input_channel(void);
 	void	*ch;
 
-	ch = tty_get_input_channel();
+	ch = terminal_get_input_channel();
 	if (ch) {
 		proc_wakeup(ch);
 	}
@@ -186,11 +185,9 @@ keyboard_poll(void)
 
 	current_driver->poll();
 
-	/* Data was drained — wake any process sleeping on tty input. */
-	extern void *tty_get_input_channel(void);
 	void	*ch;
 
-	ch = tty_get_input_channel();
+	ch = terminal_get_input_channel();
 	if (ch) {
 		proc_wakeup(ch);
 	}

@@ -5,7 +5,7 @@
  * modification, are permitted provided that the following conditions are met:
  *
  * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
+ *    this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
@@ -26,44 +26,28 @@
 
 /* !DEFINES!
 
-$define %type char as 8 bit signed
 $define %type u8 as 8 bit unsigned
 $define %type u32 as 32 bit unsigned
-$define %type int as 32 bit signed
 
-$define %func printf as procedure with args const char *, ...
-$define %func console_putchar as procedure with args char
-$define %func console_puts as procedure with args const char *
-$define %func console_color_rgb as function with args u8
-$define %func console_put_entry_at as procedure with args char, u8, int, int
-$define %func console_set_color as procedure with args u8
-$define %func clear_scr as procedure with args void
-$define %func console_get_width as function with args void
-$define %func console_get_height as function with args void
+$define %type console_palette as static 16-entry VGA color table
 
 */
 
 /* !SPACE!
 
-$space %export printf, console_putchar, console_puts, console_color_rgb
-$space %export console_put_entry_at, console_set_color, clear_scr
-$space %export console_get_width, console_get_height
+$space %internal console_palette
 
 */
 
-#ifndef CONSOLE_H
-#define CONSOLE_H
+#ifndef KERNEL_CONSOLE_PALETTE_H
+#define KERNEL_CONSOLE_PALETTE_H
 
 #include <mlibc/mlibc.h>
-
-void	printf(const char *fmt, ...);
-void	console_putchar(char c);
-void	console_puts(const char *s);
-u32	console_color_rgb(u8 attr);
-void	console_put_entry_at(char c, u8 color, int x, int y);
-void	console_set_color(u8 color);
-void	clear_scr(void);
-int	console_get_width(void);
-int	console_get_height(void);
+static const u32 console_palette[16] = {
+	0x000000, 0x0000AA, 0x00AA00, 0x00AAAA,
+	0xAA0000, 0x00AA00, 0xAA5500, 0xAAAAAA,
+	0x555555, 0x5555FF, 0x55FF55, 0x55FFFF,
+	0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF
+};
 
 #endif

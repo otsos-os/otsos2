@@ -25,7 +25,7 @@
  */
 
 #include <kernel/drivers/fs/devfs/devfs.h>
-#include <kernel/drivers/tty.h>
+#include <kernel/console/terminal.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/crypto/rng/rng.h>
 #include <mlibc/stdio.h>
@@ -74,27 +74,27 @@ dev_zero_write(const void *buf, u64 count)
 }
 
 static int
-dev_tty_read(void *buf, u64 count)
+dev_terminal_read(void *buf, u64 count)
 {
-	return (tty_read(buf, (u32)count));
+	return (terminal_read(buf, (u32)count));
 }
 
 static int
-dev_tty_write(const void *buf, u64 count)
+dev_terminal_write(const void *buf, u64 count)
 {
-	return (tty_write(buf, (u32)count));
+	return (terminal_write(buf, (u32)count));
 }
 
 static int
 dev_console_read(void *buf, u64 count)
 {
-	return (tty_read(buf, (u32)count));
+	return (terminal_read(buf, (u32)count));
 }
 
 static int
 dev_console_write(const void *buf, u64 count)
 {
-	return (tty_write(buf, (u32)count));
+	return (terminal_write(buf, (u32)count));
 }
 
 static int
@@ -171,7 +171,7 @@ devfs_init(void)
 	devfs_register("zero", DEVFS_DEV_ZERO,
 	    dev_zero_read, dev_zero_write);
 	devfs_register("tty", DEVFS_DEV_TTY,
-	    dev_tty_read, dev_tty_write);
+	    dev_terminal_read, dev_terminal_write);
 	devfs_register("console", DEVFS_DEV_CONSOLE,
 	    dev_console_read, dev_console_write);
 	devfs_register("random", DEVFS_DEV_RANDOM,

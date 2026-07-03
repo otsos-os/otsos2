@@ -24,18 +24,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * kbdtest - demonstrates TTY power management and raw keyboard events.
- *
- * Usage: /bin/kbdtest
- *
- * The program suspends the active terminal (TTY 1), reads a few raw
- * keyboard events via kqueue EVFILT_KBD, then resumes the TTY and prints
- * what was received.  While the TTY is suspended, normal text output is
- * suppressed and key presses do not appear on the console.
- */
 
-#define	KBDTEST_TTY		1
+#define	KBDTEST_terminal		1
 
 #define	CALL_TERM_POWER		0x111
 #define	CALL_EVENT_KQUEUE	0x700
@@ -54,9 +44,9 @@
 #define	API_TERM_POWER_CHANGE	1
 #define	API_TERM_POWER_RESET	2
 
-#define	TTY_STATE_ACTIVE	0
-#define	TTY_STATE_SUSPENDED	1
-#define	TTY_STATE_DISABLED	2
+#define	TERM_STATE_ACTIVE	0
+#define	TERM_STATE_SUSPENDED	1
+#define	TERM_STATE_DISABLED	2
 
 #define	KBD_DATA_SCANCODE(v)	((unsigned short)((unsigned long)(v) & 0xFFFF))
 #define	KBD_DATA_RELEASED(v)	(((unsigned long)(v) >> 16) & 1)
@@ -268,9 +258,8 @@ _start(void)
 
 	print("kbdtest: starting\n");
 
-	/* Verify current state of TTY 1. */
 	args.op = API_TERM_POWER_GET;
-	args.tty = KBDTEST_TTY;
+	args.tty = KBDTEST_terminal;
 	args.state = 0;
 	args.flags = 0;
 	ret = term_power(&args);
@@ -284,12 +273,11 @@ _start(void)
 	print_int(ret);
 	print("\n");
 
-	print("kbdtest: suspending TTY 1, press 5 keys (screen will blank)\n");
+	print("kbdtest: suspending terminal 1, press 5 keys (screen will blank)\n");
 
-	/* Suspend TTY 1.  This requires kusr auth. */
 	args.op = API_TERM_POWER_CHANGE;
-	args.tty = KBDTEST_TTY;
-	args.state = TTY_STATE_SUSPENDED;
+	args.tty = KBDTEST_terminal;
+	args.state = TERM_STATE_SUSPENDED;
 	args.flags = 0;
 	ret = term_power(&args);
 	if (ret < 0) {
@@ -303,8 +291,8 @@ _start(void)
 	if (kq < 0) {
 		print("kbdtest: kqueue_create failed\n");
 		args.op = API_TERM_POWER_CHANGE;
-		args.tty = KBDTEST_TTY;
-		args.state = TTY_STATE_ACTIVE;
+		args.tty = KBDTEST_terminal;
+		args.state = TERM_STATE_ACTIVE;
 		(void)term_power(&args);
 		return;
 	}
@@ -331,10 +319,9 @@ _start(void)
 
 	kqueue_close(kq);
 
-	/* Resume TTY 1. */
 	args.op = API_TERM_POWER_CHANGE;
-	args.tty = KBDTEST_TTY;
-	args.state = TTY_STATE_ACTIVE;
+	args.tty = KBDTEST_terminal;
+	args.state = TERM_STATE_ACTIVE;
 	args.flags = 0;
 	ret = term_power(&args);
 	if (ret < 0) {

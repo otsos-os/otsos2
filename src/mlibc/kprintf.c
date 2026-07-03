@@ -27,7 +27,7 @@
 #include <mlibc/kprintf.h>
 #include <mlibc/mlibc.h>
 #include <lib/com1.h>
-#include <kernel/console.h>
+#include <kernel/console/console.h>
 #include <kernel/other/config.h>
 #include <stdarg.h>
 

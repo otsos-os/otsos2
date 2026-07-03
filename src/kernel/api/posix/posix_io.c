@@ -28,7 +28,7 @@
 #include <kernel/api/api.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/fs/devtmpfs/devtmpfs.h>
-#include <kernel/drivers/tty.h>
+#include <kernel/console/terminal.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mlibc/stdio.h>

@@ -43,7 +43,7 @@ $space %export kshell_drm_switch_command
 */
 
 #include <kernel/drivers/video/drm/drm.h>
-#include <kernel/drivers/tty.h>
+#include <kernel/console/terminal.h>
 #include <kernel/kshell/kshell.h>
 
 static int
@@ -119,7 +119,7 @@ kshell_drm_switch_command(int argc, char *argv[])
 		return (-1);
 	}
 
-	tty_reinit();
+	terminal_reinit();
 
 	kshell_console_write("drm_switch: active driver: ");
 	kshell_console_write(drm_driver_get_selected_name());

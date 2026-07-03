@@ -50,8 +50,8 @@ $space %export print_panic_logo, kernel_panic, panic
 
 */
 
-#include <kernel/console.h>
-#include <kernel/drivers/tty.h>
+#include <kernel/console/console.h>
+#include <kernel/console/terminal.h>
 #include <kernel/drivers/video/drm/kms/console.h>
 #include <kernel/interrupts/idt.h>
 #include <mlibc/mlibc.h>
@@ -405,7 +405,7 @@ kernel_panic(registers_t *regs)
 	klog("\n\rSystem Halted.\n\r");
 	klog("\nSystem Halted.\n");
 
-	tty_flush_kernel();
+	terminal_flush_kernel();
 	print_panic_logo();
 
 	while (1) {
@@ -516,7 +516,7 @@ panic(const char *format, ...)
 	klog("\n\rSystem Halted.\n\r");
 	klog("\nSystem Halted.\n");
 
-	tty_flush_kernel();
+	terminal_flush_kernel();
 	print_panic_logo();
 
 	while (1) {

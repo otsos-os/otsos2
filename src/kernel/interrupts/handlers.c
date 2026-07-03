@@ -25,11 +25,11 @@
  */
 
 #include <kernel/drivers/keyboard/keyboard.h>
-#include <kernel/console.h>
+#include <kernel/console/console.h>
 #include <kernel/crypto/rng/rng.h>
 #include <kernel/drivers/eventtimer.h>
 #include <kernel/drivers/power/pbutton.h>
-#include <kernel/drivers/tty.h>
+#include <kernel/console/terminal.h>
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/event/event.h>
 #include <kernel/interrupts/idt.h>
@@ -103,7 +103,7 @@ void irq_handler(registers_t *regs) {
     crypto_rng_tick();
     scheduler_tick(regs);
     keyboard_poll();
-    tty_update();
+    terminal_update();
   } else if (regs->int_no == 33) {
     keyboard_common_handler();
   }

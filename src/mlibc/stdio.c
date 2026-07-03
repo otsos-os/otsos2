@@ -30,7 +30,7 @@
 static int	log_enabled = 1;
 static int	log_drivers = 1;
 static int	log_initialized = 0;
-static void	(*tty_mirror)(char) = NULL;
+static void	(*terminal_mirror)(char) = NULL;
 
 void
 stdio_init(void)
@@ -46,9 +46,9 @@ stdio_init(void)
 }
 
 void
-stdio_set_tty_mirror(void (*callback)(char))
+stdio_set_terminal_mirror(void (*callback)(char))
 {
-	tty_mirror = callback;
+	terminal_mirror = callback;
 }
 
 static void
@@ -59,9 +59,9 @@ log_emit_format(const char *fmt, __builtin_va_list args)
 
 	vsnprintf(buffer, sizeof(buffer), fmt, args);
 	uart_write_string(buffer);
-	if (tty_mirror) {
+	if (terminal_mirror) {
 		for (i = 0; buffer[i] != '\0'; i++) {
-			tty_mirror(buffer[i]);
+			terminal_mirror(buffer[i]);
 		}
 	}
 }

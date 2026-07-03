@@ -24,7 +24,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/console.h>
+#include <kernel/console/console.h>
 #include <kernel/gdt.h>
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_map.h>
