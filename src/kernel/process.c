@@ -131,6 +131,9 @@ process_create_kernel(const char *name, void (*entry)(void))
 	proc->mmap_base = MMAP_BASE;
 	proc->exit_code = 0;
 	proc->personality = PERSONALITY_OTSOS;
+	proc->sid = proc->pid;
+	proc->pgid = proc->pid;
+	proc->is_session_leader = 1;
 
 	api_init_process(proc);
 	posix_init_process(proc);
@@ -402,10 +405,10 @@ process_send_signal(u32 pid, int sig)
 	process_t	*proc;
 
 	if (sig == 0) {
-		sig = SIGKILL;
+		return (0);
 	}
 
-	if (sig != SIGKILL && sig != SIGTERM) {
+	if (sig < 1 || sig > MAX_POSIX_SIGS) {
 		return (-1);
 	}
 
@@ -416,14 +419,14 @@ process_send_signal(u32 pid, int sig)
 
 	event_notify_signal(pid, sig);
 
-	if (sig == SIGTERM) {
-		proc->exit_code = 128 + sig;
+	if (sig == SIGKILL) {
+		if (proc == process_current()) {
+			process_exit(-1);
+			return (0);
+		}
+		return (process_kill(pid));
 	}
 
-	if (proc == process_current()) {
-		process_exit(proc->exit_code ? proc->exit_code : -1);
-		return (0);
-	}
-
-	return (process_kill(pid));
+	proc->sigpending |= (1ULL << (sig - 1));
+	return (0);
 }

@@ -1,0 +1,611 @@
+/*
+ * Copyright (c) 2026, otsos team
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ * this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <kernel/console/pty.h>
+#include <kernel/drivers/fs/devfs/devfs.h>
+#include <kernel/api/posix/posix.h>
+#include <kernel/event/event.h>
+#include <kernel/process.h>
+#include <kernel/signal.h>
+#include <kernel/useraddr.h>
+#include <mlibc/stdio.h>
+#include <mlibc/mlibc.h>
+#include <mm/kmem.h>
+
+#define	PTY_COUNT	32
+#define	PTY_BUF_SIZE	1024
+
+typedef struct pty_pair {
+	int		id;
+	int		open_master;
+	int		open_slave;
+	int		locked;
+	struct termios	term;
+	struct winsize	ws;
+	u32		session;
+	u32		foreground_pgrp;
+	char		to_slave[PTY_BUF_SIZE];
+	int		to_slave_head;
+	int		to_slave_tail;
+	int		to_slave_count;
+	char		to_master[PTY_BUF_SIZE];
+	int		to_master_head;
+	int		to_master_tail;
+	int		to_master_count;
+} pty_pair_t;
+
+static pty_pair_t	pty_pairs[PTY_COUNT];
+static int		pty_initialized = 0;
+
+static void	pty_default_termios(struct termios *t);
+static pty_pair_t *pty_alloc(void);
+static void	pty_signal_pgrp(pty_pair_t *p, int sig);
+static int	pty_to_slave_put(pty_pair_t *p, char c);
+static int	pty_to_slave_get(pty_pair_t *p, char *c);
+static int	pty_to_master_put(pty_pair_t *p, char c);
+static int	pty_to_master_get(pty_pair_t *p, char *c);
+static int	pty_slave_stat(vnode_t *vn, posix_stat_t *st);
+static int	pty_master_stat(vnode_t *vn, posix_stat_t *st);
+static int	vnode_pty_master_read(vnode_t *vn, void *buf, u64 count,
+    u64 offset);
+static int	vnode_pty_master_write(vnode_t *vn, const void *buf, u64 count,
+    u64 offset);
+static int	vnode_pty_slave_read(vnode_t *vn, void *buf, u64 count,
+    u64 offset);
+static int	vnode_pty_slave_write(vnode_t *vn, const void *buf, u64 count,
+    u64 offset);
+
+static void
+pty_default_termios(struct termios *t)
+{
+	memset(t, 0, sizeof(*t));
+	t->c_iflag = ICRNL | IXON;
+	t->c_oflag = OPOST | ONLCR;
+	t->c_cflag = CREAD | CS8;
+	t->c_lflag = ISIG | ICANON | ECHO | ECHOE | ECHOK;
+	t->c_line = 0;
+	t->c_cc[VINTR] = CINTR;
+	t->c_cc[VQUIT] = CQUIT;
+	t->c_cc[VERASE] = CERASE;
+	t->c_cc[VKILL] = CKILL;
+	t->c_cc[VEOF] = CEOF;
+	t->c_cc[VMIN] = 1;
+	t->c_cc[VTIME] = 0;
+	t->c_ispeed = B38400;
+	t->c_ospeed = B38400;
+}
+
+static pty_pair_t *
+pty_alloc(void)
+{
+	pty_pair_t	*p;
+	int		 i;
+
+	for (i = 0; i < PTY_COUNT; i++) {
+		p = &pty_pairs[i];
+		if (p->id == 0) {
+			memset(p, 0, sizeof(*p));
+			p->id = i + 1;
+			pty_default_termios(&p->term);
+			p->ws.ws_row = 24;
+			p->ws.ws_col = 80;
+			p->ws.ws_xpixel = 0;
+			p->ws.ws_ypixel = 0;
+			p->locked = 0;
+			p->open_master = 0;
+			p->open_slave = 0;
+			p->session = 0;
+			p->foreground_pgrp = 0;
+			return (p);
+		}
+	}
+	return (NULL);
+}
+
+static void
+pty_signal_pgrp(pty_pair_t *p, int sig)
+{
+	process_t	*proc;
+	int		 i;
+
+	if (p->foreground_pgrp == 0) {
+		return;
+	}
+	for (i = 0; i < MAX_PROCESSES; i++) {
+		proc = &process_table[i];
+		if (proc->pid != 0 && proc->pgid == p->foreground_pgrp) {
+			process_send_signal(proc->pid, sig);
+		}
+	}
+}
+
+static int
+pty_to_slave_put(pty_pair_t *p, char c)
+{
+	int	next;
+
+	next = (p->to_slave_head + 1) % PTY_BUF_SIZE;
+	if (next == p->to_slave_tail) {
+		return (-1);
+	}
+	p->to_slave[p->to_slave_head] = c;
+	p->to_slave_head = next;
+	p->to_slave_count++;
+	proc_wakeup(&p->to_slave_count);
+	knote_notify_all(EVFILT_READ, 0, 0, 1);
+	return (0);
+}
+
+static int
+pty_to_slave_get(pty_pair_t *p, char *c)
+{
+	if (p->to_slave_count == 0) {
+		return (-1);
+	}
+	*c = p->to_slave[p->to_slave_tail];
+	p->to_slave_tail = (p->to_slave_tail + 1) % PTY_BUF_SIZE;
+	p->to_slave_count--;
+	proc_wakeup(&p->to_master_count);
+	return (0);
+}
+
+static int
+pty_to_master_put(pty_pair_t *p, char c)
+{
+	int	next;
+
+	next = (p->to_master_head + 1) % PTY_BUF_SIZE;
+	if (next == p->to_master_tail) {
+		return (-1);
+	}
+	p->to_master[p->to_master_head] = c;
+	p->to_master_head = next;
+	p->to_master_count++;
+	proc_wakeup(&p->to_master_count);
+	knote_notify_all(EVFILT_READ, 0, 0, 1);
+	return (0);
+}
+
+static int
+pty_to_master_get(pty_pair_t *p, char *c)
+{
+	if (p->to_master_count == 0) {
+		return (-1);
+	}
+	*c = p->to_master[p->to_master_tail];
+	p->to_master_tail = (p->to_master_tail + 1) % PTY_BUF_SIZE;
+	p->to_master_count--;
+	proc_wakeup(&p->to_slave_count);
+	return (0);
+}
+
+int
+pty_init(void)
+{
+	if (pty_initialized) {
+		return (0);
+	}
+	memset(pty_pairs, 0, sizeof(pty_pairs));
+	devfs_register("ptmx", DEVFS_DEV_PTMX, NULL, NULL, NULL, NULL,
+	    NULL);
+	pty_initialized = 1;
+	return (0);
+}
+
+int
+pty_open_master(vnode_t **out)
+{
+	pty_pair_t	*p;
+	vnode_t		*vn;
+	char		 name[32];
+
+	if (!out) {
+		return (-POSIX_EINVAL);
+	}
+	p = pty_alloc();
+	if (!p) {
+		return (-POSIX_ENOMEM);
+	}
+	p->open_master = 1;
+
+	vn = vnode_alloc(VCHR, "ptm");
+	if (!vn) {
+		p->id = 0;
+		p->open_master = 0;
+		return (-POSIX_ENOMEM);
+	}
+	vn->data = p;
+	vn->read_fn = vnode_pty_master_read;
+	vn->write_fn = vnode_pty_master_write;
+	vn->ioctl_fn = pty_master_ioctl;
+	vn->stat_fn = pty_master_stat;
+	vn->readdir_fn = NULL;
+
+	snprintf(name, sizeof(name), "pts/%d", p->id - 1);
+	if (devfs_register(name, DEVFS_DEV_PTS, vnode_pty_slave_read,
+	    vnode_pty_slave_write, pty_slave_ioctl, pty_slave_stat, p) != 0) {
+		vn->data = NULL;
+		vn->read_fn = NULL;
+		vn->write_fn = NULL;
+		vn->ioctl_fn = NULL;
+		vn->stat_fn = NULL;
+		vnode_release(vn);
+		p->id = 0;
+		p->open_master = 0;
+		return (-POSIX_ENOMEM);
+	}
+
+	*out = vn;
+	return (0);
+}
+
+int
+pty_name(int id, char *buf, int len)
+{
+	if (id <= 0 || id > PTY_COUNT || !buf || len <= 0) {
+		return (-1);
+	}
+	if (pty_pairs[id - 1].id != id) {
+		return (-1);
+	}
+	snprintf(buf, (unsigned long)len, "/dev/pts/%d", id - 1);
+	return (0);
+}
+
+int
+pty_master_read(vnode_t *vn, void *buf, u32 count, int nonblock)
+{
+	pty_pair_t	*p;
+	char		*out;
+	char		 c;
+	int		 n;
+
+	p = (pty_pair_t *)vn->data;
+	if (!p || p->id == 0) {
+		return (-POSIX_EBADF);
+	}
+	out = (char *)buf;
+	n = 0;
+	while (n < (int)count) {
+		if (pty_to_master_get(p, &c) == 0) {
+			out[n++] = c;
+		} else if (nonblock) {
+			if (n == 0) {
+				return (-POSIX_EAGAIN);
+			}
+			break;
+		} else {
+			proc_sleep(&p->to_master_count);
+		}
+	}
+	return (n);
+}
+
+int
+pty_master_write(vnode_t *vn, const void *buf, u32 count, int nonblock)
+{
+	pty_pair_t	*p;
+	const char	*data;
+	int		 i;
+
+	p = (pty_pair_t *)vn->data;
+	if (!p || p->id == 0) {
+		return (-POSIX_EBADF);
+	}
+	data = (const char *)buf;
+	for (i = 0; i < (int)count; i++) {
+		while (pty_to_slave_put(p, data[i]) != 0) {
+			if (nonblock) {
+				if (i == 0) {
+					return (-POSIX_EAGAIN);
+				}
+				return (i);
+			}
+			proc_sleep(&p->to_slave_count);
+		}
+	}
+	return ((int)count);
+}
+
+int
+pty_master_ioctl(vnode_t *vn, u64 cmd, void *arg)
+{
+	pty_pair_t	*p;
+	int		 n;
+
+	p = (pty_pair_t *)vn->data;
+	if (!p || p->id == 0) {
+		return (-POSIX_EBADF);
+	}
+
+	switch (cmd) {
+	case POSIX_TIOCGPTN:
+		if (!arg || !is_user_address(arg, sizeof(int))) {
+			return (-POSIX_EFAULT);
+		}
+		n = p->id - 1;
+		memcpy(arg, &n, sizeof(n));
+		return (0);
+	default:
+		return (-POSIX_ENOTTY);
+	}
+}
+
+int
+pty_slave_read(vnode_t *vn, void *buf, u32 count, int nonblock)
+{
+	pty_pair_t	*p;
+	char		*out;
+	char		 c;
+	int		 n;
+
+	p = (pty_pair_t *)vn->data;
+	if (!p || p->id == 0) {
+		return (-POSIX_EBADF);
+	}
+	out = (char *)buf;
+	n = 0;
+	while (n < (int)count) {
+		if (pty_to_slave_get(p, &c) == 0) {
+			out[n++] = c;
+		} else if (nonblock) {
+			if (n == 0) {
+				return (-POSIX_EAGAIN);
+			}
+			break;
+		} else {
+			proc_sleep(&p->to_slave_count);
+		}
+	}
+	return (n);
+}
+
+int
+pty_slave_write(vnode_t *vn, const void *buf, u32 count, int nonblock)
+{
+	pty_pair_t	*p;
+	const char	*data;
+	int		 i;
+
+	p = (pty_pair_t *)vn->data;
+	if (!p || p->id == 0) {
+		return (-POSIX_EBADF);
+	}
+	data = (const char *)buf;
+	for (i = 0; i < (int)count; i++) {
+		while (pty_to_master_put(p, data[i]) != 0) {
+			if (nonblock) {
+				if (i == 0) {
+					return (-POSIX_EAGAIN);
+				}
+				return (i);
+			}
+			proc_sleep(&p->to_master_count);
+		}
+	}
+	return ((int)count);
+}
+
+int
+pty_slave_ioctl(vnode_t *vn, u64 cmd, void *arg)
+{
+	pty_pair_t	*p;
+	struct process	*proc;
+	struct termios	t;
+	struct winsize	ws;
+	int		pgrp;
+	u32		sid;
+
+	p = (pty_pair_t *)vn->data;
+	if (!p || p->id == 0) {
+		return (-POSIX_EBADF);
+	}
+	proc = process_current();
+
+	switch (cmd) {
+	case POSIX_TIOCGWINSZ:
+		if (!arg || !is_user_address(arg, sizeof(struct winsize))) {
+			return (-POSIX_EFAULT);
+		}
+		ws = p->ws;
+		memcpy(arg, &ws, sizeof(ws));
+		return (0);
+
+	case POSIX_TIOCSWINSZ:
+		if (!arg || !is_user_address(arg, sizeof(struct winsize))) {
+			return (-POSIX_EFAULT);
+		}
+		memcpy(&ws, arg, sizeof(ws));
+		p->ws = ws;
+		pty_signal_pgrp(p, SIGWINCH);
+		return (0);
+
+	case POSIX_TCGETS:
+		if (!arg || !is_user_address(arg, sizeof(struct termios))) {
+			return (-POSIX_EFAULT);
+		}
+		t = p->term;
+		memcpy(arg, &t, sizeof(t));
+		return (0);
+
+	case POSIX_TCSETS:
+		if (!arg || !is_user_address(arg, sizeof(struct termios))) {
+			return (-POSIX_EFAULT);
+		}
+		memcpy(&t, arg, sizeof(t));
+		p->term = t;
+		return (0);
+
+	case POSIX_TIOCGPGRP:
+		if (!arg || !is_user_address(arg, sizeof(int))) {
+			return (-POSIX_EFAULT);
+		}
+		pgrp = (int)p->foreground_pgrp;
+		memcpy(arg, &pgrp, sizeof(pgrp));
+		return (0);
+
+	case POSIX_TIOCSPGRP:
+		if (!arg || !is_user_address(arg, sizeof(int))) {
+			return (-POSIX_EFAULT);
+		}
+		memcpy(&pgrp, arg, sizeof(pgrp));
+		p->foreground_pgrp = (u32)pgrp;
+		return (0);
+
+	case POSIX_TIOCGSID:
+		if (!arg || !is_user_address(arg, sizeof(int))) {
+			return (-POSIX_EFAULT);
+		}
+		sid = p->session;
+		memcpy(arg, &sid, sizeof(sid));
+		return (0);
+
+	case POSIX_TIOCSCTTY:
+		if (!proc) {
+			return (-POSIX_EFAULT);
+		}
+		if (!proc->is_session_leader) {
+			return (-POSIX_EPERM);
+		}
+		if (p->session != 0 && p->session != proc->sid) {
+			return (-POSIX_EPERM);
+		}
+		p->session = proc->sid;
+		proc->controlling_tty = -2 - p->id; /* mark as pty */
+		return (0);
+
+	default:
+		return (-POSIX_ENOTTY);
+	}
+}
+
+int
+pty_read_available(vnode_t *vn)
+{
+	pty_pair_t	*p;
+
+	if (!vn || !vn->data) {
+		return (0);
+	}
+	p = (pty_pair_t *)vn->data;
+	if (p->id == 0) {
+		return (0);
+	}
+	if (vn->ioctl_fn == pty_master_ioctl) {
+		return (p->to_master_count);
+	}
+	if (vn->ioctl_fn == pty_slave_ioctl) {
+		return (p->to_slave_count);
+	}
+	return (0);
+}
+
+vnode_t *
+pty_create_slave_vnode(int id)
+{
+	pty_pair_t	*p;
+	vnode_t		*vn;
+
+	if (id <= 0 || id > PTY_COUNT) {
+		return (NULL);
+	}
+	p = &pty_pairs[id - 1];
+	if (p->id != id) {
+		return (NULL);
+	}
+	vn = vnode_alloc(VCHR, "tty");
+	if (!vn) {
+		return (NULL);
+	}
+	vn->data = p;
+	vn->read_fn = vnode_pty_slave_read;
+	vn->write_fn = vnode_pty_slave_write;
+	vn->ioctl_fn = pty_slave_ioctl;
+	vn->stat_fn = pty_slave_stat;
+	vn->readdir_fn = NULL;
+	return (vn);
+}
+
+static int
+pty_slave_stat(vnode_t *vn, posix_stat_t *st)
+{
+	pty_pair_t	*p;
+
+	(void)vn;
+	p = (pty_pair_t *)vn->data;
+	(void)p;
+	memset(st, 0, sizeof(posix_stat_t));
+	st->st_mode = POSIX_S_IFCHR | 0620;
+	st->st_size = 0;
+	st->st_blksize = 0;
+	st->st_blocks = 0;
+	st->st_nlink = 1;
+	st->st_uid = 0;
+	st->st_gid = 0;
+	return (0);
+}
+
+static int
+pty_master_stat(vnode_t *vn, posix_stat_t *st)
+{
+	(void)vn;
+	memset(st, 0, sizeof(posix_stat_t));
+	st->st_mode = POSIX_S_IFCHR | 0666;
+	st->st_size = 0;
+	st->st_blksize = 0;
+	st->st_blocks = 0;
+	st->st_nlink = 1;
+	st->st_uid = 0;
+	st->st_gid = 0;
+	return (0);
+}
+
+static int
+vnode_pty_master_read(vnode_t *vn, void *buf, u64 count, u64 offset)
+{
+	(void)offset;
+	return (pty_master_read(vn, buf, (u32)count, 0));
+}
+
+static int
+vnode_pty_master_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
+{
+	(void)offset;
+	return (pty_master_write(vn, buf, (u32)count, 0));
+}
+
+static int
+vnode_pty_slave_read(vnode_t *vn, void *buf, u64 count, u64 offset)
+{
+	(void)offset;
+	return (pty_slave_read(vn, buf, (u32)count, 0));
+}
+
+static int
+vnode_pty_slave_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
+{
+	(void)offset;
+	return (pty_slave_write(vn, buf, (u32)count, 0));
+}

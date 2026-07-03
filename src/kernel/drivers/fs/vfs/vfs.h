@@ -124,6 +124,7 @@ typedef struct vnode {
 	int		(*write_fn)(struct vnode *, const void *, u64, u64);
 	int		(*stat_fn)(struct vnode *, posix_stat_t *);
 	int		(*readdir_fn)(struct vnode *, u32, char *, int *);
+	int		(*ioctl_fn)(struct vnode *, u64, void *);
 } vnode_t;
 
 void		vfs_init(void);
@@ -150,5 +151,6 @@ int		vnode_write(vnode_t *vn, const void *buf, u64 count,
 int		vnode_stat(vnode_t *vn, posix_stat_t *st);
 int		vnode_readdir(vnode_t *vn, u32 index, char *name,
 		    int *type);
+int		vnode_ioctl(vnode_t *vn, u64 cmd, void *arg);
 
 #endif

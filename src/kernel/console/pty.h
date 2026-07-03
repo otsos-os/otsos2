@@ -8,7 +8,7 @@
  * this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    in the documentation and/or other materials provided with the distribution.
+ *    and/or other materials provided with the distribution.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -23,55 +23,23 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* !DEFINES!
+#ifndef KERNEL_CONSOLE_PTY_H
+#define KERNEL_CONSOLE_PTY_H
 
-$define %type int as 32 bit signed
+#include <kernel/console/terminal.h>
+#include <kernel/drivers/fs/vfs/vfs.h>
+#include <mlibc/mlibc.h>
 
-*/
-
-/* !SPACE!
-
-$space %export SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGTRAP, SIGABRT, SIGBUS,
-    SIGFPE, SIGKILL, SIGUSR1, SIGSEGV, SIGUSR2, SIGPIPE, SIGALRM, SIGTERM,
-    SIGSTKFLT, SIGCHLD, SIGCONT, SIGSTOP, SIGTSTP, SIGTTIN, SIGTTOU, SIGURG,
-    SIGXCPU, SIGXFSZ, SIGVTALRM, SIGPROF, SIGWINCH, SIGIO, SIGPWR, SIGSYS
-
-*/
-
-#ifndef SIGNAL_H
-#define SIGNAL_H
-
-#define	SIGHUP		1
-#define	SIGINT		2
-#define	SIGQUIT		3
-#define	SIGILL		4
-#define	SIGTRAP		5
-#define	SIGABRT		6
-#define	SIGBUS		7
-#define	SIGFPE		8
-#define	SIGKILL		9
-#define	SIGUSR1		10
-#define	SIGSEGV		11
-#define	SIGUSR2		12
-#define	SIGPIPE		13
-#define	SIGALRM		14
-#define	SIGTERM		15
-#define	SIGSTKFLT	16
-#define	SIGCHLD		17
-#define	SIGCONT		18
-#define	SIGSTOP		19
-#define	SIGTSTP		20
-#define	SIGTTIN		21
-#define	SIGTTOU		22
-#define	SIGURG		23
-#define	SIGXCPU		24
-#define	SIGXFSZ		25
-#define	SIGVTALRM	26
-#define	SIGPROF		27
-#define	SIGWINCH	28
-#define	SIGIO		29
-#define	SIGPWR		30
-#define	SIGSYS		31
-#define	MAX_SIGNALS	32
+int	pty_init(void);
+int	pty_open_master(vnode_t **out);
+int	pty_name(int id, char *buf, int len);
+int	pty_master_read(vnode_t *vn, void *buf, u32 count, int nonblock);
+int	pty_master_write(vnode_t *vn, const void *buf, u32 count, int nonblock);
+int	pty_master_ioctl(vnode_t *vn, u64 cmd, void *arg);
+int	pty_slave_read(vnode_t *vn, void *buf, u32 count, int nonblock);
+int	pty_slave_write(vnode_t *vn, const void *buf, u32 count, int nonblock);
+int	pty_slave_ioctl(vnode_t *vn, u64 cmd, void *arg);
+int	pty_read_available(vnode_t *vn);
+vnode_t	*pty_create_slave_vnode(int id);
 
 #endif

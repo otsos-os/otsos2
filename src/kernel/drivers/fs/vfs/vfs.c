@@ -27,6 +27,7 @@
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
+#include <kernel/api/posix/posix.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
@@ -176,6 +177,7 @@ vnode_release(vnode_t *vn)
 		vn->write_fn = NULL;
 		vn->stat_fn = NULL;
 		vn->readdir_fn = NULL;
+		vn->ioctl_fn = NULL;
 	}
 }
 
@@ -231,6 +233,20 @@ vnode_readdir(vnode_t *vn, u32 index, char *name, int *type)
 	}
 
 	return (-1);
+}
+
+int
+vnode_ioctl(vnode_t *vn, u64 cmd, void *arg)
+{
+	if (!vn) {
+		return (-POSIX_ENOTTY);
+	}
+
+	if (vn->ioctl_fn) {
+		return (vn->ioctl_fn(vn, cmd, arg));
+	}
+
+	return (-POSIX_ENOTTY);
 }
 
 static int

@@ -25,8 +25,10 @@
  */
 
 #include <kernel/api/posix/posix.h>
+#include <kernel/console/terminal.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/process.h>
+#include <kernel/signal.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
 #include <mlibc/stdio.h>
@@ -345,6 +347,21 @@ posix_syscall_handler(registers_t *regs)
 	case SYS_getegid:
 		ret = posix_getegid(a1, a2, a3, a4, a5, a6, regs);
 		break;
+	case SYS_setpgid:
+		ret = posix_setpgid(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_getpgrp:
+		ret = posix_getpgrp(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_getsid:
+		ret = posix_getsid(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_setsid:
+		ret = posix_setsid(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_getpgid:
+		ret = posix_getpgid(a1, a2, a3, a4, a5, a6, regs);
+		break;
 	case SYS_getdents64:
 		ret = posix_getdents64(a1, a2, a3, a4, a5, a6, regs);
 		break;
@@ -403,6 +420,13 @@ posix_init_process(struct process *proc)
 	proc->sigpending = 0;
 	proc->brk = 0;
 	proc->personality = 0;
+	proc->sid = proc->pid;
+	proc->pgid = proc->pid;
+	proc->is_session_leader = 1;
+	proc->controlling_tty = 0;
+
+	terminal_set_session(0, proc->sid);
+	terminal_set_pgrp(0, proc->pgid);
 }
 
 void
@@ -570,11 +594,18 @@ posix_signal_deliver(struct process *proc, registers_t *regs)
 		mask = (1ULL << (sig - 1));
 		if (pending & mask) {
 			if (proc->sigaction[sig - 1].handler == 0) {
-				if (sig == 9 || sig == 15) {
+				int	dfl;
+
+				dfl = posix_signal_default(sig);
+				if (dfl == SIG_DFL_TERMINATE) {
 					proc->sigpending &= ~mask;
 					posix_cleanup_process(proc);
 					process_exit(128 + sig);
 					return;
+				}
+				if (dfl == SIG_DFL_STOP) {
+					proc->sigpending &= ~mask;
+					continue;
 				}
 				proc->sigpending &= ~mask;
 				continue;
@@ -593,5 +624,24 @@ posix_signal_deliver(struct process *proc, registers_t *regs)
 			regs->rdx = 0;
 			return;
 		}
+	}
+}
+
+int
+posix_signal_default(int sig)
+{
+	switch (sig) {
+	case SIGCHLD:
+	case SIGCONT:
+	case SIGURG:
+	case SIGWINCH:
+		return (SIG_DFL_IGNORE);
+	case SIGSTOP:
+	case SIGTSTP:
+	case SIGTTIN:
+	case SIGTTOU:
+		return (SIG_DFL_STOP);
+	default:
+		return (SIG_DFL_TERMINATE);
 	}
 }

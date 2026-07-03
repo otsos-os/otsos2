@@ -88,14 +88,20 @@ typedef struct process {
   /* File descriptors */
   api_handle_t handles[MAX_HANDLES];
 
-  /* POSIX personality state */
-  int		personality;
-  posix_fd_t	posix_fds[MAX_POSIX_FDS];
-  posix_sigaction_t	sigaction[MAX_POSIX_SIGS];
+	/* POSIX personality state */
+	int		personality;
+	posix_fd_t	posix_fds[MAX_POSIX_FDS];
+	posix_sigaction_t	sigaction[MAX_POSIX_SIGS];
 	u64		sigmask;
 	u64		sigpending;
 	u64		brk;
 	u64		brk_min;
+
+	/* Session / process group / controlling terminal */
+	u32		sid;
+	u32		pgid;
+	int		controlling_tty;	/* terminal index, -1 if none */
+	int		is_session_leader;
 } process_t;
 
 /* Initialize process subsystem */

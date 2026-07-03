@@ -29,6 +29,7 @@
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/console/terminal.h>
+#include <kernel/console/pty.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mlibc/stdio.h>
@@ -113,6 +114,19 @@ posix_open(u64 path_u, u64 flags, u64 mode, u64 a4, u64 a5, u64 a6,
 		}
 	} else {
 		exists = 0;
+	}
+
+	if (vn != NULL && vn->type == VCHR && strcmp(vn->name, "ptmx") == 0) {
+		vnode_t		*master_vn;
+		int		 ret;
+
+		vnode_release(vn);
+		ret = pty_open_master(&master_vn);
+		if (ret != 0) {
+			kmem_free(path);
+			return ((s64)ret);
+		}
+		vn = master_vn;
 	}
 
 	if (!exists) {
@@ -229,9 +243,29 @@ posix_read(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 		return (-POSIX_EBADF);
 	}
 
-	n = vnode_read(pfd->vnode, buf, count, pfd->offset);
-	if (n < 0) {
-		return (-POSIX_EIO);
+	if (pfd->vnode->ioctl_fn == terminal_ioctl_vnode) {
+		n = terminal_read_vnode(pfd->vnode, buf, (u32)count,
+		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
+		if (n < 0) {
+			return ((s64)n);
+		}
+	} else if (pfd->vnode->ioctl_fn == pty_master_ioctl) {
+		n = pty_master_read(pfd->vnode, buf, (u32)count,
+		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
+		if (n < 0) {
+			return ((s64)n);
+		}
+	} else if (pfd->vnode->ioctl_fn == pty_slave_ioctl) {
+		n = pty_slave_read(pfd->vnode, buf, (u32)count,
+		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
+		if (n < 0) {
+			return ((s64)n);
+		}
+	} else {
+		n = vnode_read(pfd->vnode, buf, count, pfd->offset);
+		if (n < 0) {
+			return (-POSIX_EIO);
+		}
 	}
 
 	pfd->offset += (u64)n;
@@ -278,9 +312,28 @@ posix_write(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 		pfd->offset = pfd->vnode->size;
 	}
 
-	n = vnode_write(pfd->vnode, buf, count, pfd->offset);
-	if (n < 0) {
-		return (-POSIX_EIO);
+	if (pfd->vnode->ioctl_fn == terminal_ioctl_vnode) {
+		n = terminal_write_vnode(pfd->vnode, buf, (u32)count);
+		if (n < 0) {
+			return (-POSIX_EIO);
+		}
+	} else if (pfd->vnode->ioctl_fn == pty_master_ioctl) {
+		n = pty_master_write(pfd->vnode, buf, (u32)count,
+		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
+		if (n < 0) {
+			return ((s64)n);
+		}
+	} else if (pfd->vnode->ioctl_fn == pty_slave_ioctl) {
+		n = pty_slave_write(pfd->vnode, buf, (u32)count,
+		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
+		if (n < 0) {
+			return ((s64)n);
+		}
+	} else {
+		n = vnode_write(pfd->vnode, buf, count, pfd->offset);
+		if (n < 0) {
+			return (-POSIX_EIO);
+		}
 	}
 
 	pfd->offset += (u64)n;
@@ -902,12 +955,14 @@ posix_ioctl(u64 fd_u, u64 cmd_u, u64 arg_u, u64 a4, u64 a5, u64 a6,
 
 	switch ((int)cmd_u) {
 	case POSIX_TIOCGWINSZ:
-		return (-POSIX_ENOTTY);
 	case POSIX_TIOCSWINSZ:
-		return (0);
 	case POSIX_TCGETS:
 	case POSIX_TCSETS:
-		return (0);
+	case POSIX_TIOCGPGRP:
+	case POSIX_TIOCSPGRP:
+	case POSIX_TIOCGSID:
+	case POSIX_TIOCSCTTY:
+		return (vnode_ioctl(pfd->vnode, cmd_u, (void *)arg_u));
 	default:
 		return (-POSIX_ENOTTY);
 	}

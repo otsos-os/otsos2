@@ -144,6 +144,12 @@ $space %export posix_signal_pending, posix_signal_deliver
 #define POSIX_TIOCSWINSZ	0x5414
 #define POSIX_TCGETS		0x5401
 #define POSIX_TCSETS		0x5402
+#define POSIX_TIOCGPGRP		0x540F
+#define POSIX_TIOCSPGRP		0x5410
+#define POSIX_TIOCGSID		0x5429
+#define	POSIX_TIOCSCTTY		0x540E
+#define	POSIX_TIOCGPTN		0x80045430
+
 
 #define POSIX_MAP_READ		0x1
 #define POSIX_MAP_WRITE		0x2
@@ -215,6 +221,11 @@ $space %export posix_signal_pending, posix_signal_deliver
 #define SYS_geteuid		108
 #define SYS_getegid		109
 #define SYS_getppid		110
+#define SYS_setpgid		124
+#define SYS_getpgrp		125
+#define SYS_getsid		126
+#define SYS_setsid		127
+#define SYS_getpgid		128
 #define SYS_getdents64		217
 #define SYS_set_tid_address	218
 #define SYS_exit_group		231
@@ -304,9 +315,14 @@ void		posix_cleanup_process(struct process *proc);
 void		posix_setup_stdio(struct process *proc);
 int		posix_alloc_fd(struct process *proc);
 posix_fd_t	*posix_get_fd(struct process *proc, int fd);
+#define SIG_DFL_IGNORE		0
+#define SIG_DFL_TERMINATE	1
+#define SIG_DFL_STOP		2
+
 int		posix_signal_pending(struct process *proc);
 void		posix_signal_deliver(struct process *proc,
 		    registers_t *regs);
+int		posix_signal_default(int sig);
 
 s64	posix_time(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5,
 	    u64 a6, registers_t *regs);
@@ -317,6 +333,18 @@ s64	posix_clock_gettime(u64 clock_id, u64 tp, u64 a3, u64 a4,
 s64	posix_clock_nanosleep(u64 clock_id, u64 flags, u64 req,
 	    u64 rem, u64 a5, u64 a6, registers_t *regs);
 s64	posix_times(u64 buf, u64 a2, u64 a3, u64 a4, u64 a5,
-	    u64 a6, registers_t *regs);
+    u64 a6, registers_t *regs);
+
+s64	posix_setpgid(u64 pid_u, u64 pgid_u, u64 a3, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_getpgrp(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_getsid(u64 pid_u, u64 a2, u64 a3, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_setsid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_getpgid(u64 pid_u, u64 a2, u64 a3, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
 
 #endif
+

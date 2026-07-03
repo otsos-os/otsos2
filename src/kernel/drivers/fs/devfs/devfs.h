@@ -29,21 +29,26 @@
 
 #include <kernel/drivers/fs/vfs/vfs.h>
 
-#define DEVFS_DEV_NULL	1
-#define DEVFS_DEV_ZERO	2
-#define DEVFS_DEV_TTY	3
-#define DEVFS_DEV_CONSOLE	4
-#define DEVFS_DEV_FB0	5
-#define DEVFS_DEV_RANDOM	6
-#define DEVFS_DEV_URANDOM	7
+#define	DEVFS_DEV_NULL		1
+#define	DEVFS_DEV_ZERO		2
+#define	DEVFS_DEV_TTY		3
+#define	DEVFS_DEV_CONSOLE	4
+#define	DEVFS_DEV_FB0		5
+#define	DEVFS_DEV_RANDOM	6
+#define	DEVFS_DEV_URANDOM	7
+#define	DEVFS_DEV_PTMX		8
+#define	DEVFS_DEV_PTS		9
 
 void		devfs_init(void);
 vnode_t		*devfs_lookup(const char *path);
 int		devfs_root_readdir(vnode_t *vn, u32 index, char *name,
 		    int *type);
 int		devfs_register(const char *name, int device_id,
-		    int (*read_fn)(void *, u64),
-		    int (*write_fn)(const void *, u64));
+		    int (*read_fn)(vnode_t *, void *, u64, u64),
+		    int (*write_fn)(vnode_t *, const void *, u64, u64),
+		    int (*ioctl_fn)(vnode_t *, u64, void *),
+		    int (*stat_fn)(vnode_t *, posix_stat_t *),
+		    void *data);
 int		devfs_unregister(const char *name);
 
 #endif

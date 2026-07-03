@@ -27,6 +27,7 @@
 #include <kernel/api/posix/posix.h>
 #include <kernel/api/api.h>
 #include <kernel/api/auxv.h>
+#include <kernel/console/terminal.h>
 #include <kernel/crypto/rng/rng.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/timer.h>
@@ -461,6 +462,122 @@ posix_getegid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 }
 
 s64
+posix_setpgid(u64 pid_u, u64 pgid_u, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+	struct process	*proc;
+	u32		pid;
+	u32		pgid;
+
+	(void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
+
+	pid = (u32)pid_u;
+	pgid = (u32)pgid_u;
+
+	if (pid == 0) {
+		proc = process_current();
+	} else {
+		proc = process_get(pid);
+	}
+	if (!proc) {
+		return (-POSIX_ESRCH);
+	}
+	if (pgid == 0) {
+		pgid = proc->pid;
+	}
+	/* session change is not allowed */
+	if (proc->sid != proc->pid && pgid != proc->sid) {
+		return (-POSIX_EPERM);
+	}
+	proc->pgid = pgid;
+	return (0);
+}
+
+s64
+posix_getpgrp(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+	struct process	*proc;
+
+	(void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+	(void)regs;
+
+	proc = process_current();
+	if (!proc) {
+		return (-POSIX_ESRCH);
+	}
+	return ((s64)proc->pgid);
+}
+
+s64
+posix_getsid(u64 pid_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+	struct process	*proc;
+
+	(void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
+
+	if (pid_u == 0) {
+		proc = process_current();
+	} else {
+		proc = process_get((u32)pid_u);
+	}
+	if (!proc) {
+		return (-POSIX_ESRCH);
+	}
+	return ((s64)proc->sid);
+}
+
+s64
+posix_setsid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+	struct process	*proc;
+	u32		old_pgrp;
+
+	(void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+	(void)regs;
+
+	proc = process_current();
+	if (!proc) {
+		return (-POSIX_ESRCH);
+	}
+	/* already a session leader */
+	if (proc->is_session_leader) {
+		return (-POSIX_EPERM);
+	}
+	old_pgrp = proc->pgid;
+	proc->sid = proc->pid;
+	proc->pgid = proc->pid;
+	proc->is_session_leader = 1;
+	if (proc->controlling_tty >= 0) {
+		terminal_hangup(proc->controlling_tty);
+	}
+	proc->controlling_tty = -1;
+	(void)old_pgrp;
+	return ((s64)proc->sid);
+}
+
+s64
+posix_getpgid(u64 pid_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+	struct process	*proc;
+
+	(void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
+
+	if (pid_u == 0) {
+		proc = process_current();
+	} else {
+		proc = process_get((u32)pid_u);
+	}
+	if (!proc) {
+		return (-POSIX_ESRCH);
+	}
+	return ((s64)proc->pgid);
+}
+
+s64
 posix_exit(u64 code, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
     registers_t *regs)
 {
@@ -639,6 +756,10 @@ posix_fork(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	child->brk_min = parent->brk_min;
 	child->brk = parent->brk;
 	child->kusr_auth = parent->kusr_auth;
+	child->sid = parent->sid;
+	child->pgid = parent->pgid;
+	child->is_session_leader = 0;
+	child->controlling_tty = parent->controlling_tty;
 
 	vm_map_fork(parent, child);
 	api_copy_handles(child, parent);

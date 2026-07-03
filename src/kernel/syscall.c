@@ -195,10 +195,11 @@ void syscall_handler(registers_t *regs) {
   case CALL_PROC_WAIT:
     regs->rax = (u64)api_proc_wait((int *)arg1);
     break;
-  case CALL_PROC_KILL:
-    regs->rax = process_send_signal((u32)arg1, (int)arg2);
-    break;
-  case CALL_PROC_LIST:
+	case CALL_PROC_KILL:
+	    regs->rax = process_send_signal((u32)arg1, (int)arg2);
+	    break;
+	case CALL_PROC_LIST:
+
     regs->rax = (u64)api_proc_list((struct api_proc_info *)arg1, (u32)arg2);
     break;
   case CALL_KUSR_AUTH:

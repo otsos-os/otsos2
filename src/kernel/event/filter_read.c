@@ -54,7 +54,11 @@ $space %export filter_read_ops
 
 #include <kernel/event/event.h>
 #include <kernel/api/api.h>
+#include <kernel/api/posix/posix.h>
+#include <kernel/console/terminal.h>
+#include <kernel/console/pty.h>
 #include <kernel/drivers/keyboard/keyboard.h>
+#include <kernel/process.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -99,9 +103,41 @@ filt_read_event(knote_t *kn, u32 nevents)
 	int			obj_idx;
 	api_object_t		*obj;
 	pipe_t			*p;
+	struct process		*proc;
+	posix_fd_t		*pfd;
 	char			c;
+	int			idx;
+	int			avail;
 
 	fd = (int)kn->ident;
+
+	proc = process_current();
+	if (proc && fd >= 0 && fd < MAX_POSIX_FDS) {
+		pfd = &proc->posix_fds[fd];
+		if (pfd->used && pfd->vnode) {
+			if (pfd->vnode->ioctl_fn == terminal_ioctl_vnode) {
+				idx = (int)(unsigned long)pfd->vnode->data;
+				if (idx == -1) {
+					idx = terminal_get_active();
+				}
+				avail = terminal_read_available(idx);
+				if (avail > 0) {
+					kn->data = avail;
+					return (1);
+				}
+				return (0);
+			}
+			if (pfd->vnode->ioctl_fn == pty_master_ioctl ||
+			    pfd->vnode->ioctl_fn == pty_slave_ioctl) {
+				avail = pty_read_available(pfd->vnode);
+				if (avail > 0) {
+					kn->data = avail;
+					return (1);
+				}
+				return (0);
+			}
+		}
+	}
 
 	if (fd == 0) {
 		c = keyboard_getchar();

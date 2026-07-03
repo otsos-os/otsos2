@@ -122,6 +122,8 @@ $space %export terminal_power_suspend_all
 #include <kernel/drivers/console/kms_console.h>
 #include <kernel/event/event.h>
 #include <kernel/process.h>
+#include <kernel/signal.h>
+#include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
 
 #define	TERM_COUNT		10
@@ -131,35 +133,37 @@ static void	terminal_lazy_init(void);
 void		terminal_update(void);
 static void	*terminal_input_channel = &terminal_input_channel;
 typedef struct {
-	u16	*cells;
-	int	width;
-	int	height;
-	int	cursor_x;
-	int	cursor_y;
-	u8	color;
-	u32	fg_rgb;
-	int	ansi_state;
-	int	ansi_params[8];
-	int	ansi_param_count;
-	int	ansi_cur_param;
-	int	state;	/*active/suspend/disabled */
+	u16		*cells;
+	int		width;
+	int		height;
+	int		cursor_x;
+	int		cursor_y;
+	u8		color;
+	u32		fg_rgb;
+	int		ansi_state;
+	int		ansi_params[8];
+	int		ansi_param_count;
+	int		ansi_cur_param;
+	int		state;	/*active/suspend/disabled */
+	struct termios	term;
+	struct winsize	ws;
+	u32		session;
+	u32		foreground_pgrp;
+	char		input_buf[1024];
+	int		input_head;
+	int		input_tail;
+	int		input_count;
+	char		line_buf[TERM_LINE_BUF_SIZE];
+	int		line_len;
+	int		line_read_pos;
+	int		eof_pending;
 } terminal_state_t;
 
-typedef struct {
-	char	data[TERM_LINE_BUF_SIZE];
-	u32	len;
-	u32	read_pos;
-} terminal_line_buf_t;
+static void	terminal_init_termios(terminal_state_t *term);
+static void	terminal_emit_to(int terminal_idx, char c);
+void		terminal_signal_pgrp(int idx, int sig);
 
-typedef struct {
-	char	buf[1024];
-	int	head;
-	int	tail;
-} terminal_input_queue_t;
-
-static terminal_state_t		terminals[TERM_COUNT];
-static terminal_line_buf_t	terminal_line_bufs[TERM_COUNT];
-static terminal_input_queue_t	terminal_inputs[TERM_COUNT];
+static terminal_state_t	terminals[TERM_COUNT];
 static int			terminal_active = 0;
 static int			terminal_initialized = 0;
 static volatile int		terminal_switch_pending = -1;
@@ -758,6 +762,13 @@ terminal_set_active(int index)
 	terminal_switch_to(index);
 }
 
+int
+terminal_get_active(void)
+{
+	terminal_lazy_init();
+	return (terminal_active);
+}
+
 void *
 terminal_get_input_channel(void)
 {
@@ -908,6 +919,19 @@ terminal_init(void)
 		term->ansi_param_count = 0;
 		term->ansi_cur_param = 0;
 		term->state = TERM_STATE_ACTIVE;
+		term->input_head = 0;
+		term->input_tail = 0;
+		term->input_count = 0;
+		term->line_len = 0;
+		term->line_read_pos = 0;
+		term->eof_pending = 0;
+		term->session = 0;
+		term->foreground_pgrp = 0;
+		term->ws.ws_row = (u16)height;
+		term->ws.ws_col = (u16)width;
+		term->ws.ws_xpixel = 0;
+		term->ws.ws_ypixel = 0;
+		terminal_init_termios(term);
 		term->cells = (u16 *)kmem_calloc(
 		    (unsigned long)(width * height), sizeof(u16));
 		if (term->cells) {
@@ -973,6 +997,10 @@ terminal_reinit(void)
 
 		term->width = new_w;
 		term->height = new_h;
+		term->ws.ws_row = (u16)new_h;
+		term->ws.ws_col = (u16)new_w;
+		term->ws.ws_xpixel = 0;
+		term->ws.ws_ypixel = 0;
 		term->cells = (u16 *)kmem_calloc(
 		    (unsigned long)(new_w * new_h), sizeof(u16));
 		if (term->cells) {
@@ -1095,12 +1123,152 @@ terminal_clear_active(void)
 }
 
 static void
+terminal_input_put(int idx, char c)
+{
+	terminal_state_t	*term;
+	int			 next;
+
+	term = &terminals[idx];
+	next = (term->input_head + 1) % 1024;
+	if (next == term->input_tail) {
+		return;
+	}
+	term->input_buf[term->input_head] = c;
+	term->input_head = next;
+	term->input_count++;
+}
+
+static int
+terminal_input_get(int idx, char *c)
+{
+	terminal_state_t	*term;
+
+	term = &terminals[idx];
+	if (term->input_head == term->input_tail) {
+		return (-1);
+	}
+	*c = term->input_buf[term->input_tail];
+	term->input_tail = (term->input_tail + 1) % 1024;
+	term->input_count--;
+	return (0);
+}
+
+static void
+terminal_echo(int idx, char c)
+{
+	terminal_state_t	*term;
+
+	term = &terminals[idx];
+	if (!(term->term.c_lflag & ECHO)) {
+		return;
+	}
+	terminal_emit_to(idx, c);
+}
+
+static void
+terminal_input_char(int idx, char c)
+{
+	terminal_state_t	*term;
+	int			 lflag;
+	int			 i;
+
+	term = &terminals[idx];
+	lflag = term->term.c_lflag;
+
+	if (lflag & ISIG) {
+		if (c == term->term.c_cc[VINTR]) {
+			terminal_signal_pgrp(idx, SIGINT);
+			return;
+		}
+		if (c == term->term.c_cc[VQUIT]) {
+			terminal_signal_pgrp(idx, SIGQUIT);
+			return;
+		}
+		if (c == term->term.c_cc[VSUSP]) {
+			terminal_signal_pgrp(idx, SIGTSTP);
+			return;
+		}
+	}
+
+	if (lflag & ICANON) {
+		if (c == term->term.c_cc[VERASE]) {
+			if (term->line_len > 0) {
+				term->line_len--;
+				if (lflag & ECHOE) {
+					terminal_echo(idx, '\b');
+					terminal_echo(idx, ' ');
+					terminal_echo(idx, '\b');
+				} else if (lflag & ECHO) {
+					terminal_echo(idx,
+					    term->term.c_cc[VERASE]);
+				}
+			}
+			return;
+		}
+		if (c == term->term.c_cc[VKILL]) {
+			while (term->line_len > 0) {
+				term->line_len--;
+				if (lflag & ECHO) {
+					terminal_echo(idx, '\b');
+					terminal_echo(idx, ' ');
+					terminal_echo(idx, '\b');
+				}
+			}
+			return;
+		}
+		if (c == term->term.c_cc[VEOF]) {
+			if (term->line_len == 0) {
+				term->eof_pending = 1;
+			} else {
+				for (i = 0; i < term->line_len; i++) {
+					terminal_input_put(idx,
+					    term->line_buf[i]);
+				}
+				term->line_len = 0;
+			}
+			proc_wakeup(terminal_input_channel);
+			return;
+		}
+		if (c == '\n' || c == '\r' ||
+		    c == term->term.c_cc[VEOL] ||
+		    c == term->term.c_cc[VEOL2]) {
+			if (c == '\r') {
+				c = '\n';
+			}
+			if (term->line_len < TERM_LINE_BUF_SIZE) {
+				term->line_buf[term->line_len++] = c;
+			}
+			for (i = 0; i < term->line_len; i++) {
+				terminal_input_put(idx, term->line_buf[i]);
+			}
+			term->line_len = 0;
+			if (lflag & ECHO) {
+				terminal_echo(idx, '\n');
+			}
+			proc_wakeup(terminal_input_channel);
+			return;
+		}
+		if (term->line_len < TERM_LINE_BUF_SIZE) {
+			term->line_buf[term->line_len++] = c;
+			if (lflag & ECHO) {
+				terminal_echo(idx, c);
+			}
+		}
+		return;
+	}
+
+	terminal_input_put(idx, c);
+	if (lflag & ECHO) {
+		terminal_echo(idx, c);
+	}
+	proc_wakeup(terminal_input_channel);
+}
+
+static void
 terminal_pump_keyboard(void)
 {
-	terminal_input_queue_t	*q;
-	char			 c;
-	int			 next;
-	int			 got_data;
+	char	c;
+	int	got_data;
 
 	got_data = 0;
 	if (terminals[terminal_active].state != TERM_STATE_ACTIVE) {
@@ -1112,12 +1280,7 @@ terminal_pump_keyboard(void)
 		if (c == 0) {
 			break;
 		}
-		q = &terminal_inputs[terminal_active];
-		next = (q->head + 1) % 256;
-		if (next != q->tail) {
-			q->buf[q->head] = c;
-			q->head = next;
-		}
+		terminal_input_char(terminal_active, c);
 		got_data = 1;
 	}
 
@@ -1126,24 +1289,132 @@ terminal_pump_keyboard(void)
 	}
 }
 
-static char
-terminal_getchar_blocking(int terminal_idx)
+int
+terminal_read_available(int idx)
 {
-	terminal_input_queue_t	*q;
-	char			 c;
+	terminal_state_t	*term;
+	int			 i;
+	int			 pos;
+	int			 count;
 
-	while (1) {
-		terminal_update();
-		terminal_pump_keyboard();
-		q = &terminal_inputs[terminal_idx];
-		if (q->head != q->tail) {
-			c = q->buf[q->tail];
-			q->tail = (q->tail + 1) % 256;
-			terminal_update();
-			return (c);
+	term = &terminals[idx];
+	if (term->term.c_lflag & ICANON) {
+		count = 0;
+		pos = term->input_tail;
+		for (i = 0; i < term->input_count; i++) {
+			count++;
+			if (term->input_buf[pos] == '\n') {
+				return (count);
+			}
+			pos = (pos + 1) % 1024;
 		}
-		proc_sleep(terminal_input_channel);
+		return (0);
 	}
+	return (term->input_count);
+}
+
+int
+terminal_read_idx(int idx, void *buf, u32 count, int nonblock)
+{
+	terminal_state_t	*term;
+	char			*out;
+	char			 c;
+	int			 n;
+
+	terminal_lazy_init();
+
+	if (count == 0) {
+		return (0);
+	}
+	if (idx < 0 || idx >= TERM_COUNT) {
+		return (-POSIX_EBADF);
+	}
+	term = &terminals[idx];
+	if (term->state != TERM_STATE_ACTIVE) {
+		return (-API_ERR_NOT_TERM);
+	}
+
+	__asm__ volatile("sti");
+	out = (char *)buf;
+	n = 0;
+
+	if (term->term.c_lflag & ICANON) {
+		while (n < (int)count) {
+			terminal_pump_keyboard();
+			if (terminal_input_get(idx, &c) == 0) {
+				out[n++] = c;
+				if (c == '\n') {
+					break;
+				}
+			} else if (term->eof_pending) {
+				term->eof_pending = 0;
+				break;
+			} else if (nonblock) {
+				if (n == 0) {
+					return (-POSIX_EAGAIN);
+				}
+				break;
+			} else {
+				proc_sleep(terminal_input_channel);
+			}
+		}
+	} else {
+		while (n < (int)count) {
+			terminal_pump_keyboard();
+			if (terminal_input_get(idx, &c) == 0) {
+				out[n++] = c;
+			} else if (nonblock) {
+				if (n == 0) {
+					return (-POSIX_EAGAIN);
+				}
+				break;
+			} else {
+				proc_sleep(terminal_input_channel);
+			}
+		}
+	}
+	return (n);
+}
+
+int
+terminal_read(void *buf, u32 count)
+{
+	return (terminal_read_idx(terminal_active, buf, count, 0));
+}
+
+int
+terminal_write_idx(int idx, const void *buf, u32 count)
+{
+	const char	*data;
+	u32		 i;
+
+	terminal_lazy_init();
+	terminal_update();
+
+	if (count == 0) {
+		return (0);
+	}
+	if (idx < 0 || idx >= TERM_COUNT) {
+		return (-POSIX_EBADF);
+	}
+	if (terminals[idx].state != TERM_STATE_ACTIVE) {
+		return (-API_ERR_NOT_TERM);
+	}
+
+	data = (const char *)buf;
+	for (i = 0; i < count; i++) {
+		terminal_emit_to(idx, data[i]);
+	}
+	if (idx == terminal_active && g_con) {
+		kms_console_flush(g_con);
+	}
+	return ((int)count);
+}
+
+int
+terminal_write(const void *buf, u32 count)
+{
+	return (terminal_write_idx(terminal_active, buf, count));
 }
 
 static void
@@ -1158,145 +1429,45 @@ terminal_emit_to(int terminal_idx, char c)
 		terminal_suppress_com1_mirror = 1;
 		uart_write_byte((u8)c);
 		terminal_suppress_com1_mirror = 0;
+		if (g_con) {
+			kms_console_flush(g_con);
+		}
 	}
 }
 
 static void
-terminal_fill_line_buffer(int terminal_idx)
+terminal_init_termios(terminal_state_t *term)
 {
-	terminal_line_buf_t	*line;
-	char			 c;
-
-	line = &terminal_line_bufs[terminal_idx];
-	if (!line) {
-		return;
-	}
-
-	line->len = 0;
-	line->read_pos = 0;
-
-	while (1) {
-		c = terminal_getchar_blocking(terminal_idx);
-		if (c == 0) {
-			continue;
-		}
-
-		if (c == '\b' || c == 0x7F) {
-			if (line->len > 0) {
-				line->len--;
-				terminal_emit_to(terminal_idx, '\b');
-				terminal_emit_to(terminal_idx, ' ');
-				terminal_emit_to(terminal_idx, '\b');
-				if (terminal_idx == terminal_active && g_con) {
-					kms_console_flush(g_con);
-				}
-			}
-			continue;
-		}
-
-		if (c == '\n' || c == '\r') {
-			if (line->len < (TERM_LINE_BUF_SIZE - 1)) {
-				line->data[line->len++] = '\n';
-			}
-			terminal_emit_to(terminal_idx, '\n');
-			if (terminal_idx == terminal_active && g_con) {
-				kms_console_flush(g_con);
-			}
-			break;
-		}
-
-		if (line->len < (TERM_LINE_BUF_SIZE - 1)) {
-			line->data[line->len++] = c;
-			terminal_emit_to(terminal_idx, c);
-			if (terminal_idx == terminal_active && g_con) {
-				kms_console_flush(g_con);
-			}
-		}
-	}
-}
-
-int
-terminal_read(void *buf, u32 count)
-{
-	terminal_line_buf_t	*line;
-	u32			 available;
-	u32			 to_copy;
-	int			 terminal_idx;
-
-	terminal_lazy_init();
-
-	if (count == 0) {
-		return (0);
-	}
-
-	if (terminals[terminal_active].state != TERM_STATE_ACTIVE) {
-		return (-API_ERR_NOT_TERM);
-	}
-
-	__asm__ volatile("sti");
-
-	terminal_idx = terminal_active;
-	line = &terminal_line_bufs[terminal_idx];
-	if (line->read_pos >= line->len) {
-		line->len = 0;
-		line->read_pos = 0;
-		terminal_fill_line_buffer(terminal_idx);
-	}
-
-	available = line->len - line->read_pos;
-	to_copy = count;
-	if (to_copy > available) {
-		to_copy = available;
-	}
-
-	if (to_copy > 0) {
-		memcpy(buf, line->data + line->read_pos, to_copy);
-		line->read_pos += to_copy;
-	}
-
-	if (line->read_pos >= line->len) {
-		line->len = 0;
-		line->read_pos = 0;
-	}
-
-	return ((int)to_copy);
-}
-
-int
-terminal_write(const void *buf, u32 count)
-{
-	const char	*data;
-	u32		 i;
-
-	terminal_lazy_init();
-	terminal_update();
-
-	if (count == 0) {
-		return (0);
-	}
-
-	if (terminals[terminal_active].state != TERM_STATE_ACTIVE) {
-		return (-API_ERR_NOT_TERM);
-	}
-
-	data = (const char *)buf;
-	for (i = 0; i < count; i++) {
-		terminal_emit(data[i]);
-	}
-
-	if (g_con) {
-		kms_console_flush(g_con);
-	}
-
-	return ((int)count);
+	term->term.c_iflag = ICRNL | IXON | IXOFF;
+	term->term.c_oflag = OPOST | ONLCR;
+	term->term.c_cflag = CS8 | CREAD | CLOCAL;
+	term->term.c_lflag = ISIG | ICANON | ECHO | ECHOE | ECHOK | ECHOKE |
+	    IEXTEN;
+	term->term.c_cc[VINTR] = CINTR;
+	term->term.c_cc[VQUIT] = CQUIT;
+	term->term.c_cc[VERASE] = CERASE;
+	term->term.c_cc[VKILL] = CKILL;
+	term->term.c_cc[VEOF] = CEOF;
+	term->term.c_cc[VTIME] = 0;
+	term->term.c_cc[VMIN] = 1;
+	term->term.c_cc[VSTART] = CSTART;
+	term->term.c_cc[VSTOP] = CSTOP;
+	term->term.c_cc[VSUSP] = CSUSP;
+	term->term.c_cc[VEOL] = CEOL;
+	term->term.c_cc[VREPRINT] = CREPRINT;
+	term->term.c_cc[VDISCARD] = CDISCARD;
+	term->term.c_cc[VWERASE] = CWERASE;
+	term->term.c_cc[VLNEXT] = CLNEXT;
+	term->term.c_cc[VEOL2] = CEOL2;
+	term->term.c_line = 0;
+	term->term.c_ispeed = B38400;
+	term->term.c_ospeed = B38400;
 }
 
 static void
 terminal_reset_one(int index)
 {
 	terminal_state_t	*term;
-	terminal_line_buf_t	*line;
-	terminal_input_queue_t	*input;
 	u16			 blank;
 	int			 i;
 
@@ -1305,8 +1476,6 @@ terminal_reset_one(int index)
 	}
 
 	term = &terminals[index];
-	line = &terminal_line_bufs[index];
-	input = &terminal_inputs[index];
 
 	if (term->cells) {
 		blank = ((u16)0x07 << 8) | ' ';
@@ -1327,14 +1496,19 @@ terminal_reset_one(int index)
 	}
 	term->state = TERM_STATE_ACTIVE;
 
-	line->len = 0;
-	line->read_pos = 0;
-
-	input->head = 0;
-	input->tail = 0;
-	for (i = 0; i < 1024; i++) {
-		input->buf[i] = 0;
-	}
+	term->input_head = 0;
+	term->input_tail = 0;
+	term->input_count = 0;
+	term->line_len = 0;
+	term->line_read_pos = 0;
+	term->eof_pending = 0;
+	terminal_init_termios(term);
+	term->ws.ws_row = 25;
+	term->ws.ws_col = 80;
+	term->ws.ws_xpixel = 0;
+	term->ws.ws_ypixel = 0;
+	term->session = 0;
+	term->foreground_pgrp = 0;
 
 	if (index == terminal_active && g_con) {
 		rapi_console_clear(g_con, 0x000000);
@@ -1424,4 +1598,257 @@ terminal_power_suspend_all(void)
 	}
 
 	return (0);
+}
+
+void
+terminal_set_winsize(int idx, const struct winsize *ws)
+{
+	terminal_state_t	*term;
+
+	if (idx < 0 || idx >= TERM_COUNT || !ws) {
+		return;
+	}
+	term = &terminals[idx];
+	term->ws = *ws;
+	terminal_signal_pgrp(idx, SIGWINCH);
+}
+
+void
+terminal_get_winsize(int idx, struct winsize *ws)
+{
+	terminal_state_t	*term;
+
+	if (idx < 0 || idx >= TERM_COUNT || !ws) {
+		return;
+	}
+	term = &terminals[idx];
+	*ws = term->ws;
+}
+
+void
+terminal_set_termios(int idx, const struct termios *t)
+{
+	terminal_state_t	*term;
+
+	if (idx < 0 || idx >= TERM_COUNT || !t) {
+		return;
+	}
+	term = &terminals[idx];
+	term->term = *t;
+}
+
+void
+terminal_get_termios(int idx, struct termios *t)
+{
+	terminal_state_t	*term;
+
+	if (idx < 0 || idx >= TERM_COUNT || !t) {
+		return;
+	}
+	term = &terminals[idx];
+	*t = term->term;
+}
+
+void
+terminal_set_session(int idx, u32 sid)
+{
+	if (idx < 0 || idx >= TERM_COUNT) {
+		return;
+	}
+	terminals[idx].session = sid;
+}
+
+u32
+terminal_get_session(int idx)
+{
+	if (idx < 0 || idx >= TERM_COUNT) {
+		return (0);
+	}
+	return (terminals[idx].session);
+}
+
+void
+terminal_set_pgrp(int idx, u32 pgid)
+{
+	if (idx < 0 || idx >= TERM_COUNT) {
+		return;
+	}
+	terminals[idx].foreground_pgrp = pgid;
+}
+
+u32
+terminal_get_pgrp(int idx)
+{
+	if (idx < 0 || idx >= TERM_COUNT) {
+		return (0);
+	}
+	return (terminals[idx].foreground_pgrp);
+}
+
+void
+terminal_signal_pgrp(int idx, int sig)
+{
+	process_t	*proc;
+	int		 i;
+	u32		 pgrp;
+
+	if (idx < 0 || idx >= TERM_COUNT) {
+		return;
+	}
+	pgrp = terminals[idx].foreground_pgrp;
+	if (pgrp == 0) {
+		return;
+	}
+	for (i = 0; i < MAX_PROCESSES; i++) {
+		proc = &process_table[i];
+		if (proc->pid != 0 && proc->pgid == pgrp) {
+			process_send_signal(proc->pid, sig);
+		}
+	}
+}
+
+void
+terminal_hangup(int idx)
+{
+	process_t	*proc;
+	int		 i;
+
+	if (idx < 0 || idx >= TERM_COUNT) {
+		return;
+	}
+	terminal_signal_pgrp(idx, SIGHUP);
+	for (i = 0; i < MAX_PROCESSES; i++) {
+		proc = &process_table[i];
+		if (proc->pid != 0 && proc->controlling_tty == idx) {
+			proc->controlling_tty = -1;
+		}
+	}
+	terminals[idx].session = 0;
+	terminals[idx].foreground_pgrp = 0;
+}
+
+int
+terminal_ioctl_idx(int idx, u64 cmd, void *arg)
+{
+	struct process	*proc;
+	struct termios	t;
+	struct winsize	ws;
+	int		pgrp;
+	u32		sid;
+
+	if (idx < 0 || idx >= TERM_COUNT) {
+		return (-POSIX_ENOTTY);
+	}
+
+	proc = process_current();
+
+	switch (cmd) {
+	case POSIX_TIOCGWINSZ:
+		if (!arg || !is_user_address(arg, sizeof(struct winsize))) {
+			return (-POSIX_EFAULT);
+		}
+		terminal_get_winsize(idx, (struct winsize *)arg);
+		return (0);
+
+	case POSIX_TIOCSWINSZ:
+		if (!arg || !is_user_address(arg, sizeof(struct winsize))) {
+			return (-POSIX_EFAULT);
+		}
+		terminal_set_winsize(idx, (struct winsize *)arg);
+		return (0);
+
+	case POSIX_TCGETS:
+		if (!arg || !is_user_address(arg, sizeof(struct termios))) {
+			return (-POSIX_EFAULT);
+		}
+		terminal_get_termios(idx, &t);
+		memcpy(arg, &t, sizeof(t));
+		return (0);
+
+	case POSIX_TCSETS:
+		if (!arg || !is_user_address(arg, sizeof(struct termios))) {
+			return (-POSIX_EFAULT);
+		}
+		memcpy(&t, arg, sizeof(t));
+		terminal_set_termios(idx, &t);
+		return (0);
+
+	case POSIX_TIOCGPGRP:
+		if (!arg || !is_user_address(arg, sizeof(int))) {
+			return (-POSIX_EFAULT);
+		}
+		pgrp = (int)terminal_get_pgrp(idx);
+		memcpy(arg, &pgrp, sizeof(pgrp));
+		return (0);
+
+	case POSIX_TIOCSPGRP:
+		if (!arg || !is_user_address(arg, sizeof(int))) {
+			return (-POSIX_EFAULT);
+		}
+		memcpy(&pgrp, arg, sizeof(pgrp));
+		terminal_set_pgrp(idx, (u32)pgrp);
+		return (0);
+
+	case POSIX_TIOCGSID:
+		if (!arg || !is_user_address(arg, sizeof(int))) {
+			return (-POSIX_EFAULT);
+		}
+		sid = terminal_get_session(idx);
+		memcpy(arg, &sid, sizeof(sid));
+		return (0);
+
+	case POSIX_TIOCSCTTY:
+		if (!proc) {
+			return (-POSIX_EFAULT);
+		}
+		if (!proc->is_session_leader) {
+			return (-POSIX_EPERM);
+		}
+		if (terminals[idx].session != 0 &&
+		    terminals[idx].session != proc->sid) {
+			return (-POSIX_EPERM);
+		}
+		terminals[idx].session = proc->sid;
+		proc->controlling_tty = idx;
+		return (0);
+
+	default:
+		return (-POSIX_ENOTTY);
+	}
+}
+
+int
+terminal_read_vnode(vnode_t *vn, void *buf, u32 count, int nonblock)
+{
+	int	idx;
+
+	idx = (int)(unsigned long)vn->data;
+	if (idx == -1) {
+		idx = terminal_active;
+	}
+	return (terminal_read_idx(idx, buf, count, nonblock));
+}
+
+int
+terminal_write_vnode(vnode_t *vn, const void *buf, u32 count)
+{
+	int	idx;
+
+	idx = (int)(unsigned long)vn->data;
+	if (idx == -1) {
+		idx = terminal_active;
+	}
+	return (terminal_write_idx(idx, buf, count));
+}
+
+int
+terminal_ioctl_vnode(vnode_t *vn, u64 cmd, void *arg)
+{
+	int	idx;
+
+	idx = (int)(unsigned long)vn->data;
+	if (idx == -1) {
+		idx = terminal_active;
+	}
+	return (terminal_ioctl_idx(idx, cmd, arg));
 }
