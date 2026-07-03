@@ -165,7 +165,7 @@ EVENT_USER_O = ../bin/event_user.o
 EVENT_KBD_O = ../bin/event_kbd.o
 
 VFS_O = ../bin/vfs.o
-DEVTMPFS_O = ../bin/devtmpfs.o
+DEVFS_O = ../bin/devfs.o
 POSIX_O = ../bin/posix.o
 POSIX_IO_O = ../bin/posix_io.o
 POSIX_PROC_O = ../bin/posix_proc.o
@@ -198,7 +198,7 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
       $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
       $(EVENT_KBD_O) \
-      $(VFS_O) $(DEVTMPFS_O) \
+      $(VFS_O) $(DEVFS_O) \
       $(POSIX_O) $(POSIX_IO_O) $(POSIX_PROC_O) $(POSIX_FS_O) \
       $(POSIX_MEM_O) $(POSIX_SIGNAL_O) \
       $(PROC_PID_O) $(THREAD_API_O) $(FUTEX_O) $(SYS_O) \
@@ -765,7 +765,7 @@ $(VFS_O): kernel/drivers/fs/vfs/vfs.c kernel/drivers/fs/vfs/vfs.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(DEVTMPFS_O): kernel/drivers/fs/devtmpfs/devtmpfs.c kernel/drivers/fs/devtmpfs/devtmpfs.h
+$(DEVFS_O): kernel/drivers/fs/devfs/devfs.c kernel/drivers/fs/devfs/devfs.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

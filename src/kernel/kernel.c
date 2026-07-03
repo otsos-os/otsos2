@@ -69,7 +69,7 @@ $space %export kmain
 #include <kernel/drivers/eventtimer.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
-#include <kernel/drivers/fs/devtmpfs/devtmpfs.h>
+#include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/power/power.h>
 #include <kernel/drivers/timer.h>

@@ -26,23 +26,21 @@
 
 #include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/console/terminal.h>
-#include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/crypto/rng/rng.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
 
-#define MAX_DEVFS_DEVICES 16
+typedef struct devfs_node {
+	char			name[32];
+	int			device_id;
+	int			(*read_fn)(void *, u64);
+	int			(*write_fn)(const void *, u64);
+	struct devfs_node	*next;
+} devfs_node_t;
 
-typedef struct {
-	char		name[32];
-	int		device_id;
-	int		(*read_fn)(void *, u64);
-	int		(*write_fn)(const void *, u64);
-} devfs_entry_t;
-
-static devfs_entry_t	devfs_devices[MAX_DEVFS_DEVICES];
-static int		devfs_device_count = 0;
+static devfs_node_t	*devfs_list = NULL;
+static int		devfs_count = 0;
 
 static int
 dev_null_read(void *buf, u64 count)
@@ -103,7 +101,6 @@ dev_random_read(void *buf, u64 count)
 	if (count == 0) {
 		return (0);
 	}
-
 	if (crypto_rng_bytes((u8 *)buf, (u32)count) != 0) {
 		return (-1);
 	}
@@ -123,7 +120,6 @@ dev_urandom_read(void *buf, u64 count)
 	if (count == 0) {
 		return (0);
 	}
-
 	if (crypto_rng_bytes((u8 *)buf, (u32)count) != 0) {
 		return (-1);
 	}
@@ -137,59 +133,13 @@ dev_urandom_write(const void *buf, u64 count)
 	return ((int)count);
 }
 
-static void
-devfs_register(const char *name, int device_id,
-    int (*read_fn)(void *, u64), int (*write_fn)(const void *, u64))
-{
-	int	i;
-
-	if (devfs_device_count >= MAX_DEVFS_DEVICES) {
-		return;
-	}
-
-	i = devfs_device_count;
-	memset(devfs_devices[i].name, 0, sizeof(devfs_devices[i].name));
-	int	j;
-	for (j = 0; j < 31 && name[j] != '\0'; j++) {
-		devfs_devices[i].name[j] = name[j];
-	}
-	devfs_devices[i].name[j] = '\0';
-	devfs_devices[i].device_id = device_id;
-	devfs_devices[i].read_fn = read_fn;
-	devfs_devices[i].write_fn = write_fn;
-	devfs_device_count++;
-}
-
-void
-devfs_init(void)
-{
-	devfs_device_count = 0;
-	memset(devfs_devices, 0, sizeof(devfs_devices));
-
-	devfs_register("null", DEVFS_DEV_NULL,
-	    dev_null_read, dev_null_write);
-	devfs_register("zero", DEVFS_DEV_ZERO,
-	    dev_zero_read, dev_zero_write);
-	devfs_register("tty", DEVFS_DEV_TTY,
-	    dev_terminal_read, dev_terminal_write);
-	devfs_register("console", DEVFS_DEV_CONSOLE,
-	    dev_console_read, dev_console_write);
-	devfs_register("random", DEVFS_DEV_RANDOM,
-	    dev_random_read, dev_random_write);
-	devfs_register("urandom", DEVFS_DEV_URANDOM,
-	    dev_urandom_read, dev_urandom_write);
-
-	drivers_log("[DEVFS] initialized (%d devices)\n",
-	    devfs_device_count);
-}
-
 static int
 devfs_dev_read(vnode_t *vn, void *buf, u64 count, u64 offset)
 {
-	devfs_entry_t	*dev;
+	devfs_node_t	*dev;
 
 	(void)offset;
-	dev = (devfs_entry_t *)vn->data;
+	dev = (devfs_node_t *)vn->data;
 	if (!dev || !dev->read_fn) {
 		return (-1);
 	}
@@ -199,10 +149,10 @@ devfs_dev_read(vnode_t *vn, void *buf, u64 count, u64 offset)
 static int
 devfs_dev_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
 {
-	devfs_entry_t	*dev;
+	devfs_node_t	*dev;
 
 	(void)offset;
-	dev = (devfs_entry_t *)vn->data;
+	dev = (devfs_node_t *)vn->data;
 	if (!dev || !dev->write_fn) {
 		return (-1);
 	}
@@ -224,57 +174,153 @@ devfs_dev_stat(vnode_t *vn, posix_stat_t *st)
 	return (0);
 }
 
-static devfs_entry_t *
-devfs_find_device(const char *name)
+static devfs_node_t *
+devfs_find(const char *name)
 {
-	int	i;
+	devfs_node_t	*cur;
 
-	for (i = 0; i < devfs_device_count; i++) {
-		if (strcmp(devfs_devices[i].name, name) == 0) {
-			return (&devfs_devices[i]);
+	cur = devfs_list;
+	while (cur) {
+		if (strcmp(cur->name, name) == 0) {
+			return (cur);
 		}
+		cur = cur->next;
 	}
 	return (NULL);
+}
+
+static const char *
+devfs_strip_prefix(const char *path)
+{
+	const char	*prefix;
+	int		i;
+	int		match;
+
+	if (strcmp(path, "/dev/") == 0) {
+		return ("");
+	}
+
+	prefix = "/dev/";
+	match = 1;
+	for (i = 0; i < 5; i++) {
+		if (path[i] != prefix[i]) {
+			match = 0;
+			break;
+		}
+	}
+	if (match) {
+		return (path + 5);
+	}
+
+	prefix = "dev/";
+	match = 1;
+	for (i = 0; i < 4; i++) {
+		if (path[i] != prefix[i]) {
+			match = 0;
+			break;
+		}
+	}
+	if (match) {
+		return (path + 4);
+	}
+
+	return (path);
+}
+
+int
+devfs_register(const char *name, int device_id,
+    int (*read_fn)(void *, u64), int (*write_fn)(const void *, u64))
+{
+	devfs_node_t	*node;
+
+	if (!name || name[0] == '\0') {
+		return (-1);
+	}
+
+	if (devfs_find(name) != NULL) {
+		return (-1);
+	}
+
+	node = (devfs_node_t *)kmem_calloc(1, sizeof(devfs_node_t));
+	if (!node) {
+		return (-1);
+	}
+
+	memset(node->name, 0, sizeof(node->name));
+	{
+		int	j;
+
+		for (j = 0; j < 31 && name[j] != '\0'; j++) {
+			node->name[j] = name[j];
+		}
+		node->name[j] = '\0';
+	}
+	node->device_id = device_id;
+	node->read_fn = read_fn;
+	node->write_fn = write_fn;
+	node->next = devfs_list;
+	devfs_list = node;
+	devfs_count++;
+
+	return (0);
+}
+
+int
+devfs_unregister(const char *name)
+{
+	devfs_node_t	*cur;
+	devfs_node_t	*prev;
+
+	prev = NULL;
+	cur = devfs_list;
+	while (cur) {
+		if (strcmp(cur->name, name) == 0) {
+			if (prev) {
+				prev->next = cur->next;
+			} else {
+				devfs_list = cur->next;
+			}
+			kmem_free(cur);
+			devfs_count--;
+			return (0);
+		}
+		prev = cur;
+		cur = cur->next;
+	}
+	return (-1);
+}
+
+void
+devfs_init(void)
+{
+	devfs_list = NULL;
+	devfs_count = 0;
+
+	devfs_register("null", DEVFS_DEV_NULL,
+	    dev_null_read, dev_null_write);
+	devfs_register("zero", DEVFS_DEV_ZERO,
+	    dev_zero_read, dev_zero_write);
+	devfs_register("tty", DEVFS_DEV_TTY,
+	    dev_terminal_read, dev_terminal_write);
+	devfs_register("console", DEVFS_DEV_CONSOLE,
+	    dev_console_read, dev_console_write);
+	devfs_register("random", DEVFS_DEV_RANDOM,
+	    dev_random_read, dev_random_write);
+	devfs_register("urandom", DEVFS_DEV_URANDOM,
+	    dev_urandom_read, dev_urandom_write);
+
+	drivers_log("[DEVFS] mounted at /dev (%d devices, RAM-backed)\n",
+	    devfs_count);
 }
 
 vnode_t *
 devfs_lookup(const char *path)
 {
-	const char	*dev_name;
-	devfs_entry_t	*dev;
-	vnode_t		*vn;
+	const char		*dev_name;
+	devfs_node_t		*dev;
+	vnode_t			*vn;
 
-	dev_name = path;
-	if (strcmp(dev_name, "/dev/") == 0) {
-		dev_name = "";
-	} else {
-		int	i;
-		int	match;
-		const char	*prefix = "/dev/";
-
-		match = 1;
-		for (i = 0; i < 5; i++) {
-			if (dev_name[i] != prefix[i]) {
-				match = 0;
-				break;
-			}
-		}
-		if (match) {
-			dev_name = dev_name + 5;
-		} else {
-			prefix = "dev/";
-			match = 1;
-			for (i = 0; i < 4; i++) {
-				if (dev_name[i] != prefix[i]) {
-					match = 0;
-					break;
-				}
-			}
-			if (match) {
-				dev_name = dev_name + 4;
-			}
-		}
-	}
+	dev_name = devfs_strip_prefix(path);
 
 	if (dev_name[0] == '\0') {
 		vn = vnode_alloc(VDIR, "dev");
@@ -285,7 +331,7 @@ devfs_lookup(const char *path)
 		return (vn);
 	}
 
-	dev = devfs_find_device(dev_name);
+	dev = devfs_find(dev_name);
 	if (!dev) {
 		return (NULL);
 	}
@@ -307,17 +353,40 @@ devfs_lookup(const char *path)
 int
 devfs_root_readdir(vnode_t *vn, u32 index, char *name, int *type)
 {
+	devfs_node_t	*cur;
+	u32			i;
+
 	(void)vn;
 
-	if (index >= (u32)devfs_device_count) {
+	if (index >= (u32)devfs_count) {
 		return (0);
 	}
 
-	int	j;
-	for (j = 0; j < 31 && devfs_devices[index].name[j] != '\0'; j++) {
-		name[j] = devfs_devices[index].name[j];
+	cur = devfs_list;
+	i = 0;
+
+	{
+		u32	target;
+
+		target = (u32)devfs_count - 1 - index;
+		while (cur && i < target) {
+			cur = cur->next;
+			i++;
+		}
 	}
-	name[j] = '\0';
+
+	if (!cur) {
+		return (0);
+	}
+
+	{
+		int	j;
+
+		for (j = 0; j < 31 && cur->name[j] != '\0'; j++) {
+			name[j] = cur->name[j];
+		}
+		name[j] = '\0';
+	}
 
 	if (type) {
 		*type = VCHR;

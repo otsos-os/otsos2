@@ -27,7 +27,7 @@
 #include <kernel/api/posix/posix.h>
 #include <kernel/api/api.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
-#include <kernel/drivers/fs/devtmpfs/devtmpfs.h>
+#include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/console/terminal.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>

@@ -32,7 +32,7 @@
 #include <kernel/api/posix/posix.h>
 #include <kernel/crypto/rng/rng.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
-#include <kernel/drivers/fs/devtmpfs/devtmpfs.h>
+#include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>

@@ -24,29 +24,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* !DEFINES!
-
-$define %type u8 as 8 bit unsigned
-$define %type u32 as 32 bit unsigned
-$define %type u64 as 64 bit unsigned
-$define %type s64 as 64 bit signed
-$define %type int as 32 bit signed
-$define %type char as 8 bit signed
-$define %type devfs_device_t as struct with name, type, read_fn, write_fn, stat_fn
-$define %type vnode_t as struct with type, refcount, size, mode, name, ops, data
-
-$define %func devfs_init as procedure with args void
-$define %func devfs_lookup as function with args const char *
-$define %func devfs_root_readdir as function with args vnode_t *, u32, char *, int *
-
-*/
-
-/* !SPACE!
-
-$space %export devfs_init, devfs_lookup, devfs_root_readdir
-
-*/
-
 #ifndef DEVFS_H
 #define DEVFS_H
 
@@ -55,14 +32,18 @@ $space %export devfs_init, devfs_lookup, devfs_root_readdir
 #define DEVFS_DEV_NULL	1
 #define DEVFS_DEV_ZERO	2
 #define DEVFS_DEV_TTY	3
-#define DEVFS_DEV_CONSOLE 4
+#define DEVFS_DEV_CONSOLE	4
 #define DEVFS_DEV_FB0	5
-#define DEVFS_DEV_RANDOM 6
-#define DEVFS_DEV_URANDOM 7
+#define DEVFS_DEV_RANDOM	6
+#define DEVFS_DEV_URANDOM	7
 
 void		devfs_init(void);
 vnode_t		*devfs_lookup(const char *path);
 int		devfs_root_readdir(vnode_t *vn, u32 index, char *name,
 		    int *type);
+int		devfs_register(const char *name, int device_id,
+		    int (*read_fn)(void *, u64),
+		    int (*write_fn)(const void *, u64));
+int		devfs_unregister(const char *name);
 
 #endif

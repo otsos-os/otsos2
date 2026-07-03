@@ -25,7 +25,7 @@
  */
 
 #include <kernel/api/posix/posix.h>
-#include <kernel/drivers/fs/devtmpfs/devtmpfs.h>
+#include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
@@ -469,9 +469,9 @@ posix_setup_stdio(struct process *proc)
 		return;
 	}
 
-	vn_in = devtmpfs_lookup("/dev/tty");
-	vn_out = devtmpfs_lookup("/dev/tty");
-	vn_err = devtmpfs_lookup("/dev/tty");
+	vn_in = devfs_lookup("/dev/tty");
+	vn_out = devfs_lookup("/dev/tty");
+	vn_err = devfs_lookup("/dev/tty");
 
 	if (!vn_in || !vn_out || !vn_err) {
 		if (vn_in) vnode_release(vn_in);

@@ -26,7 +26,7 @@
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
-#include <kernel/drivers/fs/devtmpfs/devtmpfs.h>
+#include <kernel/drivers/fs/devfs/devfs.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
@@ -81,7 +81,7 @@ vfs_init(void)
 		vnode_pool[i].readdir_fn = NULL;
 	}
 
-	devtmpfs_init();
+	devfs_init();
 	vfs_initialized = 1;
 	drivers_log("[VFS] initialized (vnode pool: %d slots)\n",
 	    VFS_MAX_VNODES);
@@ -507,11 +507,11 @@ vfs_lookup_chainfs(const char *path)
 }
 
 static vnode_t *
-vfs_lookup_devtmpfs(const char *path)
+vfs_lookup_devfs(const char *path)
 {
 	vnode_t	*vn;
 
-	vn = devtmpfs_lookup(path);
+	vn = devfs_lookup(path);
 	if (vn) {
 		return (vn);
 	}
@@ -519,7 +519,7 @@ vfs_lookup_devtmpfs(const char *path)
 	if (strcmp(path, "/dev") == 0 || strcmp(path, "/dev/") == 0) {
 		vn = vnode_alloc(VDIR, "dev");
 		if (vn) {
-			vn->readdir_fn = devtmpfs_root_readdir;
+			vn->readdir_fn = devfs_root_readdir;
 			vn->data = NULL;
 		}
 		return (vn);
@@ -542,7 +542,7 @@ vfs_resolve(const char *path, vnode_t **out)
 	}
 
 	if (path_starts_with(path, "/dev")) {
-		vn = vfs_lookup_devtmpfs(path);
+		vn = vfs_lookup_devfs(path);
 		if (vn) {
 			*out = vn;
 			return (0);
