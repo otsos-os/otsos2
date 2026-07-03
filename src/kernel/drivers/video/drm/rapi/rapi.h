@@ -8,14 +8,16 @@
 #include <drm/drm.h>
 
 /*
- * rapi — low-level rendering helpers.
+ * rapi — low-level rendering helpers. These functions write pixels into a
+ * GEM buffer's memory. They do NOT touch the screen; the caller wraps the
+ * buffer in a framebuffer and atomic-commits it to make it visible.
  *
- * These functions write pixels into a GEM buffer's memory. They do NOT touch
- * the screen; the caller wraps the buffer in a framebuffer and atomic-commits
- * it to make it visible. This keeps the rendering surface and the scanout
- * pipeline decoupled: a program can render off-screen, double-buffer, or
- * composite multiple buffers before flipping.
+ * Console-aware helpers also live here. They operate on the kernel console
+ * driver (kms_console_t) and use the low-level buffer helpers. This keeps
+ * text/glyph/rectangle abstractions out of KMS.
  */
+
+struct kms_console;
 
 typedef struct {
   u32 x;
@@ -23,6 +25,17 @@ typedef struct {
   u32 width;
   u32 height;
 } rapi_rect_t;
+
+/* Surface descriptor used by the console-aware helpers. */
+typedef struct {
+  drm_handle_t gem;
+  u32 pitch;
+  u8 bpp;
+  u32 width;
+  u32 height;
+  u32 pan_y;
+  u32 buf_h;
+} rapi_surface_t;
 
 /* Store a pixel at (x, y) of the given buffer. Bounds-checked. */
 int rapi_put_pixel(drm_gem_buffer_t *buf, u32 pitch, u8 bpp, u32 x, u32 y,
@@ -42,10 +55,19 @@ int rapi_blit(drm_gem_buffer_t *src, u32 src_pitch, u8 bpp, rapi_rect_t srect,
 /* Scroll the buffer up by `lines` scanlines (in pixels), clearing the
  * exposed bottom region with `bg`. */
 int rapi_scroll_up(drm_gem_buffer_t *buf, u32 pitch, u8 bpp, u32 lines,
-                   u32 bg);
+                    u32 bg);
 
 /* Render a single 8x16 glyph into the buffer at pixel (x, y). */
 int rapi_glyph(drm_gem_buffer_t *buf, u32 pitch, u8 bpp, u32 x, u32 y, char c,
-               u32 fg, u32 bg);
+                u32 fg, u32 bg);
+
+/* Console-aware drawing helpers. They update the console dirty rect. */
+int rapi_console_put_pixel(struct kms_console *con, u32 x, u32 y, u32 color);
+int rapi_console_fill_rect(struct kms_console *con, u32 x, u32 y, u32 w, u32 h,
+                           u32 color);
+int rapi_console_clear(struct kms_console *con, u32 color);
+int rapi_console_scroll_up(struct kms_console *con, u32 lines, u32 bg);
+int rapi_console_glyph(struct kms_console *con, u32 x, u32 y, char c, u32 fg,
+                       u32 bg);
 
 #endif

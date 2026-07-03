@@ -30,6 +30,7 @@
 #include <kernel/interrupts/idt.h>
 #include <kernel/api/errno.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
+#include <kernel/drivers/video/drm/kms/property.h>
 #include <mlibc/mlibc.h>
 
 #define MAX_HANDLES 32
@@ -162,18 +163,24 @@ struct api_proc_info {
 
 /* DRM sub-operations for CALL_DRM_CALL (passed as `op`).
  *
- * The DRM layer is low-level: it manages GEM memory buffers, KMS objects
- * (framebuffers, planes, CRTCs, connectors) identified by numeric IDs, and
- * atomic state commits. Rendering happens in user memory via rapi helpers
- * or directly; DRM only displays finished buffers.
+ * The DRM layer is a low-level display manager: it owns GEM memory buffers,
+ * KMS objects (framebuffers, planes, CRTCs, connectors) as flat arrays of
+ * IDs and properties, and a data-oriented atomic state. Rendering happens in
+ * user memory via rapi helpers or directly; DRM only validates and commits
+ * the finished state to a backend driver.
  *
  * Permission model:
- *   - INFO, GEM_*, FB_*, RAPI_*: available to all processes (they only
- *     touch memory / objects, not the screen).
- *   - ATOMIC_COMMIT page-flip (PLANE_FB_ID on active CRTC): all processes.
- *   - ATOMIC_COMMIT modeset (anything else): kusr only.
- *   - DRIVER_LIST: available to all processes
- *   - DRIVER_SWITCH: kusr only
+ *   - INFO, GEM_CREATE/CLOSE, FB_CREATE/DESTROY, GET_OBJECTS, RAPI_*:
+ *     available to all processes (they only touch memory / objects).
+ *   - ATOMIC_COMMIT page-flip (PLANE_FB_ID / damage props on active CRTC):
+ *     available to all processes.
+ *   - ATOMIC_COMMIT modeset (CRTC, connector, or plane binding changes):
+ *     requires kusr / DRM master.
+ *   - DRIVER_LIST: available to all processes.
+ *   - DRIVER_SWITCH: kusr only.
+ *
+ * Property IDs for atomic requests are defined in
+ * <kernel/drivers/video/drm/kms/property.h>.
  */
 
 /* Queries — everyone */
@@ -209,8 +216,6 @@ struct api_drm_info {
   u32 height;        /* active mode height in pixels          */
   u32 pitch;         /* bytes per scanline                    */
   u32 bpp;           /* bits per pixel                        */
-  u32 cols;          /* text columns (width / 8)              */
-  u32 rows;          /* text rows (height / 16)               */
   char driver_name[32];
 };
 

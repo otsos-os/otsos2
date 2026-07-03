@@ -118,7 +118,8 @@ $space %export terminal_power_suspend_all
 #include <kernel/drivers/timer.h>
 #include <kernel/drivers/uart/uart.h>
 #include <kernel/drivers/video/drm/drm.h>
-#include <kernel/drivers/video/drm/kms/console.h>
+#include <kernel/drivers/video/drm/rapi/rapi.h>
+#include <kernel/drivers/console/kms_console.h>
 #include <kernel/event/event.h>
 #include <kernel/process.h>
 #include <mlibc/mlibc.h>
@@ -205,7 +206,7 @@ terminal_draw_cell(int x, int y, char c, u8 color)
 	} else {
 		rgb = console_palette[color & 0x0F];
 	}
-	kms_console_glyph(con, (u32)(x * 8), (u32)(y * 16), c, rgb, 0x000000);
+	rapi_console_glyph(con, (u32)(x * 8), (u32)(y * 16), c, rgb, 0x000000);
 }
 
 static void
@@ -568,7 +569,7 @@ terminal_scroll(terminal_state_t *tty, int active)
 	if (active) {
 		con = terminal_con();
 		if (con) {
-			kms_console_scroll_up(con, 16, 0x000000);
+			rapi_console_scroll_up(con, 16, 0x000000);
 		}
 	}
 }
@@ -1336,7 +1337,7 @@ terminal_reset_one(int index)
 	}
 
 	if (index == terminal_active && g_con) {
-		kms_console_clear(g_con, 0x000000);
+		rapi_console_clear(g_con, 0x000000);
 		kms_console_flush(g_con);
 	}
 }
@@ -1382,7 +1383,7 @@ terminal_power_set(int index, int state)
 			terminal_indicator_active = 1;
 			terminal_draw_indicator(index);
 		} else if (state == TERM_STATE_SUSPENDED && g_con) {
-			kms_console_clear(g_con, 0x000000);
+			rapi_console_clear(g_con, 0x000000);
 			kms_console_flush(g_con);
 		}
 	}

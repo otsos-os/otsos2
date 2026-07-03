@@ -16,5 +16,8 @@ int drm_framebuffer_destroy(drm_id_t id);
 
 /* Look up by id (internal). */
 drm_framebuffer_t *drm_framebuffer_get(drm_id_t id);
+drm_framebuffer_t *drm_framebuffer_get_by_index(u32 index);
+u32 drm_framebuffer_count(void);
+void drm_framebuffer_reset_all(void);
 
 #endif

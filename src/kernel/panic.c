@@ -52,7 +52,8 @@ $space %export print_panic_logo, kernel_panic, panic
 
 #include <kernel/console/console.h>
 #include <kernel/console/terminal.h>
-#include <kernel/drivers/video/drm/kms/console.h>
+#include <kernel/drivers/console/kms_console.h>
+#include <kernel/drivers/video/drm/rapi/rapi.h>
 #include <kernel/interrupts/idt.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdio.h>
@@ -277,7 +278,7 @@ print_panic_logo(void)
 		} else {
 			con = kms_kernel_console();
 			if (con) {
-				kms_console_glyph(con,
+				rapi_console_glyph(con,
 				    (u32)(cur_x * 8),
 				    (u32)(cur_y * 16), *p,
 				    console_color_rgb(0x1F),

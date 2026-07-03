@@ -6,19 +6,10 @@
 #define DRM_KMS_ATOMIC_H
 
 #include <drm/drm.h>
-
-/* Property identifiers — what an atomic request can set on an object. */
-#define DRM_PROP_PLANE_FB_ID    1   /* plane -> framebuffer id */
-#define DRM_PROP_PLANE_CRTC_ID  2   /* plane -> crtc id */
-#define DRM_PROP_CRTC_ACTIVE    3   /* crtc -> 0/1 */
-#define DRM_PROP_CRTC_MODE_W    4   /* crtc -> width */
-#define DRM_PROP_CRTC_MODE_H    5   /* crtc -> height */
-#define DRM_PROP_CONNECTOR_CRTC 6   /* connector -> crtc id */
-#define DRM_PROP_CONNECTOR_CONN 7   /* connector -> 0/1 (connected) */
-
-#define DRM_ATOMIC_NONBLOCK     0x01
-#define DRM_ATOMIC_BLOCK        0x02
-#define DRM_ATOMIC_ALLOW_MODESET 0x04
+#include <drm/kms/plane.h>
+#include <drm/kms/crtc.h>
+#include <drm/kms/connector.h>
+#include <drm/kms/property.h>
 
 typedef struct {
   drm_id_t obj_id;
@@ -29,9 +20,22 @@ typedef struct {
 /* Initialize the KMS topology: register primary plane/crtc/connector. */
 int drm_kms_init(void);
 
+/* Load the current KMS state into a flat DOD structure. */
+int drm_kms_state_load_current(drm_kms_state_t *out);
+
+/* Apply a batch of property changes to a state. Returns DRM_OK on success. */
+int drm_kms_state_apply_reqs(drm_kms_state_t *state,
+                              const drm_atomic_req_t *reqs, u32 count);
+
+/* Validate a state for consistency. */
+int drm_kms_state_validate(const drm_kms_state_t *state);
+
+/* Commit a validated state to hardware. */
+int drm_kms_state_commit(const drm_kms_state_t *state, u32 flags);
+
 /* Apply a batch of property changes atomically. Returns DRM_OK on success.
- * A non-modeset commit (only PLANE_FB_ID on an active CRTC) is a page-flip
- * and does not require master. Anything else requires master. */
+ * A non-modeset commit (only PLANE_FB_ID / damage on an active CRTC) is a
+ * page-flip and does not require master. Anything else requires master. */
 int drm_atomic_commit(const drm_atomic_req_t *reqs, u32 count, u32 flags);
 
 #endif

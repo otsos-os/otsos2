@@ -40,9 +40,10 @@ $space %internal early_scroll, early_putc
 #include <kernel/console/console.h>
 #include <kernel/console/palette.h>
 #include <kernel/console/terminal.h>
+#include <kernel/drivers/console/kms_console.h>
 #include <kernel/drivers/video/drm/drm.h>
-#include <kernel/drivers/video/drm/kms/console.h>
 #include <kernel/drivers/video/drm/kms/crtc.h>
+#include <kernel/drivers/video/drm/rapi/rapi.h>
 #include <mlibc/mlibc.h>
 #include <stdarg.h>
 
@@ -125,7 +126,7 @@ console_put_entry_at(char c, u8 color, int x, int y)
 		return;
 	}
 
-	kms_console_glyph(con, (u32)(x * 8), (u32)(y * 16), c,
+	rapi_console_glyph(con, (u32)(x * 8), (u32)(y * 16), c,
 	    console_color_rgb(color), 0x000000);
 	kms_console_flush(con);
 }
@@ -137,7 +138,7 @@ early_scroll(void)
 
 	con = kms_kernel_console();
 	if (con) {
-		kms_console_scroll_up(con, 16, 0x000000);
+		rapi_console_scroll_up(con, 16, 0x000000);
 	}
 	if (early_y > 0) {
 		early_y--;
@@ -179,7 +180,7 @@ early_putc(char c)
 			early_x = w - 1;
 		}
 	} else {
-		kms_console_glyph(con, (u32)(early_x * 8), (u32)(early_y * 16), c,
+		rapi_console_glyph(con, (u32)(early_x * 8), (u32)(early_y * 16), c,
 		    0xAAAAAA, 0x000000);
 		early_x++;
 	}
@@ -230,7 +231,7 @@ clear_scr(void)
 
 	con = kms_kernel_console();
 	if (con) {
-		kms_console_clear(con, 0x000000);
+		rapi_console_clear(con, 0x000000);
 		kms_console_flush(con);
 	}
 	early_x = 0;

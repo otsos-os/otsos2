@@ -85,8 +85,9 @@ $space %export kshell_try_open_if_requested, kshell_run
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/console/terminal.h>
+#include <kernel/drivers/console/kms_console.h>
 #include <kernel/drivers/video/drm/drm.h>
-#include <kernel/drivers/video/drm/kms/console.h>
+#include <kernel/drivers/video/drm/rapi/rapi.h>
 #include <kernel/kshell/kshell.h>
 #include <kernel/other/config.h>
 #include <mlibc/mlibc.h>
@@ -197,7 +198,7 @@ kshell_draw_cell(int x, int y, char c, u8 color)
 	if (!con) {
 		return;
 	}
-	kms_console_glyph(con, (u32)(x * 8), (u32)(y * 16), c,
+	rapi_console_glyph(con, (u32)(x * 8), (u32)(y * 16), c,
 	    console_color_rgb(color), 0x000000);
 }
 

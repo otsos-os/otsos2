@@ -28,8 +28,6 @@ static int drm_op_info(struct api_drm_info *out) {
   out->height = drm_crtc_get_height();
   out->pitch = drm_crtc_get_pitch();
   out->bpp = drm_crtc_get_bpp();
-  out->cols = out->width / 8;
-  out->rows = out->height / 16;
   const char *name = drm_driver_get_selected_name();
   if (name) {
     u32 i;
@@ -229,7 +227,8 @@ drm_op_driver_switch(struct api_drm_driver_switch *arg)
 		return (0);
 	}
 
-	    arg->id, drv->name ? drv->name : "?";
+	drivers_log("[DRM] switching to driver '%s'\n",
+	    drv->name ? drv->name : "?");
 
 	rc = drm_reinit(drv, NULL);
 	if (rc != 0) {
@@ -251,14 +250,15 @@ int api_drm_call(u64 op, void *arg) {
 
   /*
    * Permission model:
-   *   Everyone: INFO, GEM_CREATE/CLOSE, RAPI_*  (render to own buffers)
+   *   Everyone: INFO, GEM_CREATE/CLOSE, FB_CREATE/DESTROY, GET_OBJECTS,
+   *             RAPI_*, ATOMIC_COMMIT page-flip (only FB_ID/damage props).
    *   kusr only: GEM_MAP (raw kernel address — dangerous),
-   *              FB_CREATE/DESTROY, GET_OBJECTS,
-   *              ATOMIC_COMMIT (page-flip + modeset — touches screen)
+   *              ATOMIC_COMMIT modeset (anything that changes CRTC/connector
+   *              state), DRIVER_SWITCH.
    *
-   * Regular programs can create GEM buffers and render into them via RAPI
-   * or mmap, but cannot display anything without kusr. This prevents
-   * unprivileged programs from breaking the screen.
+   * The DRM core itself enforces the modeset master check: the kernel holds
+   * DRM master during boot, so userspace can only page-flip unless it
+   * explicitly acquires master.
    */
 
   switch (op) {
@@ -269,6 +269,13 @@ int api_drm_call(u64 op, void *arg) {
     return drm_op_gem_create((struct api_drm_gem_create *)arg);
   case DRM_OP_GEM_CLOSE:
     return drm_op_gem_close((u32)(u64)arg);
+
+  case DRM_OP_FB_CREATE:
+    return drm_op_fb_create((struct api_drm_fb_create *)arg);
+  case DRM_OP_FB_DESTROY:
+    return drm_op_fb_destroy((u32)(u64)arg);
+  case DRM_OP_GET_OBJECTS:
+    return drm_op_get_objects((struct api_drm_objects *)arg);
 
   case DRM_OP_RAPI_CLEAR:
     return drm_op_rapi_clear((struct api_drm_rapi_rect *)arg);
@@ -283,28 +290,13 @@ int api_drm_call(u64 op, void *arg) {
   case DRM_OP_RAPI_BLIT:
     return drm_op_rapi_blit((struct api_drm_rapi_blit *)arg);
 
+  case DRM_OP_ATOMIC_COMMIT:
+    return drm_op_atomic_commit((struct api_drm_atomic_commit *)arg);
+
   /* --- kusr only beyond this point --- */
   case DRM_OP_GEM_MAP:
     if (!is_kusr) return -API_ERR_PERM;
     return drm_op_gem_map((struct api_drm_gem_map *)arg);
-
-  case DRM_OP_FB_CREATE:
-    if (!is_kusr) return -API_ERR_PERM;
-    return drm_op_fb_create((struct api_drm_fb_create *)arg);
-  case DRM_OP_FB_DESTROY:
-    if (!is_kusr) return -API_ERR_PERM;
-    return drm_op_fb_destroy((u32)(u64)arg);
-  case DRM_OP_GET_OBJECTS:
-    if (!is_kusr) return -API_ERR_PERM;
-    return drm_op_get_objects((struct api_drm_objects *)arg);
-
-  case DRM_OP_ATOMIC_COMMIT:
-    if (!is_kusr) return -API_ERR_PERM;
-    return drm_op_atomic_commit((struct api_drm_atomic_commit *)arg);
-
-  /* --- driver management --- */
-  case DRM_OP_DRIVER_LIST:
-    return drm_op_driver_list((struct api_drm_driver_list *)arg);
 
   case DRM_OP_DRIVER_SWITCH:
     if (!is_kusr) return -API_ERR_PERM;

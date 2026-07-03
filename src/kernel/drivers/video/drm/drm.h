@@ -9,7 +9,7 @@
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
- *    and/or other materials provided with the distribution.
+ * and/or other materials provided with the distribution.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -24,21 +24,17 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * DRM core types.
- *
- * The DRM layer is a low-level display subsystem inspired by Linux DRM and
- * Vulkan. It is NOT a "draw to screen" API — it manages memory buffers
- * (GEM), scanout objects with numeric IDs (framebuffers, planes, CRTCs,
- * connectors), and atomic state commits. Rendering happens in user memory
- * via the rapi helpers or directly; the DRM only shows finished buffers on
- * the screen.
- */
 
 #ifndef DRM_DRM_H
 #define DRM_DRM_H
 
 #include <mlibc/mlibc.h>
+
+#define DRM_KMS_MAX_PLANES      8
+#define DRM_KMS_MAX_CRTCS       4
+#define DRM_KMS_MAX_CONNECTORS  4
+#define DRM_KMS_MAX_PROPS       32
+#define DRM_KMS_MAX_FRAMEBUFFERS 64
 
 typedef u32 drm_id_t;       /* global object id (0 == invalid) */
 typedef u32 drm_handle_t;   /* process-local GEM handle (0 == invalid) */
@@ -63,12 +59,23 @@ typedef enum {
   DRM_ERR_RANGE     = -7,
 } drm_result_t;
 
+typedef struct drm_kms_state drm_kms_state_t;
 typedef struct drm_driver drm_driver_t;
 typedef struct drm_gem_buffer drm_gem_buffer_t;
 typedef struct drm_framebuffer drm_framebuffer_t;
 typedef struct drm_plane drm_plane_t;
 typedef struct drm_crtc drm_crtc_t;
 typedef struct drm_connector drm_connector_t;
+
+struct drm_kms_state {
+  u32 flags;
+  u32 plane_count;
+  u32 crtc_count;
+  u32 connector_count;
+  u64 plane_props[DRM_KMS_MAX_PLANES][DRM_KMS_MAX_PROPS];
+  u64 crtc_props[DRM_KMS_MAX_CRTCS][DRM_KMS_MAX_PROPS];
+  u64 connector_props[DRM_KMS_MAX_CONNECTORS][DRM_KMS_MAX_PROPS];
+};
 
 struct drm_gem_buffer {
   u8 *data;
@@ -79,36 +86,42 @@ struct drm_gem_buffer {
 
 struct drm_framebuffer {
   drm_id_t id;
+  u32 index;
   u32 width;
   u32 height;
   u32 pitch;
   u8 bpp;
-  u32 src_y;            /* vertical scanout offset within the GEM buffer */
   drm_gem_buffer_t *gem;
 };
 
 struct drm_plane {
   drm_id_t id;
+  u32 index;
   u32 type;            /* 0=primary, 1=cursor, 2=overlay */
   drm_id_t crtc_id;    /* bound CRTC, or DRM_ID_NONE */
   drm_id_t fb_id;      /* bound FB, or DRM_ID_NONE */
   drm_crtc_t *crtc;
   drm_framebuffer_t *fb;
+  u64 props[DRM_KMS_MAX_PROPS];
 };
 
 struct drm_crtc {
   drm_id_t id;
+  u32 index;
   int active;
   u32 mode_w;
   u32 mode_h;
   drm_plane_t *primary;
   drm_connector_t *connector;
+  u64 props[DRM_KMS_MAX_PROPS];
 };
 
 struct drm_connector {
   drm_id_t id;
+  u32 index;
   int connected;
   drm_crtc_t *crtc;
+  u64 props[DRM_KMS_MAX_PROPS];
 };
 
 struct drm_driver {
@@ -116,8 +129,7 @@ struct drm_driver {
   int priority;
   int (*probe)(const void *boot_info);
   int (*init)(const void *boot_info);
-  int (*present)(const drm_framebuffer_t *src);
-  int (*present_rect)(const drm_framebuffer_t *src, u32 x, u32 y, u32 w, u32 h);
+  int (*atomic_commit)(const drm_kms_state_t *state);
   void (*shutdown)(void);
 };
 

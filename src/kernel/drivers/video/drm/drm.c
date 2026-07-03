@@ -1,7 +1,28 @@
 /*
  * Copyright (c) 2026, otsos team
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ * this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ * and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
-
 #include <drm/drm.h>
 #include <drm/auth.h>
 #include <drm/object.h>
@@ -223,17 +244,20 @@ int drm_init(const drm_driver_t *driver, const void *boot_info) {
 
 extern void drm_object_reset_all(void);
 extern void kms_kernel_console_reset(void);
-
-/* The fbdev boot_info is stored by drm_boot_init so we can re-initialise
- * fbdev if a driver switch fails. */
-extern int drm_init(const drm_driver_t *driver, const void *boot_info);
+extern void drm_plane_reset_all(void);
+extern void drm_crtc_reset_all(void);
+extern void drm_connector_reset_all(void);
+extern void drm_framebuffer_reset_all(void);
 
 int drm_reinit(const drm_driver_t *new_driver, const void *boot_info) {
+  const drm_driver_t *old_driver = g_selected_driver;
+  const void *boot;
+
   if (!new_driver || !new_driver->init) {
     return DRM_ERR_INVAL;
   }
 
-  const drm_driver_t *old_driver = g_selected_driver;
+  boot = boot_info ? boot_info : drm_fbdev_get_boot_info();
 
   drivers_log("[DRM] reinit: trying new driver '");
   drivers_log(new_driver->name ? new_driver->name : "?");
@@ -241,7 +265,7 @@ int drm_reinit(const drm_driver_t *new_driver, const void *boot_info) {
 
   /* Try the new driver's init FIRST, before tearing anything down.
    * This way if it fails, the old display is still active. */
-  if (new_driver->init(boot_info) != 0) {
+  if (new_driver->init(boot) != 0) {
     drivers_log("[DRM] reinit: new driver init failed, keeping old\n");
     return DRM_ERR_NODEV;
   }
@@ -251,6 +275,10 @@ int drm_reinit(const drm_driver_t *new_driver, const void *boot_info) {
   /* New driver initialised successfully — now safe to tear down old state. */
   kms_kernel_console_reset();
   drm_object_reset_all();
+  drm_plane_reset_all();
+  drm_crtc_reset_all();
+  drm_connector_reset_all();
+  drm_framebuffer_reset_all();
   g_ready = 0;
 
   /* Shut down the old driver if it has a shutdown callback. */

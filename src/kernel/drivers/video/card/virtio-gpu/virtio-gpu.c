@@ -32,8 +32,7 @@ $define %func drm_virtio_gpu_display_init as function with args void
 $define %func drm_virtio_gpu_display_shutdown as procedure with args void
 $define %func vgpu_drm_probe as function with args const void *
 $define %func vgpu_drm_init as function with args const void *
-$define %func vgpu_drm_present as function with args const drm_framebuffer_t *
-$define %func vgpu_drm_present_rect as function with args const drm_framebuffer_t *, u32, u32, u32, u32
+$define %func vgpu_drm_atomic_commit as function with args const drm_kms_state_t *
 $define %func vgpu_drm_shutdown as procedure with args void
 $define %func drm_virtio_gpu_driver_get as function with args void
 
@@ -43,8 +42,8 @@ $define %func drm_virtio_gpu_driver_get as function with args void
 
 $space %internal virtio_gpu_setup_queues, virtio_gpu_query_display
 $space %internal virtio_gpu_pci_probe, attach_backing_store
-$space %internal vgpu_drm_probe, vgpu_drm_init, vgpu_drm_present
-$space %internal vgpu_drm_present_rect, vgpu_drm_shutdown
+$space %internal vgpu_drm_probe, vgpu_drm_init, vgpu_drm_atomic_commit
+$space %internal vgpu_drm_shutdown
 $space %export drm_virtio_gpu_pci_register, drm_virtio_gpu_is_ready
 $space %export drm_virtio_gpu_display_init
 $space %export drm_virtio_gpu_display_shutdown
@@ -58,6 +57,8 @@ $space %export drm_virtio_gpu_driver_get
 #include <kernel/drivers/video/card/virtio-gpu/virtio_gpu_cmds.h>
 #include <drm/drm.h>
 #include <drm/kms/crtc.h>
+#include <drm/kms/framebuffer.h>
+#include <drm/kms/plane.h>
 #include <kernel/pci/pci.h>
 #include <kernel/pci/utils/bar.h>
 #include <kernel/mm/vm/pmap.h>
@@ -413,92 +414,80 @@ vgpu_drm_init(const void *boot_info)
 }
 
 static int
-vgpu_drm_present(const drm_framebuffer_t *src)
+vgpu_drm_blit_full(const drm_framebuffer_t *src, u32 src_y)
 {
 	virtio_gpu_state_t	*st;
 	u32			line_bytes, copy, y;
 
 	st = &g_state;
-	if (!st->display_ready || !src || !src->gem ||
-	    !src->gem->data) {
-		return (-1);
-	}
-
 	line_bytes = src->width * (u32)(src->bpp / 8);
 	copy = line_bytes < src->pitch ? line_bytes : src->pitch;
 	if (copy > st->pitch) {
 		copy = st->pitch;
 	}
-  u32 src_y = src->src_y;
-  for (y = 0; y < src->height; y++) {
-    memcpy(st->backing + (u64)y * st->pitch,
-        src->gem->data + (u64)(y + src_y) * src->pitch, copy);
-  }
-
-  if (virtio_gpu_cmd_transfer_to_host_2d(&st->hw,
-      &st->vqs[VIRTIO_GPU_CONTROLQ],
-      st->backing_resource_id,
-      0, 0, st->width, st->height, 0) != 0) {
-    return (-1);
-  }
-  if (virtio_gpu_cmd_resource_flush(&st->hw,
-      &st->vqs[VIRTIO_GPU_CONTROLQ],
-      st->backing_resource_id,
-      0, 0, st->width, st->height) != 0) {
-    return (-1);
-  }
-  return (0);
+	for (y = 0; y < src->height; y++) {
+		memcpy(st->backing + (u64)y * st->pitch,
+		    src->gem->data + (u64)(y + src_y) * src->pitch,
+		    copy);
+	}
+	if (virtio_gpu_cmd_transfer_to_host_2d(&st->hw,
+	    &st->vqs[VIRTIO_GPU_CONTROLQ],
+	    st->backing_resource_id,
+	    0, 0, st->width, st->height, 0) != 0) {
+		return (-1);
+	}
+	if (virtio_gpu_cmd_resource_flush(&st->hw,
+	    &st->vqs[VIRTIO_GPU_CONTROLQ],
+	    st->backing_resource_id,
+	    0, 0, st->width, st->height) != 0) {
+		return (-1);
+	}
+	return (0);
 }
 
 static int
-vgpu_drm_present_rect(const drm_framebuffer_t *src,
-    u32 x, u32 y, u32 w, u32 h)
+vgpu_drm_blit_rect(const drm_framebuffer_t *src, u32 src_y, u32 x, u32 y,
+    u32 w, u32 h)
 {
-  virtio_gpu_state_t	*st;
-  u32			x2, y2, rw, rh, bpp_bytes;
-  u32			src_line_bytes, ry;
-  u64			offset;
+	virtio_gpu_state_t	*st;
+	u32			x2, y2, rw, rh, bpp_bytes;
+	u32			src_line_bytes, ry;
+	u64			offset;
 
-  st = &g_state;
-  if (!st->display_ready || !src || !src->gem ||
-      !src->gem->data) {
-    return (-1);
-  }
-  if (x >= st->width || y >= st->height || w == 0 ||
-      h == 0) {
-    return (0);
-  }
+	st = &g_state;
+	if (x >= st->width || y >= st->height || w == 0 || h == 0) {
+		return (0);
+	}
 
-  x2 = x + w;
-  y2 = y + h;
-  if (x2 > st->width) {
-    x2 = st->width;
-  }
-  if (y2 > st->height) {
-    y2 = st->height;
-  }
-  rw = x2 - x;
-  rh = y2 - y;
+	x2 = x + w;
+	y2 = y + h;
+	if (x2 > st->width) {
+		x2 = st->width;
+	}
+	if (y2 > st->height) {
+		y2 = st->height;
+	}
+	rw = x2 - x;
+	rh = y2 - y;
 
-  bpp_bytes = (u32)(src->bpp / 8);
-  src_line_bytes = rw * bpp_bytes;
+	bpp_bytes = (u32)(src->bpp / 8);
+	src_line_bytes = rw * bpp_bytes;
 
-  u32 src_y = src->src_y;
-  for (ry = 0; ry < rh; ry++) {
-    memcpy(st->backing +
-        (u64)(y + ry) * st->pitch +
-        (u64)x * bpp_bytes,
-        src->gem->data +
-        (u64)(y + ry + src_y) * src->pitch +
-        (u64)x * bpp_bytes,
-        src_line_bytes);
-  }
+	for (ry = 0; ry < rh; ry++) {
+		memcpy(st->backing +
+		    (u64)(y + ry) * st->pitch +
+		    (u64)x * bpp_bytes,
+		    src->gem->data +
+		    (u64)(y + ry + src_y) * src->pitch +
+		    (u64)x * bpp_bytes,
+		    src_line_bytes);
+	}
 
-  offset = (u64)y * st->pitch + (u64)x * bpp_bytes;
-  if (virtio_gpu_cmd_transfer_to_host_2d(&st->hw,
-      &st->vqs[VIRTIO_GPU_CONTROLQ],
-      st->backing_resource_id,
-      x, y, rw, rh, offset) != 0) {
+	offset = (u64)y * st->pitch + (u64)x * bpp_bytes;
+	if (virtio_gpu_cmd_transfer_to_host_2d(&st->hw,
+	    &st->vqs[VIRTIO_GPU_CONTROLQ],
+	    st->backing_resource_id,
+	    x, y, rw, rh, offset) != 0) {
 		return (-1);
 	}
 	if (virtio_gpu_cmd_resource_flush(&st->hw,
@@ -508,6 +497,43 @@ vgpu_drm_present_rect(const drm_framebuffer_t *src,
 		return (-1);
 	}
 	return (0);
+}
+
+static int
+vgpu_drm_atomic_commit(const drm_kms_state_t *state)
+{
+	drm_framebuffer_t	*src;
+	drm_id_t		fb_id;
+	u32			dx, dy, dw, dh;
+
+	if (!state) {
+		return (-1);
+	}
+	if (!g_state.display_ready) {
+		return (-1);
+	}
+	fb_id = (drm_id_t)state->plane_props[0][DRM_PROP_PLANE_FB_ID];
+	if (fb_id == DRM_ID_NONE) {
+		return (0);
+	}
+	src = drm_framebuffer_get(fb_id);
+	if (!src || !src->gem || !src->gem->data) {
+		return (-1);
+	}
+	if (src->width != g_state.width || src->height != g_state.height ||
+	    src->bpp != g_state.bpp) {
+		return (-1);
+	}
+  u32 src_y = (u32)state->plane_props[0][DRM_PROP_PLANE_SRC_Y];
+
+  dx = (u32)state->plane_props[0][DRM_PROP_PLANE_DIRTY_X];
+  dy = (u32)state->plane_props[0][DRM_PROP_PLANE_DIRTY_Y];
+  dw = (u32)state->plane_props[0][DRM_PROP_PLANE_DIRTY_W];
+  dh = (u32)state->plane_props[0][DRM_PROP_PLANE_DIRTY_H];
+  if (dw > 0 && dh > 0 && (dw < g_state.width || dh < g_state.height)) {
+    return (vgpu_drm_blit_rect(src, src_y, dx, dy, dw, dh));
+  }
+  return (vgpu_drm_blit_full(src, src_y));
 }
 
 static void
@@ -521,8 +547,7 @@ static const drm_driver_t g_virtio_gpu_driver = {
 	.priority	= 50,
 	.probe		= vgpu_drm_probe,
 	.init		= vgpu_drm_init,
-	.present	= vgpu_drm_present,
-	.present_rect	= vgpu_drm_present_rect,
+	.atomic_commit	= vgpu_drm_atomic_commit,
 	.shutdown	= vgpu_drm_shutdown,
 };
 
