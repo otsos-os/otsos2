@@ -421,10 +421,12 @@ ps2_process_scancode(u8 scancode)
 		released = (scancode & 0x80) != 0;
 		keyboard_handle_scancode(code, released, 1);
 		if (!released && code == 0x35) {
+			kbd_event_put(code, released, 1, '/');
 			buffer_write('/');
 			scancode_extended = 0;
 			return;
 		}
+		kbd_event_put(code, released, 1, 0);
 		if (code == 0x1D) {
 			ctrl_pressed = released ? 0 : 1;
 		} else if (code == 0x38) {
@@ -437,6 +439,7 @@ ps2_process_scancode(u8 scancode)
 	released = (scancode & 0x80) != 0;
 	code = scancode & 0x7F;
 	keyboard_handle_scancode(code, released, 0);
+	kbd_event_put(code, released, 0, 0);
 
 	if (released) {
 		scancode = code;
@@ -489,11 +492,13 @@ ps2_process_scancode(u8 scancode)
 	}
 
 	if (scancode == 0x4A) {
+		kbd_event_put(code, 0, 0, '-');
 		buffer_write('-');
 		return;
 	}
 
 	if (scancode == 0x4E) {
+		kbd_event_put(code, 0, 0, '+');
 		buffer_write('+');
 		return;
 	}
@@ -524,6 +529,7 @@ ps2_process_scancode(u8 scancode)
 	}
 
 	if (c != 0) {
+		kbd_event_put(code, 0, 0, c);
 		buffer_write(c);
 	}
 }

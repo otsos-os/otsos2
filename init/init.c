@@ -66,12 +66,16 @@ $space %internal strlen, print, trim_newline, strcmp
 
 #define	CALL_TERM_READ		0x100
 #define	CALL_TERM_WRITE		0x101
+#define	CALL_TERM_POWER		0x111
 #define	CALL_PROC_SPAWN		0x402
 #define	CALL_PROC_WAIT		0x404
 #define	CALL_PROC_EXIT		0x403
 #define	CALL_EVENT_KQUEUE	0x700
 #define	CALL_EVENT_KEVENT	0x701
 #define	CALL_EVENT_CLOSE	0x702
+
+#define	API_TERM_POWER_CHANGE	1
+#define	TTY_STATE_ACTIVE	0
 
 #define	EVFILT_READ	(-1)
 #define	EVFILT_TIMER	(-3)
@@ -102,6 +106,13 @@ struct kevent_args {
 	struct kevent		*eventlist;
 	int			nevents;
 	long long		timeout_ms;
+};
+
+struct term_power_args {
+	int			op;
+	int			tty;
+	int			state;
+	int			flags;
 };
 
 static long
@@ -138,6 +149,18 @@ static long
 termRead(void *buf, unsigned long count)
 {
 	return (syscall3(CALL_TERM_READ, (long)buf, (long)count, 0));
+}
+
+static long
+termPower(int op, int tty, int state)
+{
+	struct term_power_args	args;
+
+	args.op = op;
+	args.tty = tty;
+	args.state = state;
+	args.flags = 0;
+	return (syscall1(CALL_TERM_POWER, (long)&args));
 }
 
 static long
@@ -232,6 +255,10 @@ _start(void)
 	char		path[128];
 	long		bytes, pid;
 	int		kq, child_pid, n, status, i;
+
+	/* Wake the system terminal before using it.
+	 * The kernel boots with all TTYs suspended. */
+	termPower(API_TERM_POWER_CHANGE, 1, TTY_STATE_ACTIVE);
 
 	print("\n");
 	print("Hello init (event-driven)\n");

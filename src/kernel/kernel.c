@@ -648,9 +648,13 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 		posix_hello_sz = 0;
 		void		*musl_test_mod;
 		u32		musl_test_sz;
+		void		*kbdtest_mod;
+		u32		kbdtest_sz;
 
 		musl_test_mod = NULL;
 		musl_test_sz = 0;
+		kbdtest_mod = NULL;
+		kbdtest_sz = 0;
 
 		if (boot_magic ==
 		    MULTIBOOT2_BOOTLOADER_MAGIC) {
@@ -668,6 +672,8 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 			    &posix_hello_mod, &posix_hello_sz);
 			mb2_find_module(mboot2_ptr, "musl_test",
 			    &musl_test_mod, &musl_test_sz);
+			mb2_find_module(mboot2_ptr, "kbdtest",
+			    &kbdtest_mod, &kbdtest_sz);
 		}
 
 		api_init();
@@ -746,7 +752,30 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 			}
 		}
 
+		if (kbdtest_mod && kbdtest_sz > 0) {
+			res = vfs_write_file("/bin/kbdtest",
+			    (const u8 *)kbdtest_mod,
+			    kbdtest_sz);
+			if (res == 0) {
+				com1_printf("[KERNEL] Installed "
+				    "/bin/kbdtest from module "
+				    "(%u bytes)\n", kbdtest_sz);
+			} else {
+				com1_printf("[KERNEL] Failed to "
+				    "install /bin/kbdtest from "
+				    "module\n");
+			}
+		}
+
 		kusr_init();
+
+		/*
+		 * Hand the system console over to userspace: suspend all
+		 * TTYs now so that init can explicitly wake the one it
+		 * wants to use.  The boot menu / disk selection remains
+		 * visible up to this point.
+		 */
+		tty_power_suspend_all();
 
 		if (init_mod && init_sz > 0) {
 			com1_printf("[KERNEL] Found init module "

@@ -136,6 +136,9 @@ void syscall_handler(registers_t *regs) {
   case CALL_TERM_WRITE:
     regs->rax = (u64)api_term_write((const void *)arg1, (u32)arg2);
     break;
+  case CALL_TERM_POWER:
+    regs->rax = (u64)api_term_power((struct api_term_power *)arg1);
+    break;
   case CALL_DATA_OPEN:
     regs->rax = (u64)api_data_open((const char *)arg1, (int)arg2);
     break;

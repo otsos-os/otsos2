@@ -25,6 +25,7 @@
  */
 
 #include <kernel/console.h>
+#include <kernel/api/errno.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/tty.h>
 #include <kernel/drivers/video/drm/drm.h>
@@ -55,6 +56,7 @@ typedef struct {
   int ansi_params[8];
   int ansi_param_count;
   int ansi_cur_param;
+  int state;   /* TTY_STATE_ACTIVE / SUSPENDED / DISABLED */
 } tty_state_t;
 
 typedef struct {
@@ -82,9 +84,15 @@ static u64 tty_indicator_end_time = 0;
 static int tty_indicator_active = 0;
 
 static u32 tty_palette[16] = {0x000000, 0x0000AA, 0x00AA00, 0x00AAAA,
-                              0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA,
+                              0xAA0000, 0x00AA00, 0xAA5500, 0xAAAAAA,
                               0x555555, 0x5555FF, 0x55FF55, 0x55FFFF,
                               0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF};
+
+static int tty_state_is_valid(int state)
+{
+  return state == TTY_STATE_ACTIVE || state == TTY_STATE_SUSPENDED ||
+         state == TTY_STATE_DISABLED;
+}
 
 /* Use the shared kernel console singleton. */
 static kms_console_t *g_con;
@@ -456,9 +464,18 @@ static void tty_switch_to(int index) {
   if (index == tty_active) {
     return;
   }
+  if (ttys[index].state == TTY_STATE_DISABLED) {
+    return;
+  }
 
   tty_active = index;
-  tty_redraw(&ttys[tty_active]);
+
+  if (ttys[tty_active].state == TTY_STATE_SUSPENDED) {
+    /* Suspended TTY is left blank; do not redraw its text buffer. */
+    if (g_con) kms_console_flush(g_con);
+  } else {
+    tty_redraw(&ttys[tty_active]);
+  }
 
   tty_indicator_end_time = timer_get_ticks() + timer_get_frequency();
   tty_indicator_active = 1;
@@ -537,10 +554,17 @@ static void tty_scancode_callback(u8 scancode, int released, int extended) {
 
   if (!released && tty_ctrl_down) {
     int digit = tty_numpad_digit(scancode, extended);
-    if (digit >= 0) {
-      int index = (digit == 0) ? 9 : (digit - 1);
-      tty_request_switch(index);
+    int index;
+
+    if (digit < 0) {
+      return;
     }
+
+    index = (digit == 0) ? 9 : (digit - 1);
+    if (ttys[index].state == TTY_STATE_DISABLED) {
+      return;
+    }
+    tty_request_switch(index);
   }
 }
 
@@ -586,6 +610,7 @@ void tty_init(void) {
     ttys[i].ansi_params[7] = 0;
     ttys[i].ansi_param_count = 0;
     ttys[i].ansi_cur_param = 0;
+    ttys[i].state = TTY_STATE_ACTIVE;
     ttys[i].cells =
         (u16 *)kmem_calloc((unsigned long)(width * height), sizeof(u16));
     if (ttys[i].cells) {
@@ -683,6 +708,9 @@ void tty_putc_from_kernel(char c) {
     return;
   }
   tty_update();
+  if (ttys[tty_active].state != TTY_STATE_ACTIVE) {
+    return;
+  }
   tty_putc_internal(&ttys[tty_active], c, 1);
   /* Batch flush: only present to hardware on newline, not every character.
    * This avoids a ~3 MB memcpy per glyph. */
@@ -735,6 +763,16 @@ void tty_clear_active(void) {
 
 static void tty_pump_keyboard(void) {
   int got_data = 0;
+
+  /*
+   * When the active TTY is suspended or disabled, do not consume
+   * translated keyboard input for the TTY.  Raw scancode events still
+   * go to the kbd_event ring for EVFILT_KBD consumers.
+   */
+  if (ttys[tty_active].state != TTY_STATE_ACTIVE) {
+    return;
+  }
+
   while (1) {
     char c = keyboard_getchar();
     if (c == 0) {
@@ -773,6 +811,9 @@ static char tty_getchar_blocking(int tty_idx) {
 }
 
 static void tty_emit_to(int tty_idx, char c) {
+  if (ttys[tty_idx].state != TTY_STATE_ACTIVE) {
+    return;
+  }
   tty_putc_internal(&ttys[tty_idx], c, tty_idx == tty_active);
   if (tty_idx == tty_active) {
     tty_suppress_com1_mirror = 1;
@@ -831,6 +872,10 @@ int tty_read(void *buf, u32 count) {
     return 0;
   }
 
+  if (ttys[tty_active].state != TTY_STATE_ACTIVE) {
+    return -API_ERR_NOT_TERM;
+  }
+
   __asm__ volatile("sti");
 
   int tty_idx = tty_active;
@@ -868,6 +913,10 @@ int tty_write(const void *buf, u32 count) {
     return 0;
   }
 
+  if (ttys[tty_active].state != TTY_STATE_ACTIVE) {
+    return -API_ERR_NOT_TERM;
+  }
+
   const char *data = (const char *)buf;
   for (u32 i = 0; i < count; i++) {
     tty_emit(data[i]);
@@ -878,4 +927,132 @@ int tty_write(const void *buf, u32 count) {
   if (g_con) kms_console_flush(g_con);
 
   return (int)count;
+}
+
+static void tty_reset_one(int index)
+{
+  tty_state_t *tty;
+  tty_line_buf_t *line;
+  tty_input_queue_t *input;
+  int i;
+  u16 blank;
+
+  if (index < 0 || index >= TTY_COUNT) {
+    return;
+  }
+
+  tty = &ttys[index];
+  line = &tty_line_bufs[index];
+  input = &tty_inputs[index];
+
+  if (tty->cells) {
+    blank = ((u16)0x07 << 8) | ' ';
+    for (i = 0; i < tty->width * tty->height; i++) {
+      tty->cells[i] = blank;
+    }
+  }
+
+  tty->cursor_x = 0;
+  tty->cursor_y = 0;
+  tty->color = 0x07;
+  tty->fg_rgb = 0xFFFFFFFF;
+  tty->ansi_state = 0;
+  tty->ansi_param_count = 0;
+  tty->ansi_cur_param = 0;
+  for (i = 0; i < 8; i++) {
+    tty->ansi_params[i] = 0;
+  }
+  tty->state = TTY_STATE_ACTIVE;
+
+  line->len = 0;
+  line->read_pos = 0;
+
+  input->head = 0;
+  input->tail = 0;
+  for (i = 0; i < 1024; i++) {
+    input->buf[i] = 0;
+  }
+
+  if (index == tty_active && g_con) {
+    kms_console_clear(g_con, 0x000000);
+    kms_console_flush(g_con);
+  }
+}
+
+int tty_power_get(int index)
+{
+  if (index < 0 || index >= TTY_COUNT) {
+    return -API_ERR_INVAL;
+  }
+  if (!tty_initialized && index != 0) {
+    return -API_ERR_INVAL;
+  }
+  return ttys[index].state;
+}
+
+int tty_power_set(int index, int state)
+{
+  tty_state_t *tty;
+
+  if (index < 0 || index >= TTY_COUNT) {
+    return -API_ERR_INVAL;
+  }
+  if (!tty_state_is_valid(state)) {
+    return -API_ERR_INVAL;
+  }
+
+  tty = &ttys[index];
+
+  if (tty->state == TTY_STATE_DISABLED && state != TTY_STATE_DISABLED) {
+    /* Re-enable a disabled TTY: reset it first so it starts clean. */
+    tty_reset_one(index);
+  }
+
+  tty->state = state;
+
+  if (index == tty_active) {
+    if (state == TTY_STATE_ACTIVE) {
+      tty_redraw(tty);
+      tty_indicator_end_time = timer_get_ticks() + timer_get_frequency();
+      tty_indicator_active = 1;
+      tty_draw_indicator(index);
+    } else if (state == TTY_STATE_SUSPENDED && g_con) {
+      kms_console_clear(g_con, 0x000000);
+      kms_console_flush(g_con);
+    }
+  }
+
+  return 0;
+}
+
+int tty_power_reset(int index)
+{
+  if (index < 0 || index >= TTY_COUNT) {
+    return -API_ERR_INVAL;
+  }
+
+  tty_reset_one(index);
+
+  if (index == tty_active && ttys[index].state == TTY_STATE_ACTIVE) {
+    tty_redraw(&ttys[index]);
+  }
+
+  return 0;
+}
+
+int tty_power_suspend_all(void)
+{
+  int i;
+  int ret;
+
+  for (i = 0; i < TTY_COUNT; i++) {
+    if (ttys[i].state == TTY_STATE_ACTIVE) {
+      ret = tty_power_set(i, TTY_STATE_SUSPENDED);
+      if (ret != 0) {
+        return ret;
+      }
+    }
+  }
+
+  return 0;
 }

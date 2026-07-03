@@ -44,6 +44,9 @@ $define %func tty_set_active as procedure with args int
 $define %func tty_restore_active_display as procedure with args void
 $define %func tty_update as procedure with args void
 $define %func tty_get_input_channel as function with args void
+$define %func tty_power_get as function with args int
+$define %func tty_power_set as function with args int, int
+$define %func tty_power_reset as function with args int
 
 */
 
@@ -54,6 +57,7 @@ $space %export tty_reinit, tty_putc_from_kernel, tty_flush_kernel
 $space %export tty_set_color, tty_clear_active, tty_com1_mirror
 $space %export tty_set_active, tty_restore_active_display
 $space %export tty_update, tty_get_input_channel
+$space %export tty_power_get, tty_power_set, tty_power_reset
 
 */
 
@@ -76,5 +80,14 @@ void	tty_set_active(int index);
 void	tty_restore_active_display(void);
 void	tty_update(void);
 void	*tty_get_input_channel(void);
+
+#define	TTY_STATE_ACTIVE	0
+#define	TTY_STATE_SUSPENDED	1
+#define	TTY_STATE_DISABLED	2
+
+int	tty_power_get(int index);
+int	tty_power_set(int index, int state);
+int	tty_power_reset(int index);
+int	tty_power_suspend_all(void);
 
 #endif

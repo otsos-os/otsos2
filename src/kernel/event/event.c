@@ -204,6 +204,7 @@ event_init(void)
 		extern const filter_ops_t filter_proc_ops;
 		extern const filter_ops_t filter_signal_ops;
 		extern const filter_ops_t filter_user_ops;
+		extern const filter_ops_t filter_kbd_ops;
 
 		filter_register(&filter_read_ops);
 		filter_register(&filter_write_ops);
@@ -211,6 +212,7 @@ event_init(void)
 		filter_register(&filter_proc_ops);
 		filter_register(&filter_signal_ops);
 		filter_register(&filter_user_ops);
+		filter_register(&filter_kbd_ops);
 	}
 
 	event_initialized = 1;

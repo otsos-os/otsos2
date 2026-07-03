@@ -57,6 +57,7 @@ $space %export keyboard_get_driver_name
 
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/keyboard/ps2.h>
+#include <kernel/drivers/timer.h>
 #include <kernel/event/event.h>
 #include <kernel/kshell/kshell.h>
 #include <kernel/process.h>
@@ -67,6 +68,10 @@ $space %export keyboard_get_driver_name
 
 static keyboard_driver_t			*current_driver;
 static keyboard_scancode_callback_t		scancode_callback;
+
+static struct kbd_event	kbd_event_ring[KBD_EVENT_RING_SIZE];
+static int			kbd_event_head;
+static int			kbd_event_tail;
 
 static keyboard_driver_t ps2_driver = {
 	.name		= "PS/2 Keyboard",
@@ -223,6 +228,68 @@ keyboard_get_driver_name(void)
 		return (NULL);
 	}
 	return (current_driver->name);
+}
+
+void
+kbd_event_put(u16 scancode, u8 released, u8 extended, char ascii)
+{
+	struct kbd_event	*ev;
+	int			next;
+
+	next = (kbd_event_head + 1) % KBD_EVENT_RING_SIZE;
+	if (next == kbd_event_tail) {
+		return;
+	}
+
+	ev = &kbd_event_ring[kbd_event_head];
+	ev->timestamp = timer_get_ticks();
+	ev->scancode = scancode;
+	ev->released = released;
+	ev->extended = extended;
+	ev->ascii = ascii;
+
+	kbd_event_head = next;
+
+	extern void knote_notify_all(s16 filter, u64 ident, u32 fflags,
+	    s64 data);
+	knote_notify_all(EVFILT_KBD, 0, 0, 1);
+}
+
+int
+kbd_event_get(struct kbd_event *out)
+{
+	struct kbd_event	*ev;
+
+	if (kbd_event_head == kbd_event_tail) {
+		return (0);
+	}
+
+	ev = &kbd_event_ring[kbd_event_tail];
+	if (out) {
+		*out = *ev;
+	}
+	kbd_event_tail = (kbd_event_tail + 1) % KBD_EVENT_RING_SIZE;
+	return (1);
+}
+
+int
+kbd_event_count(void)
+{
+	int	delta;
+
+	delta = kbd_event_head - kbd_event_tail;
+	if (delta < 0) {
+		delta += KBD_EVENT_RING_SIZE;
+	}
+	return (delta);
+}
+
+void
+kbd_event_reset(void)
+{
+	kbd_event_head = 0;
+	kbd_event_tail = 0;
+	memset(kbd_event_ring, 0, sizeof(kbd_event_ring));
 }
 
 static char

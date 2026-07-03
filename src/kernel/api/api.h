@@ -83,6 +83,27 @@ typedef struct {
 #define MMAP_BASE 0x0000001000000000ULL
 #define MMAP_LIMIT 0x00007FFF00000000ULL
 
+#define API_TERM_POWER_GET	0
+#define API_TERM_POWER_CHANGE	1
+#define API_TERM_POWER_RESET	2
+
+#define TTY_STATE_ACTIVE	0
+#define TTY_STATE_SUSPENDED	1
+#define TTY_STATE_DISABLED	2
+
+struct api_term_power {
+	int	op;
+	int	tty;
+	int	state;
+	int	flags;
+};
+
+/* Decoding helpers for EVFILT_KBD kevent data. */
+#define KBD_DATA_SCANCODE(v)	((u16)((u64)(v) & 0xFFFF))
+#define KBD_DATA_RELEASED(v)	(((u64)(v) >> 16) & 1)
+#define KBD_DATA_EXTENDED(v)	(((u64)(v) >> 17) & 1)
+#define KBD_DATA_ASCII(v)	((char)(((u64)(v) >> 24) & 0xFF))
+
 #define PIPE_BUF_SIZE 4096
 
 typedef struct pipe {
@@ -358,5 +379,6 @@ int api_futex_wake(u64 uaddr, u32 max_waiters);
 int api_sys_random(u8 *buf, u32 len);
 int api_timeinfo(struct api_timeinfo *buf);
 int api_time(void);
+int api_term_power(struct api_term_power *args);
 
 #endif

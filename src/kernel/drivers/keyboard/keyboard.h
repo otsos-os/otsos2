@@ -76,6 +76,19 @@ typedef struct {
 typedef void (*keyboard_scancode_callback_t)(u8 scancode, int released,
     int extended);
 
+/* Raw keyboard event for kqueue/EVFILT_KBD consumers.
+ * Kept separate from the translated ASCII buffer so TTY and raw input
+ * can coexist without stealing each other's data. */
+struct kbd_event {
+	u64	timestamp;
+	u16	scancode;
+	u8	released;
+	u8	extended;
+	char	ascii;
+};
+
+#define	KBD_EVENT_RING_SIZE	256
+
 void		keyboard_manager_init(void);
 char		keyboard_getchar(void);
 char		keyboard_getchar_blocking(void);
@@ -88,5 +101,11 @@ void		keyboard_set_scancode_callback(
 void		keyboard_handle_scancode(u8 scancode, int released,
 		    int extended);
 const char	*keyboard_get_driver_name(void);
+
+void		kbd_event_put(u16 scancode, u8 released, u8 extended,
+		    char ascii);
+int		kbd_event_get(struct kbd_event *out);
+int		kbd_event_count(void);
+void		kbd_event_reset(void);
 
 #endif

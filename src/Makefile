@@ -26,10 +26,14 @@ ISO_IMAGE = ../otsos.iso
 ISODIR = ../isodir
 DISK_IMG = ../bin/disk.img
 PORTS_DIR = ../ports
+MUSL_DIR = ../libc/musl
+MUSL_LIBC = $(MUSL_DIR)/lib/libc.a
+MUSL_CRT1 = $(MUSL_DIR)/lib/crt1.o
 YES_BIN = $(PORTS_DIR)/yes
 FETCH_BIN = $(PORTS_DIR)/fetch
 SHELL_BIN = $(PORTS_DIR)/sh
 POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
+KBDTEST_BIN = $(PORTS_DIR)/kbdtest
 MUSL_TEST_BIN = $(PORTS_DIR)/musl_test
 LIBC_ENABLED := $(shell sh ../tools/toml_get.sh config.toml libc enabled true)
 
@@ -37,10 +41,12 @@ ifeq ($(LIBC_ENABLED),true)
 ISO_MUSL_TEST_DEP = $(MUSL_TEST_BIN)
 ISO_MUSL_TEST_COPY = @cp $(MUSL_TEST_BIN) $(ISODIR)/boot/musl_test
 GRUB_MUSL_TEST = @echo '    module2 /boot/musl_test musl_test' >> $(ISODIR)/boot/grub/grub.cfg
+LIBC_DEPS = $(MUSL_LIBC) $(MUSL_CRT1)
 else
 ISO_MUSL_TEST_DEP =
 ISO_MUSL_TEST_COPY =
 GRUB_MUSL_TEST =
+LIBC_DEPS =
 endif
 
 # object files
@@ -155,6 +161,7 @@ EVENT_TIMER_O = ../bin/event_timer.o
 EVENT_PROC_O = ../bin/event_proc.o
 EVENT_SIGNAL_O = ../bin/event_signal.o
 EVENT_USER_O = ../bin/event_user.o
+EVENT_KBD_O = ../bin/event_kbd.o
 
 VFS_O = ../bin/vfs.o
 DEVTMPFS_O = ../bin/devtmpfs.o
@@ -169,6 +176,7 @@ THREAD_API_O = ../bin/thread_api.o
 FUTEX_O = ../bin/futex.o
 SYS_O = ../bin/sys.o
 API_TIME_O = ../bin/api_time.o
+TERM_POWER_O = ../bin/term_power.o
 
 TIME_O = ../bin/time.o
 CLOCKSOURCE_O = ../bin/clocksource.o
@@ -188,11 +196,12 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(COM1_O) $(BOOT
       $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O) \
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
       $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
+      $(EVENT_KBD_O) \
       $(VFS_O) $(DEVTMPFS_O) \
       $(POSIX_O) $(POSIX_IO_O) $(POSIX_PROC_O) $(POSIX_FS_O) \
       $(POSIX_MEM_O) $(POSIX_SIGNAL_O) \
       $(PROC_PID_O) $(THREAD_API_O) $(FUTEX_O) $(SYS_O) \
-      $(API_TIME_O) \
+      $(API_TIME_O) $(TERM_POWER_O) \
       $(TIME_O) $(CLOCKSOURCE_O) $(ET_CLOCKSOURCE_O) $(CMOS_RTC_O)
 
 .PHONY: all ask_version check_build_tools check_run_tools
@@ -269,26 +278,43 @@ $(INIT_BIN):
 	@$(MAKE) -C ../init
 
 .PHONY: $(YES_BIN)
-$(YES_BIN):
+$(YES_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/yes"
-	@$(MAKE) -C $(PORTS_DIR) LIBC_ENABLED=$(LIBC_ENABLED)
+	@$(MAKE) -C $(PORTS_DIR) yes LIBC_ENABLED=$(LIBC_ENABLED)
+
+.PHONY: $(FETCH_BIN)
+$(FETCH_BIN): $(LIBC_DEPS)
+	@echo "  MAKE    ports/fetch"
+	@$(MAKE) -C $(PORTS_DIR) fetch LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(SHELL_BIN)
-$(SHELL_BIN):
+$(SHELL_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/sh"
-	@$(MAKE) -C $(PORTS_DIR) LIBC_ENABLED=$(LIBC_ENABLED)
+	@$(MAKE) -C $(PORTS_DIR) sh LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(POSIX_HELLO_BIN)
-$(POSIX_HELLO_BIN):
+$(POSIX_HELLO_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/posix_hello"
-	@$(MAKE) -C $(PORTS_DIR) LIBC_ENABLED=$(LIBC_ENABLED)
+	@$(MAKE) -C $(PORTS_DIR) posix_hello LIBC_ENABLED=$(LIBC_ENABLED)
+
+.PHONY: $(KBDTEST_BIN)
+$(KBDTEST_BIN): $(LIBC_DEPS)
+	@echo "  MAKE    ports/kbdtest"
+	@$(MAKE) -C $(PORTS_DIR) kbdtest LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(MUSL_TEST_BIN)
-$(MUSL_TEST_BIN):
+$(MUSL_TEST_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/musl_test"
-	@$(MAKE) -C $(PORTS_DIR) LIBC_ENABLED=$(LIBC_ENABLED)
+	@$(MAKE) -C $(PORTS_DIR) musl_test LIBC_ENABLED=$(LIBC_ENABLED)
 
-$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN) $(ISO_MUSL_TEST_DEP)
+$(MUSL_LIBC):
+	@echo "  MAKE    musl libc"
+	@$(MAKE) -C $(MUSL_DIR)
+
+$(MUSL_CRT1): $(MUSL_LIBC)
+	@true
+
+$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
 	@cp $(INIT_BIN) $(ISODIR)/boot/init
@@ -296,6 +322,7 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 	@cp $(FETCH_BIN) $(ISODIR)/boot/fetch
 	@cp $(SHELL_BIN) $(ISODIR)/boot/sh
 	@cp $(POSIX_HELLO_BIN) $(ISODIR)/boot/posix_hello
+	@cp $(KBDTEST_BIN) $(ISODIR)/boot/kbdtest
 	$(ISO_MUSL_TEST_COPY)
 	@cp config.toml $(ISODIR)/boot/config.toml
 	@echo 'set timeout=4' > $(ISODIR)/boot/grub/grub.cfg
@@ -310,6 +337,7 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 	@echo '    module2 /boot/fetch fetch' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    module2 /boot/sh sh' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    module2 /boot/posix_hello posix_hello' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '    module2 /boot/kbdtest kbdtest' >> $(ISODIR)/boot/grub/grub.cfg
 	$(GRUB_MUSL_TEST)
 	@echo '    boot' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '}' >> $(ISODIR)/boot/grub/grub.cfg
@@ -721,6 +749,14 @@ $(EVENT_SIGNAL_O): kernel/event/filter_signal.c kernel/event/event.h
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(EVENT_USER_O): kernel/event/filter_user.c kernel/event/event.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(EVENT_KBD_O): kernel/event/filter_kbd.c kernel/event/event.h kernel/drivers/keyboard/keyboard.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(TERM_POWER_O): kernel/api/term_power.c kernel/api/api.h kernel/drivers/tty.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

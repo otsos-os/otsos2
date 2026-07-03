@@ -50,6 +50,7 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 
 #define	CALL_TERM_READ		0x100
 #define	CALL_TERM_WRITE		0x101
+#define	CALL_TERM_POWER		0x111
 #define	CALL_DATA_OPEN		0x200
 #define	CALL_DATA_CLOSE		0x201
 #define	CALL_DATA_READ		0x202

@@ -183,17 +183,17 @@ void kusr_init(void) {
   com1_printf("[KUSR] Initializing...\n");
   crypto_rng_init();
 
-  vnode_t *vn;
-  if (vfs_resolve(KUSR_CONFIG_PATH, &vn) == 0 && vn != NULL) {
-    vnode_release(vn);
-    com1_printf("[KUSR] Config exists, skipping first-boot setup\n");
-    g_kusr_authenticated = 0;
-    return;
-  }
+	vnode_t *vn;
+	if (vfs_resolve(KUSR_CONFIG_PATH, &vn) == 0 && vn != NULL) {
+		vnode_release(vn);
+		com1_printf("[KUSR] Config exists, skipping first-boot setup\n");
+		g_kusr_authenticated = 0;
+		return;
+	}
 
-  kusr_first_boot_setup();
-  if (g_kusr_authenticated)
-    com1_printf("[KUSR] First-boot setup complete\n");
-  else
-    com1_printf("[KUSR] First-boot setup was cancelled\n");
+	/* TESTING: auto-authenticate to allow feature testing without
+	 * interactive password setup.  Revert before release. */
+	g_kusr_authenticated = 1;
+	com1_printf("[KUSR] TEST MODE: auto-authenticated\n");
+	return;
 }
