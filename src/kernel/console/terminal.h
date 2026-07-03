@@ -32,12 +32,7 @@
 #define	TERM_STATE_ACTIVE	0
 #define	TERM_STATE_SUSPENDED	1
 #define	TERM_STATE_DISABLED	2
-
-/*
- * Classic Unix TTY / termios definitions.
- */
 #define	NCCS		32
-
 #define	VINTR		0
 #define	VQUIT		1
 #define	VERASE		2
@@ -71,8 +66,6 @@
 #define	IXANY		0004000
 #define	IMAXBEL		0010000
 #define	IUTF8		0040000
-
-/* c_oflag */
 #define	OPOST		0000001
 #define	OLCUC		0000002
 #define	ONLCR		0000004
@@ -108,8 +101,6 @@
 #define	FLUSHO		0010000
 #define	PENDIN		0040000
 #define	IEXTEN		0100000
-
-/* Default special characters. */
 #define	CINTR		0x03
 #define	CQUIT		0x1c
 #define	CERASE		0x08
@@ -124,7 +115,6 @@
 #define	CLNEXT		0x16
 #define	CEOL		0
 #define	CEOL2		0
-
 #define	B38400		0000015
 
 typedef unsigned int	tcflag_t;
@@ -170,20 +160,14 @@ int	terminal_power_get(int index);
 int	terminal_power_set(int index, int state);
 int	terminal_power_reset(int index);
 int	terminal_power_suspend_all(void);
-
-/* Per-VT TTY API. */
 int	terminal_read_idx(int idx, void *buf, u32 count, int nonblock);
 int	terminal_write_idx(int idx, const void *buf, u32 count);
 int	terminal_ioctl_idx(int idx, u64 cmd, void *arg);
-
-/* Vnode helpers (devfs). */
 int	terminal_read_vnode(vnode_t *vn, void *buf, u32 count,
     int nonblock);
 int	terminal_read_available(int idx);
 int	terminal_write_vnode(vnode_t *vn, const void *buf, u32 count);
 int	terminal_ioctl_vnode(vnode_t *vn, u64 cmd, void *arg);
-
-
 void	terminal_set_winsize(int idx, const struct winsize *ws);
 void	terminal_get_winsize(int idx, struct winsize *ws);
 void	terminal_set_termios(int idx, const struct termios *t);
