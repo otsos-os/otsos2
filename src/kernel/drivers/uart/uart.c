@@ -24,6 +24,7 @@
  */
 
 #include <kernel/drivers/uart/uart.h>
+#include <mlibc/mlibc.h>
 
 #define COM1_PORT		0x3F8
 #define COM1_DATA		(COM1_PORT + 0)
@@ -35,21 +36,6 @@
 
 static int	uart_available = 0;
 
-static inline void
-uart_outb(u16 port, u8 value)
-{
-	__asm__ volatile("outb %0, %1" : : "a"(value), "Nd"(port));
-}
-
-static inline u8
-uart_inb(u16 port)
-{
-	u8	value;
-
-	__asm__ volatile("inb %1, %0" : "=a"(value) : "Nd"(port));
-	return (value);
-}
-
 int
 uart_is_available(void)
 {
@@ -59,27 +45,27 @@ uart_is_available(void)
 void
 uart_init(void)
 {
-	if (uart_inb(COM1_LINE_STATUS) == 0xFF) {
+	if (inb(COM1_LINE_STATUS) == 0xFF) {
 		uart_available = 0;
 		return;
 	}
 
-	uart_outb(COM1_INT_ENABLE, 0x00);
-	uart_outb(COM1_LINE_CTRL, 0x80);
-	uart_outb(COM1_DATA, 0x01);
-	uart_outb(COM1_INT_ENABLE, 0x00);
-	uart_outb(COM1_LINE_CTRL, 0x03);
-	uart_outb(COM1_FIFO_CTRL, 0xC7);
+	outb(COM1_INT_ENABLE, 0x00);
+	outb(COM1_LINE_CTRL, 0x80);
+	outb(COM1_DATA, 0x01);
+	outb(COM1_INT_ENABLE, 0x00);
+	outb(COM1_LINE_CTRL, 0x03);
+	outb(COM1_FIFO_CTRL, 0xC7);
 
-	uart_outb(COM1_MODEM_CTRL, 0x1E);
-	uart_outb(COM1_DATA, 0xAE);
-	if (uart_inb(COM1_DATA) != 0xAE) {
+	outb(COM1_MODEM_CTRL, 0x1E);
+	outb(COM1_DATA, 0xAE);
+	if (inb(COM1_DATA) != 0xAE) {
 		uart_available = 0;
-		uart_outb(COM1_MODEM_CTRL, 0x00);
+		outb(COM1_MODEM_CTRL, 0x00);
 		return;
 	}
 
-	uart_outb(COM1_MODEM_CTRL, 0x0B);
+	outb(COM1_MODEM_CTRL, 0x0B);
 	uart_available = 1;
 }
 
@@ -89,9 +75,9 @@ uart_write_byte(u8 byte)
 	if (!uart_available) {
 		return;
 	}
-	while ((uart_inb(COM1_LINE_STATUS) & 0x20) == 0)
+	while ((inb(COM1_LINE_STATUS) & 0x20) == 0)
 		;
-	uart_outb(COM1_DATA, byte);
+	outb(COM1_DATA, byte);
 }
 
 void
@@ -108,9 +94,9 @@ uart_read_byte(void)
 	if (!uart_available) {
 		return (0);
 	}
-	while ((uart_inb(COM1_LINE_STATUS) & 0x01) == 0)
+	while ((inb(COM1_LINE_STATUS) & 0x01) == 0)
 		;
-	return (uart_inb(COM1_DATA));
+	return (inb(COM1_DATA));
 }
 
 int
@@ -119,5 +105,5 @@ uart_has_data(void)
 	if (!uart_available) {
 		return (0);
 	}
-	return (uart_inb(COM1_LINE_STATUS) & 0x01);
+	return (inb(COM1_LINE_STATUS) & 0x01);
 }
