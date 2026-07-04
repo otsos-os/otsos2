@@ -71,30 +71,24 @@ copy_user_string(const char *user, int max_len)
 	return (kbuf);
 }
 
-s64
-posix_open(u64 path_u, u64 flags, u64 mode, u64 a4, u64 a5, u64 a6,
-    registers_t *regs)
+static s64
+posix_do_open(const char *path, int posix_flags, u64 mode)
 {
 	struct process	*proc;
-	char		*path;
 	vnode_t		*vn;
 	int		fd;
-	int		posix_flags;
 	int		exists;
 
-	(void)a4; (void)a5; (void)a6; (void)mode; (void)regs;
+	(void)mode;
 
 	proc = process_current();
 	if (!proc) {
 		return (-POSIX_EFAULT);
 	}
 
-	path = copy_user_string((const char *)path_u, 256);
-	if (!path) {
-		return (-POSIX_EFAULT);
+	if (path[0] == '\0') {
+		return (-POSIX_ENOENT);
 	}
-
-	posix_flags = (int)flags;
 
 	vn = NULL;
 	if (vfs_resolve(path, &vn) == 0 && vn != NULL) {
@@ -108,7 +102,6 @@ posix_open(u64 path_u, u64 flags, u64 mode, u64 a4, u64 a5, u64 a6,
 			if ((posix_flags & POSIX_O_WRONLY) ||
 			    (posix_flags & POSIX_O_RDWR)) {
 				vnode_release(vn);
-				kmem_free(path);
 				return (-POSIX_EISDIR);
 			}
 		}
@@ -123,7 +116,6 @@ posix_open(u64 path_u, u64 flags, u64 mode, u64 a4, u64 a5, u64 a6,
 		vnode_release(vn);
 		ret = pty_open_master(&master_vn);
 		if (ret != 0) {
-			kmem_free(path);
 			return ((s64)ret);
 		}
 		vn = master_vn;
@@ -131,18 +123,31 @@ posix_open(u64 path_u, u64 flags, u64 mode, u64 a4, u64 a5, u64 a6,
 
 	if (!exists) {
 		if (!(posix_flags & POSIX_O_CREAT)) {
-			kmem_free(path);
 			return (-POSIX_ENOENT);
 		}
 
+		if (posix_flags & POSIX_O_DIRECTORY) {
+			return (-POSIX_ENOTDIR);
+		}
+
 		if (vfs_create_file(path) != 0) {
-			kmem_free(path);
 			return (-POSIX_EIO);
 		}
 
 		if (vfs_resolve(path, &vn) != 0 || vn == NULL) {
-			kmem_free(path);
 			return (-POSIX_EIO);
+		}
+	} else {
+		if ((posix_flags & POSIX_O_CREAT) &&
+		    (posix_flags & POSIX_O_EXCL)) {
+			vnode_release(vn);
+			return (-POSIX_EEXIST);
+		}
+
+		if ((posix_flags & POSIX_O_DIRECTORY) &&
+		    vn->type != VDIR) {
+			vnode_release(vn);
+			return (-POSIX_ENOTDIR);
 		}
 	}
 
@@ -156,7 +161,6 @@ posix_open(u64 path_u, u64 flags, u64 mode, u64 a4, u64 a5, u64 a6,
 	fd = posix_alloc_fd(proc);
 	if (fd < 0) {
 		vnode_release(vn);
-		kmem_free(path);
 		return ((s64)fd);
 	}
 
@@ -164,13 +168,135 @@ posix_open(u64 path_u, u64 flags, u64 mode, u64 a4, u64 a5, u64 a6,
 	proc->posix_fds[fd].cloexec =
 	    (posix_flags & POSIX_O_CLOEXEC) ? 1 : 0;
 	proc->posix_fds[fd].flags = posix_flags & ~(POSIX_O_CREAT |
-	    POSIX_O_EXCL | POSIX_O_CLOEXEC);
+	    POSIX_O_EXCL | POSIX_O_CLOEXEC | POSIX_O_DIRECTORY |
+	    POSIX_O_NOFOLLOW | POSIX_O_LARGEFILE);
 	proc->posix_fds[fd].offset =
 	    (posix_flags & POSIX_O_APPEND) ? vn->size : 0;
 	proc->posix_fds[fd].vnode = vn;
 
-	kmem_free(path);
 	return ((s64)fd);
+}
+
+static char *
+build_dir_path(vnode_t *dir_vn, const char *name)
+{
+	const char	*base;
+	size_t		base_len;
+	size_t		name_len;
+	size_t		total_len;
+	char		*resolved;
+
+	if (!dir_vn || dir_vn->type != VDIR) {
+		return (NULL);
+	}
+
+	if (dir_vn->data) {
+		base = (const char *)dir_vn->data;
+	} else if (dir_vn->readdir_fn == devfs_root_readdir) {
+		base = "/dev";
+	} else {
+		return (NULL);
+	}
+
+	base_len = strlen(base);
+	name_len = strlen(name);
+	total_len = base_len + name_len + 2;
+	if (total_len > 256) {
+		return (NULL);
+	}
+
+	resolved = (char *)kmem_calloc(total_len, 1);
+	if (!resolved) {
+		return (NULL);
+	}
+
+	memcpy(resolved, base, base_len);
+	if (base_len > 0 && base[base_len - 1] != '/') {
+		resolved[base_len] = '/';
+		memcpy(resolved + base_len + 1, name, name_len + 1);
+	} else {
+		memcpy(resolved + base_len, name, name_len + 1);
+	}
+
+	return (resolved);
+}
+
+s64
+posix_open(u64 path_u, u64 flags, u64 mode, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+	char		*path;
+	s64		ret;
+
+	(void)a4; (void)a5; (void)a6; (void)regs;
+
+	path = copy_user_string((const char *)path_u, 256);
+	if (!path) {
+		return (-POSIX_EFAULT);
+	}
+
+	ret = posix_do_open(path, (int)flags, mode);
+	kmem_free(path);
+
+	return (ret);
+}
+
+s64
+posix_openat(u64 dirfd_u, u64 path_u, u64 flags, u64 mode, u64 a5,
+    u64 a6, registers_t *regs)
+{
+	struct process	*proc;
+	posix_fd_t	*pfd;
+	char		*path;
+	char		*resolved;
+	s64		ret;
+	int		dirfd;
+
+	(void)a5; (void)a6; (void)regs;
+
+	proc = process_current();
+	if (!proc) {
+		return (-POSIX_EFAULT);
+	}
+
+	path = copy_user_string((const char *)path_u, 256);
+	if (!path) {
+		return (-POSIX_EFAULT);
+	}
+
+	if (path[0] == '\0') {
+		kmem_free(path);
+		return (-POSIX_ENOENT);
+	}
+
+	dirfd = (int)dirfd_u;
+
+	if (path[0] != '/' && dirfd != POSIX_AT_FDCWD) {
+		pfd = posix_get_fd(proc, dirfd);
+		if (!pfd) {
+			kmem_free(path);
+			return (-POSIX_EBADF);
+		}
+
+		if (!pfd->vnode || pfd->vnode->type != VDIR) {
+			kmem_free(path);
+			return (-POSIX_ENOTDIR);
+		}
+
+		resolved = build_dir_path(pfd->vnode, path);
+		kmem_free(path);
+		if (!resolved) {
+			return (-POSIX_ENOTDIR);
+		}
+
+		ret = posix_do_open(resolved, (int)flags, mode);
+		kmem_free(resolved);
+		return (ret);
+	}
+
+	ret = posix_do_open(path, (int)flags, mode);
+	kmem_free(path);
+	return (ret);
 }
 
 s64
@@ -245,7 +371,7 @@ posix_read(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 
 	if (pfd->vnode->ioctl_fn == terminal_ioctl_vnode) {
 		n = terminal_read_vnode(pfd->vnode, buf, (u32)count,
-		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
+		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0, 0);
 		if (n < 0) {
 			return ((s64)n);
 		}

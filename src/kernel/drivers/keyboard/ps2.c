@@ -524,8 +524,14 @@ ps2_process_scancode(u8 scancode)
 		c = kbd_us[scancode];
 	}
 
-	if (ctrl_pressed && c >= '0' && c <= '9') {
-		c = 0;
+	if (ctrl_pressed) {
+		if (c >= '0' && c <= '9') {
+			c = 0;
+		} else if (c >= 'a' && c <= 'z') {
+			c = c - 'a' + 1;
+		} else if (c >= 'A' && c <= 'Z') {
+			c = c - 'A' + 1;
+		}
 	}
 
 	if (c != 0) {

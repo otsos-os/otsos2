@@ -119,6 +119,10 @@ $space %export posix_signal_pending, posix_signal_deliver
 #define POSIX_O_NONBLOCK	04000
 #define POSIX_O_CLOEXEC		02000000
 #define POSIX_O_DIRECTORY	0200000
+#define POSIX_O_NOFOLLOW	0400000
+#define POSIX_O_LARGEFILE	0100000
+
+#define POSIX_AT_FDCWD		(-100)
 
 #define POSIX_SEEK_SET		0
 #define POSIX_SEEK_CUR		1
@@ -167,6 +171,7 @@ $space %export posix_signal_pending, posix_signal_deliver
 #define SYS_read		0
 #define SYS_write		1
 #define SYS_open		2
+#define SYS_openat		257
 #define SYS_close		3
 #define SYS_stat		4
 #define SYS_fstat		5

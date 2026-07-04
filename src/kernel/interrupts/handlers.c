@@ -101,8 +101,8 @@ void irq_handler(registers_t *regs) {
     watchdog_tick();
     event_timer_tick();
     crypto_rng_tick();
-    scheduler_tick(regs);
     keyboard_poll();
+    scheduler_tick(regs);
     terminal_update();
   } else if (regs->int_no == 33) {
     keyboard_common_handler();

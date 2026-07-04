@@ -45,6 +45,8 @@ s64	posix_writev(u64 fd, u64 iov, u64 iovcnt, u64 a4, u64 a5, u64 a6,
     registers_t *regs);
 s64	posix_open(u64 path, u64 flags, u64 mode, u64 a4, u64 a5, u64 a6,
 	    registers_t *regs);
+s64	posix_openat(u64 dirfd, u64 path, u64 flags, u64 mode, u64 a5,
+	    u64 a6, registers_t *regs);
 s64	posix_close(u64 fd, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	    registers_t *regs);
 s64	posix_stat(u64 path, u64 buf, u64 a3, u64 a4, u64 a5, u64 a6,
@@ -190,6 +192,9 @@ posix_syscall_handler(registers_t *regs)
 		break;
 	case SYS_open:
 		ret = posix_open(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_openat:
+		ret = posix_openat(a1, a2, a3, a4, a5, a6, regs);
 		break;
 	case SYS_close:
 		ret = posix_close(a1, a2, a3, a4, a5, a6, regs);
@@ -521,6 +526,8 @@ posix_setup_stdio(struct process *proc)
 	proc->posix_fds[2].flags = POSIX_O_WRONLY;
 	proc->posix_fds[2].offset = 0;
 	proc->posix_fds[2].vnode = vn_err;
+
+	terminal_set_pgrp(terminal_get_active(), proc->pgid);
 }
 
 int

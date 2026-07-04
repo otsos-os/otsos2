@@ -139,7 +139,9 @@ struct termios {
 	speed_t		c_ospeed;
 };
 
-int	terminal_read(void *buf, u32 count);
+#define	TERM_READ_IGNORE_SIGINT	0x00000001
+
+int	terminal_read(void *buf, u32 count, u32 flags);
 int	terminal_write(const void *buf, u32 count);
 void	terminal_init(void);
 int	terminal_is_initialized(void);
@@ -160,11 +162,12 @@ int	terminal_power_get(int index);
 int	terminal_power_set(int index, int state);
 int	terminal_power_reset(int index);
 int	terminal_power_suspend_all(void);
-int	terminal_read_idx(int idx, void *buf, u32 count, int nonblock);
+int	terminal_read_idx(int idx, void *buf, u32 count, int nonblock,
+    u32 flags);
 int	terminal_write_idx(int idx, const void *buf, u32 count);
 int	terminal_ioctl_idx(int idx, u64 cmd, void *arg);
 int	terminal_read_vnode(vnode_t *vn, void *buf, u32 count,
-    int nonblock);
+    int nonblock, u32 flags);
 int	terminal_read_available(int idx);
 int	terminal_write_vnode(vnode_t *vn, const void *buf, u32 count);
 int	terminal_ioctl_vnode(vnode_t *vn, u64 cmd, void *arg);
@@ -176,6 +179,9 @@ void	terminal_set_session(int idx, u32 sid);
 u32	terminal_get_session(int idx);
 void	terminal_set_pgrp(int idx, u32 pgid);
 u32	terminal_get_pgrp(int idx);
+void	terminal_drop_pgrp(u32 pgid);
 void	terminal_hangup(int idx);
+void	terminal_signal_pgrp(int idx, int sig);
+void	terminal_input_poll(void);
 
 #endif

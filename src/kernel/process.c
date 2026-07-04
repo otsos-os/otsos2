@@ -66,6 +66,7 @@ $space %export process_get, process_create, process_create_kernel
 #include <kernel/process.h>
 #include <kernel/signal.h>
 #include <kernel/thread.h>
+#include <kernel/console/terminal.h>
 #include <kernel/event/event.h>
 #include <mm/vm/vm_map.h>
 #include <mlibc/stdio.h>
@@ -275,6 +276,8 @@ process_exit(int code)
 		}
 	}
 
+	terminal_drop_pgrp(proc->pgid);
+
 	__asm__ volatile("sti");
 	while (1) {
 		__asm__ volatile("hlt");
@@ -361,12 +364,28 @@ process_kill(u32 pid)
 		return (-1);
 	}
 
-	if (proc == process_current()) {
-		process_exit(-1);
+	if (proc->main_thread &&
+	    proc->main_thread->state == PROC_STATE_ZOMBIE) {
 		return (0);
 	}
 
-	thread_kill_all(proc);
+	if (proc == process_current()) {
+		thread_t	*td;
+
+		thread_kill_all(proc);
+		td = thread_current();
+		if (td) {
+			td->state = PROC_STATE_ZOMBIE;
+		}
+	} else {
+		thread_kill_all(proc);
+		if (proc->main_thread) {
+			proc->main_thread->state = PROC_STATE_ZOMBIE;
+		}
+		if (proc->cur_thread && proc->cur_thread != proc->main_thread) {
+			proc->cur_thread->state = PROC_STATE_ZOMBIE;
+		}
+	}
 
 	api_release_handles(proc);
 	posix_cleanup_process(proc);
@@ -381,20 +400,21 @@ process_kill(u32 pid)
 		proc->cr3 = 0;
 		proc->owns_address_space = 0;
 	}
+	proc->mmap_base = MMAP_BASE;
 
-	/* Destroy all threads */
-	{
-		thread_t	*td, *next;
+	event_notify_proc_exit(proc->pid, proc->exit_code);
+	event_cleanup_process(proc);
 
-		td = proc->thread_list;
-		while (td) {
-			next = td->next;
-			thread_destroy(td);
-			td = next;
+	if (proc->ppid > 0) {
+		process_t	*parent;
+
+		parent = process_get(proc->ppid);
+		if (parent) {
+			proc_wakeup((void *)parent);
 		}
 	}
 
-	memset(proc, 0, sizeof(process_t));
+	terminal_drop_pgrp(proc->pgid);
 
 	return (0);
 }
@@ -403,6 +423,7 @@ int
 process_send_signal(u32 pid, int sig)
 {
 	process_t	*proc;
+	thread_t	*td;
 
 	if (sig == 0) {
 		return (0);
@@ -420,13 +441,33 @@ process_send_signal(u32 pid, int sig)
 	event_notify_signal(pid, sig);
 
 	if (sig == SIGKILL) {
-		if (proc == process_current()) {
-			process_exit(-1);
-			return (0);
-		}
+		proc->exit_code = 128 + SIGKILL;
 		return (process_kill(pid));
 	}
 
 	proc->sigpending |= (1ULL << (sig - 1));
+
+	if (proc->personality != PERSONALITY_POSIX) {
+		int	dfl;
+
+		dfl = posix_signal_default(sig);
+		if (dfl == SIG_DFL_TERMINATE) {
+			proc->exit_code = 128 + sig;
+			return (process_kill(pid));
+		}
+	}
+
+	/*
+	 * Wake up any sleeping threads so the pending signal can be
+	 * delivered instead of waiting indefinitely for the next
+	 * syscall entry.
+	 */
+	for (td = proc->thread_list; td != NULL; td = td->next) {
+		if (td->used && td->state == PROC_STATE_SLEEPING) {
+			td->state = PROC_STATE_RUNNABLE;
+			td->wait_channel = NULL;
+		}
+	}
+
 	return (0);
 }

@@ -33,7 +33,7 @@
 #include <mlibc/mlibc.h>
 
 int
-api_term_read(void *buf, u32 count)
+api_term_read(void *buf, u32 count, u32 flags)
 {
 	if (count == 0) {
 		return (0);
@@ -49,7 +49,7 @@ api_term_read(void *buf, u32 count)
 		return (-API_ERR_BAD_ADDR);
 	}
 
-	return (terminal_read(buf, count));
+	return (terminal_read(buf, count, flags));
 }
 
 int

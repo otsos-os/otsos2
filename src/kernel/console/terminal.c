@@ -57,12 +57,12 @@ $define %func terminal_switch_to as procedure with args int
 $define %func terminal_numpad_digit as function with args u8, int
 $define %func terminal_scancode_callback as procedure with args u8, int, int
 $define %func terminal_lazy_init as procedure with args void
-$define %func terminal_pump_keyboard as procedure with args void
+$define %func terminal_pump_keyboard as procedure with args u32
 $define %func terminal_getchar_blocking as function with args int
 $define %func terminal_emit_to as procedure with args int, char
 $define %func terminal_fill_line_buffer as procedure with args int
 $define %func terminal_reset_one as procedure with args int
-$define %func terminal_read as function with args void *, u32
+$define %func terminal_read as function with args void *, u32, u32
 $define %func terminal_write as function with args const void *, u32
 $define %func terminal_init as procedure with args void
 $define %func terminal_is_initialized as function with args void
@@ -1166,7 +1166,7 @@ terminal_echo(int idx, char c)
 }
 
 static void
-terminal_input_char(int idx, char c)
+terminal_input_char(int idx, char c, u32 flags)
 {
 	terminal_state_t	*term;
 	int			 lflag;
@@ -1177,14 +1177,14 @@ terminal_input_char(int idx, char c)
 
 	if (lflag & ISIG) {
 		if (c == term->term.c_cc[VINTR]) {
-			terminal_signal_pgrp(idx, SIGINT);
-			return;
-		}
-		if (c == term->term.c_cc[VQUIT]) {
+			if (!(flags & TERM_READ_IGNORE_SIGINT)) {
+				terminal_signal_pgrp(idx, SIGINT);
+				return;
+			}
+		} else if (c == term->term.c_cc[VQUIT]) {
 			terminal_signal_pgrp(idx, SIGQUIT);
 			return;
-		}
-		if (c == term->term.c_cc[VSUSP]) {
+		} else if (c == term->term.c_cc[VSUSP]) {
 			terminal_signal_pgrp(idx, SIGTSTP);
 			return;
 		}
@@ -1265,7 +1265,7 @@ terminal_input_char(int idx, char c)
 }
 
 static void
-terminal_pump_keyboard(void)
+terminal_pump_keyboard(u32 flags)
 {
 	char	c;
 	int	got_data;
@@ -1280,13 +1280,19 @@ terminal_pump_keyboard(void)
 		if (c == 0) {
 			break;
 		}
-		terminal_input_char(terminal_active, c);
+		terminal_input_char(terminal_active, c, flags);
 		got_data = 1;
 	}
 
 	if (got_data) {
 		knote_notify_all(EVFILT_READ, 0, 0, 1);
 	}
+}
+
+void
+terminal_input_poll(void)
+{
+	terminal_pump_keyboard(0);
 }
 
 int
@@ -1314,7 +1320,7 @@ terminal_read_available(int idx)
 }
 
 int
-terminal_read_idx(int idx, void *buf, u32 count, int nonblock)
+terminal_read_idx(int idx, void *buf, u32 count, int nonblock, u32 flags)
 {
 	terminal_state_t	*term;
 	char			*out;
@@ -1340,7 +1346,7 @@ terminal_read_idx(int idx, void *buf, u32 count, int nonblock)
 
 	if (term->term.c_lflag & ICANON) {
 		while (n < (int)count) {
-			terminal_pump_keyboard();
+			terminal_pump_keyboard(flags);
 			if (terminal_input_get(idx, &c) == 0) {
 				out[n++] = c;
 				if (c == '\n') {
@@ -1355,12 +1361,20 @@ terminal_read_idx(int idx, void *buf, u32 count, int nonblock)
 				}
 				break;
 			} else {
+				struct process	*p;
+
+				if (n == 0) {
+					p = process_current();
+					if (p && (p->sigpending & ~p->sigmask)) {
+						return (-POSIX_EINTR);
+					}
+				}
 				proc_sleep(terminal_input_channel);
 			}
 		}
 	} else {
 		while (n < (int)count) {
-			terminal_pump_keyboard();
+			terminal_pump_keyboard(flags);
 			if (terminal_input_get(idx, &c) == 0) {
 				out[n++] = c;
 			} else if (nonblock) {
@@ -1369,6 +1383,14 @@ terminal_read_idx(int idx, void *buf, u32 count, int nonblock)
 				}
 				break;
 			} else {
+				struct process	*p;
+
+				if (n == 0) {
+					p = process_current();
+					if (p && (p->sigpending & ~p->sigmask)) {
+						return (-POSIX_EINTR);
+					}
+				}
 				proc_sleep(terminal_input_channel);
 			}
 		}
@@ -1377,9 +1399,9 @@ terminal_read_idx(int idx, void *buf, u32 count, int nonblock)
 }
 
 int
-terminal_read(void *buf, u32 count)
+terminal_read(void *buf, u32 count, u32 flags)
 {
-	return (terminal_read_idx(terminal_active, buf, count, 0));
+	return (terminal_read_idx(terminal_active, buf, count, 0, flags));
 }
 
 int
@@ -1686,6 +1708,21 @@ terminal_get_pgrp(int idx)
 }
 
 void
+terminal_drop_pgrp(u32 pgid)
+{
+	int	i;
+
+	if (pgid == 0) {
+		return;
+	}
+	for (i = 0; i < TERM_COUNT; i++) {
+		if (terminals[i].foreground_pgrp == pgid) {
+			terminals[i].foreground_pgrp = 0;
+		}
+	}
+}
+
+void
 terminal_signal_pgrp(int idx, int sig)
 {
 	process_t	*proc;
@@ -1818,7 +1855,8 @@ terminal_ioctl_idx(int idx, u64 cmd, void *arg)
 }
 
 int
-terminal_read_vnode(vnode_t *vn, void *buf, u32 count, int nonblock)
+terminal_read_vnode(vnode_t *vn, void *buf, u32 count, int nonblock,
+    u32 flags)
 {
 	int	idx;
 
@@ -1826,7 +1864,7 @@ terminal_read_vnode(vnode_t *vn, void *buf, u32 count, int nonblock)
 	if (idx == -1) {
 		idx = terminal_active;
 	}
-	return (terminal_read_idx(idx, buf, count, nonblock));
+	return (terminal_read_idx(idx, buf, count, nonblock, flags));
 }
 
 int

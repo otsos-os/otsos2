@@ -98,9 +98,6 @@ void _start(long argc, char **argv, char **envp) {
   if (argc <= 1 || !argv) {
     const char *msg = "y\n";
     for (;;) {
-      volatile int a = 2;
-      volatile int b = 0;
-      int ressss = a / b;
       if (write_all(msg, 2) != 0)
         procExit(1);
     }

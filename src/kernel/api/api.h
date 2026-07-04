@@ -336,7 +336,7 @@ struct api_timeinfo {
   char clocksource[32];
 };
 
-int api_term_read(void *buf, u32 count);
+int api_term_read(void *buf, u32 count, u32 flags);
 int api_term_write(const void *buf, u32 count);
 int api_data_read(int handle, void *buf, u32 count);
 int api_info(struct api_sysinfo *buf);

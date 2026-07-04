@@ -11,6 +11,7 @@
 
 #define CALL_TERM_READ  0x100
 #define CALL_TERM_WRITE 0x101
+#define TERM_READ_IGNORE_SIGINT 0x00000001
 #define CALL_DATA_OPEN  0x200
 #define CALL_DATA_CLOSE 0x201
 #define CALL_DATA_READ  0x202
@@ -183,7 +184,8 @@ static long term_write(const void *buf, u32 len) {
 }
 
 static long term_read(void *buf, u32 len) {
-  return syscall3(CALL_TERM_READ, (long)buf, (long)len, 0);
+  return syscall3(CALL_TERM_READ, (long)buf, (long)len,
+                  TERM_READ_IGNORE_SIGINT);
 }
 
 static long fs_chdir(const char *path) {

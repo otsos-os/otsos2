@@ -184,6 +184,7 @@ keyboard_poll(void)
 	}
 
 	current_driver->poll();
+	terminal_input_poll();
 
 	void	*ch;
 

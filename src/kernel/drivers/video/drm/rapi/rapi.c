@@ -232,6 +232,7 @@ int rapi_console_scroll_up(kms_console_t *con, u32 lines, u32 bg) {
 
   if (!con || !con->ready) return DRM_ERR_INVAL;
   if (lines == 0) return DRM_OK;
+  if (lines > 50) lines = 50;
   if (lines >= con->height) return rapi_console_clear(con, bg);
   buf = drm_gem_lookup(con->gem);
   if (!buf || !buf->data) return DRM_ERR_INVAL;

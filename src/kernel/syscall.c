@@ -131,7 +131,7 @@ void syscall_handler(registers_t *regs) {
 
   switch (syscall_number) {
   case CALL_TERM_READ:
-    regs->rax = (u64)api_term_read((void *)arg1, (u32)arg2);
+    regs->rax = (u64)api_term_read((void *)arg1, (u32)arg2, (u32)arg3);
     break;
   case CALL_TERM_WRITE:
     regs->rax = (u64)api_term_write((const void *)arg1, (u32)arg2);

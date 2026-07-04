@@ -182,7 +182,7 @@ static int
 vnode_tty_read(vnode_t *vn, void *buf, u64 count, u64 offset)
 {
 	(void)offset;
-	return (terminal_read_vnode(vn, buf, (u32)count, 0));
+	return (terminal_read_vnode(vn, buf, (u32)count, 0, 0));
 }
 
 static int
