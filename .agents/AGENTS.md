@@ -111,8 +111,13 @@ Monolithic kernel with the following rough layers:
 ### Configuration
 
 - `src/config.toml` — kernel identity, timer frequency, kshell, libc toggle, disk
-  options. `config.c` reads it at boot from the `config` Multiboot module and
-  can persist it to `/conf/boot/modules.toml`.
+  options, and multiboot module list. `config.c` reads it at boot from the
+  `config` Multiboot module and can persist it to `/conf/boot/modules.toml`.
+- `[modules]` section in `config.toml` — maps multiboot module names to
+  filesystem destinations (e.g., `yes = "/bin/yes"`).  The kernel iterates this
+  section at boot to copy modules into ChainFS; the module named `init` is also
+  used to start the first userspace process.  The Makefile and ISO generator use
+  the same list via `tools/modules.sh`.
 
 ### Tooling / scripts
 
@@ -120,6 +125,9 @@ Monolithic kernel with the following rough layers:
 - `add_copyright.sh` — prepends the BSD-2-Clause copyright header to `.c`,
   `.h`, `.s` files.
 - `tools/toml_get.sh` — helper used by Makefiles to read `config.toml` values.
+- `tools/modules.sh` — extracts module names from the `[modules]` section of
+  `config.toml`; used by the Makefile to stage ISO modules and generate GRUB
+  `module2` entries.
 
 ## Repository Structure
 

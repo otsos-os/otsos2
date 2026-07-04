@@ -37,6 +37,7 @@ $define %type multiboot_info_t as struct with multiboot1 info
 $define %type multiboot2_info_t as struct with multiboot2 info
 $define %type multiboot2_tag_t as struct with multiboot2 tag header
 $define %type multiboot2_tag_module_t as struct with module tag
+$define %type module_copy_ctx_t as struct with multiboot pointers, boot magic, init module
 
 $define %func debug_multiboot_info as procedure with args multiboot_info_t *
 $define %func debug_multiboot2_tags as procedure with args multiboot2_info_t *
@@ -46,6 +47,8 @@ $define %func disk_has_type as function with args disk_type_t
 $define %func disk_find_type as function with args disk_type_t
 $define %func timer_sanity_check as function with args void
 $define %func enable_sse as procedure with args void
+$define %func kernel_ensure_parent_dirs as function with args const char *
+$define %func kernel_install_module_cb as procedure with args const char *, const char *, void *
 $define %func kmain as start with args u64, u64, u64
 
 */
@@ -56,6 +59,7 @@ $space %internal debug_multiboot_info, debug_multiboot2_tags
 $space %internal mb2_find_module, status_line
 $space %internal disk_has_type, disk_find_type
 $space %internal timer_sanity_check, enable_sse
+$space %internal kernel_ensure_parent_dirs, kernel_install_module_cb
 $space %export kmain
 
 */
@@ -306,6 +310,89 @@ enable_sse(void)
 	__asm__ volatile("mov %0, %%cr4" : : "r"(cr4));
 }
 
+typedef struct {
+	multiboot2_info_t	*mboot2_ptr;
+	multiboot_info_t	*mboot1_ptr;
+	u32			boot_magic;
+	void			*init_mod;
+	u32			init_sz;
+} module_copy_ctx_t;
+
+static int
+kernel_ensure_parent_dirs(const char *path)
+{
+	char	buf[256];
+	int	len;
+	int	i;
+
+	if (!path || path[0] != '/') {
+		return (-1);
+	}
+
+	len = strlen(path);
+	if (len >= (int)sizeof(buf)) {
+		return (-1);
+	}
+	memcpy(buf, path, len + 1);
+
+	for (i = 1; i < len; i++) {
+		if (buf[i] == '/') {
+			buf[i] = '\0';
+			vfs_mkdir(buf);
+			buf[i] = '/';
+		}
+	}
+	return (0);
+}
+
+static void
+kernel_install_module_cb(const char *name, const char *dest, void *ctx)
+{
+	module_copy_ctx_t	*c;
+	void			*mod;
+	u32			sz;
+	int			res;
+
+	c = (module_copy_ctx_t *)ctx;
+	if (!name || !dest || !c) {
+		return;
+	}
+
+	mod = NULL;
+	sz = 0;
+	if (c->boot_magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
+		mb2_find_module(c->mboot2_ptr, name, &mod, &sz);
+	} else {
+		return;
+	}
+
+	if (!mod || sz == 0) {
+		printk("[KERNEL] Module '%s' not found, skipping "
+		    "copy to %s\n", name, dest);
+		return;
+	}
+
+	if (kernel_ensure_parent_dirs(dest) != 0) {
+		printk("[KERNEL] Failed to create parent directories "
+		    "for %s\n", dest);
+		return;
+	}
+
+	res = vfs_write_file(dest, (const u8 *)mod, sz);
+	if (res == 0) {
+		printk("[KERNEL] Installed %s from module '%s' "
+		    "(%u bytes)\n", dest, name, sz);
+	} else {
+		printk("[KERNEL] Failed to install %s from module "
+		    "'%s'\n", dest, name);
+	}
+
+	if (strcmp(name, "init") == 0) {
+		c->init_mod = mod;
+		c->init_sz = sz;
+	}
+}
+
 void
 kmain(u64 magic, u64 addr, u64 boot_option)
 {
@@ -329,13 +416,9 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 	int		ramdisk_ok, fb_ok, drm_atomic_ok, acpi_ok;
 	int		power_ok, pci_ok, watchdog_ok;
 	u32		format_blocks;
-	void		*init_mod, *yes_mod, *fetch_mod, *sh_mod;
-	u32		init_sz, yes_sz, fetch_sz, sh_sz;
-	void		*posix_hello_mod;
-	u32		posix_hello_sz;
 	void		*config_mod;
 	u32		config_sz;
-	int		res;
+	module_copy_ctx_t	mod_ctx;
 
 	safe_mode = (boot_option == 1);
 	debug_mode = (boot_option == 2);
@@ -623,135 +706,19 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 
 		userspace_init();
 
-		init_mod = NULL;
-		init_sz = 0;
-		yes_mod = NULL;
-		yes_sz = 0;
-		fetch_mod = NULL;
-		fetch_sz = 0;
-		sh_mod = NULL;
-		sh_sz = 0;
-		posix_hello_mod = NULL;
-		posix_hello_sz = 0;
-		void		*musl_test_mod;
-		u32		musl_test_sz;
-		void		*kbdtest_mod;
-		u32		kbdtest_sz;
-
-		musl_test_mod = NULL;
-		musl_test_sz = 0;
-		kbdtest_mod = NULL;
-		kbdtest_sz = 0;
-
-		if (boot_magic ==
-		    MULTIBOOT2_BOOTLOADER_MAGIC) {
-			mboot2_ptr =
-			    (multiboot2_info_t *)addr;
-			mb2_find_module(mboot2_ptr, "init",
-			    &init_mod, &init_sz);
-			mb2_find_module(mboot2_ptr, "yes",
-			    &yes_mod, &yes_sz);
-			mb2_find_module(mboot2_ptr, "fetch",
-			    &fetch_mod, &fetch_sz);
-			mb2_find_module(mboot2_ptr, "sh",
-			    &sh_mod, &sh_sz);
-			mb2_find_module(mboot2_ptr, "posix_hello",
-			    &posix_hello_mod, &posix_hello_sz);
-			mb2_find_module(mboot2_ptr, "musl_test",
-			    &musl_test_mod, &musl_test_sz);
-			mb2_find_module(mboot2_ptr, "kbdtest",
-			    &kbdtest_mod, &kbdtest_sz);
-		}
+		memset(&mod_ctx, 0, sizeof(mod_ctx));
+		mod_ctx.mboot2_ptr = mboot2_ptr;
+		mod_ctx.mboot1_ptr = mboot1_ptr;
+		mod_ctx.boot_magic = boot_magic;
 
 		api_init();
 
-		vfs_mkdir("/bin");
-
-		if (yes_mod && yes_sz > 0) {
-			res = vfs_write_file("/bin/yes",
-			    (const u8 *)yes_mod, yes_sz);
-			if (res == 0) {
-				printk("[KERNEL] Installed "
-				    "/bin/yes from module "
-				    "(%u bytes)\n", yes_sz);
-			} else {
-				printk("[KERNEL] Failed to "
-				    "install /bin/yes from "
-				    "module\n");
-			}
-		}
-
-		if (fetch_mod && fetch_sz > 0) {
-			res = vfs_write_file("/bin/fetch",
-			    (const u8 *)fetch_mod, fetch_sz);
-			if (res == 0) {
-				printk("[KERNEL] Installed "
-				    "/bin/fetch from module "
-				    "(%u bytes)\n", fetch_sz);
-			} else {
-				printk("[KERNEL] Failed to "
-				    "install /bin/fetch from "
-				    "module\n");
-			}
-		}
-
-		if (sh_mod && sh_sz > 0) {
-			res = vfs_write_file("/bin/sh",
-			    (const u8 *)sh_mod, sh_sz);
-			if (res == 0) {
-				printk("[KERNEL] Installed "
-				    "/bin/sh from module "
-				    "(%u bytes)\n", sh_sz);
-			} else {
-				printk("[KERNEL] Failed to "
-				    "install /bin/sh from "
-				    "module\n");
-			}
-		}
-
-		if (posix_hello_mod && posix_hello_sz > 0) {
-			res = vfs_write_file("/bin/posix_hello",
-			    (const u8 *)posix_hello_mod,
-			    posix_hello_sz);
-			if (res == 0) {
-				printk("[KERNEL] Installed "
-				    "/bin/posix_hello from module "
-				    "(%u bytes)\n", posix_hello_sz);
-			} else {
-				printk("[KERNEL] Failed to "
-				    "install /bin/posix_hello from "
-				    "module\n");
-			}
-		}
-
-		if (musl_test_mod && musl_test_sz > 0) {
-			res = vfs_write_file("/bin/musl_test",
-			    (const u8 *)musl_test_mod,
-			    musl_test_sz);
-			if (res == 0) {
-				printk("[KERNEL] Installed "
-				    "/bin/musl_test from module "
-				    "(%u bytes)\n", musl_test_sz);
-			} else {
-				printk("[KERNEL] Failed to "
-				    "install /bin/musl_test from "
-				    "module\n");
-			}
-		}
-
-		if (kbdtest_mod && kbdtest_sz > 0) {
-			res = vfs_write_file("/bin/kbdtest",
-			    (const u8 *)kbdtest_mod,
-			    kbdtest_sz);
-			if (res == 0) {
-				printk("[KERNEL] Installed "
-				    "/bin/kbdtest from module "
-				    "(%u bytes)\n", kbdtest_sz);
-			} else {
-				printk("[KERNEL] Failed to "
-				    "install /bin/kbdtest from "
-				    "module\n");
-			}
+		if (config_is_initialized()) {
+			config_foreach_in_section("modules",
+			    kernel_install_module_cb, &mod_ctx);
+		} else {
+			printk("[KERNEL] No config loaded, "
+			    "cannot install multiboot modules\n");
 		}
 
 		kusr_init();
@@ -764,12 +731,12 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 		 */
 		terminal_power_suspend_all();
 
-		if (init_mod && init_sz > 0) {
+		if (mod_ctx.init_mod && mod_ctx.init_sz > 0) {
 			printk("[KERNEL] Found init module "
 			    "at %p, size %d. Starting init...\n",
-			    init_mod, init_sz);
-			userspace_load_init(init_mod,
-			    (u64)init_sz);
+			    mod_ctx.init_mod, mod_ctx.init_sz);
+			userspace_load_init(mod_ctx.init_mod,
+			    (u64)mod_ctx.init_sz);
 		} else {
 			printk("[KERNEL] Init module not "
 			    "found! Falling back to kernel "

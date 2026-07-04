@@ -36,6 +36,7 @@ POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
 KBDTEST_BIN = $(PORTS_DIR)/kbdtest
 MUSL_TEST_BIN = $(PORTS_DIR)/musl_test
 LIBC_ENABLED := $(shell sh ../tools/toml_get.sh config.toml libc enabled true)
+MULTIBOOT_MODULES := $(shell sh ../tools/modules.sh config.toml)
 
 ifeq ($(LIBC_ENABLED),true)
 ISO_MUSL_TEST_DEP = $(MUSL_TEST_BIN)
@@ -319,13 +320,21 @@ $(MUSL_CRT1): $(MUSL_LIBC)
 $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
-	@cp $(INIT_BIN) $(ISODIR)/boot/init
-	@cp $(YES_BIN) $(ISODIR)/boot/yes
-	@cp $(FETCH_BIN) $(ISODIR)/boot/fetch
-	@cp $(SHELL_BIN) $(ISODIR)/boot/sh
-	@cp $(POSIX_HELLO_BIN) $(ISODIR)/boot/posix_hello
-	@cp $(KBDTEST_BIN) $(ISODIR)/boot/kbdtest
-	$(ISO_MUSL_TEST_COPY)
+	@for m in $(MULTIBOOT_MODULES); do \
+		src=""; \
+		case $$m in \
+			init) src=$(INIT_BIN);; \
+			yes) src=$(YES_BIN);; \
+			fetch) src=$(FETCH_BIN);; \
+			sh) src=$(SHELL_BIN);; \
+			posix_hello) src=$(POSIX_HELLO_BIN);; \
+			kbdtest) src=$(KBDTEST_BIN);; \
+			musl_test) src=$(MUSL_TEST_BIN);; \
+		esac; \
+		if [ -n "$$src" ] && [ -f "$$src" ]; then \
+			cp "$$src" "$(ISODIR)/boot/$$m"; \
+		fi; \
+	done
 	@cp config.toml $(ISODIR)/boot/config.toml
 	@echo 'set timeout=4' > $(ISODIR)/boot/grub/grub.cfg
 	@echo 'set default=0' >> $(ISODIR)/boot/grub/grub.cfg
@@ -334,13 +343,11 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 	@echo 'menuentry "OTSOS" {' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    multiboot2 /boot/kernel.bin' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '    module2 /boot/config.toml config' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo '    module2 /boot/init init' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo '    module2 /boot/yes yes' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo '    module2 /boot/fetch fetch' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo '    module2 /boot/sh sh' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo '    module2 /boot/posix_hello posix_hello' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo '    module2 /boot/kbdtest kbdtest' >> $(ISODIR)/boot/grub/grub.cfg
-	$(GRUB_MUSL_TEST)
+	@for m in $(MULTIBOOT_MODULES); do \
+		if [ -f "$(ISODIR)/boot/$$m" ]; then \
+			echo "    module2 /boot/$$m $$m" >> $(ISODIR)/boot/grub/grub.cfg; \
+		fi; \
+	done
 	@echo '    boot' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '}' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo "  ISO     $(ISO_IMAGE)"

@@ -47,6 +47,7 @@ $define %func config_get_int as function with args const char *, const char *, i
 $define %func config_get_string as function with args const char *, const char *, const char *
 $define %func config_set as procedure with args const char *, const char *, const char *
 $define %func config_foreach_section as procedure with args const char *, config_section_cb, void *
+$define %func config_foreach_in_section as procedure with args const char *, config_kv_cb, void *
 $define %func config_is_initialized as function with args void
 $define %func config_free as procedure with args void
 
@@ -59,7 +60,8 @@ $space %internal config_section_seen, config_value_is_true
 $space %export config_init_from_data, config_init_from_file
 $space %export config_save_to_file, config_get, config_get_bool
 $space %export config_get_int, config_get_string, config_set
-$space %export config_foreach_section, config_is_initialized
+$space %export config_foreach_section, config_foreach_in_section
+$space %export config_is_initialized
 $space %export config_free
 
 */
@@ -259,6 +261,26 @@ config_foreach_section(const char *prefix, config_section_cb cb,
 		if (cb(e->section, ctx) != 0) {
 			break;
 		}
+	}
+}
+
+void
+config_foreach_in_section(const char *section, config_kv_cb cb,
+    void *ctx)
+{
+	toml_entry_t	*e;
+
+	if (!g_config_doc || !section || !cb) {
+		return;
+	}
+	for (e = g_config_doc->entries; e; e = e->next) {
+		if (!e->section || !e->key || !e->value) {
+			continue;
+		}
+		if (strcmp(e->section, section) != 0) {
+			continue;
+		}
+		cb(e->key, e->value, ctx);
 	}
 }
 

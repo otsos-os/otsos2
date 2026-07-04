@@ -31,6 +31,7 @@ $define %type u32 as 32 bit unsigned
 $define %type int as 32 bit signed
 $define %type char as 8 bit signed
 $define %type config_section_cb as function pointer with args const char *, void *
+$define %type config_kv_cb as function pointer with args const char *, const char *, void *
 
 $define %func config_init_from_data as procedure with args const char *, u32
 $define %func config_init_from_file as procedure with args const char *
@@ -41,6 +42,7 @@ $define %func config_get_int as function with args const char *, const char *, i
 $define %func config_get_string as function with args const char *, const char *, const char *
 $define %func config_set as procedure with args const char *, const char *, const char *
 $define %func config_foreach_section as procedure with args const char *, config_section_cb, void *
+$define %func config_foreach_in_section as procedure with args const char *, config_kv_cb, void *
 $define %func config_is_initialized as function with args void
 $define %func config_free as procedure with args void
 
@@ -51,7 +53,8 @@ $define %func config_free as procedure with args void
 $space %export config_init_from_data, config_init_from_file
 $space %export config_save_to_file, config_get, config_get_bool
 $space %export config_get_int, config_get_string, config_set
-$space %export config_foreach_section, config_is_initialized
+$space %export config_foreach_section, config_foreach_in_section
+$space %export config_is_initialized
 $space %export config_free
 
 */
@@ -64,6 +67,7 @@ $space %export config_free
 #define CONFIG_PATH_BOOT "/conf/boot/modules.toml"
 
 typedef int (*config_section_cb)(const char *section, void *ctx);
+typedef void (*config_kv_cb)(const char *key, const char *value, void *ctx);
 
 void		config_init_from_data(const char *data, u32 len);
 void		config_init_from_file(const char *path);
@@ -78,7 +82,9 @@ const char	*config_get_string(const char *section, const char *key,
 void		config_set(const char *section, const char *key,
 		    const char *value);
 void		config_foreach_section(const char *prefix,
-		    config_section_cb cb, void *ctx);
+	    config_section_cb cb, void *ctx);
+void		config_foreach_in_section(const char *section,
+	    config_kv_cb cb, void *ctx);
 int		config_is_initialized(void);
 void		config_free(void);
 
