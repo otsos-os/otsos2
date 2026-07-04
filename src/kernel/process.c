@@ -131,12 +131,18 @@ process_create_kernel(const char *name, void (*entry)(void))
 	proc->owns_address_space = 0;
 	proc->mmap_base = MMAP_BASE;
 	proc->exit_code = 0;
-	proc->personality = PERSONALITY_OTSOS;
-	proc->sid = proc->pid;
-	proc->pgid = proc->pid;
-	proc->is_session_leader = 1;
+  proc->personality = PERSONALITY_OTSOS;
+  proc->sid = proc->pid;
+  proc->pgid = proc->pid;
+  proc->is_session_leader = 1;
+  proc->uid = 0;
+  proc->gid = 0;
+  proc->euid = 0;
+  proc->egid = 0;
+  proc->suid = 0;
+  proc->sgid = 0;
 
-	api_init_process(proc);
+  api_init_process(proc);
 	posix_init_process(proc);
 
 	td = thread_create(proc, (u64)entry, 0, KERNEL_CS,

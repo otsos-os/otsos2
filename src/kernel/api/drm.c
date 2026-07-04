@@ -246,7 +246,7 @@ int api_drm_call(u64 op, void *arg) {
   }
 
   process_t *proc = process_current();
-  int is_kusr = proc && proc->kusr_auth;
+  int is_kusr = proc_has_privilege(proc);
 
   /*
    * Permission model:

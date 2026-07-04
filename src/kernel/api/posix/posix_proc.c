@@ -429,36 +429,122 @@ s64
 posix_getuid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
     registers_t *regs)
 {
-	(void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
-	(void)regs;
-	return (0);
+  struct process	*proc;
+
+  (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)regs;
+
+  proc = process_current();
+  if (!proc) {
+    return (0);
+  }
+  return ((s64)proc->uid);
 }
 
 s64
 posix_getgid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
     registers_t *regs)
 {
-	(void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
-	(void)regs;
-	return (0);
+  struct process	*proc;
+
+  (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)regs;
+
+  proc = process_current();
+  if (!proc) {
+    return (0);
+  }
+  return ((s64)proc->gid);
 }
 
 s64
 posix_geteuid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
     registers_t *regs)
 {
-	(void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
-	(void)regs;
-	return (0);
+  struct process	*proc;
+
+  (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)regs;
+
+  proc = process_current();
+  if (!proc) {
+    return (0);
+  }
+  return ((s64)proc->euid);
 }
 
 s64
 posix_getegid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
     registers_t *regs)
 {
-	(void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
-	(void)regs;
-	return (0);
+  struct process	*proc;
+
+  (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)regs;
+
+  proc = process_current();
+  if (!proc) {
+    return (0);
+  }
+  return ((s64)proc->egid);
+}
+
+s64
+posix_setuid(u64 uid_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+  struct process	*proc;
+  u32		uid;
+
+  (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
+
+  proc = process_current();
+  if (!proc) {
+    return (-POSIX_EFAULT);
+  }
+
+  uid = (u32)uid_u;
+
+  if (proc->euid == 0) {
+    proc->uid = uid;
+    proc->euid = uid;
+    proc->suid = uid;
+    return (0);
+  }
+  if (uid == proc->uid || uid == proc->suid) {
+    proc->euid = uid;
+    return (0);
+  }
+  return (-POSIX_EPERM);
+}
+
+s64
+posix_setgid(u64 gid_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+  struct process	*proc;
+  u32		gid;
+
+  (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
+
+  proc = process_current();
+  if (!proc) {
+    return (-POSIX_EFAULT);
+  }
+
+  gid = (u32)gid_u;
+
+  if (proc->egid == 0) {
+    proc->gid = gid;
+    proc->egid = gid;
+    proc->sgid = gid;
+    return (0);
+  }
+  if (gid == proc->gid || gid == proc->sgid) {
+    proc->egid = gid;
+    return (0);
+  }
+  return (-POSIX_EPERM);
 }
 
 s64
@@ -755,9 +841,15 @@ posix_fork(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	child->mmap_base = parent->mmap_base;
 	child->brk_min = parent->brk_min;
 	child->brk = parent->brk;
-	child->kusr_auth = parent->kusr_auth;
-	child->sid = parent->sid;
-	child->pgid = parent->pgid;
+  child->kusr_auth = parent->kusr_auth;
+  child->uid = parent->uid;
+  child->gid = parent->gid;
+  child->euid = parent->euid;
+  child->egid = parent->egid;
+  child->suid = parent->suid;
+  child->sgid = parent->sgid;
+  child->sid = parent->sid;
+  child->pgid = parent->pgid;
 	child->is_session_leader = 0;
 	child->controlling_tty = parent->controlling_tty;
 
@@ -1049,10 +1141,12 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 	proc->entry_point = entry_point;
 	proc->user_stack = user_stack;
 	proc->owns_address_space = 1;
-	proc->mmap_base = MMAP_BASE;
-	proc->kusr_auth = 0;
+  proc->mmap_base = MMAP_BASE;
+  proc->kusr_auth = 0;
+  proc->suid = proc->euid;
+  proc->sgid = proc->egid;
 
-	copy_process_name(proc->name, kpath);
+  copy_process_name(proc->name, kpath);
 	kmem_free(kpath);
 
 	for (i = 0; i < MAX_POSIX_FDS; i++) {

@@ -222,7 +222,9 @@ $space %export posix_signal_pending, posix_signal_deliver
 #define SYS_fchmod		91
 #define SYS_chown		92
 #define SYS_getuid		102
+#define SYS_setuid		105
 #define SYS_getgid		103
+#define SYS_setgid		106
 #define SYS_geteuid		108
 #define SYS_getegid		109
 #define SYS_getppid		110

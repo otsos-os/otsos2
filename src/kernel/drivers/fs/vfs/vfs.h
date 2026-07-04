@@ -114,11 +114,13 @@ typedef struct posix_stat {
 
 typedef struct vnode {
 	int		type;
-	int		refcount;
-	int		data_owned;
-	u64		size;
-	u32		mode;
-	char		name[32];
+  int		refcount;
+  int		data_owned;
+  u64		size;
+  u32		mode;
+  u32		uid;
+  u32		gid;
+  char		name[32];
 	void		*data;
 	int		(*read_fn)(struct vnode *, void *, u64, u64);
 	int		(*write_fn)(struct vnode *, const void *, u64, u64);

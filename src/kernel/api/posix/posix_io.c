@@ -30,6 +30,7 @@
 #include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/console/terminal.h>
 #include <kernel/console/pty.h>
+#include <kernel/other/restrict.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mlibc/stdio.h>
@@ -71,13 +72,57 @@ copy_user_string(const char *user, int max_len)
 	return (kbuf);
 }
 
+static int
+posix_check_perm(vnode_t *vn, int access)
+{
+  struct process	*proc;
+  int			mode;
+
+  if (!vn || !access) {
+    return (0);
+  }
+
+  proc = process_current();
+  if (!proc) {
+    return (-POSIX_EACCES);
+  }
+
+  if (proc->euid == 0) {
+    return (0);
+  }
+
+  if (proc->euid == vn->uid) {
+    mode = (vn->mode >> 6) & 7;
+    if ((access & 4) && !(mode & 4)) return (-POSIX_EACCES);
+    if ((access & 2) && !(mode & 2)) return (-POSIX_EACCES);
+    if ((access & 1) && !(mode & 1)) return (-POSIX_EACCES);
+    return (0);
+  }
+
+  if (proc->egid == vn->gid) {
+    mode = (vn->mode >> 3) & 7;
+    if ((access & 4) && !(mode & 4)) return (-POSIX_EACCES);
+    if ((access & 2) && !(mode & 2)) return (-POSIX_EACCES);
+    if ((access & 1) && !(mode & 1)) return (-POSIX_EACCES);
+    return (0);
+  }
+
+  mode = vn->mode & 7;
+  if ((access & 4) && !(mode & 4)) return (-POSIX_EACCES);
+  if ((access & 2) && !(mode & 2)) return (-POSIX_EACCES);
+  if ((access & 1) && !(mode & 1)) return (-POSIX_EACCES);
+  return (0);
+}
+
 static s64
 posix_do_open(const char *path, int posix_flags, u64 mode)
 {
-	struct process	*proc;
-	vnode_t		*vn;
-	int		fd;
-	int		exists;
+  struct process	*proc;
+  vnode_t		*vn;
+  int			fd;
+  int			exists;
+  int			perm;
+  int			want;
 
 	(void)mode;
 
@@ -86,12 +131,16 @@ posix_do_open(const char *path, int posix_flags, u64 mode)
 		return (-POSIX_EFAULT);
 	}
 
-	if (path[0] == '\0') {
-		return (-POSIX_ENOENT);
-	}
+  if (path[0] == '\0') {
+    return (-POSIX_ENOENT);
+  }
 
-	vn = NULL;
-	if (vfs_resolve(path, &vn) == 0 && vn != NULL) {
+  if (restrict_kusr_check(path)) {
+    return (-POSIX_EACCES);
+  }
+
+  vn = NULL;
+  if (vfs_resolve(path, &vn) == 0 && vn != NULL) {
 		exists = 1;
 		if (vn->type == VDIR) {
 			/*
@@ -137,6 +186,9 @@ posix_do_open(const char *path, int posix_flags, u64 mode)
 		if (vfs_resolve(path, &vn) != 0 || vn == NULL) {
 			return (-POSIX_EIO);
 		}
+
+		vn->uid = proc->euid;
+		vn->gid = proc->egid;
 	} else {
 		if ((posix_flags & POSIX_O_CREAT) &&
 		    (posix_flags & POSIX_O_EXCL)) {
@@ -149,6 +201,21 @@ posix_do_open(const char *path, int posix_flags, u64 mode)
 			vnode_release(vn);
 			return (-POSIX_ENOTDIR);
 		}
+	}
+
+	want = 0;
+	if (posix_flags & POSIX_O_RDWR) {
+		want = 6;
+	} else if (posix_flags & POSIX_O_WRONLY) {
+		want = 2;
+	} else {
+		want = 4;
+	}
+
+	perm = posix_check_perm(vn, want);
+	if (perm != 0) {
+		vnode_release(vn);
+		return ((s64)perm);
 	}
 
 	if (posix_flags & POSIX_O_TRUNC) {
@@ -1098,24 +1165,33 @@ s64
 posix_access(u64 path_u, u64 mode, u64 a3, u64 a4, u64 a5, u64 a6,
     registers_t *regs)
 {
-	char		*path;
-	vnode_t		*vn;
+  char		*path;
+  vnode_t		*vn;
+  int			perm;
+  int			want;
 
-	(void)mode; (void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
+  (void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
 
-	path = copy_user_string((const char *)path_u, 256);
-	if (!path) {
-		return (-POSIX_EFAULT);
-	}
+  path = copy_user_string((const char *)path_u, 256);
+  if (!path) {
+    return (-POSIX_EFAULT);
+  }
 
-	if (vfs_resolve(path, &vn) != 0 || vn == NULL) {
-		kmem_free(path);
-		return (-POSIX_ENOENT);
-	}
+  if (restrict_kusr_check(path)) {
+    kmem_free(path);
+    return (-POSIX_EACCES);
+  }
 
-	vnode_release(vn);
-	kmem_free(path);
-	return (0);
+  if (vfs_resolve(path, &vn) != 0 || vn == NULL) {
+    kmem_free(path);
+    return (-POSIX_ENOENT);
+  }
+
+  want = (int)mode & 7;
+  perm = posix_check_perm(vn, want);
+  vnode_release(vn);
+  kmem_free(path);
+  return ((s64)perm);
 }
 
 s64

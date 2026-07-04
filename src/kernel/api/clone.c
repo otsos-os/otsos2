@@ -104,6 +104,13 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
   child->exit_code = 0;
   child->owns_address_space = 1;
   child->mmap_base = parent->mmap_base;
+  child->kusr_auth = parent->kusr_auth;
+  child->uid = parent->uid;
+  child->gid = parent->gid;
+  child->euid = parent->euid;
+  child->egid = parent->egid;
+  child->suid = parent->suid;
+  child->sgid = parent->sgid;
   vm_map_fork(parent, child);
   api_copy_handles(child, parent);
   posix_copy_fds(child, parent);

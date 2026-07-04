@@ -80,6 +80,12 @@ typedef struct process {
 
   /* KUSR privilege */
   int kusr_auth;
+  u32 uid;
+  u32 gid;
+  u32 euid;
+  u32 egid;
+  u32 suid;
+  u32 sgid;
 
   /* mmap */
   u64 mmap_base;
@@ -140,6 +146,10 @@ int process_is_initialized(void);
 void proc_sleep(void *channel);
 void proc_wakeup(void *channel);
 void proc_wakeup_one(void *channel);
+static inline int proc_has_privilege(const process_t *proc)
+{
+	return (proc != NULL && (proc->kusr_auth || proc->euid == 0));
+}
 
 /* Global process data */
 extern process_t process_table[MAX_PROCESSES];

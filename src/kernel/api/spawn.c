@@ -549,10 +549,16 @@ int api_proc_spawn(const char *path, const char *const *argv,
   child->exit_code = 0;
   child->owns_address_space = 1;
   child->mmap_base = MMAP_BASE;
-  /* Spawn loads a new program — it starts unprivileged. kusr rights are
-   * not inherited; the program must authenticate via kusr_auth(password)
-   * if it needs elevated access (e.g. to display anything on screen). */
-  child->kusr_auth = 0;
+  /* Spawn inherits parent credentials for Linux-compatible privilege
+   * semantics.  A root parent creates a root child; the child can drop
+   * privileges via POSIX setuid/setgid if needed. */
+  child->kusr_auth = parent->kusr_auth;
+  child->uid = parent->uid;
+  child->gid = parent->gid;
+  child->euid = parent->euid;
+  child->egid = parent->egid;
+  child->suid = parent->suid;
+  child->sgid = parent->sgid;
   api_copy_handles(child, parent);
   posix_init_process(child);
   posix_copy_fds(child, parent);

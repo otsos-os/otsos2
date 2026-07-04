@@ -112,12 +112,14 @@ vnode_alloc(int type, const char *name)
 		return (NULL);
 	}
 
-	memset(vn, 0, sizeof(vnode_t));
-	vn->type = type;
-	vn->refcount = 1;
-	vn->data_owned = 0;
-	vn->size = 0;
-	vn->mode = 0;
+  memset(vn, 0, sizeof(vnode_t));
+  vn->type = type;
+  vn->refcount = 1;
+  vn->data_owned = 0;
+  vn->size = 0;
+  vn->mode = 0;
+  vn->uid = 0;
+  vn->gid = 0;
 
 	if (name) {
 		int	j;
@@ -215,10 +217,10 @@ vnode_stat(vnode_t *vn, posix_stat_t *st)
 	st->st_size = (s64)vn->size;
 	st->st_blksize = 512;
 	st->st_blocks = (s64)((vn->size + 511) / 512);
-	st->st_nlink = 1;
-	st->st_uid = 0;
-	st->st_gid = 0;
-	return (0);
+  st->st_nlink = 1;
+  st->st_uid = vn->uid;
+  st->st_gid = vn->gid;
+  return (0);
 }
 
 int
@@ -369,10 +371,10 @@ chainfs_vnode_stat(vnode_t *vn, posix_stat_t *st)
 	st->st_blksize = CHAINFS_BLOCK_SIZE;
 	st->st_blocks = (s64)((entry.size + CHAINFS_BLOCK_SIZE - 1) /
 	    CHAINFS_BLOCK_SIZE);
-	st->st_nlink = 1;
-	st->st_uid = 0;
-	st->st_gid = 0;
-	st->st_ino = (u64)entry_block;
+  st->st_nlink = 1;
+  st->st_uid = vn->uid;
+  st->st_gid = vn->gid;
+  st->st_ino = (u64)entry_block;
 	vn->size = entry.size;
 	return (0);
 }

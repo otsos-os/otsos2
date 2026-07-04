@@ -200,6 +200,12 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   new_proc->exit_code = 0;
   new_proc->owns_address_space = 1;
   new_proc->mmap_base = MMAP_BASE;
+  new_proc->uid = 0;
+  new_proc->gid = 0;
+  new_proc->euid = 0;
+  new_proc->egid = 0;
+  new_proc->suid = 0;
+  new_proc->sgid = 0;
   if (li.data_end != 0) {
     new_proc->brk_min = li.data_end;
   } else if (li.load_addr_max != 0) {
@@ -249,6 +255,12 @@ void userspace_load_init(void *module_start, u64 module_size) {
 
   /* Init always has kusr rights */
   init->kusr_auth = 1;
+  init->uid = 0;
+  init->gid = 0;
+  init->euid = 0;
+  init->egid = 0;
+  init->suid = 0;
+  init->sgid = 0;
   printk("[USERSPACE] Granted kusr rights to init (PID %d)\n", init->pid);
 
   /* Init must be PID 1 */

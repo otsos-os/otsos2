@@ -66,6 +66,12 @@ int api_proc_copy(registers_t *regs) {
   child->owns_address_space = 1;
   child->mmap_base = parent->mmap_base;
   child->kusr_auth = parent->kusr_auth;
+  child->uid = parent->uid;
+  child->gid = parent->gid;
+  child->euid = parent->euid;
+  child->egid = parent->egid;
+  child->suid = parent->suid;
+  child->sgid = parent->sgid;
   vm_map_fork(parent, child);
   api_copy_handles(child, parent);
 

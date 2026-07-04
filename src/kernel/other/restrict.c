@@ -37,7 +37,7 @@ int restrict_kusr_check(const char *path) {
   if (!path) return 0;
 
   process_t *proc = process_current();
-  if (proc && proc->kusr_auth) return 0;
+  if (proc_has_privilege(proc)) return 0;
 
   for (int i = 0; g_kusr_restricted[i]; i++) {
     const char *prefix = g_kusr_restricted[i];

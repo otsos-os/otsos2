@@ -42,7 +42,7 @@ int api_meminfo(struct api_meminfo *buf) {
 
 int api_kmeminfo(struct api_kmeminfo *buf) {
   process_t *proc = process_current();
-  if (!proc || !proc->kusr_auth) {
+  if (!proc_has_privilege(proc)) {
     return -API_ERR_PERM;
   }
 

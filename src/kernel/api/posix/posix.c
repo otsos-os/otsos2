@@ -134,13 +134,17 @@ s64	posix_getpid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 s64	posix_getppid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	    registers_t *regs);
 s64	posix_getuid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
-	    registers_t *regs);
+    registers_t *regs);
+s64	posix_setuid(u64 uid, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs);
 s64	posix_getgid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
-	    registers_t *regs);
+    registers_t *regs);
+s64	posix_setgid(u64 gid, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs);
 s64	posix_geteuid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
-	    registers_t *regs);
+    registers_t *regs);
 s64	posix_getegid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
-	    registers_t *regs);
+    registers_t *regs);
 s64	posix_getdents64(u64 fd, u64 buf, u64 count, u64 a4, u64 a5,
     u64 a6, registers_t *regs);
 s64	posix_clone(u64 flags, u64 stack, u64 ptid, u64 ctid, u64 tls,
@@ -343,8 +347,14 @@ posix_syscall_handler(registers_t *regs)
 	case SYS_getuid:
 		ret = posix_getuid(a1, a2, a3, a4, a5, a6, regs);
 		break;
+	case SYS_setuid:
+		ret = posix_setuid(a1, a2, a3, a4, a5, a6, regs);
+		break;
 	case SYS_getgid:
 		ret = posix_getgid(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_setgid:
+		ret = posix_setgid(a1, a2, a3, a4, a5, a6, regs);
 		break;
 	case SYS_geteuid:
 		ret = posix_geteuid(a1, a2, a3, a4, a5, a6, regs);

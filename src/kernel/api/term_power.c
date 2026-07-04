@@ -63,16 +63,16 @@ api_term_power(struct api_term_power *uargs)
 	switch (args.op) {
 	case API_TERM_POWER_GET:
 		return (terminal_power_get(args.tty));
-	case API_TERM_POWER_CHANGE:
-		if (args.state == TERM_STATE_DISABLED && !proc->kusr_auth) {
-			return (-API_ERR_PERM);
-		}
-		return (terminal_power_set(args.tty, args.state));
-	case API_TERM_POWER_RESET:
-		if (!proc->kusr_auth) {
-			return (-API_ERR_PERM);
-		}
-		return (terminal_power_reset(args.tty));
+  case API_TERM_POWER_CHANGE:
+    if (args.state == TERM_STATE_DISABLED && !proc_has_privilege(proc)) {
+      return (-API_ERR_PERM);
+    }
+    return (terminal_power_set(args.tty, args.state));
+  case API_TERM_POWER_RESET:
+    if (!proc_has_privilege(proc)) {
+      return (-API_ERR_PERM);
+    }
+    return (terminal_power_reset(args.tty));
 	default:
 		return (-API_ERR_INVAL);
 	}
