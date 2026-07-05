@@ -275,3 +275,17 @@ eventtimer_dispatch(void)
 		}
 	}
 }
+
+int
+et_get_count(void)
+{
+	return (et_count);
+}
+
+struct eventtimer *
+et_get_entry(int i)
+{
+	if (i < 0 || i >= et_count)
+		return (NULL);
+	return (et_list[i]);
+}

@@ -5,7 +5,7 @@
  * modification, are permitted provided that the following conditions are met:
  *
  * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
+ *    this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
@@ -26,40 +26,50 @@
 
 /* !DEFINES!
 
-$define %type u64 as 64 bit unsigned
+$define %type u8 as 8 bit unsigned
 $define %type u32 as 32 bit unsigned
+$define %type u64 as 64 bit unsigned
 $define %type int as 32 bit signed
 
-$define %func timer_init as procedure with args u32
-$define %func timer_get_ticks as function with args void
-$define %func timer_is_initialized as function with args void
-$define %func timer_get_frequency as function with args void
+$define %func ioapic_init as function with args void
+$define %func ioapic_read as inline u32 with args u8
+$define %func ioapic_write as inline void with args u8, u32
+$define %func ioapic_set_irq as procedure with args u8, u8, u8, int, int
+$define %func ioapic_mask_irq as procedure with args u8
+$define %func ioapic_unmask_irq as procedure with args u8
+$define %func ioapic_is_initialized as function with args void
 
 */
 
 /* !SPACE!
 
-$space %export timer_init, timer_get_ticks
-$space %export timer_is_initialized, timer_get_frequency
+$space %internal ioapic_read, ioapic_write
+$space %export ioapic_init, ioapic_set_irq
+$space %export ioapic_mask_irq, ioapic_unmask_irq
+$space %export ioapic_is_initialized
 
 */
 
-#ifndef TIMER_H
-#define TIMER_H
-
+#ifndef KERNEL_INTERRUPTS_APIC_IOAPIC_H
+#define KERNEL_INTERRUPTS_APIC_IOAPIC_H
 #include <mlibc/mlibc.h>
-
-struct timer_calibrate {
-	u64	(*read_count)(void *arg);
-	void	*arg;
-};
-
-void	timer_init(u32 frequency);
-void	timer_reinit(u32 frequency);
-u64	timer_get_ticks(void);
-int	timer_is_initialized(void);
-u32	timer_get_frequency(void);
-u64	timer_calibrate(struct timer_calibrate *calib, u32 ticks,
-	    u32 divider);
+#define	IOAPIC_IOREGSEL		0x00
+#define	IOAPIC_IOWIN		0x10
+#define	IOAPIC_IRQ_ENTRY_COUNT	24
+#define	IOAPIC_RTE_VECTOR_MASK	0x000000FF
+#define	IOAPIC_RTE_FIXED	(0U << 8)
+#define	IOAPIC_RTE_LOWEST	(1U << 8)
+#define	IOAPIC_RTE_INIT		(5U << 8)
+#define	IOAPIC_RTE_EXTINT	(7U << 8)
+#define	IOAPIC_RTE_LOGIC	(1U << 11)
+#define	IOAPIC_RTE_ACTIVE_LOW	(1U << 13)
+#define	IOAPIC_RTE_LEVEL	(1U << 15)
+#define	IOAPIC_RTE_MASK		(1U << 16)
+int	ioapic_init(void);
+void	ioapic_set_irq(u8 irq, u8 vector, u8 dest, int level,
+	    int active_low);
+void	ioapic_mask_irq(u8 irq);
+void	ioapic_unmask_irq(u8 irq);
+int	ioapic_is_initialized(void);
 
 #endif

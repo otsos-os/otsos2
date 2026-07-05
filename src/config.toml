@@ -14,6 +14,10 @@ domainname = "localdomain"
 
 [timer]
 hz = 1000
+default_timer = "apic"
+timer_to_calibrate = "pit"
+apic_enabled = 1
+apic_quality = 1000
 
 [time]
 timezone_offset = 3
@@ -53,7 +57,7 @@ usage = "clear"
 [kshell.commands.echo]
 enabled = true
 description = "prints text, evaluates math, or prints kernel value"
-usage = "echo <text> | echo &<math> | echo %videoM | %dkey | %prun | %uname | %drm"
+usage = "echo <text> | echo &<math> | echo %videoM | %dkey | %prun | %uname | %drm | %timers"
 
 [kshell.commands.drm_switch]
 enabled = true

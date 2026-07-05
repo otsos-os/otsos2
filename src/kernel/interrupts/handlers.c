@@ -24,6 +24,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <kernel/interrupts/apic/lapic.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/console/console.h>
 #include <kernel/crypto/rng/rng.h>
@@ -106,7 +107,19 @@ void irq_handler(registers_t *regs) {
     terminal_update();
   } else if (regs->int_no == 33) {
     keyboard_common_handler();
+  } else if (regs->int_no == 48) {
+    eventtimer_dispatch();
+    power_button_poll();
+    watchdog_tick();
+    event_timer_tick();
+    crypto_rng_tick();
+    keyboard_poll();
+    scheduler_tick(regs);
+    terminal_update();
+    lapic_eoi();
+    return;
   }
 
-  pic_send_eoi(regs->int_no - 32);
+  if (regs->int_no >= 32 && regs->int_no < 48)
+    pic_send_eoi(regs->int_no - 32);
 }

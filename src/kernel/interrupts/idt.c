@@ -98,6 +98,7 @@ extern void irq_stub_12();
 extern void irq_stub_13();
 extern void irq_stub_14();
 extern void irq_stub_15();
+extern void irq_stub_16();
 extern void isr_stub_128();
 
 void idt_set_gate(int n, unsigned long long handler, u8 type_attr) {
@@ -171,6 +172,7 @@ void init_idt() {
   // Syscall 0x80 (128), DPL=3 (User Mode), Type=0xE (Interrupt Gate)
   // 0xE | DPL<<5 | Present<<7 = 0xE | 0x60 | 0x80 = 0xEE
   idt_set_gate(128, (unsigned long long)isr_stub_128, 0xEE);
+  idt_set_gate(48, (unsigned long long)irq_stub_16, 0x8E);
 
   load_idt(&idt_ptr);
   idt_loaded = 1;

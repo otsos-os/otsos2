@@ -103,6 +103,46 @@ timer_get_ticks(void)
 {
 	return (timer_ticks);
 }
+u64
+timer_calibrate(struct timer_calibrate *calib, u32 ticks,
+    u32 divider)
+{
+	u64	tick_start, tick_end, tick_delta;
+	u64	count_start, count_end, count_delta;
+	u64	freq;
+	u32	tries;
+
+	if (!timer_initialized || calib == NULL ||
+	    calib->read_count == NULL)
+		return (0);
+	if (ticks == 0 || divider == 0)
+		return (0);
+
+	tries = 0;
+	do {
+		tick_start = timer_get_ticks();
+		count_start = calib->read_count(calib->arg);
+
+		while (timer_get_ticks() - tick_start < ticks)
+			__asm__ volatile("pause");
+
+		count_end = calib->read_count(calib->arg);
+		tick_end = timer_get_ticks();
+		tries++;
+	} while (count_start <= count_end && tries < 5);
+
+	if (count_start <= count_end)
+		return (0);
+
+	tick_delta = tick_end - tick_start;
+	count_delta = count_start - count_end;
+	if (tick_delta == 0 || count_delta == 0)
+		return (0);
+
+	freq = count_delta * (u64)divider * timer_frequency /
+	    tick_delta;
+	return (freq);
+}
 
 int
 timer_is_initialized(void)
@@ -114,4 +154,16 @@ u32
 timer_get_frequency(void)
 {
 	return (timer_frequency);
+}
+void
+timer_reinit(u32 frequency)
+{
+	if (timer_et != NULL) {
+		et_stop(timer_et);
+		et_free(timer_et);
+	}
+	timer_et = NULL;
+	timer_ticks = 0;
+	timer_initialized = 0;
+	timer_init(frequency);
 }

@@ -52,7 +52,9 @@ $space %export kshell_echo_command
 
 */
 
+#include <kernel/drivers/eventtimer.h>
 #include <kernel/drivers/keyboard/keyboard.h>
+#include <kernel/drivers/timer.h>
 #include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/kms/crtc.h>
 #include <kernel/kshell/kshell.h>
@@ -356,6 +358,41 @@ print_kernel_var(const char *name)
 			if ((u32)i == active) {
 				kshell_console_write(" (active)");
 			}
+			kshell_console_write("\n");
+		}
+		return (0);
+	}
+
+	if (strcmp(name, "timers") == 0) {
+		struct eventtimer	*et;
+		count = (u32)et_get_count();
+		kshell_console_write("event timers: ");
+		kshell_console_write_int((int)count);
+		kshell_console_write(" registered, system freq: ");
+		kshell_console_write_int(
+		    (int)timer_get_frequency());
+		kshell_console_write(" Hz\n");
+		for (i = 0; i < (int)count; i++) {
+			et = et_get_entry(i);
+			if (!et)
+				continue;
+			kshell_console_write("  ");
+			kshell_console_write_int(i);
+			kshell_console_write(". ");
+			kshell_console_write(et->et_name);
+			kshell_console_write("  freq=");
+			kshell_console_write_int(
+			    (int)et->et_frequency);
+			kshell_console_write(" Hz");
+			kshell_console_write("  quality=");
+			kshell_console_write_int(et->et_quality);
+			kshell_console_write("  flags=");
+			if (et->et_flags & ET_FLAGS_PERIODIC)
+				kshell_console_write("P");
+			if (et->et_flags & ET_FLAGS_ONESHOT)
+				kshell_console_write("O");
+			if (et->et_active)
+				kshell_console_write(" [ACTIVE]");
 			kshell_console_write("\n");
 		}
 		return (0);

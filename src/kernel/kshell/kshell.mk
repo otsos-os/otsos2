@@ -45,7 +45,8 @@ endif
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 ../bin/kshell_echo.o: kernel/kshell/commands/echo.c kernel/kshell/kshell.h \
-    kernel/process.h kernel/api/api.h
+    kernel/process.h kernel/api/api.h kernel/drivers/eventtimer.h \
+    kernel/drivers/timer.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

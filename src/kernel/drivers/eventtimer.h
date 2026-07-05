@@ -145,5 +145,7 @@ int		et_free(struct eventtimer *et);
 
 /* Dispatch event from the active timer to its consumer. */
 void		eventtimer_dispatch(void);
+int		et_get_count(void);
+struct eventtimer	*et_get_entry(int i);
 
 #endif

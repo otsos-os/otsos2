@@ -159,6 +159,7 @@ irq_stub 12
 irq_stub 13
 irq_stub 14
 irq_stub 15
+irq_stub 16
 
 global load_idt
 load_idt:

@@ -64,6 +64,8 @@ $space %export kmain
 
 */
 
+#include <kernel/interrupts/apic/lapic.h>
+#include <kernel/interrupts/apic/ioapic.h>
 #include <kernel/drivers/acpi/acpi.h>
 #include <kernel/drivers/disk/disk.h>
 #ifdef CONFIG_DISK_PATA
@@ -109,6 +111,7 @@ extern void	cpuid_get(u32 code, u32 *res);
 extern void	cinfo(char *buf);
 extern u64	rinfo(u64 mb_ptr);
 extern void	pit_init(void);
+extern void	apic_timer_init(void);
 extern char	start;
 extern char	kernel_end;
 
@@ -445,15 +448,20 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 
 	init_idt();
 	pit_init();
+	pmap_init();
+	vm_page_init_from_bootmem();
+	lapic_init();
 	timer_init(config_get_int("timer", "hz", 1000));
 	time_init();
 	et_clocksource_init();
-	pmap_init();
-	vm_page_init_from_bootmem();
 	vm_object_init();
 	uma_init();
 	enable_sse();
 	__asm__ volatile("sti");
+
+	if (strcmp(config_get_string("timer", "default_timer",
+	    "apic"), "apic") == 0)
+		apic_timer_init();
 
 	syscall_init();
 	event_init();
@@ -491,6 +499,7 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 		drm_boot_init_mb2(mboot2_ptr, 0);
 
 		acpi_init_from_multiboot2(mboot2_ptr);
+		ioapic_init();
 
 		clear_scr();
 		terminal_init();
