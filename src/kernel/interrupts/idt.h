@@ -35,5 +35,11 @@ typedef struct {
   unsigned long long int_no, err_code;
   unsigned long long rip, cs, rflags, rsp, ss;
 } registers_t;
+typedef struct {
+  unsigned short limit;
+  unsigned long long base;
+} __attribute__((packed)) idt_ptr_t;
+void load_idt(idt_ptr_t *idt_ptr_addr);
+extern idt_ptr_t idt_ptr;
 
 #endif

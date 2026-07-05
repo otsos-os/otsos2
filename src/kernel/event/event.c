@@ -86,6 +86,7 @@ $space %export event_fork_process, event_notify_pipe_change
 #include <kernel/drivers/timer.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
+#include <kernel/smp/smp.h>
 #include <kernel/panic.h>
 #include <mm/kmem.h>
 #include <mlibc/stdio.h>
@@ -139,18 +140,29 @@ void
 proc_sleep(void *channel)
 {
 	thread_t	*td;
+	int		had_lock;
 
 	td = thread_current();
 	if (!td) {
 		return;
 	}
 
+	had_lock = smp_lock_held();
 	td->wait_channel = channel;
 	td->state = PROC_STATE_SLEEPING;
+
+	if (had_lock) {
+		smp_unlock();
+	}
 
 	__asm__ volatile("sti");
 	while (td->wait_channel != NULL) {
 		__asm__ volatile("hlt");
+	}
+	__asm__ volatile("cli");
+
+	if (had_lock) {
+		smp_lock();
 	}
 
 	td->state = PROC_STATE_RUNNING;

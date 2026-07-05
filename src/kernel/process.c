@@ -68,6 +68,7 @@ $space %export process_get, process_create, process_create_kernel
 #include <kernel/thread.h>
 #include <kernel/console/terminal.h>
 #include <kernel/event/event.h>
+#include <kernel/smp/smp.h>
 #include <mm/vm/vm_map.h>
 #include <mlibc/stdio.h>
 #include <mm/kmem.h>
@@ -219,7 +220,18 @@ process_set_current(process_t *proc)
 void
 process_yield(void)
 {
+	int	had_lock;
+
+	had_lock = smp_lock_held();
+	if (had_lock) {
+		smp_unlock();
+	}
+
 	__asm__ volatile("int $32");
+
+	if (had_lock) {
+		smp_lock();
+	}
 }
 
 void

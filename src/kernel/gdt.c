@@ -25,38 +25,9 @@
  */
 
 #include <kernel/gdt.h>
+#include <kernel/smp/smp.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
-
-/*
- * GDT Entry structure for x86_64
- * Each entry is 8 bytes, except TSS which is 16 bytes
- */
-typedef struct {
-  u16 limit_low;
-  u16 base_low;
-  u8 base_mid;
-  u8 access;
-  u8 granularity;
-  u8 base_high;
-} __attribute__((packed)) gdt_entry_t;
-
-/* TSS descriptor is 16 bytes in long mode */
-typedef struct {
-  u16 limit_low;
-  u16 base_low;
-  u8 base_mid;
-  u8 access;
-  u8 granularity;
-  u8 base_mid_high;
-  u32 base_high;
-  u32 reserved;
-} __attribute__((packed)) tss_descriptor_t;
-
-typedef struct {
-  u16 limit;
-  u64 base;
-} __attribute__((packed)) gdt_ptr_t;
 
 /*
  * GDT: 5 normal entries + 1 TSS entry (16 bytes = 2 slots)
@@ -87,8 +58,8 @@ static u8 kernel_stack[16384] __attribute__((aligned(16)));
  *   bit 5: Long mode (1 for 64-bit code segment)
  *   bits 0-3: limit high
  */
-static void gdt_set_entry(int idx, u32 base, u32 limit, u8 access,
-                          u8 granularity) {
+static void gdt_set_entry(gdt_entry_t *gdt, int idx, u32 base, u32 limit,
+    u8 access, u8 granularity) {
   gdt[idx].limit_low = limit & 0xFFFF;
   gdt[idx].base_low = base & 0xFFFF;
   gdt[idx].base_mid = (base >> 16) & 0xFF;
@@ -98,7 +69,7 @@ static void gdt_set_entry(int idx, u32 base, u32 limit, u8 access,
 }
 
 /* Set TSS descriptor (16 bytes in long mode) */
-static void gdt_set_tss(int idx, u64 base, u32 limit) {
+static void gdt_set_tss(gdt_entry_t *gdt, int idx, u64 base, u32 limit) {
   tss_descriptor_t *tss_desc = (tss_descriptor_t *)&gdt[idx];
 
   tss_desc->limit_low = limit & 0xFFFF;
@@ -124,31 +95,31 @@ void gdt_init(void) {
   tss.iomap_base = sizeof(tss_t); /* No I/O permission bitmap */
 
   /* Null descriptor */
-  gdt_set_entry(0, 0, 0, 0, 0);
+  gdt_set_entry(gdt, 0, 0, 0, 0, 0);
 
   /* Kernel Code: base=0, limit=0xFFFFF, DPL=0, executable, readable, long mode
    */
   /* Access: 1001 1010 = 0x9A (Present, Ring 0, Code, Executable, Readable) */
   /* Granularity: 0010 0000 = 0x20 (Long mode bit set) */
-  gdt_set_entry(1, 0, 0xFFFFF, 0x9A, 0x20);
+  gdt_set_entry(gdt, 1, 0, 0xFFFFF, 0x9A, 0x20);
 
   /* Kernel Data: base=0, limit=0xFFFFF, DPL=0, writable */
   /* Access: 1001 0010 = 0x92 (Present, Ring 0, Data, Writable) */
   /* Granularity: 0000 0000 = 0x00 (no special flags for data in long mode) */
-  gdt_set_entry(2, 0, 0xFFFFF, 0x92, 0x00);
+  gdt_set_entry(gdt, 2, 0, 0xFFFFF, 0x92, 0x00);
 
   /* User Data: base=0, limit=0xFFFFF, DPL=3, writable */
   /* Access: 1111 0010 = 0xF2 (Present, Ring 3, Data, Writable) */
   /* Granularity: 0000 0000 = 0x00 */
-  gdt_set_entry(3, 0, 0xFFFFF, 0xF2, 0x00);
+  gdt_set_entry(gdt, 3, 0, 0xFFFFF, 0xF2, 0x00);
 
   /* User Code: base=0, limit=0xFFFFF, DPL=3, executable, readable, long mode */
   /* Access: 1111 1010 = 0xFA (Present, Ring 3, Code, Executable, Readable) */
   /* Granularity: 0010 0000 = 0x20 (Long mode bit set) */
-  gdt_set_entry(4, 0, 0xFFFFF, 0xFA, 0x20);
+  gdt_set_entry(gdt, 4, 0, 0xFFFFF, 0xFA, 0x20);
 
   /* TSS descriptor (occupies slots 5 and 6) */
-  gdt_set_tss(5, (u64)&tss, sizeof(tss_t) - 1);
+  gdt_set_tss(gdt, 5, (u64)&tss, sizeof(tss_t) - 1);
 
   /* Set up GDT pointer */
   gdt_ptr.limit = sizeof(gdt) - 1;
@@ -165,9 +136,40 @@ void gdt_init(void) {
   printk("[GDT] Kernel stack RSP0: %p\n", (void *)tss.rsp0);
 }
 
-void tss_set_rsp0(u64 stack) { tss.rsp0 = stack; }
+void gdt_init_cpu(u8 cpu_index, tss_t *tss, gdt_entry_t *gdt) {
+  (void)cpu_index;
 
-u64 tss_get_rsp0(void) { return tss.rsp0; }
+  memset(tss, 0, sizeof(tss_t));
+  tss->iomap_base = sizeof(tss_t);
+
+  gdt_set_entry(gdt, 0, 0, 0, 0, 0);
+  gdt_set_entry(gdt, 1, 0, 0xFFFFF, 0x9A, 0x20);
+  gdt_set_entry(gdt, 2, 0, 0xFFFFF, 0x92, 0x00);
+  gdt_set_entry(gdt, 3, 0, 0xFFFFF, 0xF2, 0x00);
+  gdt_set_entry(gdt, 4, 0, 0xFFFFF, 0xFA, 0x20);
+  gdt_set_tss(gdt, 5, (u64)tss, sizeof(tss_t) - 1);
+}
+
+void tss_set_rsp0(u64 stack) {
+  tss_t *tss = smp_tss_current();
+  tss->rsp0 = stack;
+}
+
+u64 tss_get_rsp0(void) {
+  return smp_tss_current()->rsp0;
+}
+
+void *gdt_get_base(void) {
+  return (void *)&gdt;
+}
+
+u16 gdt_get_limit(void) {
+  return (u16)(sizeof(gdt) - 1);
+}
+
+tss_t *gdt_get_tss(void) {
+  return &tss;
+}
 
 int gdt_is_initialized(void) {
   if (!gdt_initialized) {

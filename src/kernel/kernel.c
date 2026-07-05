@@ -102,6 +102,7 @@ $space %export kmain
 #include <kernel/other/kusr.h>
 #include <kernel/other/config.h>
 #include <kernel/syscall.h>
+#include <kernel/smp/smp.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdio.h>
 #include <mlibc/stdlib.h>
@@ -500,6 +501,7 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 
 		acpi_init_from_multiboot2(mboot2_ptr);
 		ioapic_init();
+		smp_init();
 
 		clear_scr();
 		terminal_init();

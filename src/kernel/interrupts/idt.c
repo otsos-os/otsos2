@@ -38,14 +38,9 @@ typedef struct {
   unsigned int reserved;
 } __attribute__((packed)) idt_entry_t;
 
-typedef struct {
-  unsigned short limit;
-  unsigned long long base;
-} __attribute__((packed)) idt_ptr_t;
-
 idt_entry_t idt[256];
 idt_ptr_t idt_ptr;
-static int idt_loaded = 0;
+int idt_loaded = 0;
 
 extern void load_idt(idt_ptr_t *);
 

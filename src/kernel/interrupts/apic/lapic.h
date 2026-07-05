@@ -111,12 +111,16 @@ $space %export lapic_get_id, lapic_is_enabled
 #define	APIC_TIMER_VECTOR		0x30
 
 int	lapic_init(void);
+void	lapic_enable(void);
 void	lapic_eoi(void);
+void	lapic_icr_send(u32 vector, u8 apic_id);
 void	lapic_timer_set(u32 vector, int periodic);
 void	lapic_timer_stop(void);
 void	lapic_timer_set_count(u32 count);
 u32	lapic_timer_get_count(void);
 u64	lapic_timer_calibrate(void);
+u64	lapic_timer_get_freq(void);
+void	lapic_timer_init_ap(void);
 u8	lapic_get_id(void);
 int	lapic_is_enabled(void);
 #endif

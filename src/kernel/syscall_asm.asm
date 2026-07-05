@@ -5,38 +5,33 @@
 section .text
 
 extern syscall_handler
-extern tss 
+extern smp_lock
+extern smp_unlock
+extern smp_tss_current
 
 %define USER_DS 0x1B
 %define USER_CS 0x23
-; Offset of rsp0 in struct tss_t (u32 reserved0; u64 rsp0)
-; u32 is 4 bytes. Packed/Aligned behavior needs verification.
-; The C define has __attribute__((packed)).
-; So offset is 4.
-%define TSS_RSP0_OFFSET 4 
+
+section .data
+syscall_entry_lock:
+    dq 0
+syscall_user_rsp:
+    dq 0
+
+align 16
+syscall_bootstrap_stack:
+    times 4096 db 0
+syscall_bootstrap_stack_top:
 
 global syscall_entry
 syscall_entry:
-    ; 1. Save User RSP to a temporary location
-    ; (Note: In a multi-core/preemptive OS, this should be per-cpu)
-    mov [rel user_rsp_save], rsp
-    
-    ; 2. Switch to Kernel Stack
-    ; We read directly from the TSS structure to avoid function calls clobbering regs
-    mov rsp, [rel tss + TSS_RSP0_OFFSET]
-    
-    ; 3. Build interrupt stack frame (registers_t)
-    ; Stack grows down. We push in reverse order of the struct.
-    
-    push qword USER_DS              ; ss
-    push qword [rel user_rsp_save]  ; rsp (saved user stack)
-    push r11                        ; rflags (saved by syscall)
-    push qword USER_CS              ; cs
-    push rcx                        ; rip (saved by syscall)
-    push qword 0                    ; err_code
-    push qword 0                    ; int_no
-    
-    push rax                        ; syscall_number
+    cli
+.lock:
+    lock bts qword [rel syscall_entry_lock], 0
+    jc .lock
+    mov [rel syscall_user_rsp], rsp
+    lea rsp, [rel syscall_bootstrap_stack_top]
+    push rax
     push rbx
     push rcx
     push rdx
@@ -51,12 +46,38 @@ syscall_entry:
     push r13
     push r14
     push r15
-    
-    ; 4. Call Handler
+    push qword [rel syscall_user_rsp]
+    mov r15, rsp
+    call smp_lock
+    call smp_tss_current
+    mov rsp, [rax + 4]
+    push qword USER_DS
+    push qword [r15 + 0]
+    push qword [r15 + 40]
+    push qword USER_CS
+    push qword [r15 + 104]
+    push qword 0
+    push qword 0
+    push qword [r15 + 120]
+    push qword [r15 + 112]
+    push qword [r15 + 104]
+    push qword [r15 + 96]           ; rdx
+    push qword [r15 + 88]           ; rsi
+    push qword [r15 + 80]           ; rdi
+    push qword [r15 + 72]           ; rbp
+    push qword [r15 + 64]           ; r8
+    push qword [r15 + 56]           ; r9
+    push qword [r15 + 48]           ; r10
+    push qword [r15 + 40]           ; r11
+    push qword [r15 + 32]           ; r12
+    push qword [r15 + 24]           ; r13
+    push qword [r15 + 16]           ; r14
+    push qword [r15 + 8]            ; r15
+    lock btr qword [rel syscall_entry_lock], 0
     mov rdi, rsp
     call syscall_handler
-    
-    ; 5. Restore state
+    call smp_unlock
+
     pop r15
     pop r14
     pop r13
@@ -71,17 +92,10 @@ syscall_entry:
     pop rdx
     pop rcx
     pop rbx
-    pop rax ; Return value from syscall
-    
-    add rsp, 16 ; Skip int_no, err_code
-    
-    ; 6. Return to User Mode
-    pop rcx ; RIP
-    add rsp, 8 ; Skip CS
-    pop r11 ; RFLAGS
-    pop rsp ; User RSP
-    
+    pop rax
+    add rsp, 16
+    pop rcx
+    add rsp, 8
+    pop r11
+    pop rsp
     o64 sysret
-
-section .bss
-user_rsp_save: resq 1

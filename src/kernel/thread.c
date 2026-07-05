@@ -71,6 +71,7 @@ $space %export thread_count_alive, thread_kill_all
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/event/event.h>
+#include <kernel/smp/smp.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
@@ -100,7 +101,6 @@ thread_wrmsr(u32 msr, u64 value)
 
 thread_t	thread_table[MAX_THREADS];
 u32		next_tid = 1;
-static thread_t	*current_thread = NULL;
 static int	thread_initialized = 0;
 
 static void	thread_link(process_t *proc, thread_t *td);
@@ -112,7 +112,7 @@ thread_init(void)
 	printk("[THREAD] Initializing thread subsystem...\n");
 	memset(thread_table, 0, sizeof(thread_table));
 	next_tid = 1;
-	current_thread = NULL;
+	smp_set_current_thread(NULL);
 	thread_initialized = 1;
 	printk("[THREAD] Thread table initialized "
 	    "(%d slots)\n", MAX_THREADS);
@@ -239,13 +239,13 @@ thread_unlink(thread_t *td)
 thread_t *
 thread_current(void)
 {
-	return (current_thread);
+	return (smp_current_thread());
 }
 
 void
 thread_set_current(thread_t *td)
 {
-	current_thread = td;
+	smp_set_current_thread(td);
 	if (td) {
 		td->state = PROC_STATE_RUNNING;
 		if (td->proc) {

@@ -137,6 +137,63 @@ lapic_init(void)
 	    (void *)apic_phys);
 	return (0);
 }
+void
+lapic_enable(void)
+{
+	u64	apic_msr;
+
+	apic_msr = lapic_rdmsr(IA32_APIC_BASE);
+	if (!(apic_msr & IA32_APIC_BASE_ENABLE)) {
+		apic_msr |= IA32_APIC_BASE_ENABLE;
+		lapic_wrmsr(IA32_APIC_BASE, apic_msr);
+	}
+	if (!lapic_enabled) {
+		lapic_enabled = 1;
+	}
+}
+
+void
+lapic_icr_send(u32 vector, u8 apic_id)
+{
+	u32	icr_high;
+
+	icr_high = ((u32)apic_id) << 24;
+	lapic_write(LAPIC_ICR_HI, icr_high);
+	lapic_write(LAPIC_ICR_LO, vector);
+	while ((lapic_read(LAPIC_ICR_LO) & LAPIC_ICR_PENDING) != 0) {
+		__asm__ volatile("pause");
+	}
+}
+
+u64
+lapic_timer_get_freq(void)
+{
+	return (lapic_timer_freq);
+}
+
+void
+lapic_timer_init_ap(void)
+{
+	u32	hz;
+	u64	freq;
+	u32	count;
+
+	freq = lapic_timer_freq;
+	hz = timer_get_frequency();
+	if (freq == 0 || hz == 0) {
+		printk("[LAPIC] AP timer doesnt started and no freq\n");
+		return;
+	}
+
+	lapic_write(LAPIC_TIMER_DCR, LAPIC_TIMER_DIV128);
+	count = (u32)(freq / hz);
+	if (count == 0) {
+		count = 1;
+	}
+	lapic_timer_set(APIC_TIMER_VECTOR, 1);
+	lapic_timer_set_count(count);
+	printk("[LAPIC] AP timer started count=%u\n", count);
+}
 
 void
 lapic_eoi(void)

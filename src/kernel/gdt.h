@@ -54,6 +54,25 @@
 #define USER_DS (GDT_USER_DATA | 3)
 
 typedef struct {
+  u16 limit_low;
+  u16 base_low;
+  u8 base_mid;
+  u8 access;
+  u8 granularity;
+  u8 base_high;
+} __attribute__((packed)) gdt_entry_t;
+typedef struct {
+  u16 limit_low;
+  u16 base_low;
+  u8 base_mid;
+  u8 access;
+  u8 granularity;
+  u8 base_mid_high;
+  u32 base_high;
+  u32 reserved;
+} __attribute__((packed)) tss_descriptor_t;
+
+typedef struct {
   u32 reserved0;
   u64 rsp0; /* Stack pointer for Ring 0 */
   u64 rsp1; /* Stack pointer for Ring 1 (unused) */
@@ -71,14 +90,30 @@ typedef struct {
   u16 iomap_base; /* I/O Map Base Address */
 } __attribute__((packed)) tss_t;
 
-/* Initialize GDT with Ring 0/3 segments and TSS */
+typedef struct {
+  u16 limit;
+  u64 base;
+} __attribute__((packed)) gdt_ptr_t;
+
 void gdt_init(void);
+void gdt_init_cpu(u8 cpu_index, tss_t *tss, gdt_entry_t *gdt);
 
 /* Set the kernel stack in TSS (called on context switch) */
 void tss_set_rsp0(u64 stack);
 
 /* Get current TSS RSP0 */
 u64 tss_get_rsp0(void);
+
+/* Get the kernel GDT base and limit for the trampoline */
+void *gdt_get_base(void);
+u16 gdt_get_limit(void);
+
+/* Get the BSP TSS */
+tss_t *gdt_get_tss(void);
+
+void gdt_flush(u64 gdt_ptr_addr);
+void tss_load(u16 selector);
+
 int gdt_is_initialized(void);
 
 #endif

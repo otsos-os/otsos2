@@ -32,6 +32,9 @@ irq_stub_%1:
     jmp irq_common
 %endmacro
 
+extern smp_lock
+extern smp_unlock
+
 isr_common:
     push rax
     push rbx
@@ -48,10 +51,17 @@ isr_common:
     push r13
     push r14
     push r15
+    pushfq
+
+    call smp_lock
 
     mov rdi, rsp
+    add rdi, 8
     call isr_handler
 
+    call smp_unlock
+
+    add rsp, 8
     pop r15
     pop r14
     pop r13
@@ -86,10 +96,17 @@ irq_common:
     push r13
     push r14
     push r15
+    pushfq
+
+    call smp_lock
 
     mov rdi, rsp
+    add rdi, 8
     call irq_handler
 
+    call smp_unlock
+
+    add rsp, 8
     pop r15
     pop r14
     pop r13
