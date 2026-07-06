@@ -119,7 +119,7 @@ kms_console_init(kms_console_t *con)
 		return (DRM_ERR_NODEV);
 	}
 
-	buf_h = h * 2;
+	buf_h = h;
 	size = (u64)pitch * buf_h;
 	con->gem = drm_gem_create(size);
 	if (con->gem == 0) {

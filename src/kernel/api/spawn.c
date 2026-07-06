@@ -580,6 +580,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
     return -API_ERR_NO_MEMORY;
   }
 
+  td->context.rsp = new_rsp;
   td->context.rdi = (u64)argc;
   td->context.rsi = argv_addr;
   td->context.rdx = envp_addr;

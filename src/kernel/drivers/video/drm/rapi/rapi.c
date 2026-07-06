@@ -237,6 +237,15 @@ int rapi_console_scroll_up(kms_console_t *con, u32 lines, u32 bg) {
   buf = drm_gem_lookup(con->gem);
   if (!buf || !buf->data) return DRM_ERR_INVAL;
 
+  if (con->buf_h <= con->height) {
+    rc = rapi_scroll_up(buf, con->pitch, con->bpp, lines, bg);
+    if (rc == DRM_OK) {
+      con->pan_y = 0;
+      kms_console_mark_dirty(con, 0, 0, con->width, con->height);
+    }
+    return rc;
+  }
+
   new_pan_y = con->pan_y + lines;
   if (new_pan_y + con->height > con->buf_h) {
     u64 move_bytes = (u64)con->pitch * con->height;
