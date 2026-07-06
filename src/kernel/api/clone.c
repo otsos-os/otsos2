@@ -29,6 +29,7 @@
 #include <kernel/api/api.h>
 #include <kernel/api/posix/posix.h>
 #include <kernel/process.h>
+#include <kernel/scheduler.h>
 #include <kernel/thread.h>
 #include <mlibc/stdio.h>
 #include <mm/vm/vm_map.h>
@@ -103,6 +104,8 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
   child->user_stack = parent->user_stack;
   child->exit_code = 0;
   child->owns_address_space = 1;
+  child->preferred_cpu = -1;
+  child->last_cpu = -1;
   child->mmap_base = parent->mmap_base;
   child->kusr_auth = parent->kusr_auth;
   child->uid = parent->uid;
@@ -114,6 +117,7 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
   vm_map_fork(parent, child);
   api_copy_handles(child, parent);
   posix_copy_fds(child, parent);
+  scheduler_assign_process(child);
 
   /* Create thread for child process */
   thread_t *td = thread_create(child, parent->entry_point,

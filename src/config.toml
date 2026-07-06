@@ -22,6 +22,11 @@ apic_quality = 1000
 [time]
 timezone_offset = 3
 
+[scheduler]
+strict_process_separation = true
+smart_migration = true
+migration_threshold = 2
+
 [kshell]
 enabled = true
 prompt = "kshell> "

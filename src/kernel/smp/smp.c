@@ -88,6 +88,7 @@ $space %export ap_main
 #include <kernel/panic.h>
 #include <kernel/process.h>
 #include <kernel/smp/smp.h>
+#include <kernel/syscall.h>
 #include <mlibc/stdio.h>
 /* bkl - big kernel lock*/
 static spinlock_t	smp_bkl;
@@ -492,6 +493,7 @@ ap_main(u8 cpu_index)
 	gdt_entry_t	*gdt;
 	gdt_ptr_t	gdt_ptr;
 	lapic_enable();
+	pmap_init();
 	lapic_id = lapic_get_id();
 	if (cpu_index >= SMP_MAX_CPUS) {
 		panic("[SMP]with ap cpu_index %u out of range\n",
@@ -517,6 +519,7 @@ ap_main(u8 cpu_index)
 	gdt_flush((u64)&gdt_ptr);
 	tss_load(GDT_TSS);
 	load_idt(&idt_ptr);
+	syscall_init();
 	smp_cpu_map[cpu_index].tss = tss;
 	smp_tss_register(lapic_id, tss);
 	lapic_timer_init_ap();

@@ -67,10 +67,12 @@ typedef struct process {
   /* Stack */
   u64 user_stack;   /* User stack top */
 
-  thread_t	*main_thread; 
-  thread_t	*cur_thread;
-  thread_t	*thread_list;	/* linked list of all threads in this proc */
-  int		thread_count;	/* number of alive threads */
+	thread_t	*main_thread; 
+	thread_t	*cur_thread;
+	thread_t	*thread_list;	/* linked list of all threads in this proc */
+	int		thread_count;	/* number of alive threads */
+	int		preferred_cpu;	/* scheduler placement target, -1 for any CPU */
+	int		last_cpu;	/* last CPU that ran this process */
 
   /* Exit status */
   int exit_code;

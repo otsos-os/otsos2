@@ -28,6 +28,7 @@
 #include <kernel/gdt.h>
 #include <kernel/api/api.h>
 #include <kernel/process.h>
+#include <kernel/scheduler.h>
 #include <kernel/thread.h>
 #include <mm/vm/vm_map.h>
 #include <mm/kmem.h>
@@ -64,6 +65,8 @@ int api_proc_copy(registers_t *regs) {
   child->user_stack = parent->user_stack;
   child->exit_code = 0;
   child->owns_address_space = 1;
+  child->preferred_cpu = -1;
+  child->last_cpu = -1;
   child->mmap_base = parent->mmap_base;
   child->kusr_auth = parent->kusr_auth;
   child->uid = parent->uid;
@@ -74,6 +77,7 @@ int api_proc_copy(registers_t *regs) {
   child->sgid = parent->sgid;
   vm_map_fork(parent, child);
   api_copy_handles(child, parent);
+  scheduler_assign_process(child);
 
   /* Create thread for child process */
   thread_t *td = thread_create(child, parent->entry_point,

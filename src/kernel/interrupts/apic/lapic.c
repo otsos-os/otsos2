@@ -141,12 +141,16 @@ void
 lapic_enable(void)
 {
 	u64	apic_msr;
+	u32	svr;
 
 	apic_msr = lapic_rdmsr(IA32_APIC_BASE);
 	if (!(apic_msr & IA32_APIC_BASE_ENABLE)) {
 		apic_msr |= IA32_APIC_BASE_ENABLE;
 		lapic_wrmsr(IA32_APIC_BASE, apic_msr);
 	}
+	svr = lapic_read(LAPIC_SVR);
+	lapic_write(LAPIC_SVR, (svr & ~0xFFU) | 0xFF |
+	    LAPIC_SVR_ENABLE);
 	if (!lapic_enabled) {
 		lapic_enabled = 1;
 	}

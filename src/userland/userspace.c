@@ -33,6 +33,7 @@
 #include <kernel/api/posix/posix.h>
 #include <kernel/api/api.h>
 #include <kernel/process.h>
+#include <kernel/scheduler.h>
 #include <kernel/thread.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/mlibc.h>
@@ -199,6 +200,8 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
 
   new_proc->exit_code = 0;
   new_proc->owns_address_space = 1;
+  new_proc->preferred_cpu = -1;
+  new_proc->last_cpu = -1;
   new_proc->mmap_base = MMAP_BASE;
   new_proc->uid = 0;
   new_proc->gid = 0;
@@ -218,6 +221,7 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   api_init_process(new_proc);
   posix_init_process(new_proc);
   new_proc->personality = PERSONALITY_OTSOS;
+  scheduler_assign_process(new_proc);
 
   thread_t *td = thread_create(new_proc, entry, user_stack,
                                USER_CS, USER_DS);

@@ -32,6 +32,12 @@ irq_stub_%1:
     jmp irq_common
 %endmacro
 
+global irq_stub_spurious
+irq_stub_spurious:
+    push qword 0
+    push qword 255
+    jmp irq_common
+
 extern smp_lock
 extern smp_unlock
 

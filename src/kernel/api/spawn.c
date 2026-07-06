@@ -34,6 +34,7 @@
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/process.h>
+#include <kernel/scheduler.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
 #include <mlibc/stdio.h>
@@ -548,6 +549,8 @@ int api_proc_spawn(const char *path, const char *const *argv,
 
   child->exit_code = 0;
   child->owns_address_space = 1;
+  child->preferred_cpu = -1;
+  child->last_cpu = -1;
   child->mmap_base = MMAP_BASE;
   /* Spawn inherits parent credentials for Linux-compatible privilege
    * semantics.  A root parent creates a root child; the child can drop
@@ -563,6 +566,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
   posix_init_process(child);
   posix_copy_fds(child, parent);
   child->personality = PERSONALITY_POSIX;
+  scheduler_assign_process(child);
   posix_setup_stdio(child);
 
   /* Create the main thread for the child process */

@@ -183,6 +183,7 @@ thread_create(process_t *proc, u64 rip, u64 rsp, u64 cs, u64 ss)
 	td->prev = NULL;
 	td->exit_code = 0;
 	td->fs_base = 0;
+	td->running_cpu = -1;
 
 	td->state = PROC_STATE_RUNNABLE;
 
@@ -248,8 +249,10 @@ thread_set_current(thread_t *td)
 	smp_set_current_thread(td);
 	if (td) {
 		td->state = PROC_STATE_RUNNING;
+		td->running_cpu = smp_cpu_index();
 		if (td->proc) {
 			td->proc->cur_thread = td;
+			td->proc->last_cpu = td->running_cpu;
 		}
 		tss_set_rsp0(td->kernel_stack);
 	}
@@ -376,6 +379,7 @@ thread_exit(int code)
 
 	td->exit_code = code;
 	td->state = PROC_STATE_ZOMBIE;
+	td->running_cpu = -1;
 
 	/* If set_tid_address was called, clear the TID field
 	 * and do a futex wake so anyone waiting on it wakes up */
@@ -472,6 +476,7 @@ thread_kill_all(process_t *proc)
 		next = td->next;
 		if (td != proc->cur_thread) {
 			td->state = PROC_STATE_ZOMBIE;
+			td->running_cpu = -1;
 			td->exit_code = -1;
 		}
 		td = next;

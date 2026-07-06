@@ -27,14 +27,17 @@
 /* !DEFINES!
 
 $define %type registers_t as struct with CPU register snapshot
+$define %type process_t as struct with process control block
 
+$define %func scheduler_init as procedure with args void
+$define %func scheduler_assign_process as procedure with args process_t *
 $define %func scheduler_tick as procedure with args registers_t *
 
 */
 
 /* !SPACE!
 
-$space %export scheduler_tick
+$space %export scheduler_init, scheduler_assign_process, scheduler_tick
 
 */
 
@@ -43,6 +46,9 @@ $space %export scheduler_tick
 
 #include <kernel/interrupts/idt.h>
 
+struct process;
+void	scheduler_init(void);
+void	scheduler_assign_process(struct process *proc);
 void	scheduler_tick(registers_t *regs);
 
 #endif

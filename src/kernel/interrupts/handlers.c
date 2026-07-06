@@ -37,6 +37,7 @@
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_map.h>
 #include <kernel/scheduler.h>
+#include <kernel/smp/smp.h>
 #include <kernel/thread.h>
 #include <mlibc/mlibc.h>
 
@@ -85,8 +86,9 @@ void isr_handler(registers_t *regs) {
                     regs->int_no, proc ? (int)proc->pid : -1,
                     proc ? proc->name : "???", (void *)regs->rip);
     }
-
-    __asm__ volatile("sti");
+    if (smp_lock_held()) {
+      smp_unlock();
+    }
     process_exit(-1);
     } else {
       __asm__ volatile("sti");
@@ -117,6 +119,8 @@ void irq_handler(registers_t *regs) {
     scheduler_tick(regs);
     terminal_update();
     lapic_eoi();
+    return;
+  } else if (regs->int_no == 255) {
     return;
   }
 

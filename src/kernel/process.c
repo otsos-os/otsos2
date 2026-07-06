@@ -64,6 +64,7 @@ $space %export process_get, process_create, process_create_kernel
 #include <mm/vm/pmap.h>
 #include <kernel/panic.h>
 #include <kernel/process.h>
+#include <kernel/scheduler.h>
 #include <kernel/signal.h>
 #include <kernel/thread.h>
 #include <kernel/console/terminal.h>
@@ -86,6 +87,7 @@ process_init(void)
 	memset(process_table, 0, sizeof(process_table));
 	next_pid = 1;
 	thread_init();
+	scheduler_init();
 	process_initialized = 1;
 	printk("[PROC] Process table initialized "
 	    "(%d slots)\n", MAX_PROCESSES);
@@ -132,6 +134,8 @@ process_create_kernel(const char *name, void (*entry)(void))
 	proc->owns_address_space = 0;
 	proc->mmap_base = MMAP_BASE;
 	proc->exit_code = 0;
+	proc->preferred_cpu = -1;
+	proc->last_cpu = -1;
   proc->personality = PERSONALITY_OTSOS;
   proc->sid = proc->pid;
   proc->pgid = proc->pid;
@@ -142,6 +146,7 @@ process_create_kernel(const char *name, void (*entry)(void))
   proc->egid = 0;
   proc->suid = 0;
   proc->sgid = 0;
+	scheduler_assign_process(proc);
 
   api_init_process(proc);
 	posix_init_process(proc);
@@ -266,6 +271,7 @@ process_exit(int code)
 
 	if (td) {
 		td->state = PROC_STATE_ZOMBIE;
+		td->running_cpu = -1;
 	}
 
 	api_release_handles(proc);
@@ -394,14 +400,17 @@ process_kill(u32 pid)
 		td = thread_current();
 		if (td) {
 			td->state = PROC_STATE_ZOMBIE;
+			td->running_cpu = -1;
 		}
 	} else {
 		thread_kill_all(proc);
 		if (proc->main_thread) {
 			proc->main_thread->state = PROC_STATE_ZOMBIE;
+			proc->main_thread->running_cpu = -1;
 		}
 		if (proc->cur_thread && proc->cur_thread != proc->main_thread) {
 			proc->cur_thread->state = PROC_STATE_ZOMBIE;
+			proc->cur_thread->running_cpu = -1;
 		}
 	}
 

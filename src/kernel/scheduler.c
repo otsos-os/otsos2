@@ -47,17 +47,137 @@ $space %export scheduler_tick
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <mm/vm/pmap.h>
+#include <kernel/other/config.h>
 #include <kernel/process.h>
 #include <kernel/scheduler.h>
+#include <kernel/smp/smp.h>
 #include <kernel/thread.h>
+static int	sched_strict_process_separation;
+static int	sched_smart_migration = 1;
+static int	sched_migration_threshold = 2;
+static int	sched_next_cpu;
+static int
+scheduler_cpu_runnable_count(int cpu)
+{
+	int		i, count;
+	thread_t	*td;
+	count = 0;
+	for (i = 0; i < MAX_THREADS; i++) {
+		td = &thread_table[i];
+		if (!td->used || !td->proc) {
+			continue;
+		}
+		if (td->state == PROC_STATE_ZOMBIE ||
+		    td->state == PROC_STATE_UNUSED) {
+			continue;
+		}
+		if (td->proc->preferred_cpu == cpu || td->running_cpu == cpu) {
+			count++;
+		}
+	}
+	return (count);
+}
+
+static int
+scheduler_least_loaded_cpu(void)
+{
+	int	cpu, cpus, best_cpu, best_load, load;
+
+	cpus = smp_cpu_count();
+	if (cpus <= 0) {
+		return (0);
+	}
+	best_cpu = 0;
+	best_load = scheduler_cpu_runnable_count(0);
+	for (cpu = 1; cpu < cpus; cpu++) {
+		load = scheduler_cpu_runnable_count(cpu);
+		if (load < best_load) {
+			best_cpu = cpu;
+			best_load = load;
+		}
+	}
+	return (best_cpu);
+}
+
+static int
+scheduler_thread_can_run_on(thread_t *td, int cpu)
+{
+	process_t	*proc;
+
+	if (!td || !td->proc) {
+		return (0);
+	}
+	proc = td->proc;
+	if (td->running_cpu >= 0 && td->running_cpu != cpu) {
+		return (0);
+	}
+	if (proc->preferred_cpu < 0) {
+		return (1);
+	}
+	if (sched_strict_process_separation) {
+		return (proc->preferred_cpu == cpu);
+	}
+	if (!sched_smart_migration) {
+		return (1);
+	}
+	if (proc->last_cpu == cpu || proc->preferred_cpu == cpu) {
+		return (1);
+	}
+	return (scheduler_cpu_runnable_count(cpu) + sched_migration_threshold <
+	    scheduler_cpu_runnable_count(proc->preferred_cpu));
+}
+
+void
+scheduler_init(void)
+{
+	sched_strict_process_separation =
+	    config_get_bool("scheduler", "strict_process_separation", 0);
+	sched_smart_migration =
+	    config_get_bool("scheduler", "smart_migration", 1);
+	sched_migration_threshold =
+	    config_get_int("scheduler", "migration_threshold", 2);
+	if (sched_migration_threshold < 0) {
+		sched_migration_threshold = 0;
+	}
+	sched_next_cpu = 0;
+	printk("[SCHED] strict=%d smart=%d migration_threshold=%d\n",
+	    sched_strict_process_separation, sched_smart_migration,
+	    sched_migration_threshold);
+}
+
+void
+scheduler_assign_process(process_t *proc)
+{
+	int	cpus;
+
+	if (!proc) {
+		return;
+	}
+	cpus = smp_cpu_count();
+	if (cpus <= 0) {
+		cpus = 1;
+	}
+	if (sched_strict_process_separation) {
+		proc->preferred_cpu = sched_next_cpu % cpus;
+		sched_next_cpu = (sched_next_cpu + 1) % cpus;
+	} else if (sched_smart_migration) {
+		proc->preferred_cpu = scheduler_least_loaded_cpu();
+	} else {
+		proc->preferred_cpu = -1;
+	}
+	proc->last_cpu = -1;
+	printk("[SCHED] PID %d preferred_cpu=%d\n", proc->pid,
+	    proc->preferred_cpu);
+}
 
 static thread_t *
 pick_next_thread(thread_t *current)
 {
 	thread_t	*cand;
-	int		start, i, idx;
+	int		start, i, idx, cpu;
 
 	start = 0;
+	cpu = smp_cpu_index();
 	if (current) {
 		start = (int)(current - thread_table) + 1;
 	}
@@ -66,7 +186,8 @@ pick_next_thread(thread_t *current)
 		idx = (start + i) % MAX_THREADS;
 		cand = &thread_table[idx];
 		if (cand->used &&
-		    cand->state == PROC_STATE_RUNNABLE) {
+		    cand->state == PROC_STATE_RUNNABLE &&
+		    scheduler_thread_can_run_on(cand, cpu)) {
 			return (cand);
 		}
 	}
@@ -80,6 +201,7 @@ scheduler_tick(registers_t *regs)
 	static u32	last_magic = 0;
 	thread_t	*current, *next;
 	process_t	*cur_proc;
+	int		locked_here;
 
 	if (last_magic == 0) {
 		last_magic = g_chainfs.superblock.magic;
@@ -104,6 +226,25 @@ scheduler_tick(registers_t *regs)
 
 	current = thread_current();
 	if (!current) {
+		locked_here = !smp_lock_held();
+		if (locked_here) {
+			smp_lock();
+		}
+		next = pick_next_thread(NULL);
+		if (!next || next->state != PROC_STATE_RUNNABLE) {
+			if (locked_here) {
+				smp_unlock();
+			}
+			return;
+		}
+		thread_set_current(next);
+		if (locked_here) {
+			smp_unlock();
+		}
+		if (next->proc) {
+			pmap_load(next->proc->cr3);
+		}
+		thread_load_context(next, regs);
 		return;
 	}
 
@@ -115,35 +256,65 @@ scheduler_tick(registers_t *regs)
 	}
 
 	if (current->state == PROC_STATE_SLEEPING) {
+		locked_here = !smp_lock_held();
+		if (locked_here) {
+			smp_lock();
+		}
+		current->running_cpu = -1;
 		next = pick_next_thread(current);
 		if (!next || next == current) {
+			current->running_cpu = smp_cpu_index();
+			if (locked_here) {
+				smp_unlock();
+			}
 			return;
 		}
 		thread_save_context(current, regs);
 		thread_set_current(next);
+		if (locked_here) {
+			smp_unlock();
+		}
 		if (next->proc && cur_proc &&
 		    next->proc->cr3 != cur_proc->cr3) {
+			pmap_load(next->proc->cr3);
+		} else if (next->proc && !cur_proc) {
 			pmap_load(next->proc->cr3);
 		}
 		thread_load_context(next, regs);
 		return;
 	}
 
+	locked_here = !smp_lock_held();
+	if (locked_here) {
+		smp_lock();
+	}
 	thread_save_context(current, regs);
 
 	if (current->state == PROC_STATE_RUNNING) {
 		current->state = PROC_STATE_RUNNABLE;
+		current->running_cpu = -1;
+	} else {
+		current->running_cpu = -1;
 	}
 
 	next = pick_next_thread(current);
 	if (!next || next == current) {
 		current->state = PROC_STATE_RUNNING;
+		current->running_cpu = smp_cpu_index();
+		if (locked_here) {
+			smp_unlock();
+		}
 		return;
 	}
 
 	thread_set_current(next);
+	if (locked_here) {
+		smp_unlock();
+	}
 	if (next->proc && cur_proc &&
 	    next->proc->cr3 != cur_proc->cr3) {
+		pmap_load(next->proc->cr3);
+	} else if (next->proc && !cur_proc) {
 		pmap_load(next->proc->cr3);
 	}
 

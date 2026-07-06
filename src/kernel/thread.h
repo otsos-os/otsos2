@@ -109,6 +109,7 @@ typedef struct thread {
 	u64			tid_address;	/* set_tid_address: cleared on exit */
 	u64			fs_base;	/* FS segment base (TLS) */
 	u64			sleep_target_ticks; /* nanosleep wakeup target */
+	int			running_cpu;	/* -1 when not running on any CPU */
 	struct thread		*next;
 	struct thread		*prev;
 } thread_t;
