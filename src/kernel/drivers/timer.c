@@ -163,7 +163,6 @@ timer_reinit(u32 frequency)
 		et_free(timer_et);
 	}
 	timer_et = NULL;
-	timer_ticks = 0;
 	timer_initialized = 0;
 	timer_init(frequency);
 }
