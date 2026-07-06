@@ -63,17 +63,18 @@ __stack_chk_fail(void)
 void
 sleep(u32 ms)
 {
-	u64		start_ticks;
 	u64		deadline;
 	thread_t	*td;
 
 	td = thread_current();
 
 	if (!td || (td->context.cs & 3) == 0) {
-		start_ticks = timer_get_ticks();
-		while (timer_get_ticks() < start_ticks + ms) {
-			__asm__ volatile("pause");
-		}
+	/*TODO: maybe we need to get HZ value from config in runtime*/
+	deadline = timer_get_ticks() +
+	    (u64)ms * timer_get_frequency() / 1000;
+	while (timer_get_ticks() < deadline) {
+		__asm__ volatile("pause");
+	}
 		return;
 	}
 

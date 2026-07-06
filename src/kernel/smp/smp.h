@@ -78,6 +78,7 @@ $space %export smp_bsp_lapic_id, smp_ap_cpu_index
 struct spinlock {
 	u32	locked;
 	u32	owner;
+	u32	recursion;
 };
 
 typedef struct spinlock	spinlock_t;

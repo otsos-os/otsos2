@@ -175,7 +175,10 @@ thread_create(process_t *proc, u64 rip, u64 rsp, u64 cs, u64 ss)
 	td->context.rip = rip;
 	td->context.cs = cs;
 	td->context.rflags = 0x202;
-	td->context.rsp = rsp;
+	if ((cs & 3) == 3)
+		td->context.rsp = rsp - 8;
+	else
+		td->context.rsp = rsp;
 	td->context.ss = ss;
 
 	td->wait_channel = NULL;

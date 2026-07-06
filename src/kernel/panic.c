@@ -293,6 +293,8 @@ print_panic_logo(void)
 	}
 }
 
+static int	panic_in_progress;
+
 void
 kernel_panic(registers_t *regs)
 {
@@ -302,6 +304,13 @@ kernel_panic(registers_t *regs)
 		u16	limit;
 		u64	base;
 	} __attribute__((packed)) gdtr, idtr;
+
+	if (__atomic_exchange_n(&panic_in_progress, 1,
+	    __ATOMIC_ACQUIRE) != 0) {
+		__asm__ volatile("cli");
+		while (1)
+			__asm__ volatile("hlt");
+	}
 
 	__asm__ volatile("cli");
 
@@ -421,6 +430,13 @@ panic(const char *format, ...)
 	char			buffer[512];
 	int			i;
 	const char		*p;
+
+	if (__atomic_exchange_n(&panic_in_progress, 1,
+	    __ATOMIC_ACQUIRE) != 0) {
+		__asm__ volatile("cli");
+		while (1)
+			__asm__ volatile("hlt");
+	}
 
 	__asm__ volatile("cli");
 

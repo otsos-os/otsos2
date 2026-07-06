@@ -266,7 +266,7 @@ lapic_timer_calibrate(void)
 
 	calib.read_count = lapic_timer_calibrate_read;
 	calib.arg = NULL;
-	freq = timer_calibrate(&calib, 50, 128);
+	freq = timer_calibrate(&calib, 50, 1);
 
 	if (freq == 0) {
 		printk("[LAPIC] calibration failed\n");

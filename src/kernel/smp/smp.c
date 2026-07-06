@@ -211,8 +211,8 @@ smp_lock(void)
 	cpu = smp_cpu_id();
 
 	if (smp_bkl.locked && smp_bkl.owner == cpu) {
-		panic("[SMP] BKL already held by CPU %u\n",
-		    (u32)cpu);
+		smp_bkl.recursion++;
+		return;
 	}
 
 	__asm__ volatile("pushfq; pop %0; cli" : "=r"(flags));
@@ -223,6 +223,7 @@ smp_lock(void)
 		__asm__ volatile("pause");
 	}
 	smp_bkl.owner = cpu;
+	smp_bkl.recursion = 0;
 }
 
 void
@@ -236,6 +237,12 @@ smp_unlock(void)
 		panic("[SMP] BKL not held by CPU %u\n",
 		    (u32)cpu);
 	}
+
+	if (smp_bkl.recursion > 0) {
+		smp_bkl.recursion--;
+		return;
+	}
+
 	flags = smp_bkl_flags[cpu];
 	smp_bkl.owner = 0;
 	__atomic_store_n(&smp_bkl.locked, 0, __ATOMIC_RELEASE);
