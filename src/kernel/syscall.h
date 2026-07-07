@@ -91,6 +91,7 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_SYS_RANDOM		0x503
 #define	CALL_SYS_TIMEINFO	0x504
 #define	CALL_SYS_TIME		0x505
+#define	CALL_SYS_CPUINFO	0x506
 
 #define	CALL_PERSONALITY	0xFFFF
 

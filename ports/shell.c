@@ -1,7 +1,7 @@
 /*
  * sh - otsos2 userspace shell
  *
- * Built-in commands: echo, pwd, cd, ls, ps, cat, clear, exit, help, env
+ * Built-in commands: echo, pwd, cd, ls, ps, cpus, cat, clear, exit, help, env
  * External commands: spawn + wait via CALL_PROC_SPAWN/CALL_PROC_WAIT
  * PATH resolution: /bin/<cmd> for external binaries
  *
@@ -27,6 +27,7 @@
 #define CALL_SYS_MEMINFO 0x501
 #define CALL_SYS_KMEMINFO 0x502
 #define CALL_SYS_TIMEINFO 0x504
+#define CALL_SYS_CPUINFO 0x506
 #define CALL_DRM_CALL    0x600
 
 #define DRM_OP_INFO            1
@@ -76,6 +77,8 @@
 #define MAX_PATH  256
 #define MAX_DIRENT 128
 #define MAX_PROCS 64
+#define MAX_CPUS 32
+#define MAX_CPU_PIDS 64
 
 typedef unsigned long u64;
 typedef unsigned int  u32;
@@ -124,6 +127,25 @@ struct api_kmeminfo {
   u64 kmem_heap_free_kb;
   u64 bootmem_free_kb;
   u64 kmem_heap_addr;
+};
+
+struct api_cpu_entry {
+  u32 cpu_index;
+  u32 lapic_id;
+  u32 present;
+  u32 online;
+  u32 pid;
+  u32 tid;
+  u32 state;
+  u32 pid_count;
+  u32 pids[MAX_CPU_PIDS];
+  char proc_name[32];
+};
+
+struct api_cpuinfo {
+  u32 cpu_count;
+  u32 entry_count;
+  struct api_cpu_entry entries[MAX_CPUS];
 };
 
 struct api_timeinfo {
@@ -223,6 +245,10 @@ static long sys_meminfo(struct api_meminfo *buf) {
 
 static long sys_kmeminfo(struct api_kmeminfo *buf) {
   return syscall1(CALL_SYS_KMEMINFO, (long)buf);
+}
+
+static long sys_cpuinfo(struct api_cpuinfo *buf) {
+  return syscall1(CALL_SYS_CPUINFO, (long)buf);
 }
 
 static long sys_timeinfo(struct api_timeinfo *buf) {
@@ -605,6 +631,7 @@ static void cmd_help(void) {
   println("  cd <path>          change directory");
   println("  ls [path]          list directory");
   println("  ps                 list processes");
+  println("  cpus               list CPUs and running PIDs");
   println("  time               show time info");
   println("  mem                show memory info");
   println("  cat <file>         print file contents");
@@ -944,6 +971,63 @@ static void cmd_ps(void) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  built-in: cpus                                                    */
+/* ------------------------------------------------------------------ */
+
+static void cmd_cpus(void) {
+  struct api_cpuinfo info;
+  long ret = sys_cpuinfo(&info);
+  if (ret < 0) {
+    print_err("cpus", ret);
+    return;
+  }
+
+  print("CPUs detected: ");
+  print_int((int)info.cpu_count);
+  printc('\n');
+  println("CPU\tLAPIC\tONLINE\tCURPID\tTID\tSTATE\tNAME\tPIDS");
+  for (u32 i = 0; i < info.entry_count && i < MAX_CPUS; i++) {
+    struct api_cpu_entry *cpu = &info.entries[i];
+    print_int((int)cpu->cpu_index);
+    printc('\t');
+    print_int((int)cpu->lapic_id);
+    printc('\t');
+    print(cpu->online ? "yes" : "no");
+    printc('\t');
+    if (cpu->pid) {
+      print_int((int)cpu->pid);
+    } else {
+      print("-");
+    }
+    printc('\t');
+    if (cpu->tid) {
+      print_int((int)cpu->tid);
+    } else {
+      print("-");
+    }
+    printc('\t');
+    print(state_name(cpu->state));
+    printc('\t');
+    if (cpu->proc_name[0]) {
+      print(cpu->proc_name);
+    } else {
+      print("-");
+    }
+    printc('\t');
+    if (cpu->pid_count == 0) {
+      print("-");
+    }
+    for (u32 j = 0; j < cpu->pid_count && j < MAX_CPU_PIDS; j++) {
+      if (j > 0) {
+        printc(',');
+      }
+      print_int((int)cpu->pids[j]);
+    }
+    printc('\n');
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  built-in: time                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -1172,6 +1256,7 @@ static int exec_builtin(int argc, char **argv) {
   if (strcmp_s(cmd, "cd") == 0)     { cmd_cd(argc, argv); return 0; }
   if (strcmp_s(cmd, "ls") == 0)     { cmd_ls(argc, argv); return 0; }
   if (strcmp_s(cmd, "ps") == 0)     { cmd_ps(); return 0; }
+  if (strcmp_s(cmd, "cpus") == 0)   { cmd_cpus(); return 0; }
   if (strcmp_s(cmd, "time") == 0)   { cmd_time(); return 0; }
   if (strcmp_s(cmd, "mem") == 0)    { cmd_mem(); return 0; }
   if (strcmp_s(cmd, "cat") == 0)    { cmd_cat(argc, argv); return 0; }

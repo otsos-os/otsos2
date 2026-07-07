@@ -147,6 +147,25 @@ struct api_kmeminfo {
   u64 bootmem_free_kb;
   u64 kmem_heap_addr;
 };
+#define API_CPUINFO_MAX_CPUS 32
+#define API_CPUINFO_MAX_PIDS 64
+struct api_cpu_entry {
+  u32 cpu_index;
+  u32 lapic_id;
+  u32 present;
+  u32 online;
+  u32 pid;
+  u32 tid;
+  u32 state;
+  u32 pid_count;
+  u32 pids[API_CPUINFO_MAX_PIDS];
+  char proc_name[32];
+};
+struct api_cpuinfo {
+  u32 cpu_count;
+  u32 entry_count;
+  struct api_cpu_entry entries[API_CPUINFO_MAX_CPUS];
+};
 
 struct api_dirent {
   char name[32];
@@ -342,6 +361,7 @@ int api_data_read(int handle, void *buf, u32 count);
 int api_info(struct api_sysinfo *buf);
 int api_meminfo(struct api_meminfo *buf);
 int api_kmeminfo(struct api_kmeminfo *buf);
+int api_cpuinfo(struct api_cpuinfo *buf);
 void api_info_fill(struct api_sysinfo *buf);
 int api_data_write(int handle, const void *buf, u32 count);
 int api_data_open(const char *path, int flags);
