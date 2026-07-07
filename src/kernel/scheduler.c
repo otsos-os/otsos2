@@ -56,6 +56,7 @@ static int	sched_strict_process_separation;
 static int	sched_smart_migration = 1;
 static int	sched_migration_threshold = 2;
 static int	sched_next_cpu;
+static int	sched_zkill;
 static int
 scheduler_cpu_runnable_count(int cpu)
 {
@@ -139,10 +140,12 @@ scheduler_init(void)
 	if (sched_migration_threshold < 0) {
 		sched_migration_threshold = 0;
 	}
+	sched_zkill =
+	    config_get_bool("scheduler", "zkill", 0);
 	sched_next_cpu = 0;
-	printk("[SCHED] strict=%d smart=%d migration_threshold=%d\n",
+	printk("[SCHED] strict=%d smart=%d migration_threshold=%d zkill=%d\n",
 	    sched_strict_process_separation, sched_smart_migration,
-	    sched_migration_threshold);
+	    sched_migration_threshold, sched_zkill);
 }
 
 void
@@ -269,7 +272,15 @@ scheduler_tick(registers_t *regs)
 			}
 			return;
 		}
-		thread_save_context(current, regs);
+		if (sched_zkill && current->proc &&
+		    current->proc->exit_code != 0) {
+			process_t *zp = current->proc;
+			thread_destroy(current);
+			memset(zp, 0, sizeof(process_t));
+			cur_proc = NULL;
+		} else {
+			thread_save_context(current, regs);
+		}
 		thread_set_current(next);
 		if (locked_here) {
 			smp_unlock();
@@ -299,7 +310,10 @@ scheduler_tick(registers_t *regs)
 
 	next = pick_next_thread(current);
 	if (!next || next == current) {
-		current->state = PROC_STATE_RUNNING;
+		if (current->state == PROC_STATE_ZOMBIE)
+			current->state = PROC_STATE_SLEEPING;
+		else
+			current->state = PROC_STATE_RUNNING;
 		current->running_cpu = smp_cpu_index();
 		if (locked_here) {
 			smp_unlock();
@@ -307,6 +321,13 @@ scheduler_tick(registers_t *regs)
 		return;
 	}
 
+	if (sched_zkill && current->state == PROC_STATE_ZOMBIE &&
+	    current->proc) {
+		process_t *zp = current->proc;
+		thread_destroy(current);
+		memset(zp, 0, sizeof(process_t));
+		cur_proc = NULL;
+	}
 	thread_set_current(next);
 	if (locked_here) {
 		smp_unlock();

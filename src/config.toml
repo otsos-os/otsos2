@@ -26,6 +26,7 @@ timezone_offset = 3
 strict_process_separation = true
 smart_migration = true
 migration_threshold = 2
+zkill = true
 
 [kshell]
 enabled = true
