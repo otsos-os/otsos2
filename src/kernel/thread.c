@@ -405,9 +405,8 @@ thread_exit(int code)
 		process_exit(code);
 	}
 
-	__asm__ volatile("sti");
 	while (1) {
-		__asm__ volatile("hlt");
+		process_yield();
 	}
 }
 

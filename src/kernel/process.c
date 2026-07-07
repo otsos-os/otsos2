@@ -301,10 +301,8 @@ process_exit(int code)
 	}
 
 	terminal_drop_pgrp(proc->pgid);
-
-	__asm__ volatile("sti");
 	while (1) {
-		__asm__ volatile("hlt");
+		process_yield();
 	}
 }
 

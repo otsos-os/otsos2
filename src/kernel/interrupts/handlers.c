@@ -106,6 +106,7 @@ void irq_handler(registers_t *regs) {
     terminal_update();
   } else if (regs->int_no == 33) {
     keyboard_common_handler();
+    scheduler_tick(regs);
   } else if (regs->int_no == 48) {
     eventtimer_dispatch();
     power_button_poll();

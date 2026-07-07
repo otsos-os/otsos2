@@ -135,7 +135,7 @@ scheduler_init(void)
 	sched_smart_migration =
 	    config_get_bool("scheduler", "smart_migration", 1);
 	sched_migration_threshold =
-	    config_get_int("scheduler", "migration_threshold", 2);
+	    config_get_int("scheduler", "migration_threshold", 0);
 	if (sched_migration_threshold < 0) {
 		sched_migration_threshold = 0;
 	}

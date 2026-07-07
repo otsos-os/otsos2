@@ -150,6 +150,7 @@ proc_sleep(void *channel)
 	had_lock = smp_lock_held();
 	td->wait_channel = channel;
 	td->state = PROC_STATE_SLEEPING;
+	td->running_cpu = -1;
 
 	if (had_lock) {
 		smp_unlock();
