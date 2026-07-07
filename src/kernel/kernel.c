@@ -49,7 +49,7 @@ $define %func timer_sanity_check as function with args void
 $define %func enable_sse as procedure with args void
 $define %func kernel_ensure_parent_dirs as function with args const char *
 $define %func kernel_install_module_cb as procedure with args const char *, const char *, void *
-$define %func kmain as start with args u64, u64, u64
+$define %func kmain as start with args u64, u64, u64, u64
 
 */
 
@@ -118,6 +118,8 @@ extern char	kernel_end;
 
 static u32	boot_magic;
 static int	is_multiboot2;
+
+#define BOOT_FLAG_DISABLE_APIC	0x00000001ULL
 
 static void
 debug_multiboot_info(multiboot_info_t *mb_info)
@@ -398,9 +400,9 @@ kernel_install_module_cb(const char *name, const char *dest, void *ctx)
 }
 
 void
-kmain(u64 magic, u64 addr, u64 boot_option)
+kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 {
-	int		safe_mode, debug_mode;
+	int		safe_mode, debug_mode, disable_apic;
 	void		*ramdisk_mem;
 	multiboot2_info_t	*mboot2_ptr;
 	multiboot_info_t	*mboot1_ptr;
@@ -426,6 +428,7 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 
 	safe_mode = (boot_option == 1);
 	debug_mode = (boot_option == 2);
+	disable_apic = ((boot_flags & BOOT_FLAG_DISABLE_APIC) != 0);
 
 	uart_init();
 	bootmem_init(magic, addr, 0x100000,
@@ -451,7 +454,11 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 	pit_init();
 	pmap_init();
 	vm_page_init_from_bootmem();
-	lapic_init();
+	if (disable_apic) {
+		printk("[BOOT] APIC disabled by boot settings\n");
+	} else {
+		lapic_init();
+	}
 	timer_init(config_get_int("timer", "hz", 1000));
 	time_init();
 	et_clocksource_init();
@@ -460,7 +467,7 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 	enable_sse();
 	__asm__ volatile("sti");
 
-	if (strcmp(config_get_string("timer", "default_timer",
+	if (!disable_apic && strcmp(config_get_string("timer", "default_timer",
 	    "apic"), "apic") == 0)
 		apic_timer_init();
 
@@ -500,8 +507,10 @@ kmain(u64 magic, u64 addr, u64 boot_option)
 		drm_boot_init_mb2(mboot2_ptr, 0);
 
 		acpi_init_from_multiboot2(mboot2_ptr);
-		ioapic_init();
-		smp_init();
+		if (!disable_apic) {
+			ioapic_init();
+			smp_init();
+		}
 
 		clear_scr();
 		terminal_init();

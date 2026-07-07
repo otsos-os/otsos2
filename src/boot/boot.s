@@ -82,6 +82,7 @@
 .set KEY_E,                 0x12    /* 'e' for edit */
 .set KEY_C,                 0x2E    /* 'c' for cmd */
 .set KEY_R,                 0x13    /* 'r' for reboot */
+.set KEY_SPACE,             0x39
 
 .set KB_DATA_PORT,          0x60
 .set KB_STATUS_PORT,        0x64
@@ -91,9 +92,10 @@
 .set PIT_FREQ,              1193182         
 .set TARGET_FREQ,           100             
 
-.set MENU_ITEMS,            5               
+.set MENU_ITEMS,            6               
 .set MENU_START_Y,          10              
 .set AUTO_BOOT_TIMEOUT,     10              
+.set BOOT_FLAG_DISABLE_APIC, 0x00000001
 
 .section .multiboot
 .align 8
@@ -160,6 +162,8 @@ timer_ticks:
     .long 0                     
 boot_timeout:
     .long AUTO_BOOT_TIMEOUT     
+boot_flags:
+    .long 0
 pit_last_counter:
     .long 0xFFFFFFFF
 menu_active:
@@ -218,7 +222,8 @@ menu_item0:     .asciz "  > boot OTSOS default                    "
 menu_item1:     .asciz "  > boot OTSOS safe mode                  "
 menu_item2:     .asciz "  > boot OTSOS debug mode                 "
 menu_item3:     .asciz "  > system info                           "
-menu_item4:     .asciz "  > reboot                                "
+menu_item4:     .asciz "  > boot settings                         "
+menu_item5:     .asciz "  > reboot                                "
 
 msg_booting:        .asciz "Boot OTSOS..."
 msg_safe_mode:      .asciz "starting in safe mode..."
@@ -247,6 +252,12 @@ sysinfo_press_key:  .asciz "Press any key to return to menu..."
 sysinfo_long_mode:  .asciz "Long Mode: "
 sysinfo_yes:        .asciz "Supported"
 sysinfo_no:         .asciz "Not Supported"
+
+settings_title:     .asciz "=== Boot Settings ==="
+settings_hint:      .asciz "Enter/Space toggles, Esc returns to menu"
+settings_apic:      .asciz "Disable APIC: "
+settings_on:        .asciz "ON "
+settings_off:       .asciz "OFF"
 
 digits:             .asciz "0123456789"
 
@@ -850,6 +861,8 @@ update_menu_display:
     je .Litem3
     cmp edi, 4
     je .Litem4
+    cmp edi, 5
+    je .Litem5
     jmp .Lnext_item
     
 .Litem0:
@@ -866,6 +879,9 @@ update_menu_display:
     jmp .Lprint_item
 .Litem4:
     mov esi, offset menu_item4
+    jmp .Lprint_item
+.Litem5:
+    mov esi, offset menu_item5
 
 .Lprint_item:
     call print_string
@@ -1045,6 +1061,8 @@ menu_loop:
     cmp eax, 3
     je .Lshow_sysinfo
     cmp eax, 4
+    je .Lshow_settings
+    cmp eax, 5
     je .Lreboot
     
     jmp .Lmenu_main_loop
@@ -1073,7 +1091,12 @@ menu_loop:
     call show_system_info
     call show_boot_menu
     jmp .Lmenu_main_loop
-    
+
+.Lshow_settings:
+    call show_boot_settings
+    call show_boot_menu
+    jmp .Lmenu_main_loop
+     
 .Lreboot:
     call do_reboot
 
@@ -1174,6 +1197,74 @@ show_system_info:
     test al, 0x80               
     jnz .Lwait_key_sysinfo
     
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+
+show_boot_settings:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    push esi
+
+.Lsettings_redraw:
+    call clear_screen
+
+    mov ebx, 216
+    mov ecx, 16
+    mov edx, 0x00FFFF
+    mov esi, offset settings_title
+    call print_string
+
+    mov ebx, 40
+    mov ecx, 64
+    mov edx, 0xFFFF00
+    mov esi, offset settings_apic
+    call print_string
+
+    mov ebx, 160
+    mov edx, 0x00FF00
+    test dword ptr [boot_flags], BOOT_FLAG_DISABLE_APIC
+    jz .Lapic_off
+    mov esi, offset settings_on
+    jmp .Lprint_apic_state
+.Lapic_off:
+    mov esi, offset settings_off
+.Lprint_apic_state:
+    call print_string
+
+    mov ebx, 120
+    mov ecx, 200
+    mov edx, 0xAAAAAA
+    mov esi, offset settings_hint
+    call print_string
+
+.Lsettings_wait_key:
+    in al, KB_STATUS_PORT
+    test al, 1
+    jz .Lsettings_wait_key
+    in al, KB_DATA_PORT
+    test al, 0x80
+    jnz .Lsettings_wait_key
+
+    cmp al, KEY_ESC
+    je .Lsettings_done
+    cmp al, KEY_ENTER
+    je .Lsettings_toggle_apic
+    cmp al, KEY_SPACE
+    je .Lsettings_toggle_apic
+    jmp .Lsettings_wait_key
+
+.Lsettings_toggle_apic:
+    xor dword ptr [boot_flags], BOOT_FLAG_DISABLE_APIC
+    jmp .Lsettings_redraw
+
+.Lsettings_done:
     pop esi
     pop edx
     pop ecx
@@ -1510,6 +1601,7 @@ start64:
     mov rdi, [multiboot_magic_val]
     mov rsi, [multiboot_info_ptr]
     mov edx, [selected_item]
+    mov ecx, [boot_flags]
 
     .extern kmain
     mov rax, offset kmain
