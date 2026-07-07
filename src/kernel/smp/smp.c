@@ -91,8 +91,8 @@ $space %export ap_main
 #include <kernel/syscall.h>
 #include <mlibc/stdio.h>
 /* bkl - big kernel lock*/
-static spinlock_t	smp_bkl;
-static u64		smp_bkl_flags[256];
+static		spinlock_t	smp_bkl;
+static		u64		smp_bkl_flags[256];
 struct smp_cpu	smp_cpu_map[SMP_MAX_CPUS];
 tss_t		*smp_tss_by_lapic[256];
 u8		smp_bsp_lapic_id;
@@ -234,8 +234,7 @@ smp_unlock(void)
 	cpu = smp_cpu_id();
 
 	if (!smp_bkl.locked || smp_bkl.owner != cpu) {
-		panic("[SMP] BKL not held by CPU %u\n",
-		    (u32)cpu);
+		panic("[SMP] BKL not held by CPU %d\n", (int)cpu);
 	}
 
 	if (smp_bkl.recursion > 0) {
@@ -244,8 +243,8 @@ smp_unlock(void)
 	}
 
 	flags = smp_bkl_flags[cpu];
-	__atomic_store_n(&smp_bkl.locked, 0, __ATOMIC_RELEASE);
 	smp_bkl.owner = 0xFF;
+	__atomic_store_n(&smp_bkl.locked, 0, __ATOMIC_RELEASE);
 	__asm__ volatile("push %0; popfq" : : "r"(flags));
 }
 
