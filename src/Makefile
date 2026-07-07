@@ -36,7 +36,7 @@ POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
 KBDTEST_BIN = $(PORTS_DIR)/kbdtest
 MUSL_TEST_BIN = $(PORTS_DIR)/musl_test
 LIBC_ENABLED := $(shell sh ../tools/toml_get.sh config.toml libc enabled true)
-MULTIBOOT_MODULES := $(shell sh ../tools/modules.sh config.toml)
+MULTIBOOT_MODULES := $(shell perl ../tools/modules.pl config.toml)
 
 ifeq ($(LIBC_ENABLED),true)
 ISO_MUSL_TEST_DEP = $(MUSL_TEST_BIN)

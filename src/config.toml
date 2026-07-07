@@ -37,7 +37,7 @@ enabled = false
 enabled = true
 drivers = true
 [libc]
-enabled = true
+enabled = false
 type = "musl"
 
 [modules]
@@ -45,9 +45,9 @@ init = "/bin/init"
 yes = "/bin/yes"
 fetch = "/bin/fetch"
 sh = "/bin/sh"
-posix_hello = "/bin/posix_hello"
-kbdtest = "/bin/kbdtest"
-musl_test = "/bin/musl_test"
+# posix_hello = "/bin/posix_hello"
+# kbdtest = "/bin/kbdtest"
+# musl_test = "/bin/musl_test"
 
 [kshell.commands.help]
 enabled = true

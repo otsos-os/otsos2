@@ -244,8 +244,8 @@ smp_unlock(void)
 	}
 
 	flags = smp_bkl_flags[cpu];
-	smp_bkl.owner = 0;
 	__atomic_store_n(&smp_bkl.locked, 0, __ATOMIC_RELEASE);
+	smp_bkl.owner = 0xFF;
 	__asm__ volatile("push %0; popfq" : : "r"(flags));
 }
 
