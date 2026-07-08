@@ -35,6 +35,7 @@ $define %type registers_t as struct with CPU register snapshot
 
 $define %func pick_next_thread as function with args thread_t *
 $define %func pick_any_runnable_thread as function with args thread_t *
+$define %func scheduler_retire_zombies as procedure with args thread_t *
 $define %func scheduler_reap_orphans as procedure with args thread_t *
 $define %func scheduler_tick as procedure with args registers_t *
 
@@ -43,7 +44,7 @@ $define %func scheduler_tick as procedure with args registers_t *
 /* !SPACE!
 
 $space %internal pick_next_thread, pick_any_runnable_thread
-$space %internal scheduler_reap_orphans
+$space %internal scheduler_retire_zombies, scheduler_reap_orphans
 $space %export scheduler_tick
 
 */
@@ -229,6 +230,23 @@ pick_any_runnable_thread(thread_t *current)
 }
 
 static void
+scheduler_retire_zombies(thread_t *current)
+{
+	thread_t	*td;
+	int	cpu, i;
+
+	cpu = smp_cpu_index();
+	for (i = 0; i < MAX_THREADS; i++) {
+		td = &thread_table[i];
+		if (td->used && td != current &&
+		    td->state == PROC_STATE_ZOMBIE &&
+		    td->running_cpu == cpu) {
+			td->running_cpu = -1;
+		}
+	}
+}
+
+static void
 scheduler_reap_orphans(thread_t *skip)
 {
 	process_t	*proc;
@@ -348,13 +366,14 @@ scheduler_tick(registers_t *regs)
 	if (locked_here) {
 		smp_lock();
 	}
+	scheduler_retire_zombies(current);
 	scheduler_reap_orphans(current);
 	thread_save_context(current, regs);
 
 	if (current->state == PROC_STATE_RUNNING) {
 		current->state = PROC_STATE_RUNNABLE;
 		current->running_cpu = -1;
-	} else {
+	} else if (current->state != PROC_STATE_ZOMBIE) {
 		current->running_cpu = -1;
 	}
 

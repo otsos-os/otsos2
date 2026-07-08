@@ -271,7 +271,7 @@ process_exit(int code)
 
 	if (td) {
 		td->state = PROC_STATE_ZOMBIE;
-		td->running_cpu = -1;
+		td->running_cpu = smp_cpu_index();
 	}
 
 	api_release_handles(proc);
@@ -398,7 +398,7 @@ process_kill(u32 pid)
 		td = thread_current();
 		if (td) {
 			td->state = PROC_STATE_ZOMBIE;
-			td->running_cpu = -1;
+			td->running_cpu = smp_cpu_index();
 		}
 	} else {
 		thread_kill_all(proc);

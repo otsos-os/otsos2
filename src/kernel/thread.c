@@ -382,7 +382,7 @@ thread_exit(int code)
 
 	td->exit_code = code;
 	td->state = PROC_STATE_ZOMBIE;
-	td->running_cpu = -1;
+	td->running_cpu = smp_cpu_index();
 
 	/* If set_tid_address was called, clear the TID field
 	 * and do a futex wake so anyone waiting on it wakes up */
