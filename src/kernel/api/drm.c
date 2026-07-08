@@ -277,6 +277,9 @@ int api_drm_call(u64 op, void *arg) {
   case DRM_OP_GET_OBJECTS:
     return drm_op_get_objects((struct api_drm_objects *)arg);
 
+  case DRM_OP_DRIVER_LIST:
+    return drm_op_driver_list((struct api_drm_driver_list *)arg);
+
   case DRM_OP_RAPI_CLEAR:
     return drm_op_rapi_clear((struct api_drm_rapi_rect *)arg);
   case DRM_OP_RAPI_PUT_PIXEL:
