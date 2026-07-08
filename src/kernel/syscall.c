@@ -29,6 +29,7 @@
 #include <kernel/api/api.h>
 #include <kernel/api/shm.h>
 #include <kernel/api/posix/posix.h>
+#include <kernel/api/signal.h>
 #include <kernel/event/event.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
@@ -124,10 +125,12 @@ void syscall_handler(registers_t *regs) {
   }
 
   process_t *cur_proc = process_current();
-  if (cur_proc && cur_proc->personality == PERSONALITY_POSIX) {
-    posix_signal_deliver(cur_proc, regs);
-    posix_syscall_handler(regs);
-    return;
+  if (cur_proc) {
+    signal_deliver(cur_proc, regs);
+    if (cur_proc->personality == PERSONALITY_POSIX) {
+      posix_syscall_handler(regs);
+      return;
+    }
   }
 
   switch (syscall_number) {

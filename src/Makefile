@@ -182,6 +182,7 @@ POSIX_PROC_O = ../bin/posix_proc.o
 POSIX_FS_O = ../bin/posix_fs.o
 POSIX_MEM_O = ../bin/posix_mem.o
 POSIX_SIGNAL_O = ../bin/posix_signal.o
+SIGNAL_O = ../bin/signal.o
 PROC_PID_O = ../bin/proc_pid.o
 THREAD_API_O = ../bin/thread_api.o
 FUTEX_O = ../bin/futex.o
@@ -210,7 +211,7 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(EVENT_KBD_O) \
       $(VFS_O) $(DEVFS_O) \
       $(POSIX_O) $(POSIX_IO_O) $(POSIX_PROC_O) $(POSIX_FS_O) \
-      $(POSIX_MEM_O) $(POSIX_SIGNAL_O) \
+      $(POSIX_MEM_O) $(POSIX_SIGNAL_O) $(SIGNAL_O) \
       $(PROC_PID_O) $(THREAD_API_O) $(FUTEX_O) $(SYS_O) \
       $(API_TIME_O) $(TERM_POWER_O) \
       $(TIME_O) $(CLOCKSOURCE_O) $(ET_CLOCKSOURCE_O) $(CMOS_RTC_O)
@@ -844,6 +845,10 @@ $(POSIX_MEM_O): kernel/api/posix/posix_mem.c kernel/api/posix/posix.h kernel/api
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(POSIX_SIGNAL_O): kernel/api/posix/posix_signal.c kernel/api/posix/posix.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(SIGNAL_O): kernel/api/signal.c kernel/api/signal.h kernel/process.h kernel/thread.h kernel/signal.h kernel/api/posix/posix.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

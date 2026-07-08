@@ -25,6 +25,7 @@
  */
 
 #include <kernel/api/posix/posix.h>
+#include <kernel/api/signal.h>
 #include <kernel/console/terminal.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/process.h>
@@ -595,11 +596,7 @@ posix_get_fd(struct process *proc, int fd)
 int
 posix_signal_pending(struct process *proc)
 {
-	if (!proc) {
-		return (0);
-	}
-
-	return ((int)(proc->sigpending & ~proc->sigmask));
+	return (signal_pending(proc));
 }
 
 void

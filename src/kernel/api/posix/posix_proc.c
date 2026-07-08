@@ -1247,14 +1247,7 @@ posix_kill(u64 pid_u, u64 sig_u, u64 a3, u64 a4, u64 a5, u64 a6,
 		return (-POSIX_ESRCH);
 	}
 
-	if (sig == 9 || sig == 15) {
-		return ((s64)process_send_signal(pid, sig));
-	}
-
-	target->sigpending |= (1ULL << (sig - 1));
-	event_notify_signal(pid, sig);
-
-	return (0);
+	return ((s64)process_send_signal(pid, sig));
 }
 
 s64

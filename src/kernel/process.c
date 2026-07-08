@@ -75,6 +75,7 @@ $space %export process_get, process_create, process_create_kernel
 #include <mm/kmem.h>
 
 #include <kernel/api/posix/posix.h>
+#include <kernel/api/signal.h>
 
 process_t	process_table[MAX_PROCESSES];
 u32		next_pid = 1;
@@ -462,54 +463,9 @@ process_kill(u32 pid)
 int
 process_send_signal(u32 pid, int sig)
 {
-	process_t	*proc;
-	thread_t	*td;
-
 	if (sig == 0) {
 		return (0);
 	}
 
-	if (sig < 1 || sig > MAX_POSIX_SIGS) {
-		return (-1);
-	}
-
-	proc = process_get(pid);
-	if (!proc) {
-		return (-1);
-	}
-
-	event_notify_signal(pid, sig);
-
-	if (sig == SIGKILL) {
-		proc->exit_code = 128 + SIGKILL;
-		return (process_kill(pid));
-	}
-
-	proc->sigpending |= (1ULL << (sig - 1));
-
-	{
-		int	dfl;
-
-		dfl = posix_signal_default(sig);
-		if (dfl == SIG_DFL_TERMINATE &&
-		    (proc->personality != PERSONALITY_POSIX ||
-		    proc->sigaction[sig - 1].handler == 0)) {
-			proc->exit_code = 128 + sig;
-			return (process_kill(pid));
-		}
-	}
-
-	/*
-	 * Wake up any sleeping threads so the pending signal can be
-	 * delivered instead of waiting indefinitely for the next
-	 * syscall entry.
-	 */
-	for (td = proc->thread_list; td != NULL; td = td->next) {
-		if (td->used && td->state == PROC_STATE_SLEEPING) {
-			td->state = PROC_STATE_RUNNABLE;
-			td->wait_channel = NULL;
-		}
-	}
-
-	return (0);
+	return (signal_send(pid, sig));
 }
