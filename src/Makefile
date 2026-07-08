@@ -32,6 +32,7 @@ MUSL_CRT1 = $(MUSL_DIR)/lib/crt1.o
 YES_BIN = $(PORTS_DIR)/yes
 FETCH_BIN = $(PORTS_DIR)/fetch
 SHELL_BIN = $(PORTS_DIR)/sh
+SHMTEST_BIN = $(PORTS_DIR)/shmtest
 POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
 KBDTEST_BIN = $(PORTS_DIR)/kbdtest
 MUSL_TEST_BIN = $(PORTS_DIR)/musl_test
@@ -107,6 +108,7 @@ CLOSE_O = ../bin/close.o
 LSEEK_O = ../bin/lseek.o
 WAIT_O = ../bin/wait.o
 MMAP_O = ../bin/mmap.o
+SHM_O = ../bin/shm.o
 
 PIPE_O = ../bin/pipe.o
 CLONE_O = ../bin/clone.o
@@ -193,7 +195,7 @@ ET_CLOCKSOURCE_O = ../bin/et_clocksource.o
 CMOS_RTC_O = ../bin/cmos_rtc.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDIO_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(PS2_O) $(KEYBOARD_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
+      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(PS2_O) $(KEYBOARD_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(THREAD_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
@@ -301,6 +303,11 @@ $(SHELL_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/sh"
 	@$(MAKE) -C $(PORTS_DIR) sh LIBC_ENABLED=$(LIBC_ENABLED)
 
+.PHONY: $(SHMTEST_BIN)
+$(SHMTEST_BIN): $(LIBC_DEPS)
+	@echo "  MAKE    ports/shmtest"
+	@$(MAKE) -C $(PORTS_DIR) shmtest LIBC_ENABLED=$(LIBC_ENABLED)
+
 .PHONY: $(POSIX_HELLO_BIN)
 $(POSIX_HELLO_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/posix_hello"
@@ -323,7 +330,7 @@ $(MUSL_LIBC):
 $(MUSL_CRT1): $(MUSL_LIBC)
 	@true
 
-$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP)
+$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
 	@for m in $(MULTIBOOT_MODULES); do \
@@ -333,6 +340,7 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 			yes) src=$(YES_BIN);; \
 			fetch) src=$(FETCH_BIN);; \
 			sh) src=$(SHELL_BIN);; \
+			shmtest) src=$(SHMTEST_BIN);; \
 			posix_hello) src=$(POSIX_HELLO_BIN);; \
 			kbdtest) src=$(KBDTEST_BIN);; \
 			musl_test) src=$(MUSL_TEST_BIN);; \
@@ -515,7 +523,7 @@ $(VM_PAGE_O): kernel/mm/vm/vm_page.c kernel/mm/vm/vm_page.h kernel/mm/kmem.h ker
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(VM_MAP_O): kernel/mm/vm/vm_map.c kernel/mm/vm/vm_map.h kernel/mm/vm/vm_object.h kernel/mm/vm/vm_pager.h kernel/mm/vm/vm_page.h kernel/mm/vm/pmap.h kernel/process.h kernel/api/api.h
+$(VM_MAP_O): kernel/mm/vm/vm_map.c kernel/mm/vm/vm_map.h kernel/mm/vm/vm_object.h kernel/mm/vm/vm_pager.h kernel/mm/vm/vm_page.h kernel/mm/vm/pmap.h kernel/process.h kernel/api/api.h kernel/api/shm.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -535,7 +543,7 @@ $(OPEN_O): kernel/api/open.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(SYSCALL_O): kernel/syscall.c
+$(SYSCALL_O): kernel/syscall.c kernel/api/shm.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -556,6 +564,10 @@ $(WAIT_O): kernel/api/wait.c kernel/mm/vm/vm_map.h kernel/mm/vm/pmap.h
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(MMAP_O): kernel/api/mmap.c kernel/api/api.h kernel/mm/vm/vm_map.h kernel/mm/vm/vm_object.h kernel/mm/vm/vm_page.h kernel/drivers/video/drm/gem.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(SHM_O): kernel/api/shm.c kernel/api/shm.h kernel/api/api.h kernel/mm/vm/vm_map.h kernel/mm/vm/vm_object.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -827,7 +839,7 @@ $(POSIX_FS_O): kernel/api/posix/posix_fs.c kernel/api/posix/posix.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(POSIX_MEM_O): kernel/api/posix/posix_mem.c kernel/api/posix/posix.h
+$(POSIX_MEM_O): kernel/api/posix/posix_mem.c kernel/api/posix/posix.h kernel/api/shm.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

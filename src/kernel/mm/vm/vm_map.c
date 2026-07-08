@@ -60,6 +60,7 @@ $space %export vm_map_fault, vm_cow_fault
 #include <mm/vm/vm_pager.h>
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_page.h>
+#include <kernel/api/shm.h>
 #include <mm/kmem.h>
 #include <mlibc/mlibc.h>
 
@@ -198,6 +199,10 @@ vm_map_remove(process_t *proc, u64 addr)
 		if (addr >= (*pp)->start && addr < (*pp)->end) {
 			v = *pp;
 			*pp = v->next;
+			if (v->object != NULL && v->object->type == VM_OBJ_SHM &&
+			    v->gem_handle != 0) {
+				shm_detach((int)v->gem_handle);
+			}
 			vm_object_unref(v->object);
 			kmem_free(v);
 			return (0);
@@ -241,6 +246,10 @@ vm_map_free_all(process_t *proc)
 			}
 			pmap_remove(va);
 		}
+		if (v->object != NULL && v->object->type == VM_OBJ_SHM &&
+		    v->gem_handle != 0) {
+			shm_detach((int)v->gem_handle);
+		}
 		vm_object_unref(v->object);
 		kmem_free(v);
 		v = next;
@@ -275,9 +284,13 @@ vm_map_fork(process_t *parent, process_t *child)
 		child_vma->object_offset = v->object_offset;
 
 		if (v->object != NULL) {
-			if (v->flags & API_MAP_GEM) {
+			if (v->flags & (API_MAP_GEM | API_MAP_SHARED)) {
 				child_vma->object = v->object;
 				vm_object_ref(v->object);
+				if (v->object->type == VM_OBJ_SHM &&
+				    v->gem_handle != 0) {
+					shm_attach((int)v->gem_handle);
+				}
 			} else {
 				child_shadow =
 				    vm_object_create_shadow(

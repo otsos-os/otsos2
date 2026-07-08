@@ -27,6 +27,7 @@
 #include <kernel/gdt.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/api/api.h>
+#include <kernel/api/shm.h>
 #include <kernel/api/posix/posix.h>
 #include <kernel/event/event.h>
 #include <kernel/process.h>
@@ -172,6 +173,15 @@ void syscall_handler(registers_t *regs) {
     break;
   case CALL_MEM_UNMAP:
     regs->rax = (u64)api_mem_unmap((void *)arg1, arg2);
+    break;
+  case CALL_SHM_GET:
+    regs->rax = (u64)api_shm_get((struct api_shmget_args *)arg1);
+    break;
+  case CALL_SHM_MAP:
+    regs->rax = (u64)api_shm_map((struct api_shmmap_args *)arg1);
+    break;
+  case CALL_SHM_CTL:
+    regs->rax = (u64)api_shm_ctl((int)arg1, (int)arg2, (void *)arg3);
     break;
   case CALL_PROC_CLONE:
     regs->rax = (u64)api_proc_clone(arg1, arg2, arg3, regs);

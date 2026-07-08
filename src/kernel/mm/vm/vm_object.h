@@ -62,6 +62,7 @@ $space %export vm_object_get_page, vm_object_init
 #define VM_OBJ_FILE		0x02
 #define VM_OBJ_GEM		0x04
 #define VM_OBJ_SHADOW		0x08
+#define VM_OBJ_SHM		0x10
 
 struct vm_pager;
 

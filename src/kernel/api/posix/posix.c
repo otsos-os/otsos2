@@ -83,6 +83,14 @@ s64	posix_pipe(u64 pipefd, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	    registers_t *regs);
 s64	posix_pipe2(u64 pipefd, u64 flags, u64 a3, u64 a4, u64 a5,
 	    u64 a6, registers_t *regs);
+s64	posix_shmget(u64 key, u64 size, u64 shmflg, u64 a4, u64 a5,
+	    u64 a6, registers_t *regs);
+s64	posix_shmat(u64 shmid, u64 shmaddr, u64 shmflg, u64 a4, u64 a5,
+	    u64 a6, registers_t *regs);
+s64	posix_shmdt(u64 shmaddr, u64 a2, u64 a3, u64 a4, u64 a5,
+	    u64 a6, registers_t *regs);
+s64	posix_shmctl(u64 shmid, u64 cmd, u64 buf, u64 a4, u64 a5,
+	    u64 a6, registers_t *regs);
 s64	posix_dup(u64 fd, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	    registers_t *regs);
 s64	posix_dup2(u64 oldfd, u64 newfd, u64 a3, u64 a4, u64 a5, u64 a6,
@@ -253,6 +261,18 @@ posix_syscall_handler(registers_t *regs)
 		break;
 	case SYS_pipe2:
 		ret = posix_pipe2(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_shmget:
+		ret = posix_shmget(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_shmat:
+		ret = posix_shmat(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_shmctl:
+		ret = posix_shmctl(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_shmdt:
+		ret = posix_shmdt(a1, a2, a3, a4, a5, a6, regs);
 		break;
 	case SYS_dup:
 		ret = posix_dup(a1, a2, a3, a4, a5, a6, regs);

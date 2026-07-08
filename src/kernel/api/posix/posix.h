@@ -103,6 +103,13 @@ $space %export posix_signal_pending, posix_signal_deliver
 #define POSIX_EPERM		1
 #define POSIX_ENOENT		2
 
+#define POSIX_IPC_PRIVATE	0
+#define POSIX_IPC_RMID		0
+#define POSIX_IPC_SET		1
+#define POSIX_IPC_STAT		2
+#define POSIX_IPC_CREAT	01000
+#define POSIX_IPC_EXCL		02000
+
 #define MAX_POSIX_FDS		256
 #define MAX_POSIX_SIGS		64
 #define POSIX_SIG_BLOCK		0
@@ -167,6 +174,10 @@ $space %export posix_signal_pending, posix_signal_deliver
 #define POSIX_PROT_READ		1
 #define POSIX_PROT_WRITE	2
 #define POSIX_PROT_EXEC		4
+#define POSIX_SHM_RDONLY	010000
+#define POSIX_SHM_RND		020000
+#define POSIX_SHM_REMAP	040000
+#define POSIX_SHM_EXEC		0100000
 
 #define SYS_read		0
 #define SYS_write		1
@@ -192,6 +203,9 @@ $space %export posix_signal_pending, posix_signal_deliver
 #define SYS_pwrite64		18
 #define SYS_access		21
 #define SYS_pipe		22
+#define SYS_shmget		29
+#define SYS_shmat		30
+#define SYS_shmctl		31
 #define SYS_dup			32
 #define SYS_dup2		33
 #define SYS_nanosleep		35
@@ -202,6 +216,7 @@ $space %export posix_signal_pending, posix_signal_deliver
 #define SYS_wait4		61
 #define SYS_kill		62
 #define SYS_uname		63
+#define SYS_shmdt		67
 #define SYS_time		201
 #define SYS_gettimeofday	96
 #define SYS_clock_gettime	228
@@ -354,4 +369,3 @@ s64	posix_getpgid(u64 pid_u, u64 a2, u64 a3, u64 a4, u64 a5,
     u64 a6, registers_t *regs);
 
 #endif
-

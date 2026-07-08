@@ -70,6 +70,7 @@ typedef struct {
 #define API_MAP_WRITE 0x2
 #define API_MAP_EXEC 0x4
 
+#define API_MAP_SHARED  0x01
 #define API_MAP_PRIVATE 0x02
 #define API_MAP_FIXED   0x10
 #define API_MAP_ANON    0x20

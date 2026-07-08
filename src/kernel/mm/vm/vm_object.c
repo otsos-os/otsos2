@@ -87,6 +87,7 @@ vm_object_create(u32 type, u64 size, void *backing)
 
 	switch (type) {
 	case VM_OBJ_ANON:
+	case VM_OBJ_SHM:
 		obj->pager = vm_pager_create_default(size);
 		break;
 	case VM_OBJ_FILE:

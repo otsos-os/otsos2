@@ -18,6 +18,9 @@ FETCH_OBJS = fetch.o
 SHELL_BIN = sh
 SHELL_OBJS = shell.o
 
+SHMTEST_BIN = shmtest
+SHMTEST_OBJS = shmtest.o
+
 POSIX_HELLO_BIN = posix_hello
 POSIX_HELLO_OBJS = posix_hello.o
 
@@ -32,9 +35,9 @@ MUSL_TEST_OBJS = musl_test.o
 LIBC_ENABLED ?= true
 
 ifeq ($(LIBC_ENABLED),true)
-ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(MUSL_TEST_BIN)
+ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(MUSL_TEST_BIN)
 else
-ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN)
+ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN)
 endif
 
 all: $(ALL_TARGETS)
@@ -54,6 +57,12 @@ $(FETCH_BIN): $(FETCH_OBJS)
 $(SHELL_BIN): $(SHELL_OBJS)
 	@echo "  LLD      $@"
 	@$(LD) $(LDFLAGS) $(SHELL_OBJS) -o $@
+	@echo "  SIZE    $@"
+	@$(SIZE) $@
+
+$(SHMTEST_BIN): $(SHMTEST_OBJS)
+	@echo "  LLD      $@"
+	@$(LD) $(LDFLAGS) $(SHMTEST_OBJS) -o $@
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
@@ -93,6 +102,6 @@ musl_test.o: musl_test.c
 	    -I$(MUSL_DIR)/obj/include -I$(MUSL_DIR)/include -c $< -o $@
 
 clean:
-	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN) $(POSIX_HELLO_OBJS) $(POSIX_HELLO_BIN) $(KBDTEST_OBJS) $(KBDTEST_BIN) $(MUSL_TEST_OBJS) $(MUSL_TEST_BIN)
+	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN) $(SHMTEST_OBJS) $(SHMTEST_BIN) $(POSIX_HELLO_OBJS) $(POSIX_HELLO_BIN) $(KBDTEST_OBJS) $(KBDTEST_BIN) $(MUSL_TEST_OBJS) $(MUSL_TEST_BIN)
 
 .PHONY: all clean

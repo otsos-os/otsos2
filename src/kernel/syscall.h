@@ -62,6 +62,9 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_FS_LISTDIR		0x208
 #define	CALL_MEM_MAP		0x300	
 #define	CALL_MEM_UNMAP		0x301
+#define	CALL_SHM_GET		0x302
+#define	CALL_SHM_MAP		0x303
+#define	CALL_SHM_CTL		0x304
 #define	CALL_PROC_CLONE		0x400
 #define	CALL_PROC_COPY		0x401
 #define	CALL_PROC_SPAWN		0x402

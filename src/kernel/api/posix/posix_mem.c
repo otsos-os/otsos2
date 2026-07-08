@@ -26,6 +26,7 @@
 
 #include <kernel/api/posix/posix.h>
 #include <kernel/api/api.h>
+#include <kernel/api/shm.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/video/drm/gem.h>
 #include <kernel/process.h>
@@ -59,6 +60,59 @@ page_flags_for_prot(u64 prot)
 		flags |= PTE_NX;
 	}
 	return (flags);
+}
+
+struct posix_ipc_perm {
+	s32		key;
+	u32		uid;
+	u32		gid;
+	u32		cuid;
+	u32		cgid;
+	u32		mode;
+	s32		seq;
+	s64		pad1;
+	s64		pad2;
+};
+
+struct posix_shmid_ds {
+	struct posix_ipc_perm	shm_perm;
+	u64			shm_segsz;
+	s64			shm_atime;
+	s64			shm_dtime;
+	s64			shm_ctime;
+	s32			shm_cpid;
+	s32			shm_lpid;
+	u64			shm_nattch;
+	u64			pad1;
+	u64			pad2;
+};
+
+static s64
+posix_errno_from_api(int error)
+{
+	if (error > 0) {
+		error = -error;
+	}
+
+	switch (-error) {
+	case API_ERR_NOT_FOUND:
+		return (-POSIX_ENOENT);
+	case API_ERR_EXISTS:
+		return (-POSIX_EEXIST);
+	case API_ERR_NO_MEMORY:
+	case API_ERR_NOMEM:
+		return (-POSIX_ENOMEM);
+	case API_ERR_BAD_ADDR:
+		return (-POSIX_EFAULT);
+	case API_ERR_PERM:
+	case API_ERR_ACCESS:
+		return (-POSIX_EACCES);
+	case API_ERR_BAD_VALUE:
+	case API_ERR_INVAL:
+		return (-POSIX_EINVAL);
+	default:
+		return (-POSIX_EINVAL);
+	}
 }
 
 s64
@@ -276,6 +330,140 @@ posix_mprotect(u64 addr_u, u64 length, u64 prot, u64 a4, u64 a5,
 	if (prot & POSIX_PROT_WRITE) vma->prot |= API_MAP_WRITE;
 	if (prot & POSIX_PROT_EXEC) vma->prot |= API_MAP_EXEC;
 
+	return (0);
+}
+
+s64
+posix_shmget(u64 key, u64 size, u64 shmflg, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+	shm_segment_t	*seg;
+	int		error;
+
+	(void)a4; (void)a5; (void)a6; (void)regs;
+
+	seg = shm_get_or_create(key, size, (int)shmflg, &error);
+	if (seg == NULL) {
+		return (posix_errno_from_api(error));
+	}
+
+	error = seg->id;
+	shm_put(seg);
+	return ((s64)error);
+}
+
+s64
+posix_shmat(u64 shmid, u64 shmaddr, u64 shmflg, u64 a4, u64 a5,
+    u64 a6, registers_t *regs)
+{
+	shm_segment_t	*seg;
+	u64		addr;
+	u32		prot;
+	u32		flags;
+
+	(void)a4; (void)a5; (void)a6; (void)regs;
+
+	seg = shm_get((int)shmid);
+	if (seg == NULL) {
+		return (-POSIX_EINVAL);
+	}
+
+	addr = shmaddr;
+	if ((shmflg & POSIX_SHM_RND) && addr != 0) {
+		addr &= ~((u64)PAGE_SIZE - 1);
+	}
+
+	prot = API_MAP_READ;
+	if (!(shmflg & POSIX_SHM_RDONLY)) {
+		prot |= API_MAP_WRITE;
+	}
+	if (shmflg & POSIX_SHM_EXEC) {
+		prot |= API_MAP_EXEC;
+	}
+
+	flags = API_MAP_SHARED;
+	if (addr != 0) {
+		flags |= API_MAP_FIXED;
+	}
+
+	addr = shm_map(seg, addr, seg->size, prot, flags);
+	shm_put(seg);
+	if ((s64)addr < 0) {
+		return (posix_errno_from_api((int)addr));
+	}
+	return ((s64)addr);
+}
+
+s64
+posix_shmdt(u64 shmaddr, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+	struct process	*proc;
+	vma_t		*vma;
+
+	(void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
+
+	proc = process_current();
+	if (proc == NULL || shmaddr == 0) {
+		return (-POSIX_EINVAL);
+	}
+	if ((shmaddr & (PAGE_SIZE - 1)) != 0) {
+		return (-POSIX_EINVAL);
+	}
+
+	vma = vm_map_lookup(proc, shmaddr);
+	if (vma == NULL || !(vma->flags & API_MAP_SHARED) ||
+	    vma->start != shmaddr) {
+		return (-POSIX_EINVAL);
+	}
+
+	return (posix_munmap(shmaddr, vma->end - vma->start, 0, 0, 0, 0,
+	    regs));
+}
+
+s64
+posix_shmctl(u64 shmid, u64 cmd, u64 buf, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+	struct posix_shmid_ds	ds;
+	struct api_shminfo_args	info;
+	int			ret;
+
+	(void)a4; (void)a5; (void)a6; (void)regs;
+
+	if ((int)cmd == POSIX_IPC_RMID) {
+		ret = shm_remove((int)shmid);
+		if (ret != 0) {
+			return (posix_errno_from_api(ret));
+		}
+		return (0);
+	}
+
+	if ((int)cmd == POSIX_IPC_SET) {
+		return (-POSIX_EPERM);
+	}
+	if ((int)cmd != POSIX_IPC_STAT) {
+		return (-POSIX_EINVAL);
+	}
+	if (!is_user_address((void *)buf, sizeof(ds))) {
+		return (-POSIX_EFAULT);
+	}
+
+	ret = shm_info((int)shmid, &info);
+	if (ret != 0) {
+		return (posix_errno_from_api(ret));
+	}
+
+	memset(&ds, 0, sizeof(ds));
+	ds.shm_perm.key = (s32)info.key;
+	ds.shm_perm.uid = 0;
+	ds.shm_perm.gid = 0;
+	ds.shm_perm.cuid = 0;
+	ds.shm_perm.cgid = 0;
+	ds.shm_perm.mode = info.mode;
+	ds.shm_segsz = info.size;
+	ds.shm_nattch = info.refs;
+	memcpy((void *)buf, &ds, sizeof(ds));
 	return (0);
 }
 
