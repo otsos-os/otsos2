@@ -56,6 +56,8 @@ $space %export scheduler_tick
 #include <kernel/scheduler.h>
 #include <kernel/smp/smp.h>
 #include <kernel/thread.h>
+#include <kernel/api/posix/posix.h>
+#include <mm/vm/vm_map.h>
 static int	sched_strict_process_separation;
 static int	sched_smart_migration = 1;
 static int	sched_migration_threshold = 2;
@@ -267,6 +269,19 @@ scheduler_reap_orphans(thread_t *skip)
 		proc = td->proc;
 		if (proc->ppid != 0 && process_get(proc->ppid) != NULL) {
 			continue;
+		}
+		api_release_handles(proc);
+		posix_cleanup_process(proc);
+		if (proc->owns_address_space && proc->cr3 != 0) {
+			u64	old_cr3;
+
+			old_cr3 = pmap_get_cr3();
+			pmap_load(proc->cr3);
+			vm_map_free_all(proc);
+			pmap_load(old_cr3);
+			pmap_destroy(proc->cr3);
+			proc->cr3 = 0;
+			proc->owns_address_space = 0;
 		}
 		thread_destroy(td);
 		memset(proc, 0, sizeof(process_t));

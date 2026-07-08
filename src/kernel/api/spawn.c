@@ -33,6 +33,7 @@
 #include <kernel/crypto/rng/rng.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
+#include <kernel/console/terminal.h>
 #include <kernel/process.h>
 #include <kernel/scheduler.h>
 #include <kernel/thread.h>
@@ -588,6 +589,14 @@ int api_proc_spawn(const char *path, const char *const *argv,
 
   child->main_thread = td;
   child->cur_thread = td;
+  if (parent->controlling_tty >= 0) {
+    child->controlling_tty = parent->controlling_tty;
+    child->sid = parent->sid;
+    child->pgid = child->pid;
+    child->is_session_leader = 0;
+    terminal_set_pgrp(parent->controlling_tty, child->pgid);
+  }
+  terminal_set_pgrp(terminal_get_active(), child->pgid);
 
   printk("[SPAWN] Created '%s' (PID %d) from '%s'\n", child->name,
               child->pid, kpath);

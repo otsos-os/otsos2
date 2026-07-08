@@ -27,6 +27,7 @@
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_map.h>
 #include <kernel/event/event.h>
+#include <kernel/console/terminal.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
@@ -63,6 +64,10 @@ int api_proc_wait(int *status) {
       if (child_td->running_cpu >= 0) {
         int pid = (int)child->pid;
 
+        if (current->controlling_tty >= 0) {
+          terminal_set_pgrp(current->controlling_tty, current->pgid);
+        }
+        terminal_set_pgrp(terminal_get_active(), current->pgid);
         child->ppid = 0;
         return pid;
       }
@@ -83,6 +88,10 @@ int api_proc_wait(int *status) {
 
       int pid = (int)child->pid;
       memset(child, 0, sizeof(process_t));
+      if (current->controlling_tty >= 0) {
+        terminal_set_pgrp(current->controlling_tty, current->pgid);
+      }
+      terminal_set_pgrp(terminal_get_active(), current->pgid);
       return pid;
     }
 

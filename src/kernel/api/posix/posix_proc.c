@@ -759,6 +759,12 @@ posix_wait4(u64 pid_u, u64 status_u, u64 options, u64 rusage_u,
 				int	reaped_pid;
 
 				reaped_pid = (int)child->pid;
+				if (current->controlling_tty >= 0) {
+					terminal_set_pgrp(current->controlling_tty,
+					    current->pgid);
+				}
+				terminal_set_pgrp(terminal_get_active(),
+				    current->pgid);
 				child->ppid = 0;
 				return ((s64)reaped_pid);
 			}
@@ -782,6 +788,12 @@ posix_wait4(u64 pid_u, u64 status_u, u64 options, u64 rusage_u,
 				int	reaped_pid;
 				reaped_pid = (int)child->pid;
 				memset(child, 0, sizeof(process_t));
+				if (current->controlling_tty >= 0) {
+					terminal_set_pgrp(current->controlling_tty,
+					    current->pgid);
+				}
+				terminal_set_pgrp(terminal_get_active(),
+				    current->pgid);
 				return ((s64)reaped_pid);
 			}
 		}

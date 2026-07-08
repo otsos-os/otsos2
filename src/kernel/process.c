@@ -376,6 +376,8 @@ int
 process_kill(u32 pid)
 {
 	process_t	*proc;
+	thread_t	*td;
+	int		running;
 
 	if (pid == 1) {
 		return (-1);
@@ -392,24 +394,37 @@ process_kill(u32 pid)
 	}
 
 	if (proc == process_current()) {
-		thread_t	*td;
-
-		thread_kill_all(proc);
-		td = thread_current();
-		if (td) {
-			td->state = PROC_STATE_ZOMBIE;
-			td->running_cpu = smp_cpu_index();
-		}
+		process_exit(proc->exit_code);
+		return (0);
 	} else {
 		thread_kill_all(proc);
 		if (proc->main_thread) {
 			proc->main_thread->state = PROC_STATE_ZOMBIE;
-			proc->main_thread->running_cpu = -1;
 		}
 		if (proc->cur_thread && proc->cur_thread != proc->main_thread) {
 			proc->cur_thread->state = PROC_STATE_ZOMBIE;
-			proc->cur_thread->running_cpu = -1;
 		}
+	}
+
+	running = 0;
+	for (td = proc->thread_list; td != NULL; td = td->next) {
+		if (td->running_cpu >= 0) {
+			running = 1;
+			break;
+		}
+	}
+	if (running) {
+		event_notify_proc_exit(proc->pid, proc->exit_code);
+		if (proc->ppid > 0) {
+			process_t	*parent;
+
+			parent = process_get(proc->ppid);
+			if (parent) {
+				proc_wakeup((void *)parent);
+			}
+		}
+		terminal_drop_pgrp(proc->pgid);
+		return (0);
 	}
 
 	api_release_handles(proc);
@@ -472,11 +487,13 @@ process_send_signal(u32 pid, int sig)
 
 	proc->sigpending |= (1ULL << (sig - 1));
 
-	if (proc->personality != PERSONALITY_POSIX) {
+	{
 		int	dfl;
 
 		dfl = posix_signal_default(sig);
-		if (dfl == SIG_DFL_TERMINATE) {
+		if (dfl == SIG_DFL_TERMINATE &&
+		    (proc->personality != PERSONALITY_POSIX ||
+		    proc->sigaction[sig - 1].handler == 0)) {
 			proc->exit_code = 128 + sig;
 			return (process_kill(pid));
 		}
