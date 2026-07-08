@@ -38,6 +38,7 @@ $define %type tss_t as struct with task state segment
 $define %type thread_t as struct with per-thread CPU context and state
 
 $define %func smp_init as procedure with args void
+$define %func smp_init_single_cpu as procedure with args void
 $define %func smp_init_bsp as procedure with args void
 $define %func smp_start_ap as procedure with args u8, u8
 $define %func smp_lock as procedure with args void
@@ -69,7 +70,7 @@ $space %internal smp_init_bsp, smp_start_ap, smp_cpu_index_from_lapic
 $space %internal smp_ap_count_cb, smp_ap_list_cb
 $space %internal smp_send_init, smp_send_sipi, smp_wait_us
 $space %internal smp_trampoline_setup
-$space %export smp_init, smp_lock, smp_unlock, smp_lock_held
+$space %export smp_init, smp_init_single_cpu, smp_lock, smp_unlock, smp_lock_held
 $space %export smp_cpu_id, smp_cpu_index, smp_cpu_count_var
 $space %export smp_tss_current, smp_tss_register
 $space %export smp_current_thread, smp_set_current_thread
@@ -135,6 +136,9 @@ smp_cpu_index_from_lapic(u8 lapic_id)
 u8
 smp_cpu_id(void)
 {
+	if (!lapic_is_enabled()) {
+		return (smp_bsp_lapic_id);
+	}
 	return (lapic_get_id());
 }
 
@@ -159,6 +163,12 @@ tss_t *
 smp_tss_current(void)
 {
 	tss_t	*tss;
+	int	idx;
+
+	idx = smp_cpu_index();
+	if (idx >= 0 && idx < SMP_MAX_CPUS && smp_cpu_map[idx].tss) {
+		return (smp_cpu_map[idx].tss);
+	}
 	tss = smp_tss_by_lapic[smp_cpu_id()];
 	if (tss == NULL) {
 		panic("[SMP] no TSS for current CPU\n");
@@ -170,6 +180,31 @@ void
 smp_tss_register(u8 lapic_id, tss_t *tss)
 {
 	smp_tss_by_lapic[lapic_id] = tss;
+}
+
+void
+smp_init_single_cpu(void)
+{
+	if (smp_initialized) {
+		return;
+	}
+	smp_initialized = 1;
+	smp_bkl.locked = 0;
+	smp_bkl.owner = 0;
+	memset(smp_cpu_map, 0, sizeof(smp_cpu_map));
+	memset(smp_tss_by_lapic, 0, sizeof(smp_tss_by_lapic));
+	memset(smp_ap_ready, 0, sizeof(smp_ap_ready));
+	smp_bsp_lapic_id = 0;
+	smp_ap_cpu_index = 0;
+	smp_cpu_count_var = 1;
+	smp_cpu_map[0].lapic_id = 0;
+	smp_cpu_map[0].present = 1;
+	smp_cpu_map[0].cpu_index = 0;
+	smp_cpu_map[0].current_thread = NULL;
+	smp_cpu_map[0].tss = gdt_get_tss();
+	smp_tss_register(0, smp_cpu_map[0].tss);
+	smp_ap_ready[0] = 1;
+	printk("[SMP] single CPU fallback initialized\n");
 }
 
 thread_t *
@@ -440,7 +475,7 @@ smp_init_bsp(void)
 	smp_cpu_map[0].present = 1;
 	smp_cpu_map[0].cpu_index = 0;
 	smp_cpu_map[0].current_thread = NULL;
-	smp_cpu_map[0].tss = NULL;
+	smp_cpu_map[0].tss = gdt_get_tss();
 	smp_tss_register(bsp_id, gdt_get_tss());
 
 	ap_count = 0;
@@ -474,10 +509,14 @@ smp_init(void)
 
 	if (!acpi_is_initialized()) {
 		printk("[SMP] ACPI not initialized, SMP disabled\n");
+		smp_initialized = 0;
+		smp_init_single_cpu();
 		return;
 	}
 	if (!lapic_is_enabled()) {
 		printk("[SMP] LAPIC not init SMP disabled\n");
+		smp_initialized = 0;
+		smp_init_single_cpu();
 		return;
 	}
 

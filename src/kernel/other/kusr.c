@@ -191,9 +191,5 @@ void kusr_init(void) {
 		return;
 	}
 
-	/* TESTING: auto-authenticate to allow feature testing without
-	 * interactive password setup.  Revert before release. */
-	g_kusr_authenticated = 1;
-	printk("[KUSR] TEST MODE: auto-authenticated\n");
-	return;
+	kusr_first_boot_setup();
 }

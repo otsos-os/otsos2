@@ -510,6 +510,8 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 		if (!disable_apic) {
 			ioapic_init();
 			smp_init();
+		} else {
+			smp_init_single_cpu();
 		}
 
 		clear_scr();
