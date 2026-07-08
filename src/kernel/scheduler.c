@@ -34,13 +34,16 @@ $define %type process_t as struct with process control block
 $define %type registers_t as struct with CPU register snapshot
 
 $define %func pick_next_thread as function with args thread_t *
+$define %func pick_any_runnable_thread as function with args thread_t *
+$define %func scheduler_reap_orphans as procedure with args thread_t *
 $define %func scheduler_tick as procedure with args registers_t *
 
 */
 
 /* !SPACE!
 
-$space %internal pick_next_thread
+$space %internal pick_next_thread, pick_any_runnable_thread
+$space %internal scheduler_reap_orphans
 $space %export scheduler_tick
 
 */
@@ -198,6 +201,60 @@ pick_next_thread(thread_t *current)
 	return (current);
 }
 
+static thread_t *
+pick_any_runnable_thread(thread_t *current)
+{
+	thread_t	*cand;
+	int	start, i, idx, cpu;
+
+	start = 0;
+	cpu = smp_cpu_index();
+	if (current) {
+		start = (int)(current - thread_table) + 1;
+	}
+
+	for (i = 0; i < MAX_THREADS; i++) {
+		idx = (start + i) % MAX_THREADS;
+		cand = &thread_table[idx];
+		if (!cand->used || cand->state != PROC_STATE_RUNNABLE) {
+			continue;
+		}
+		if (cand->running_cpu >= 0 && cand->running_cpu != cpu) {
+			continue;
+		}
+		return (cand);
+	}
+
+	return (current);
+}
+
+static void
+scheduler_reap_orphans(thread_t *skip)
+{
+	process_t	*proc;
+	thread_t	*td;
+	int		i;
+
+	if (!sched_zkill) {
+		return;
+	}
+
+	for (i = 0; i < MAX_THREADS; i++) {
+		td = &thread_table[i];
+		if (!td->used || td == skip ||
+		    td->state != PROC_STATE_ZOMBIE ||
+		    td->running_cpu >= 0 || td->proc == NULL) {
+			continue;
+		}
+		proc = td->proc;
+		if (proc->ppid != 0 && process_get(proc->ppid) != NULL) {
+			continue;
+		}
+		thread_destroy(td);
+		memset(proc, 0, sizeof(process_t));
+	}
+}
+
 void
 scheduler_tick(registers_t *regs)
 {
@@ -272,15 +329,7 @@ scheduler_tick(registers_t *regs)
 			}
 			return;
 		}
-		if (sched_zkill && current->proc &&
-		    current->proc->exit_code != 0) {
-			process_t *zp = current->proc;
-			thread_destroy(current);
-			memset(zp, 0, sizeof(process_t));
-			cur_proc = NULL;
-		} else {
-			thread_save_context(current, regs);
-		}
+		thread_save_context(current, regs);
 		thread_set_current(next);
 		if (locked_here) {
 			smp_unlock();
@@ -299,6 +348,7 @@ scheduler_tick(registers_t *regs)
 	if (locked_here) {
 		smp_lock();
 	}
+	scheduler_reap_orphans(current);
 	thread_save_context(current, regs);
 
 	if (current->state == PROC_STATE_RUNNING) {
@@ -310,10 +360,20 @@ scheduler_tick(registers_t *regs)
 
 	next = pick_next_thread(current);
 	if (!next || next == current) {
-		if (current->state == PROC_STATE_ZOMBIE)
-			current->state = PROC_STATE_SLEEPING;
-		else
-			current->state = PROC_STATE_RUNNING;
+		if (current->state == PROC_STATE_ZOMBIE) {
+			next = pick_any_runnable_thread(current);
+		}
+	}
+
+	if (!next || next == current) {
+		if (current->state == PROC_STATE_ZOMBIE) {
+			current->running_cpu = smp_cpu_index();
+			if (locked_here) {
+				smp_unlock();
+			}
+			return;
+		}
+		current->state = PROC_STATE_RUNNING;
 		current->running_cpu = smp_cpu_index();
 		if (locked_here) {
 			smp_unlock();
@@ -321,13 +381,6 @@ scheduler_tick(registers_t *regs)
 		return;
 	}
 
-	if (sched_zkill && current->state == PROC_STATE_ZOMBIE &&
-	    current->proc) {
-		process_t *zp = current->proc;
-		thread_destroy(current);
-		memset(zp, 0, sizeof(process_t));
-		cur_proc = NULL;
-	}
 	thread_set_current(next);
 	if (locked_here) {
 		smp_unlock();

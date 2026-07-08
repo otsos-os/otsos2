@@ -755,6 +755,14 @@ posix_wait4(u64 pid_u, u64 status_u, u64 options, u64 rusage_u,
 				*status = child->exit_code;
 			}
 
+			if (child_td->running_cpu >= 0) {
+				int	reaped_pid;
+
+				reaped_pid = (int)child->pid;
+				child->ppid = 0;
+				return ((s64)reaped_pid);
+			}
+
 			if (child->owns_address_space && child->cr3) {
 				u64	old_cr3;
 				old_cr3 = pmap_get_cr3();

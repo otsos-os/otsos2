@@ -60,6 +60,13 @@ int api_proc_wait(int *status) {
         *status = child->exit_code;
       }
 
+      if (child_td->running_cpu >= 0) {
+        int pid = (int)child->pid;
+
+        child->ppid = 0;
+        return pid;
+      }
+
       if (child->owns_address_space && child->cr3) {
         u64 old_cr3 = pmap_get_cr3();
         pmap_load(child->cr3);
