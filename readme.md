@@ -8,7 +8,7 @@
 
 Simple [amd64](https://www.amd.com/content/dam/amd/en/documents/processor-tech-docs/programmer-references/24593.pdf) operating system writen in **C/GAS/Zig**
 
-It have **own kernel** writen from scratch that seems like FreeBSD-like
+It have **own kernel** writen from scratch that inspired by FreeBSD
 
 it has its own DOD-ish syscall/API surface: `termWrite`, `termRead`,
 `dataOpen`, `dataClose`, `procSpawn`, `procKill`, `drmCall`, and more.
