@@ -22,3 +22,6 @@ there are only 2 test lines: my pc (ASUS TUF Gaming FX706LI-H7010) and qemu.
 
 ### Disclaimer
 > THis OS is **govno code** and licensed by [BSD 2 clause](https://opensource.org/license/bsd-2-clause)
+
+### Where all possibilities in readme?
+There is not, i dont want to make readme full of every detail describing what's in here. If someone is interested in something, they should read the code.
