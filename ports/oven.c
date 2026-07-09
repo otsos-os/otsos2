@@ -909,7 +909,10 @@ static void
 draw_status(void)
 {
 	char	buf[256];
+	int	cols;
+	int	len;
 
+	cols = screen_cols > 1 ? screen_cols - 1 : screen_cols;
 	move_to(screen_rows - 1, 1);
 	print("\033[36m");
 	buf[0] = '\0';
@@ -921,17 +924,25 @@ draw_status(void)
 	append_text(buf, sizeof(buf), ":");
 	append_int(buf, sizeof(buf), cx + 1);
 	append_text(buf, sizeof(buf), select_all ? " | ALL" : "");
-	term_write(buf, strlen_s(buf));
-	if ((int)strlen_s(buf) < screen_cols) {
-		write_repeat(' ', screen_cols - (int)strlen_s(buf));
+	len = strlen_s(buf);
+	if (len > cols) {
+		len = cols;
+	}
+	term_write(buf, (u32)len);
+	if (len < cols) {
+		write_repeat(' ', cols - len);
 	}
 	print("\033[0m");
 
 	move_to(screen_rows, 1);
 	print("\033[33m");
-	term_write(status_msg, strlen_s(status_msg));
-	if ((int)strlen_s(status_msg) < screen_cols) {
-		write_repeat(' ', screen_cols - (int)strlen_s(status_msg));
+	len = strlen_s(status_msg);
+	if (len > cols) {
+		len = cols;
+	}
+	term_write(status_msg, (u32)len);
+	if (len < cols) {
+		write_repeat(' ', cols - len);
 	}
 	print("\033[0m");
 }
@@ -939,18 +950,22 @@ draw_status(void)
 static void
 draw_rows(void)
 {
+	char	buf[LINE_CAP];
 	int	view_rows;
 	int	y;
 	int	file_y;
 	int	x;
+	int	n;
 	int	len;
+	int	cols;
 	char	c;
 
 	view_rows = screen_rows - 2;
+	cols = screen_cols > 1 ? screen_cols - 1 : screen_cols;
 	for (y = 0; y < view_rows; y++) {
 		file_y = rowoff + y;
 		move_to(y + 1, 1);
-		print("\033[K");
+		print("\033[0m\033[K");
 		if (file_y >= line_count) {
 			print("\033[90m~\033[0m");
 			continue;
@@ -959,24 +974,23 @@ draw_rows(void)
 			print("\033[33m");
 		}
 		len = line_len(file_y);
-		for (x = 0; x < screen_cols; x++) {
-			int	file_x;
-
-			file_x = coloff + x;
-			if (file_x > len) {
-				break;
-			}
-			if (file_y == cy && file_x == cx) {
-				print("\033[92m");
-				c = file_x < len ? lines[file_y][file_x] : '_';
-				term_write(&c, 1);
-				print(select_all ? "\033[33m" : "\033[0m");
-			} else if (file_x < len) {
-				c = lines[file_y][file_x];
-				term_write(&c, 1);
-			}
+		n = 0;
+		for (x = coloff; x < len && n < cols &&
+		    n < (int)sizeof(buf); x++) {
+			buf[n++] = lines[file_y][x];
+		}
+		if (n > 0) {
+			term_write(buf, (u32)n);
 		}
 		if (select_all) {
+			print("\033[0m");
+		}
+		if (file_y == cy && cx >= coloff &&
+		    cx < coloff + cols) {
+			move_to(y + 1, cx - coloff + 1);
+			print("\033[92m");
+			c = cx < len ? lines[file_y][cx] : '_';
+			term_write(&c, 1);
 			print("\033[0m");
 		}
 	}
@@ -987,7 +1001,7 @@ refresh_screen(void)
 {
 	refresh_size();
 	ensure_cursor();
-	print("\033[2J\033[H");
+	print("\033[H");
 	draw_rows();
 	draw_status();
 	move_to(cy - rowoff + 1, cx - coloff + 1);
