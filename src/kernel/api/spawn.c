@@ -28,6 +28,7 @@
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_page.h>
 #include <kernel/api/api.h>
+#include <kernel/api/session.h>
 #include <kernel/api/auxv.h>
 #include <kernel/api/posix/posix.h>
 #include <kernel/crypto/rng/rng.h>
@@ -567,13 +568,14 @@ int api_proc_spawn(const char *path, const char *const *argv,
   posix_init_process(child);
   posix_copy_fds(child, parent);
   child->personality = PERSONALITY_POSIX;
+  api_session_fork(parent, child);
   if (parent->controlling_tty >= 0) {
-    child->controlling_tty = parent->controlling_tty;
-    child->sid = parent->sid;
-    child->pgid = child->pid;
-    child->is_session_leader = 0;
     terminal_set_session(parent->controlling_tty, child->sid);
     terminal_set_pgrp(parent->controlling_tty, child->pgid);
+  }
+  if (child->controlling_tty >= 0) {
+    child->pgid = child->pid;
+    terminal_set_pgrp(child->controlling_tty, child->pgid);
   }
   scheduler_assign_process(child);
   posix_setup_stdio(child);

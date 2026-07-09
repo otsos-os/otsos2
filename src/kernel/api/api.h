@@ -29,6 +29,7 @@
 
 #include <kernel/interrupts/idt.h>
 #include <kernel/api/errno.h>
+#include <kernel/api/session.h>
 #include <kernel/drivers/keyboard/keycodes.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/video/drm/kms/property.h>
@@ -461,6 +462,10 @@ void api_thread_exit(int code);
 int api_thread_join(u32 tid, int *status);
 void api_proc_exit_group(int code);
 int api_proc_set_tid_address(u64 tidptr);
+int api_session_setsid(void);
+int api_session_getsid(void);
+void api_session_init(struct process *proc);
+void api_session_fork(struct process *parent, struct process *child);
 int api_futex_wait(u64 uaddr, u32 expected_val);
 int api_futex_wake(u64 uaddr, u32 max_waiters);
 int api_sys_random(u8 *buf, u32 len);

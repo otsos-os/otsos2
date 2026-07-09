@@ -27,6 +27,7 @@
 #include <kernel/gdt.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/api/api.h>
+#include <kernel/api/session.h>
 #include <kernel/api/shm.h>
 #include <kernel/api/posix/posix.h>
 #include <kernel/api/signal.h>
@@ -300,6 +301,12 @@ void syscall_handler(registers_t *regs) {
     break;
   case CALL_PROC_SET_TID_ADDR:
     regs->rax = (u64)api_proc_set_tid_address(arg1);
+    break;
+  case CALL_PROC_SETSID:
+    regs->rax = (u64)api_session_setsid();
+    break;
+  case CALL_PROC_GETSID:
+    regs->rax = (u64)api_session_getsid();
     break;
   case CALL_FUTEX_WAIT:
     regs->rax = (u64)api_futex_wait(arg1, (u32)arg2);

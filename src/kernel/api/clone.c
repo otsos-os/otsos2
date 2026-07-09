@@ -27,6 +27,7 @@
 #include <mm/vm/pmap.h>
 #include <kernel/gdt.h>
 #include <kernel/api/api.h>
+#include <kernel/api/session.h>
 #include <kernel/api/posix/posix.h>
 #include <kernel/process.h>
 #include <kernel/scheduler.h>
@@ -117,6 +118,7 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
   vm_map_fork(parent, child);
   api_copy_handles(child, parent);
   posix_copy_fds(child, parent);
+  api_session_fork(parent, child);
   scheduler_assign_process(child);
 
   /* Create thread for child process */

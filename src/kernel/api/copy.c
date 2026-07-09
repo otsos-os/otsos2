@@ -27,6 +27,7 @@
 #include <mm/vm/pmap.h>
 #include <kernel/gdt.h>
 #include <kernel/api/api.h>
+#include <kernel/api/session.h>
 #include <kernel/process.h>
 #include <kernel/scheduler.h>
 #include <kernel/thread.h>
@@ -77,6 +78,7 @@ int api_proc_copy(registers_t *regs) {
   child->sgid = parent->sgid;
   vm_map_fork(parent, child);
   api_copy_handles(child, parent);
+  api_session_fork(parent, child);
   scheduler_assign_process(child);
 
   /* Create thread for child process */

@@ -27,6 +27,7 @@
 #include <kernel/api/posix/posix.h>
 #include <kernel/api/api.h>
 #include <kernel/api/auxv.h>
+#include <kernel/api/session.h>
 #include <kernel/console/terminal.h>
 #include <kernel/crypto/rng/rng.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
@@ -618,30 +619,22 @@ s64
 posix_setsid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
     registers_t *regs)
 {
-	struct process	*proc;
-	u32		old_pgrp;
+	int		sid;
 
 	(void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
 	(void)regs;
 
-	proc = process_current();
-	if (!proc) {
-		return (-POSIX_ESRCH);
-	}
-	/* already a session leader */
-	if (proc->is_session_leader) {
+	sid = api_session_setsid();
+	if (sid < 0) {
+		if (sid == -API_ERR_BAD_VALUE || sid == -API_ERR_NO_PROC) {
+			return (-POSIX_ESRCH);
+		}
+		if (sid == -API_ERR_PERM) {
+			return (-POSIX_EPERM);
+		}
 		return (-POSIX_EPERM);
 	}
-	old_pgrp = proc->pgid;
-	proc->sid = proc->pid;
-	proc->pgid = proc->pid;
-	proc->is_session_leader = 1;
-	if (proc->controlling_tty >= 0) {
-		terminal_hangup(proc->controlling_tty);
-	}
-	proc->controlling_tty = -1;
-	(void)old_pgrp;
-	return ((s64)proc->sid);
+	return ((s64)sid);
 }
 
 s64

@@ -2,10 +2,12 @@
 
 #define	CALL_TERM_WRITE		0x101
 #define	CALL_PROC_EXIT		0x403
+#define	CALL_PROC_COPY		0x401
+#define	CALL_PROC_SETSID		0x411
 #define	CALL_DRM_CALL		0x600
-#define	CALL_EVENT_KQUEUE	0x700
-#define	CALL_EVENT_KEVENT	0x701
-#define	CALL_PERSONALITY	0xFFFF
+#define	CALL_EVENT_KQUEUE		0x700
+#define	CALL_EVENT_KEVENT		0x701
+#define	CALL_PERSONALITY		0xFFFF
 
 #define	EVFILT_MOUSE		(-8)
 #define	EV_ADD			0x0001
@@ -125,6 +127,18 @@ struct api_drm_rapi_rect {
 };
 
 static long
+syscall0(long num)
+{
+	long	ret;
+
+	__asm__ volatile("syscall"
+	    : "=a"(ret)
+	    : "a"(num)
+	    : "rcx", "r11", "memory");
+	return (ret);
+}
+
+static long
 syscall1(long num, long a1)
 {
 	long	ret;
@@ -146,6 +160,18 @@ syscall3(long num, long a1, long a2, long a3)
 	    : "a"(num), "D"(a1), "S"(a2), "d"(a3)
 	    : "rcx", "r11", "memory");
 	return (ret);
+}
+
+static long
+proc_copy(void)
+{
+	return (syscall0(CALL_PROC_COPY));
+}
+
+static long
+proc_setsid(void)
+{
+	return (syscall0(CALL_PROC_SETSID));
 }
 
 static unsigned long
@@ -326,12 +352,35 @@ _start(long argc, char **argv, char **envp)
 	struct kevent		change;
 	struct kevent		events[CURSOR_EVENT_BATCH];
 	int			i, kq, n, x, y, dx, dy, max_x, max_y;
+	long			pid;
 
 	(void)argc;
 	(void)argv;
 	(void)envp;
 
 	syscall1(CALL_PERSONALITY, 0);
+	pid = proc_copy();
+	if (pid < 0) {
+		print("cursord: first fork failed\n");
+		exit_now(1);
+	}
+	if (pid > 0) {
+		exit_now(0);
+	}
+
+	if (proc_setsid() < 0) {
+		print("cursord: setsid failed\n");
+		exit_now(1);
+	}
+
+	pid = proc_copy();
+	if (pid < 0) {
+		print("cursord: second fork failed\n");
+		exit_now(1);
+	}
+	if (pid > 0) {
+		exit_now(0);
+	}
 
 	if (drm_call(DRM_OP_INFO, &info) != 0 || !info.available) {
 		print("cursord: drm not available\n");
