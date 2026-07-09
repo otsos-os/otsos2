@@ -32,10 +32,12 @@ MUSL_LIBC = $(MUSL_DIR)/lib/libc.a
 MUSL_CRT1 = $(MUSL_DIR)/lib/crt1.o
 MUSL_TEST_BIN = musl_test
 MUSL_TEST_OBJS = musl_test.o
+LUA_BIN = lua/lua/lua
+LUA_DIR = lua/lua
 LIBC_ENABLED ?= true
 
 ifeq ($(LIBC_ENABLED),true)
-ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(MUSL_TEST_BIN)
+ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(MUSL_TEST_BIN) $(LUA_BIN)
 else
 ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN)
 endif
@@ -91,6 +93,12 @@ $(MUSL_TEST_BIN): $(MUSL_CRT1) $(MUSL_TEST_OBJS) $(MUSL_LIBC)
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
+lua: $(LUA_BIN)
+
+$(LUA_BIN): $(MUSL_CRT1) $(MUSL_LIBC)
+	@echo "  MAKE    ports/lua"
+	@$(MAKE) -C $(LUA_DIR)
+
 %.o: %.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
@@ -103,5 +111,6 @@ musl_test.o: musl_test.c
 
 clean:
 	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN) $(SHMTEST_OBJS) $(SHMTEST_BIN) $(POSIX_HELLO_OBJS) $(POSIX_HELLO_BIN) $(KBDTEST_OBJS) $(KBDTEST_BIN) $(MUSL_TEST_OBJS) $(MUSL_TEST_BIN)
+	$(MAKE) -C $(LUA_DIR) clean
 
-.PHONY: all clean
+.PHONY: all clean lua

@@ -36,6 +36,7 @@ SHMTEST_BIN = $(PORTS_DIR)/shmtest
 POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
 KBDTEST_BIN = $(PORTS_DIR)/kbdtest
 MUSL_TEST_BIN = $(PORTS_DIR)/musl_test
+LUA_BIN = $(PORTS_DIR)/lua/lua/lua
 LIBC_ENABLED := $(shell sh ../tools/toml_get.sh config.toml libc enabled true)
 MULTIBOOT_MODULES := $(shell perl ../tools/modules.pl config.toml)
 
@@ -43,11 +44,13 @@ ifeq ($(LIBC_ENABLED),true)
 ISO_MUSL_TEST_DEP = $(MUSL_TEST_BIN)
 ISO_MUSL_TEST_COPY = @cp $(MUSL_TEST_BIN) $(ISODIR)/boot/musl_test
 GRUB_MUSL_TEST = @echo '    module2 /boot/musl_test musl_test' >> $(ISODIR)/boot/grub/grub.cfg
+ISO_LUA_DEP = $(LUA_BIN)
 LIBC_DEPS = $(MUSL_LIBC) $(MUSL_CRT1)
 else
 ISO_MUSL_TEST_DEP =
 ISO_MUSL_TEST_COPY =
 GRUB_MUSL_TEST =
+ISO_LUA_DEP =
 LIBC_DEPS =
 endif
 
@@ -324,6 +327,11 @@ $(MUSL_TEST_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/musl_test"
 	@$(MAKE) -C $(PORTS_DIR) musl_test LIBC_ENABLED=$(LIBC_ENABLED)
 
+.PHONY: $(LUA_BIN)
+$(LUA_BIN): $(LIBC_DEPS)
+	@echo "  MAKE    ports/lua"
+	@$(MAKE) -C $(PORTS_DIR) lua LIBC_ENABLED=$(LIBC_ENABLED)
+
 $(MUSL_LIBC):
 	@echo "  MAKE    musl libc"
 	@$(MAKE) -C $(MUSL_DIR)
@@ -331,7 +339,7 @@ $(MUSL_LIBC):
 $(MUSL_CRT1): $(MUSL_LIBC)
 	@true
 
-$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP)
+$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
 	@for m in $(MULTIBOOT_MODULES); do \
@@ -345,6 +353,7 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 			posix_hello) src=$(POSIX_HELLO_BIN);; \
 			kbdtest) src=$(KBDTEST_BIN);; \
 			musl_test) src=$(MUSL_TEST_BIN);; \
+			lua) src=$(LUA_BIN);; \
 		esac; \
 		if [ -n "$$src" ] && [ -f "$$src" ]; then \
 			cp "$$src" "$(ISODIR)/boot/$$m"; \
