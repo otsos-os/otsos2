@@ -38,6 +38,8 @@ $define %func keyboard_getchar_blocking as function with args void
 $define %func keyboard_common_handler as procedure with args void
 $define %func keyboard_poll as procedure with args void
 $define %func keyboard_reset_state as procedure with args void
+$define %func keyboard_start_direct_input as procedure with args void
+$define %func keyboard_stop_direct_input as procedure with args void
 $define %func scanf as function with args const char *, ...
 $define %func keyboard_set_scancode_callback as procedure with args keyboard_scancode_callback_t
 $define %func keyboard_handle_scancode as procedure with args u8, int, int
@@ -49,7 +51,8 @@ $define %func keyboard_get_driver_name as function with args void
 
 $space %export keyboard_manager_init, keyboard_getchar
 $space %export keyboard_getchar_blocking, keyboard_common_handler
-$space %export keyboard_poll, keyboard_reset_state, scanf
+$space %export keyboard_poll, keyboard_reset_state
+$space %export keyboard_start_direct_input, keyboard_stop_direct_input, scanf
 $space %export keyboard_set_scancode_callback, keyboard_handle_scancode
 $space %export keyboard_get_driver_name
 
@@ -69,6 +72,7 @@ $space %export keyboard_get_driver_name
 
 static keyboard_driver_t			*current_driver;
 static keyboard_scancode_callback_t		scancode_callback;
+static volatile int				direct_input_depth;
 
 static struct kbd_event	kbd_event_ring[KBD_EVENT_RING_SIZE];
 static int			kbd_event_head;
@@ -184,7 +188,9 @@ keyboard_poll(void)
 	}
 
 	current_driver->poll();
-	terminal_input_poll();
+	if (direct_input_depth == 0) {
+		terminal_input_poll();
+	}
 
 	void	*ch;
 
@@ -199,6 +205,20 @@ keyboard_reset_state(void)
 {
 	if (current_driver == &ps2_driver) {
 		ps2_keyboard_reset_state();
+	}
+}
+
+void
+keyboard_start_direct_input(void)
+{
+	direct_input_depth++;
+}
+
+void
+keyboard_stop_direct_input(void)
+{
+	if (direct_input_depth > 0) {
+		direct_input_depth--;
 	}
 }
 

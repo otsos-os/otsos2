@@ -12,6 +12,7 @@
 #define CALL_TERM_READ  0x100
 #define CALL_TERM_WRITE 0x101
 #define TERM_READ_IGNORE_SIGINT 0x00000001
+#define TERM_READ_NO_ECHO 0x00000002
 #define CALL_DATA_OPEN  0x200
 #define CALL_DATA_CLOSE 0x201
 #define CALL_DATA_READ  0x202
@@ -208,6 +209,10 @@ static long term_write(const void *buf, u32 len) {
 static long term_read(void *buf, u32 len) {
   return syscall3(CALL_TERM_READ, (long)buf, (long)len,
                   TERM_READ_IGNORE_SIGINT);
+}
+
+static long term_read_flags(void *buf, u32 len, u32 flags) {
+  return syscall3(CALL_TERM_READ, (long)buf, (long)len, flags);
 }
 
 static long fs_chdir(const char *path) {
@@ -1196,7 +1201,8 @@ static void cmd_kusr(void) {
   print("kusr password: ");
   for (;;) {
     char c;
-    long n = term_read(&c, 1);
+    long n = term_read_flags(&c, 1,
+                             TERM_READ_IGNORE_SIGINT | TERM_READ_NO_ECHO);
     if (n <= 0) continue;
     if (c == '\r' || c == '\n') {
       printc('\n');

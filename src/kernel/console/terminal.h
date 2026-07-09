@@ -140,6 +140,7 @@ struct termios {
 };
 
 #define	TERM_READ_IGNORE_SIGINT	0x00000001
+#define	TERM_READ_NO_ECHO	0x00000002
 
 int	terminal_read(void *buf, u32 count, u32 flags);
 int	terminal_write(const void *buf, u32 count);

@@ -157,6 +157,7 @@ typedef struct {
 	int		line_len;
 	int		line_read_pos;
 	int		eof_pending;
+	u32		read_flag;
 } terminal_state_t;
 
 static void	terminal_init_termios(terminal_state_t *term);
@@ -925,6 +926,7 @@ terminal_init(void)
 		term->line_len = 0;
 		term->line_read_pos = 0;
 		term->eof_pending = 0;
+		term->read_flag = 0;
 		term->session = 0;
 		term->foreground_pgrp = 0;
 		term->ws.ws_row = (u16)height;
@@ -1174,6 +1176,10 @@ terminal_input_char(int idx, char c, u32 flags)
 
 	term = &terminals[idx];
 	lflag = term->term.c_lflag;
+	if (flags & TERM_READ_NO_ECHO) {
+		lflag &= ~(ECHO | ECHOE | ECHOK | ECHONL | ECHOCTL |
+		    ECHOPRT | ECHOKE);
+	}
 
 	if (lflag & ISIG) {
 		if (c == term->term.c_cc[VINTR]) {
@@ -1292,7 +1298,7 @@ terminal_pump_keyboard(u32 flags)
 void
 terminal_input_poll(void)
 {
-	terminal_pump_keyboard(0);
+	terminal_pump_keyboard(terminals[terminal_active].read_flag);
 }
 
 int
@@ -1326,6 +1332,8 @@ terminal_read_idx(int idx, void *buf, u32 count, int nonblock, u32 flags)
 	char			*out;
 	char			 c;
 	int			 n;
+	int			 ret;
+	u32			 old_flags;
 
 	terminal_lazy_init();
 
@@ -1343,6 +1351,9 @@ terminal_read_idx(int idx, void *buf, u32 count, int nonblock, u32 flags)
 	__asm__ volatile("sti");
 	out = (char *)buf;
 	n = 0;
+	ret = 0;
+	old_flags = term->read_flag;
+	term->read_flag = flags;
 
 	if (term->term.c_lflag & ICANON) {
 		while (n < (int)count) {
@@ -1357,7 +1368,8 @@ terminal_read_idx(int idx, void *buf, u32 count, int nonblock, u32 flags)
 				break;
 			} else if (nonblock) {
 				if (n == 0) {
-					return (-POSIX_EAGAIN);
+					ret = -POSIX_EAGAIN;
+					goto out;
 				}
 				break;
 			} else {
@@ -1366,7 +1378,8 @@ terminal_read_idx(int idx, void *buf, u32 count, int nonblock, u32 flags)
 				if (n == 0) {
 					p = process_current();
 					if (p && (p->sigpending & ~p->sigmask)) {
-						return (-POSIX_EINTR);
+						ret = -POSIX_EINTR;
+						goto out;
 					}
 				}
 				proc_sleep(terminal_input_channel);
@@ -1379,7 +1392,8 @@ terminal_read_idx(int idx, void *buf, u32 count, int nonblock, u32 flags)
 				out[n++] = c;
 			} else if (nonblock) {
 				if (n == 0) {
-					return (-POSIX_EAGAIN);
+					ret = -POSIX_EAGAIN;
+					goto out;
 				}
 				break;
 			} else {
@@ -1388,14 +1402,18 @@ terminal_read_idx(int idx, void *buf, u32 count, int nonblock, u32 flags)
 				if (n == 0) {
 					p = process_current();
 					if (p && (p->sigpending & ~p->sigmask)) {
-						return (-POSIX_EINTR);
+						ret = -POSIX_EINTR;
+						goto out;
 					}
 				}
 				proc_sleep(terminal_input_channel);
 			}
 		}
 	}
-	return (n);
+	ret = n;
+out:
+	term->read_flag = old_flags;
+	return (ret);
 }
 
 int
@@ -1524,6 +1542,7 @@ terminal_reset_one(int index)
 	term->line_len = 0;
 	term->line_read_pos = 0;
 	term->eof_pending = 0;
+	term->read_flag = 0;
 	terminal_init_termios(term);
 	term->ws.ws_row = 25;
 	term->ws.ws_col = 80;

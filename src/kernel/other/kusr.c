@@ -67,6 +67,7 @@ static void kusr_generate_salt(u8 *salt, u32 len) {
 
 static int kusr_read_password(char *buf, int max, const char *prompt) {
   int pos = 0;
+  keyboard_start_direct_input();
   printf("%s", prompt);
   kusr_flush();
   while (1) {
@@ -79,6 +80,7 @@ static int kusr_read_password(char *buf, int max, const char *prompt) {
       printf("\n");
       kusr_flush();
       buf[pos] = '\0';
+      keyboard_stop_direct_input();
       break;
     }
     if (c == '\b' || c == 0x7F) {
