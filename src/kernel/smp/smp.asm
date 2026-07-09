@@ -43,7 +43,7 @@ ap_trampoline_prot32:
 	mov ss, ax
 
 	mov eax, cr4
-	or eax, 1 << 5
+	or eax, (1 << 5) | (1 << 9) | (1 << 10)
 	mov cr4, eax
 
 	mov eax, [TRAMPOLINE_BASE + OFF_CR3]
@@ -55,7 +55,8 @@ ap_trampoline_prot32:
 	wrmsr
 
 	mov eax, cr0
-	or eax, 1 << 31
+	and eax, 0xfffffff3
+	or eax, (1 << 1) | (1 << 31)
 	mov cr0, eax
 
 	lgdt [TRAMPOLINE_BASE + OFF_GDTR64]

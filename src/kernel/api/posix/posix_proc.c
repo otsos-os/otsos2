@@ -1441,11 +1441,15 @@ posix_set_tid_address(u64 tidptr_u, u64 a2, u64 a3, u64 a4, u64 a5,
 	 * if the thread is still alive */
 	if (tidptr_u && is_user_address((void *)tidptr_u,
 	    sizeof(u32))) {
-		/* After fork the page can be COW/read-only; make sure
-		 * it is writable before touching userspace directly. */
-		if (vm_map_fault(process_current(), tidptr_u, 0x3)
-		    != 0 && vm_cow_fault(tidptr_u, 0x3) != 0) {
-			return (-POSIX_EFAULT);
+		u64	flags;
+
+		flags = pmap_extract_flags(tidptr_u);
+		if (!(flags & PTE_PRESENT) || (flags & PTE_COW) ||
+		    !(flags & PTE_RW)) {
+			if (vm_map_fault(process_current(), tidptr_u, 0x3)
+			    != 0 && vm_cow_fault(tidptr_u, 0x3) != 0) {
+				return (-POSIX_EFAULT);
+			}
 		}
 		*(u32 *)tidptr_u = td->tid;
 	}

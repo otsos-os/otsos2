@@ -47,9 +47,9 @@ yes = "/bin/yes"
 fetch = "/bin/fetch"
 sh = "/bin/sh"
 # shmtest = "/bin/shmtest"
-# posix_hello = "/bin/posix_hello"
+posix_hello = "/bin/posix_hello"
 # kbdtest = "/bin/kbdtest"
-# musl_test = "/bin/musl_test"
+musl_test = "/bin/musl_test"
 
 [kshell.commands.help]
 enabled = true

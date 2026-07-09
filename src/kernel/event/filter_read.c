@@ -105,7 +105,6 @@ filt_read_event(knote_t *kn, u32 nevents)
 	pipe_t			*p;
 	struct process		*proc;
 	posix_fd_t		*pfd;
-	char			c;
 	int			idx;
 	int			avail;
 
@@ -140,9 +139,10 @@ filt_read_event(knote_t *kn, u32 nevents)
 	}
 
 	if (fd == 0) {
-		c = keyboard_getchar();
-		if (c) {
-			kn->data = 1;
+		terminal_input_poll();
+		avail = terminal_read_available(terminal_get_active());
+		if (avail > 0) {
+			kn->data = avail;
 			return (1);
 		}
 		return (0);

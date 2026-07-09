@@ -432,6 +432,7 @@ void
 posix_init_process(struct process *proc)
 {
 	int	i;
+	int	tty;
 
 	if (!proc) {
 		return;
@@ -459,10 +460,11 @@ posix_init_process(struct process *proc)
 	proc->sid = proc->pid;
 	proc->pgid = proc->pid;
 	proc->is_session_leader = 1;
-	proc->controlling_tty = 0;
+	tty = terminal_get_active();
+	proc->controlling_tty = tty;
 
-	terminal_set_session(0, proc->sid);
-	terminal_set_pgrp(0, proc->pgid);
+	terminal_set_session(tty, proc->sid);
+	terminal_set_pgrp(tty, proc->pgid);
 }
 
 void
@@ -558,7 +560,9 @@ posix_setup_stdio(struct process *proc)
 	proc->posix_fds[2].offset = 0;
 	proc->posix_fds[2].vnode = vn_err;
 
-	terminal_set_pgrp(terminal_get_active(), proc->pgid);
+	if (proc->controlling_tty >= 0) {
+		terminal_set_pgrp(proc->controlling_tty, proc->pgid);
+	}
 }
 
 int
