@@ -324,6 +324,13 @@ int drm_kms_state_commit(const drm_kms_state_t *st, u32 flags) {
     return (DRM_ERR_NODEV);
   }
   state_sync_to_objects(st);
+  drm_plane_t *p = drm_plane_get_primary();
+  if (p && p->id != DRM_ID_NONE) {
+    p->props[DRM_PROP_PLANE_DIRTY_X] = 0;
+    p->props[DRM_PROP_PLANE_DIRTY_Y] = 0;
+    p->props[DRM_PROP_PLANE_DIRTY_W] = 0;
+    p->props[DRM_PROP_PLANE_DIRTY_H] = 0;
+  }
   return (DRM_OK);
 }
 

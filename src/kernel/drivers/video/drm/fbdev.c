@@ -474,25 +474,24 @@ static int fbdev_atomic_commit(const drm_kms_state_t *state) {
 
   dirty_valid = 0;
   full_update = (fb_id != g_primary_fb_id);
-  if (dw >= g_hw_width && dh >= g_hw_height) {
-    full_update = 1;
-  }
-  if (!full_update && dw > 0 && dh > 0 &&
-      (dw < g_hw_width || dh < g_hw_height)) {
+  int full_dirty = (dw >= g_hw_width && dh >= g_hw_height);
+
+  if (!full_update && !full_dirty && dw > 0 && dh > 0) {
     fbdev_rect_include(&dx, &dy, &dw, &dh, &dirty_valid, dx, dy, dw, dh);
   }
-  if (!full_update && g_cursor_valid) {
-    fbdev_rect_include(&dx, &dy, &dw, &dh, &dirty_valid, g_cursor_x,
-                       g_cursor_y, g_cursor_w, g_cursor_h);
-  }
-  if (!full_update && cursor) {
-    fbdev_rect_include(&dx, &dy, &dw, &dh, &dirty_valid, cx, cy, cw, ch);
-  }
-
-  if (!full_update && dirty_valid) {
-    fbdev_blit_rect(src, src_y, dx, dy, dw, dh);
-  } else {
+  if (full_update || full_dirty) {
     fbdev_blit_full(src, src_y);
+  } else {
+    if (!full_update && g_cursor_valid) {
+      fbdev_blit_rect(src, src_y, g_cursor_x, g_cursor_y,
+                      g_cursor_w, g_cursor_h);
+    }
+    if (dirty_valid) {
+      fbdev_blit_rect(src, src_y, dx, dy, dw, dh);
+    }
+    if (cursor) {
+      fbdev_blit_rect(src, src_y, cx, cy, cw, ch);
+    }
   }
 
   if (cursor) {
