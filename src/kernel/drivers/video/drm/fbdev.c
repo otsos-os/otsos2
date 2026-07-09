@@ -29,6 +29,7 @@
 #include <drm/kms/crtc.h>
 #include <drm/kms/plane.h>
 #include <drm/kms/framebuffer.h>
+#include <drm/rapi/rapi.h>
 #include <kernel/api/posix/posix.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
@@ -127,6 +128,9 @@ static u32 g_fb_xoffset;
 static u32 g_fb_yoffset;
 static u32 g_fb_blank;
 static u8 g_hw_bpp;
+static int g_cursor_valid;
+static u32 g_cursor_x, g_cursor_y, g_cursor_w, g_cursor_h;
+static drm_id_t g_primary_fb_id;
 
 static int fbdev_ready(void) {
   return (g_hw_base != NULL && g_hw_phys != 0 && g_hw_size != 0 &&
@@ -342,6 +346,8 @@ static int fbdev_init(const void *boot_info) {
   g_fb_xoffset = 0;
   g_fb_yoffset = 0;
   g_fb_blank = 0;
+  g_cursor_valid = 0;
+  g_primary_fb_id = DRM_ID_NONE;
 
   /* Publish geometry so the KMS layer knows the active mode. */
   drm_crtc_set_mode_geometry(boot->width, boot->height, boot->pitch,
@@ -390,10 +396,43 @@ static void fbdev_blit_rect(const drm_framebuffer_t *src, u32 src_y,
   }
 }
 
+static void fbdev_rect_include(u32 *x, u32 *y, u32 *w, u32 *h,
+                               int *valid, u32 rx, u32 ry, u32 rw,
+                               u32 rh) {
+  u32 x2, y2, rx2, ry2;
+
+  if (rw == 0 || rh == 0) {
+    return;
+  }
+  if (!*valid) {
+    *x = rx;
+    *y = ry;
+    *w = rw;
+    *h = rh;
+    *valid = 1;
+    return;
+  }
+  x2 = *x + *w;
+  y2 = *y + *h;
+  rx2 = rx + rw;
+  ry2 = ry + rh;
+  if (rx < *x) *x = rx;
+  if (ry < *y) *y = ry;
+  if (rx2 > x2) x2 = rx2;
+  if (ry2 > y2) y2 = ry2;
+  *w = x2 - *x;
+  *h = y2 - *y;
+}
+
 static int fbdev_atomic_commit(const drm_kms_state_t *state) {
   drm_framebuffer_t *src;
+  drm_framebuffer_t *cursor;
   drm_id_t fb_id;
-  u32 dx, dy, dw, dh;
+  drm_id_t cursor_id;
+  rapi_rect_t cursor_dirty;
+  u32 dx, dy, dw, dh, cx, cy, cw, ch;
+  u32 src_y;
+  int dirty_valid, full_update;
 
   if (!state || !g_hw_base) {
     return -1;
@@ -411,17 +450,63 @@ static int fbdev_atomic_commit(const drm_kms_state_t *state) {
       src->bpp != g_hw_bpp) {
     return -1;
   }
-  u32 src_y = (u32)state->plane_props[0][DRM_PROP_PLANE_SRC_Y];
+  src_y = (u32)state->plane_props[0][DRM_PROP_PLANE_SRC_Y];
 
   dx = (u32)state->plane_props[0][DRM_PROP_PLANE_DIRTY_X];
   dy = (u32)state->plane_props[0][DRM_PROP_PLANE_DIRTY_Y];
   dw = (u32)state->plane_props[0][DRM_PROP_PLANE_DIRTY_W];
   dh = (u32)state->plane_props[0][DRM_PROP_PLANE_DIRTY_H];
-  if (dw > 0 && dh > 0 && (dw < g_hw_width || dh < g_hw_height)) {
+  cursor = NULL;
+  cursor_id = DRM_ID_NONE;
+  cx = cy = cw = ch = 0;
+  if (state->plane_count > 1) {
+    cursor_id = (drm_id_t)state->plane_props[1][DRM_PROP_PLANE_FB_ID];
+    if (cursor_id != DRM_ID_NONE) {
+      cursor = drm_framebuffer_get(cursor_id);
+      cx = (u32)state->plane_props[1][DRM_PROP_PLANE_CRTC_X];
+      cy = (u32)state->plane_props[1][DRM_PROP_PLANE_CRTC_Y];
+      if (cursor) {
+        cw = cursor->width;
+        ch = cursor->height;
+      }
+    }
+  }
+
+  dirty_valid = 0;
+  full_update = (fb_id != g_primary_fb_id);
+  if (!full_update && dw > 0 && dh > 0 &&
+      (dw < g_hw_width || dh < g_hw_height)) {
+    fbdev_rect_include(&dx, &dy, &dw, &dh, &dirty_valid, dx, dy, dw, dh);
+  }
+  if (!full_update && g_cursor_valid) {
+    fbdev_rect_include(&dx, &dy, &dw, &dh, &dirty_valid, g_cursor_x,
+                       g_cursor_y, g_cursor_w, g_cursor_h);
+  }
+  if (!full_update && cursor) {
+    fbdev_rect_include(&dx, &dy, &dw, &dh, &dirty_valid, cx, cy, cw, ch);
+  }
+
+  if (!full_update && dirty_valid) {
     fbdev_blit_rect(src, src_y, dx, dy, dw, dh);
   } else {
     fbdev_blit_full(src, src_y);
   }
+
+  if (cursor) {
+    if (rapi_blend_argb32_to_raw(cursor, g_hw_base, g_hw_pitch, g_hw_bpp,
+                                 g_hw_width, g_hw_height, cx, cy,
+                                 &cursor_dirty) != DRM_OK) {
+      return -1;
+    }
+    g_cursor_valid = 1;
+    g_cursor_x = cursor_dirty.x;
+    g_cursor_y = cursor_dirty.y;
+    g_cursor_w = cursor_dirty.width;
+    g_cursor_h = cursor_dirty.height;
+  } else {
+    g_cursor_valid = 0;
+  }
+  g_primary_fb_id = fb_id;
   return 0;
 }
 

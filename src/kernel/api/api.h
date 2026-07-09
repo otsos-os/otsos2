@@ -145,6 +145,24 @@ struct api_fs_stat {
 #define KBD_DATA_EXTENDED(v)	(((u64)(v) >> 17) & 1)
 #define KBD_DATA_ASCII(v)	((char)(((u64)(v) >> 24) & 0xFF))
 
+#define	MOUSE_BUTTON_LEFT	0x00000001
+#define	MOUSE_BUTTON_RIGHT	0x00000002
+#define	MOUSE_BUTTON_MIDDLE	0x00000004
+#define	MOUSE_BUTTON_X1		0x00000008
+#define	MOUSE_BUTTON_X2		0x00000010
+
+#define	MOUSE_EVENT_MOVE	0x00000001
+#define	MOUSE_EVENT_BUTTON	0x00000002
+#define	MOUSE_EVENT_WHEEL	0x00000004
+#define	MOUSE_EVENT_OVERFLOW	0x00000008
+
+/* Decoding helpers for EVFILT_MOUSE kevent data. */
+#define	MOUSE_DATA_DX(v)	((s16)((u64)(v) & 0xFFFF))
+#define	MOUSE_DATA_DY(v)	((s16)(((u64)(v) >> 16) & 0xFFFF))
+#define	MOUSE_DATA_DZ(v)	((s8)(((u64)(v) >> 32) & 0xFF))
+#define	MOUSE_DATA_BUTTONS(v)	((u8)(((u64)(v) >> 40) & 0xFF))
+#define	MOUSE_DATA_FLAGS(v)	((u16)(((u64)(v) >> 48) & 0xFFFF))
+
 #define PIPE_BUF_SIZE 4096
 
 typedef struct pipe {
@@ -312,6 +330,7 @@ struct api_drm_atomic_commit {
 
 struct api_drm_objects {
   u32 primary_plane_id;
+  u32 cursor_plane_id;
   u32 crtc_id;
   u32 connector_id;
 };

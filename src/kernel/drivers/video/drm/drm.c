@@ -234,7 +234,7 @@ int drm_init(const drm_driver_t *driver, const void *boot_info) {
    * perform the initial modeset. Userspace can acquire master via kusr. */
   drm_auth_acquire();
 
-  /* Bring up the KMS topology: one connector, one CRTC, one primary plane. */
+  /* Bring up the KMS topology. */
   drm_kms_init();
 
   g_ready = 1;

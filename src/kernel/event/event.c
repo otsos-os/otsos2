@@ -218,6 +218,7 @@ event_init(void)
 		extern const filter_ops_t filter_signal_ops;
 		extern const filter_ops_t filter_user_ops;
 		extern const filter_ops_t filter_kbd_ops;
+		extern const filter_ops_t filter_mouse_ops;
 
 		filter_register(&filter_read_ops);
 		filter_register(&filter_write_ops);
@@ -226,6 +227,7 @@ event_init(void)
 		filter_register(&filter_signal_ops);
 		filter_register(&filter_user_ops);
 		filter_register(&filter_kbd_ops);
+		filter_register(&filter_mouse_ops);
 	}
 
 	event_initialized = 1;
@@ -577,12 +579,13 @@ collect_events(kqueue_t *kq, struct kevent *eventlist, int nevents)
 	int			count;
 	knote_t			*kn;
 	const filter_ops_t	*ops;
-	int			result;
+	int			result, requeue;
 
 	count = 0;
 
 	while (kq->ready_head && count < nevents) {
 		kn = kq->ready_head;
+		requeue = 0;
 
 		ops = filter_lookup(kn->filter);
 		if (ops && ops->event) {
@@ -590,6 +593,9 @@ collect_events(kqueue_t *kq, struct kevent *eventlist, int nevents)
 			if (result <= 0) {
 				knote_remove_from_ready(kq, kn);
 				continue;
+			}
+			if (result > 1) {
+				requeue = 1;
 			}
 		}
 
@@ -622,9 +628,13 @@ collect_events(kqueue_t *kq, struct kevent *eventlist, int nevents)
 
 		if (kn->flags & EV_DISPATCH) {
 			kn->disabled = 1;
+			requeue = 0;
 		}
 
 		knote_remove_from_ready(kq, kn);
+		if (requeue && !kn->disabled) {
+			knote_ready(kn);
+		}
 	}
 
 	return (count);

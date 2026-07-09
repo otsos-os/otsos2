@@ -89,6 +89,13 @@ u32 drm_plane_count(void) { return g_plane_count; }
 
 drm_plane_t *drm_plane_get_primary(void) { return &g_planes[0]; }
 
+drm_plane_t *drm_plane_get_cursor(void) {
+  if (g_plane_count <= 1 || g_planes[1].id == DRM_ID_NONE) {
+    return NULL;
+  }
+  return &g_planes[1];
+}
+
 drm_plane_t *drm_plane_find_by_fb(drm_id_t fb_id) {
   for (u32 i = 0; i < g_plane_count; i++) {
     if (g_planes[i].id != DRM_ID_NONE && g_planes[i].fb_id == fb_id) {
@@ -131,6 +138,22 @@ drm_id_t drm_plane_init_primary(void) {
   g_planes[0].id = id;
   if (1 > g_plane_count) {
     g_plane_count = 1;
+  }
+  return id;
+}
+
+drm_id_t drm_plane_init_cursor(void) {
+  memset(&g_planes[1], 0, sizeof(g_planes[1]));
+  g_planes[1].type = DRM_PLANE_CURSOR;
+  g_planes[1].index = 1;
+  g_planes[1].fb_id = DRM_ID_NONE;
+  g_planes[1].crtc_id = DRM_ID_NONE;
+  g_planes[1].props[DRM_PROP_PLANE_FB_ID] = DRM_ID_NONE;
+  g_planes[1].props[DRM_PROP_PLANE_CRTC_ID] = DRM_ID_NONE;
+  drm_id_t id = drm_object_register(DRM_OBJECT_PLANE, &g_planes[1], 1);
+  g_planes[1].id = id;
+  if (2 > g_plane_count) {
+    g_plane_count = 2;
   }
   return id;
 }

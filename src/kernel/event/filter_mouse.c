@@ -26,83 +26,89 @@
 
 /* !DEFINES!
 
+$define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
 $define %type u32 as 32 bit unsigned
 $define %type u64 as 64 bit unsigned
+$define %type s8 as 8 bit signed
+$define %type s16 as 16 bit signed
+$define %type s64 as 64 bit signed
 $define %type int as 32 bit signed
 $define %type knote_t as struct with registered event state
 $define %type kevent as struct with event ident, filter, flags, fflags, data, udata
 $define %type filter_ops_t as struct with filter callbacks vtable
-$define %type kbd_event as struct with raw keyboard event
+$define %type mouse_event as struct with normalized mouse input event
 
-$define %func filt_kbd_attach as function with args knote_t *
-$define %func filt_kbd_detach as procedure with args knote_t *
-$define %func filt_kbd_event as function with args knote_t *, u32
-$define %func filt_kbd_touch as procedure with args knote_t *, struct kevent *
+$define %func filt_mouse_attach as function with args knote_t *
+$define %func filt_mouse_detach as procedure with args knote_t *
+$define %func filt_mouse_event as function with args knote_t *, u32
+$define %func filt_mouse_touch as procedure with args knote_t *, struct kevent *
 
 */
 
 /* !SPACE!
 
-$space %internal filt_kbd_attach, filt_kbd_detach
-$space %internal filt_kbd_event, filt_kbd_touch
-$space %export filter_kbd_ops
+$space %internal filt_mouse_attach, filt_mouse_detach
+$space %internal filt_mouse_event, filt_mouse_touch
+$space %export filter_mouse_ops
 
 */
 
 #include <kernel/event/event.h>
-#include <kernel/drivers/keyboard/keyboard.h>
+#include <kernel/drivers/mouse/mouse.h>
 #include <mlibc/mlibc.h>
 
-
 static int
-filt_kbd_attach(knote_t *kn)
+filt_mouse_attach(knote_t *kn)
 {
 	(void)kn;
 	return (0);
 }
 
 static void
-filt_kbd_detach(knote_t *kn)
+filt_mouse_detach(knote_t *kn)
 {
 	(void)kn;
 }
 
 static int
-filt_kbd_event(knote_t *kn, u32 nevents)
+filt_mouse_event(knote_t *kn, u32 nevents)
 {
-	struct kbd_event	ev;
+	struct mouse_event	ev;
 	u64			data;
 
 	if (nevents == 0) {
-		return (kbd_event_count() > 0);
+		return (mouse_event_count() > 0);
 	}
 
-	if (kbd_event_get(&ev) == 0) {
+	if (mouse_event_get(&ev) == 0) {
 		return (0);
 	}
 
-	data = (u64)ev.key;
-	data |= (u64)((ev.flags & KEY_EVENT_RELEASE) ? 1 : 0) << 16;
-	data |= (u64)((ev.flags & KEY_EVENT_EXTENDED) ? 1 : 0) << 17;
-	data |= (u64)(u8)ev.ch << 24;
+	data = (u64)(u16)(s16)ev.dx;
+	data |= (u64)(u16)(s16)ev.dy << 16;
+	data |= (u64)(u8)(s8)ev.dz << 32;
+	data |= (u64)(u8)ev.buttons << 40;
+	data |= (u64)(u16)ev.flags << 48;
 
 	kn->data = (s64)data;
+	kn->fflags = ev.flags | (ev.buttons << 16);
 
-	return (kbd_event_count() > 0 ? 2 : 1);
+	return (mouse_event_count() > 0 ? 2 : 1);
 }
 
 static void
-filt_kbd_touch(knote_t *kn, struct kevent *kev)
+filt_mouse_touch(knote_t *kn, struct kevent *kev)
 {
 	(void)kn;
 	(void)kev;
 }
 
-const filter_ops_t filter_kbd_ops = {
-	.filter	= EVFILT_KBD,
-	.name	= "kbd",
-	.attach	= filt_kbd_attach,
-	.detach	= filt_kbd_detach,
-	.event	= filt_kbd_event,
-	.touch	= filt_kbd_touch,
+const filter_ops_t filter_mouse_ops = {
+	.filter	= EVFILT_MOUSE,
+	.name	= "mouse",
+	.attach	= filt_mouse_attach,
+	.detach	= filt_mouse_detach,
+	.event	= filt_mouse_event,
+	.touch	= filt_mouse_touch,
 };

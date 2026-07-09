@@ -78,9 +78,11 @@ static int drm_op_fb_destroy(u32 fb_id) {
 static int drm_op_get_objects(struct api_drm_objects *out) {
   if (!out) return -API_ERR_INVAL;
   drm_plane_t *p = drm_plane_get_primary();
+  drm_plane_t *cursor = drm_plane_get_cursor();
   drm_crtc_t *c = drm_crtc_get_primary();
   drm_connector_t *conn = drm_connector_get_primary();
   out->primary_plane_id = p ? p->id : 0;
+  out->cursor_plane_id = cursor ? cursor->id : 0;
   out->crtc_id = c ? c->id : 0;
   out->connector_id = conn ? conn->id : 0;
   return 0;

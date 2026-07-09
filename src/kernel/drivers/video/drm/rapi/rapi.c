@@ -25,6 +25,53 @@ static inline void store_pixel(u8 *base, u32 pitch, u8 bpp, u32 x, u32 y,
   }
 }
 
+static inline u32 load_pixel(u8 *base, u32 pitch, u8 bpp, u32 x, u32 y) {
+  u32 bytes_pp = (u32)(bpp / 8);
+  u64 offset = (u64)y * pitch + (u64)x * bytes_pp;
+
+  if (bytes_pp == 4) {
+    return (*(volatile u32 *)(base + offset) & 0x00FFFFFF);
+  } else if (bytes_pp == 3) {
+    return ((u32)base[offset] | ((u32)base[offset + 1] << 8) |
+        ((u32)base[offset + 2] << 16));
+  } else if (bytes_pp == 2) {
+    u16 v = *(volatile u16 *)(base + offset);
+    u32 r = ((u32)(v >> 11) & 0x1F) << 3;
+    u32 g = ((u32)(v >> 5) & 0x3F) << 2;
+    u32 b = ((u32)v & 0x1F) << 3;
+    return (r << 16) | (g << 8) | b;
+  }
+  return ((u32)base[offset]);
+}
+
+static inline u32 blend_rgb(u32 dst, u32 src)
+{
+  u32 a, ia;
+  u32 sr, sg, sb;
+  u32 dr, dg, db;
+
+  a = (src >> 24) & 0xFF;
+  if (a == 0) {
+    return (dst);
+  }
+  if (a == 255) {
+    return (src & 0x00FFFFFF);
+  }
+
+  ia = 255 - a;
+  sr = (src >> 16) & 0xFF;
+  sg = (src >> 8) & 0xFF;
+  sb = src & 0xFF;
+  dr = (dst >> 16) & 0xFF;
+  dg = (dst >> 8) & 0xFF;
+  db = dst & 0xFF;
+
+  dr = (sr * a + dr * ia) / 255;
+  dg = (sg * a + dg * ia) / 255;
+  db = (sb * a + db * ia) / 255;
+  return ((dr << 16) | (dg << 8) | db);
+}
+
 static u32 buf_height(drm_gem_buffer_t *buf, u32 pitch) {
   if (pitch == 0) {
     return 0;
@@ -110,6 +157,59 @@ int rapi_blit(drm_gem_buffer_t *src, u32 src_pitch, u8 bpp, rapi_rect_t srect,
     }
   }
   return DRM_OK;
+}
+
+int
+rapi_blend_argb32_to_raw(const drm_framebuffer_t *src, u8 *dst,
+                         u32 dst_pitch, u8 dst_bpp, u32 dst_w,
+                         u32 dst_h, u32 dx, u32 dy,
+                         rapi_rect_t *dirty)
+{
+  u32 x2, y2, sx, sy, x, y;
+  u32 dst_color, src_color, out_color;
+
+  if (!src || !src->gem || !src->gem->data || !dst ||
+      src->bpp != 32 || dst_pitch == 0 || dst_bpp == 0) {
+    return (DRM_ERR_INVAL);
+  }
+  if (dx >= dst_w || dy >= dst_h) {
+    return (DRM_OK);
+  }
+
+  x2 = dx + src->width;
+  y2 = dy + src->height;
+  if (x2 > dst_w) {
+    x2 = dst_w;
+  }
+  if (y2 > dst_h) {
+    y2 = dst_h;
+  }
+  if (x2 <= dx || y2 <= dy) {
+    return (DRM_OK);
+  }
+
+  for (y = dy; y < y2; y++) {
+    sy = y - dy;
+    for (x = dx; x < x2; x++) {
+      sx = x - dx;
+      src_color = *(volatile u32 *)(src->gem->data +
+          (u64)sy * src->pitch + (u64)sx * 4);
+      if ((src_color >> 24) == 0) {
+        continue;
+      }
+      dst_color = load_pixel(dst, dst_pitch, dst_bpp, x, y);
+      out_color = blend_rgb(dst_color, src_color);
+      store_pixel(dst, dst_pitch, dst_bpp, x, y, out_color);
+    }
+  }
+
+  if (dirty) {
+    dirty->x = dx;
+    dirty->y = dy;
+    dirty->width = x2 - dx;
+    dirty->height = y2 - dy;
+  }
+  return (DRM_OK);
 }
 
 int rapi_scroll_up(drm_gem_buffer_t *buf, u32 pitch, u8 bpp, u32 lines,

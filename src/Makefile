@@ -33,6 +33,7 @@ YES_BIN = $(PORTS_DIR)/yes
 FETCH_BIN = $(PORTS_DIR)/fetch
 SHELL_BIN = $(PORTS_DIR)/sh
 OVEN_BIN = $(PORTS_DIR)/oven
+CURSORD_BIN = $(PORTS_DIR)/demons/cursord
 SHMTEST_BIN = $(PORTS_DIR)/shmtest
 POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
 KBDTEST_BIN = $(PORTS_DIR)/kbdtest
@@ -78,6 +79,7 @@ PTY_O = ../bin/console_pty.o
 PS2_O = ../bin/ps2.o
 KEYBOARD_O = ../bin/keyboard.o
 KEYMAP_O = ../bin/keymap.o
+MOUSE_PS2_O = ../bin/mouse_ps2.o
 FONT_O = ../bin/font.o
 DRM_CORE_O = ../bin/drm_core.o
 DRM_GEM_O = ../bin/drm_gem.o
@@ -179,6 +181,7 @@ EVENT_PROC_O = ../bin/event_proc.o
 EVENT_SIGNAL_O = ../bin/event_signal.o
 EVENT_USER_O = ../bin/event_user.o
 EVENT_KBD_O = ../bin/event_kbd.o
+EVENT_MOUSE_O = ../bin/event_mouse.o
 
 VFS_O = ../bin/vfs.o
 DEVFS_O = ../bin/devfs.o
@@ -204,7 +207,7 @@ ET_CLOCKSOURCE_O = ../bin/et_clocksource.o
 CMOS_RTC_O = ../bin/cmos_rtc.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDIO_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
+      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(THREAD_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(FS_META_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
@@ -216,7 +219,7 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O) \
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
       $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
-      $(EVENT_KBD_O) \
+      $(EVENT_KBD_O) $(EVENT_MOUSE_O) \
       $(VFS_O) $(DEVFS_O) \
       $(POSIX_O) $(POSIX_IO_O) $(POSIX_PROC_O) $(POSIX_FS_O) \
       $(POSIX_MEM_O) $(POSIX_SIGNAL_O) $(SIGNAL_O) \
@@ -317,6 +320,11 @@ $(OVEN_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/oven"
 	@$(MAKE) -C $(PORTS_DIR) oven LIBC_ENABLED=$(LIBC_ENABLED)
 
+.PHONY: $(CURSORD_BIN)
+$(CURSORD_BIN): $(LIBC_DEPS)
+	@echo "  MAKE    ports/demons/cursord"
+	@$(MAKE) -C $(PORTS_DIR) demons/cursord LIBC_ENABLED=$(LIBC_ENABLED)
+
 .PHONY: $(SHMTEST_BIN)
 $(SHMTEST_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/shmtest"
@@ -349,7 +357,7 @@ $(MUSL_LIBC):
 $(MUSL_CRT1): $(MUSL_LIBC)
 	@true
 
-$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP)
+$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
 	@for m in $(MULTIBOOT_MODULES); do \
@@ -360,6 +368,7 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 			fetch) src=$(FETCH_BIN);; \
 			sh) src=$(SHELL_BIN);; \
 			oven) src=$(OVEN_BIN);; \
+			cursord) src=$(CURSORD_BIN);; \
 			shmtest) src=$(SHMTEST_BIN);; \
 			posix_hello) src=$(POSIX_HELLO_BIN);; \
 			kbdtest) src=$(KBDTEST_BIN);; \
@@ -448,6 +457,10 @@ $(KEYMAP_O): kernel/drivers/keyboard/keymap.c kernel/drivers/keyboard/keymap.h k
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+$(MOUSE_PS2_O): kernel/drivers/mouse/ps2.c kernel/drivers/mouse/mouse.h kernel/event/event.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
 $(FONT_O): kernel/drivers/video/font.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
@@ -472,7 +485,7 @@ $(DRM_INIT_O): kernel/drivers/video/drm/init.c kernel/drivers/video/drm/init.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(DRM_FBDEV_O): kernel/drivers/video/drm/fbdev.c kernel/drivers/video/drm/fbdev.h
+$(DRM_FBDEV_O): kernel/drivers/video/drm/fbdev.c kernel/drivers/video/drm/fbdev.h kernel/drivers/video/drm/rapi/rapi.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -800,7 +813,7 @@ $(VIRTIO_GPU_CMDS_O): kernel/drivers/video/card/virtio-gpu/virtio_gpu_cmds.c ker
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(VIRTIO_GPU_O): kernel/drivers/video/card/virtio-gpu/virtio-gpu.c kernel/drivers/video/card/virtio-gpu/virtio-gpu.h kernel/drivers/video/card/virtio-gpu/virtio_hw.h kernel/drivers/video/card/virtio-gpu/virtio_queue.h kernel/drivers/video/card/virtio-gpu/virtio_gpu_cmds.h kernel/drivers/video/drm/drm.h kernel/drivers/video/drm/kms/crtc.h
+$(VIRTIO_GPU_O): kernel/drivers/video/card/virtio-gpu/virtio-gpu.c kernel/drivers/video/card/virtio-gpu/virtio-gpu.h kernel/drivers/video/card/virtio-gpu/virtio_hw.h kernel/drivers/video/card/virtio-gpu/virtio_queue.h kernel/drivers/video/card/virtio-gpu/virtio_gpu_cmds.h kernel/drivers/video/drm/drm.h kernel/drivers/video/drm/kms/crtc.h kernel/drivers/video/drm/rapi/rapi.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -837,6 +850,10 @@ $(EVENT_USER_O): kernel/event/filter_user.c kernel/event/event.h
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(EVENT_KBD_O): kernel/event/filter_kbd.c kernel/event/event.h kernel/drivers/keyboard/keyboard.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(EVENT_MOUSE_O): kernel/event/filter_mouse.c kernel/event/event.h kernel/drivers/mouse/mouse.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

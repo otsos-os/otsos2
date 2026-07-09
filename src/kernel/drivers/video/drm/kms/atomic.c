@@ -37,22 +37,33 @@
 
 int drm_kms_init(void) {
   drm_plane_init_primary();
+  drm_plane_init_cursor();
   drm_crtc_init_primary();
   drm_connector_init_primary();
 
   drm_plane_t *plane = drm_plane_get_primary();
+  drm_plane_t *cursor = drm_plane_get_cursor();
   drm_crtc_t *crtc = drm_crtc_get_primary();
   drm_connector_t *conn = drm_connector_get_primary();
 
   plane->props[DRM_PROP_PLANE_CRTC_ID] = crtc->id;
   plane->crtc_id = crtc->id;
   plane->crtc = crtc;
+  if (cursor) {
+    cursor->props[DRM_PROP_PLANE_CRTC_ID] = crtc->id;
+    cursor->props[DRM_PROP_PLANE_CRTC_X] = 0;
+    cursor->props[DRM_PROP_PLANE_CRTC_Y] = 0;
+    cursor->props[DRM_PROP_PLANE_CRTC_W] = 0;
+    cursor->props[DRM_PROP_PLANE_CRTC_H] = 0;
+    cursor->crtc_id = crtc->id;
+    cursor->crtc = crtc;
+  }
   crtc->primary = plane;
   crtc->connector = conn;
   conn->props[DRM_PROP_CONNECTOR_CRTC_ID] = crtc->id;
   conn->crtc = crtc;
 
-  drivers_log("[KMS] topology: 1 connector + 1 crtc + 1 primary plane\n");
+  drivers_log("[KMS] topology: 1 connector + 1 crtc + primary/cursor planes\n");
   return DRM_OK;
 }
 
@@ -195,7 +206,15 @@ int drm_kms_state_validate(const drm_kms_state_t *st) {
     drm_id_t crtc_id = (drm_id_t)st->plane_props[i][DRM_PROP_PLANE_CRTC_ID];
     drm_framebuffer_t *fb = (fb_id == DRM_ID_NONE) ? NULL : drm_framebuffer_get(fb_id);
     drm_crtc_t *crtc = (crtc_id == DRM_ID_NONE) ? NULL : drm_crtc_get(crtc_id);
+    drm_plane_t *plane = drm_plane_get_by_index(i);
     if (!fb || !crtc) {
+      continue;
+    }
+    if (plane && plane->type == DRM_PLANE_CURSOR) {
+      if (fb->bpp != 32) {
+        drivers_log("[ATOMIC] cursor plane requires ARGB32 fb\n");
+        return (DRM_ERR_RANGE);
+      }
       continue;
     }
     pw = fb->width;
@@ -221,11 +240,24 @@ static int state_is_modeset(const drm_kms_state_t *st,
   (void)st;
   for (i = 0; i < count; i++) {
     u32 p = reqs[i].prop_id;
+    u32 idx;
+    drm_plane_t *plane;
+
+    plane = NULL;
+    if (drm_object_get_index(reqs[i].obj_id, DRM_OBJECT_PLANE,
+        &idx) == DRM_OK) {
+      plane = drm_plane_get_by_index(idx);
+    }
     if (p == DRM_PROP_PLANE_FB_ID ||
         p == DRM_PROP_PLANE_SRC_X || p == DRM_PROP_PLANE_SRC_Y ||
         p == DRM_PROP_PLANE_SRC_W || p == DRM_PROP_PLANE_SRC_H ||
         p == DRM_PROP_PLANE_DIRTY_X || p == DRM_PROP_PLANE_DIRTY_Y ||
         p == DRM_PROP_PLANE_DIRTY_W || p == DRM_PROP_PLANE_DIRTY_H) {
+      continue;
+    }
+    if (plane && plane->type == DRM_PLANE_CURSOR &&
+        (p == DRM_PROP_PLANE_CRTC_X || p == DRM_PROP_PLANE_CRTC_Y ||
+        p == DRM_PROP_PLANE_CRTC_W || p == DRM_PROP_PLANE_CRTC_H)) {
       continue;
     }
     return (1);

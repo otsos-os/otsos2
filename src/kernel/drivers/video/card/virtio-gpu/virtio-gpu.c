@@ -59,6 +59,7 @@ $space %export drm_virtio_gpu_driver_get
 #include <drm/kms/crtc.h>
 #include <drm/kms/framebuffer.h>
 #include <drm/kms/plane.h>
+#include <drm/rapi/rapi.h>
 #include <kernel/pci/pci.h>
 #include <kernel/pci/utils/bar.h>
 #include <kernel/mm/vm/pmap.h>
@@ -87,6 +88,10 @@ typedef struct {
 } virtio_gpu_state_t;
 
 static virtio_gpu_state_t	g_state;
+static int			g_cursor_valid;
+static u32			g_cursor_x, g_cursor_y;
+static u32			g_cursor_w, g_cursor_h;
+static drm_id_t		g_primary_fb_id;
 
 static int
 virtio_gpu_setup_queues(virtio_gpu_state_t *st)
@@ -410,6 +415,8 @@ static int
 vgpu_drm_init(const void *boot_info)
 {
 	(void)boot_info;
+	g_cursor_valid = 0;
+	g_primary_fb_id = DRM_ID_NONE;
 	return (drm_virtio_gpu_display_init());
 }
 
@@ -499,12 +506,92 @@ vgpu_drm_blit_rect(const drm_framebuffer_t *src, u32 src_y, u32 x, u32 y,
 	return (0);
 }
 
+static void
+vgpu_rect_include(u32 *x, u32 *y, u32 *w, u32 *h, int *valid,
+    u32 rx, u32 ry, u32 rw, u32 rh)
+{
+	u32	x2, y2, rx2, ry2;
+
+	if (rw == 0 || rh == 0) {
+		return;
+	}
+	if (!*valid) {
+		*x = rx;
+		*y = ry;
+		*w = rw;
+		*h = rh;
+		*valid = 1;
+		return;
+	}
+	x2 = *x + *w;
+	y2 = *y + *h;
+	rx2 = rx + rw;
+	ry2 = ry + rh;
+	if (rx < *x) {
+		*x = rx;
+	}
+	if (ry < *y) {
+		*y = ry;
+	}
+	if (rx2 > x2) {
+		x2 = rx2;
+	}
+	if (ry2 > y2) {
+		y2 = ry2;
+	}
+	*w = x2 - *x;
+	*h = y2 - *y;
+}
+
+static int
+vgpu_drm_flush_rect(u32 x, u32 y, u32 w, u32 h)
+{
+	virtio_gpu_state_t	*st;
+	u32			x2, y2, rw, rh, bpp_bytes;
+	u64			offset;
+
+	st = &g_state;
+	if (x >= st->width || y >= st->height || w == 0 || h == 0) {
+		return (0);
+	}
+	x2 = x + w;
+	y2 = y + h;
+	if (x2 > st->width) {
+		x2 = st->width;
+	}
+	if (y2 > st->height) {
+		y2 = st->height;
+	}
+	rw = x2 - x;
+	rh = y2 - y;
+	bpp_bytes = (u32)(st->bpp / 8);
+	offset = (u64)y * st->pitch + (u64)x * bpp_bytes;
+	if (virtio_gpu_cmd_transfer_to_host_2d(&st->hw,
+	    &st->vqs[VIRTIO_GPU_CONTROLQ],
+	    st->backing_resource_id,
+	    x, y, rw, rh, offset) != 0) {
+		return (-1);
+	}
+	if (virtio_gpu_cmd_resource_flush(&st->hw,
+	    &st->vqs[VIRTIO_GPU_CONTROLQ],
+	    st->backing_resource_id,
+	    x, y, rw, rh) != 0) {
+		return (-1);
+	}
+	return (0);
+}
+
 static int
 vgpu_drm_atomic_commit(const drm_kms_state_t *state)
 {
 	drm_framebuffer_t	*src;
+	drm_framebuffer_t	*cursor;
 	drm_id_t		fb_id;
-	u32			dx, dy, dw, dh;
+	drm_id_t		cursor_id;
+	rapi_rect_t		cursor_dirty;
+	u32			dx, dy, dw, dh, cx, cy, cw, ch;
+	u32			src_y;
+	int			dirty_valid, full_update;
 
 	if (!state) {
 		return (-1);
@@ -524,16 +611,84 @@ vgpu_drm_atomic_commit(const drm_kms_state_t *state)
 	    src->bpp != g_state.bpp) {
 		return (-1);
 	}
-  u32 src_y = (u32)state->plane_props[0][DRM_PROP_PLANE_SRC_Y];
+	src_y = (u32)state->plane_props[0][DRM_PROP_PLANE_SRC_Y];
 
-  dx = (u32)state->plane_props[0][DRM_PROP_PLANE_DIRTY_X];
-  dy = (u32)state->plane_props[0][DRM_PROP_PLANE_DIRTY_Y];
-  dw = (u32)state->plane_props[0][DRM_PROP_PLANE_DIRTY_W];
-  dh = (u32)state->plane_props[0][DRM_PROP_PLANE_DIRTY_H];
-  if (dw > 0 && dh > 0 && (dw < g_state.width || dh < g_state.height)) {
-    return (vgpu_drm_blit_rect(src, src_y, dx, dy, dw, dh));
-  }
-  return (vgpu_drm_blit_full(src, src_y));
+	dx = (u32)state->plane_props[0][DRM_PROP_PLANE_DIRTY_X];
+	dy = (u32)state->plane_props[0][DRM_PROP_PLANE_DIRTY_Y];
+	dw = (u32)state->plane_props[0][DRM_PROP_PLANE_DIRTY_W];
+	dh = (u32)state->plane_props[0][DRM_PROP_PLANE_DIRTY_H];
+
+	cursor = NULL;
+	cursor_id = DRM_ID_NONE;
+	cx = cy = cw = ch = 0;
+	if (state->plane_count > 1) {
+		cursor_id = (drm_id_t)
+		    state->plane_props[1][DRM_PROP_PLANE_FB_ID];
+		if (cursor_id != DRM_ID_NONE) {
+			cursor = drm_framebuffer_get(cursor_id);
+			cx = (u32)state->plane_props[1]
+			    [DRM_PROP_PLANE_CRTC_X];
+			cy = (u32)state->plane_props[1]
+			    [DRM_PROP_PLANE_CRTC_Y];
+			if (cursor) {
+				cw = cursor->width;
+				ch = cursor->height;
+			}
+		}
+	}
+
+	dirty_valid = 0;
+	full_update = (fb_id != g_primary_fb_id);
+	if (!full_update && dw > 0 && dh > 0 &&
+	    (dw < g_state.width || dh < g_state.height)) {
+		vgpu_rect_include(&dx, &dy, &dw, &dh, &dirty_valid,
+		    dx, dy, dw, dh);
+	}
+	if (!full_update && g_cursor_valid) {
+		vgpu_rect_include(&dx, &dy, &dw, &dh,
+		    &dirty_valid, g_cursor_x, g_cursor_y,
+		    g_cursor_w, g_cursor_h);
+	}
+	if (!full_update && cursor) {
+		vgpu_rect_include(&dx, &dy, &dw, &dh,
+		    &dirty_valid, cx, cy, cw, ch);
+	}
+
+	if (!full_update && dirty_valid) {
+		if (vgpu_drm_blit_rect(src, src_y, dx, dy, dw, dh) != 0) {
+			return (-1);
+		}
+	} else {
+		if (vgpu_drm_blit_full(src, src_y) != 0) {
+			return (-1);
+		}
+		dx = 0;
+		dy = 0;
+		dw = g_state.width;
+		dh = g_state.height;
+		dirty_valid = 1;
+	}
+
+	if (cursor) {
+		if (rapi_blend_argb32_to_raw(cursor, g_state.backing,
+		    g_state.pitch, (u8)g_state.bpp, g_state.width,
+		    g_state.height, cx, cy, &cursor_dirty) != DRM_OK) {
+			return (-1);
+		}
+		vgpu_rect_include(&dx, &dy, &dw, &dh, &dirty_valid,
+		    cursor_dirty.x, cursor_dirty.y,
+		    cursor_dirty.width, cursor_dirty.height);
+		g_cursor_valid = 1;
+		g_cursor_x = cursor_dirty.x;
+		g_cursor_y = cursor_dirty.y;
+		g_cursor_w = cursor_dirty.width;
+		g_cursor_h = cursor_dirty.height;
+	} else {
+		g_cursor_valid = 0;
+	}
+
+	g_primary_fb_id = fb_id;
+	return (vgpu_drm_flush_rect(dx, dy, dw, dh));
 }
 
 static void

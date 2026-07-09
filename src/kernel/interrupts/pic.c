@@ -68,7 +68,7 @@ void pic_remap(int offset1, int offset2) {
   // outb(PIC2_DATA, a2);
 
   outb(PIC1_DATA, 0b11111000);
-  outb(PIC2_DATA, 0b11111111);
+  outb(PIC2_DATA, 0b11101111);
 
   outb(0x22, 0x70);
   (void)inb(0x23);

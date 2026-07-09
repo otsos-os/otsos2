@@ -77,6 +77,7 @@ $space %export kmain
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/drivers/keyboard/keyboard.h>
+#include <kernel/drivers/mouse/mouse.h>
 #include <kernel/drivers/power/power.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/console/terminal.h>
@@ -421,6 +422,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 #endif
 	int		ramdisk_ok, fb_ok, drm_atomic_ok, acpi_ok;
 	int		power_ok, pci_ok, watchdog_ok;
+	int		mouse_ok;
 	u32		format_blocks;
 	void		*config_mod;
 	u32		config_sz;
@@ -632,6 +634,8 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	sleep(430);
 
 	keyboard_manager_init();
+	mouse_ok = (ps2_mouse_init() == 0);
+	status_line("ps/2 mouse", mouse_ok);
 	kshell_set_boot_info(is_multiboot2);
 
 	terminal_set_active(1);

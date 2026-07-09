@@ -528,6 +528,9 @@ ps2_handle_input(const char *tag)
 
 	while (inb(KBD_STATUS_PORT) & 0x01) {
 		status = inb(KBD_STATUS_PORT);
+		if (status & 0x20) {
+			return;
+		}
 		scancode = inb(KBD_DATA_PORT);
 		ps2_debug_status(tag, status, scancode);
 		ps2_process_scancode(scancode);

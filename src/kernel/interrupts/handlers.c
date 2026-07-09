@@ -26,6 +26,7 @@
 
 #include <kernel/interrupts/apic/lapic.h>
 #include <kernel/drivers/keyboard/keyboard.h>
+#include <kernel/drivers/mouse/mouse.h>
 #include <kernel/console/console.h>
 #include <kernel/crypto/rng/rng.h>
 #include <kernel/drivers/eventtimer.h>
@@ -102,10 +103,14 @@ void irq_handler(registers_t *regs) {
     event_timer_tick();
     crypto_rng_tick();
     keyboard_poll();
+    ps2_mouse_poll();
     scheduler_tick(regs);
     terminal_update();
   } else if (regs->int_no == 33) {
     keyboard_common_handler();
+    scheduler_tick(regs);
+  } else if (regs->int_no == 44) {
+    ps2_mouse_handler();
     scheduler_tick(regs);
   } else if (regs->int_no == 48) {
     eventtimer_dispatch();
@@ -114,6 +119,7 @@ void irq_handler(registers_t *regs) {
     event_timer_tick();
     crypto_rng_tick();
     keyboard_poll();
+    ps2_mouse_poll();
     scheduler_tick(regs);
     terminal_update();
     lapic_eoi();

@@ -36,8 +36,8 @@ Monolithic kernel with the following rough layers:
 4. Process/threading (`src/kernel/process.c`, `thread.c`, `scheduler.c`) —
    process table, threads, context switch, round-robin scheduler, signals, futex.
 5. Drivers (`src/kernel/drivers/*`) — disk (ramdisk, optional PATA), ChainFS,
-   VFS, devfs, keyboard, console, UART, timer, RTC, watchdog, ACPI, PCI,
-   virtio-gpu, DRM/KMS.
+   VFS, devfs, keyboard, mouse, console, UART, timer, RTC, watchdog, ACPI,
+   PCI, virtio-gpu, DRM/KMS.
 6. Syscalls (`src/kernel/syscall.c`, `src/kernel/api/*`) — native ABI plus
    optional Linux/POSIX personality layer.
 7. Userspace (`init/`, `ports/`) — small freestanding programs loaded as
@@ -64,11 +64,12 @@ Monolithic kernel with the following rough layers:
   `/dev/urandom`, `/dev/tty`, `/dev/console`, `/dev/fb0`, `/dev/ptmx`,
   `/dev/pts/*`. `/dev/fb0` is a root-only Linux fbdev-compatible character
   device backed by the boot linear framebuffer.
-- `drivers/video/drm/` — minimal DRM: GEM buffers, KMS objects, atomic commit,
-  fbdev, render helpers (`rapi`), and a virtio-gpu backend.
+- `drivers/video/drm/` — minimal DRM: GEM buffers, KMS objects, primary/cursor
+  planes, atomic commit, fbdev, render helpers (`rapi`), and a virtio-gpu
+  backend.
 - `console/` — kernel terminal, pty, and console rendering.
 - `event/` — kqueue-style event system (read, write, timer, proc, signal, user,
-  keyboard filters).
+  keyboard and mouse filters).
 - `kshell/` — optional kernel debug shell configured via `config.toml`.
 - `crypto/` — SHA-256, HMAC-SHA256, PBKDF2, ChaCha20, RNG, plus `kusr`
   authentication.
@@ -98,7 +99,8 @@ Monolithic kernel with the following rough layers:
 - `init/init.c` — first userspace process, event-driven program spawner via
   `procSpawn` and `procWait`.
 - `ports/yes.c`, `fetch.c`, `shell.c`, `kbdtest.c`, `posix_hello.c`,
-  `musl_test.c` — small test/utility binaries.
+  `musl_test.c`, `demons/cursord.c` — small test/utility binaries and
+  daemons.
 - `ports/posix_hello.c` and `kbdtest.c` use Linux x86-64 syscall numbers and
   expect the POSIX personality.
 - `ports/musl_test.c` uses real musl headers and is linked against vendored

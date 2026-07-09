@@ -86,8 +86,9 @@ $space %export event_notify_signal, event_notify_pipe_change
 #define	EVFILT_SIGNAL	(-5)
 #define	EVFILT_USER	(-6)
 #define	EVFILT_KBD	(-7)
+#define	EVFILT_MOUSE	(-8)
 
-#define	EVFILT_SYSCOUNT	7
+#define	EVFILT_SYSCOUNT	8
 
 #define	EV_ADD		0x0001
 #define	EV_DELETE	0x0002

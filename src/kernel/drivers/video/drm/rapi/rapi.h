@@ -52,6 +52,12 @@ int rapi_clear(drm_gem_buffer_t *buf, u32 pitch, u8 bpp, u32 color);
 int rapi_blit(drm_gem_buffer_t *src, u32 src_pitch, u8 bpp, rapi_rect_t srect,
               drm_gem_buffer_t *dst, u32 dst_pitch, u32 dx, u32 dy);
 
+/* Alpha-blend an ARGB32 framebuffer into a raw scanout/backing buffer. */
+int rapi_blend_argb32_to_raw(const drm_framebuffer_t *src, u8 *dst,
+                             u32 dst_pitch, u8 dst_bpp, u32 dst_w,
+                             u32 dst_h, u32 dx, u32 dy,
+                             rapi_rect_t *dirty);
+
 /* Scroll the buffer up by `lines` scanlines (in pixels), clearing the
  * exposed bottom region with `bg`. */
 int rapi_scroll_up(drm_gem_buffer_t *buf, u32 pitch, u8 bpp, u32 lines,
