@@ -5,7 +5,7 @@
  * modification, are permitted provided that the following conditions are met:
  *
  * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
+ *    this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
@@ -26,36 +26,25 @@
 
 /* !DEFINES!
 
-$define %type char as 8 bit signed
-$define %type int as 32 bit signed
+$define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
 
-$define %func ps2_keyboard_init as function with args void
-$define %func ps2_keyboard_handler as procedure with args void
-$define %func ps2_keyboard_getchar as function with args void
-$define %func ps2_keyboard_poll as procedure with args void
-$define %func ps2_keyboard_reset_state as procedure with args void
-$define %func ps2_keyboard_flush as procedure with args void
-$define %func ps2Scanf as function with args const char *, ...
+$define %func keymap_ps2_set1 as function with args u8, int
+$define %func keymap_ascii as function with args u16, u32
 
 */
 
 /* !SPACE!
 
-$space %export ps2_keyboard_init, ps2_keyboard_handler
-$space %export ps2_keyboard_getchar, ps2_keyboard_poll
-$space %export ps2_keyboard_reset_state, ps2_keyboard_flush, ps2Scanf
+$space %export keymap_ps2_set1, keymap_ascii
 
 */
 
-#ifndef PS2_H
-#define PS2_H
-
-int	ps2_keyboard_init(void);
-void	ps2_keyboard_handler(void);
-char	ps2_keyboard_getchar(void);
-void	ps2_keyboard_poll(void);
-void	ps2_keyboard_reset_state(void);
-void	ps2_keyboard_flush(void);
-int	ps2Scanf(const char *format, ...);
-
+#ifndef KERNEL_DRIVERS_KEYBOARD_KEYMAP_H
+#define KERNEL_DRIVERS_KEYBOARD_KEYMAP_H
+#include <kernel/drivers/keyboard/keycodes.h>
+#include <mlibc/mlibc.h>
+u16	keymap_ps2_set1(u8 scancode, int extended);
+u32	keymap_ascii(u16 key, u32 mods);
 #endif

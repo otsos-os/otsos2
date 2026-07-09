@@ -140,8 +140,21 @@ void syscall_handler(registers_t *regs) {
   case CALL_TERM_WRITE:
     regs->rax = (u64)api_term_write((const void *)arg1, (u32)arg2);
     break;
+  case CALL_TERM_INFO:
+    regs->rax = (u64)api_term_info((struct api_term_info *)arg1);
+    break;
   case CALL_TERM_POWER:
     regs->rax = (u64)api_term_power((struct api_term_power *)arg1);
+    break;
+  case CALL_INPUT_READ:
+    regs->rax = (u64)api_input_read((struct api_key_event *)arg1,
+                                    (u32)arg2, (u32)arg3);
+    break;
+  case CALL_INPUT_POLL:
+    regs->rax = (u64)api_input_poll();
+    break;
+  case CALL_INPUT_FLUSH:
+    regs->rax = (u64)api_input_flush();
     break;
   case CALL_DATA_OPEN:
     regs->rax = (u64)api_data_open((const char *)arg1, (int)arg2);
@@ -170,6 +183,17 @@ void syscall_handler(registers_t *regs) {
   case CALL_FS_LISTDIR:
     regs->rax = (u64)api_fs_listdir((const char *)arg1,
                                 (struct api_dirent *)arg2, (u32)arg3);
+    break;
+  case CALL_FS_STAT:
+    regs->rax = (u64)api_fs_stat((const char *)arg1,
+                                (struct api_fs_stat *)arg2);
+    break;
+  case CALL_FS_RENAME:
+    regs->rax = (u64)api_fs_rename((const char *)arg1,
+                                (const char *)arg2);
+    break;
+  case CALL_FS_UNLINK:
+    regs->rax = (u64)api_fs_unlink((const char *)arg1);
     break;
   case CALL_MEM_MAP:
     regs->rax = (u64)api_mem_map((const void *)arg1);

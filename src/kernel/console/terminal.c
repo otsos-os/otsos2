@@ -77,6 +77,7 @@ $define %func terminal_puts_to as procedure with args int, const char *
 $define %func terminal_set_active as procedure with args int
 $define %func terminal_restore_active_display as procedure with args void
 $define %func terminal_update as procedure with args void
+$define %func terminal_flush_input_active as procedure with args void
 $define %func terminal_get_input_channel as function with args void
 $define %func terminal_power_get as function with args int
 $define %func terminal_power_set as function with args int, int
@@ -105,7 +106,8 @@ $space %export terminal_putc_from_kernel, terminal_flush_kernel
 $space %export terminal_set_color, terminal_clear_active, terminal_log_mirror
 $space %export terminal_putc_to, terminal_puts_to
 $space %export terminal_set_active, terminal_restore_active_display
-$space %export terminal_update, terminal_get_input_channel
+$space %export terminal_update, terminal_flush_input_active
+$space %export terminal_get_input_channel
 $space %export terminal_power_get, terminal_power_set, terminal_power_reset
 $space %export terminal_power_suspend_all
 
@@ -774,6 +776,21 @@ void *
 terminal_get_input_channel(void)
 {
 	return (terminal_input_channel);
+}
+
+void
+terminal_flush_input_active(void)
+{
+	terminal_state_t	*term;
+
+	terminal_lazy_init();
+	term = &terminals[terminal_active];
+	term->input_head = 0;
+	term->input_tail = 0;
+	term->input_count = 0;
+	term->line_len = 0;
+	term->line_read_pos = 0;
+	term->eof_pending = 0;
 }
 
 void

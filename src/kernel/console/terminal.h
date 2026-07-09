@@ -158,6 +158,7 @@ void	terminal_set_active(int index);
 int	terminal_get_active(void);
 void	terminal_restore_active_display(void);
 void	terminal_update(void);
+void	terminal_flush_input_active(void);
 void	*terminal_get_input_channel(void);
 int	terminal_power_get(int index);
 int	terminal_power_set(int index, int state);

@@ -29,6 +29,7 @@
 
 #include <kernel/interrupts/idt.h>
 #include <kernel/api/errno.h>
+#include <kernel/drivers/keyboard/keycodes.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/video/drm/kms/property.h>
 #include <mlibc/mlibc.h>
@@ -100,8 +101,46 @@ struct api_term_power {
 	int	flags;
 };
 
+#define	API_INPUT_NONBLOCK	0x00000001
+
+struct api_key_event {
+	u64	timestamp;
+	u16	key;
+	u16	raw;
+	u32	flags;
+	u32	mods;
+	u32	ch;
+};
+
+struct api_term_info {
+	int	tty;
+	int	state;
+	u16	rows;
+	u16	cols;
+	u16	xpixel;
+	u16	ypixel;
+};
+
+#define	API_FS_TYPE_REG		1
+#define	API_FS_TYPE_DIR		2
+#define	API_FS_TYPE_CHR		3
+#define	API_FS_TYPE_PIPE	4
+
+struct api_fs_stat {
+	u32	type;
+	u32	mode;
+	u32	uid;
+	u32	gid;
+	u64	size;
+	u64	blocks;
+	s64	atime;
+	s64	mtime;
+	s64	ctime;
+	char	name[32];
+};
+
 /* Decoding helpers for EVFILT_KBD kevent data. */
-#define KBD_DATA_SCANCODE(v)	((u16)((u64)(v) & 0xFFFF))
+#define KBD_DATA_KEY(v)		((u16)((u64)(v) & 0xFFFF))
 #define KBD_DATA_RELEASED(v)	(((u64)(v) >> 16) & 1)
 #define KBD_DATA_EXTENDED(v)	(((u64)(v) >> 17) & 1)
 #define KBD_DATA_ASCII(v)	((char)(((u64)(v) >> 24) & 0xFF))
@@ -382,6 +421,9 @@ int api_proc_spawn(const char *path, const char *const *argv,
 int api_fs_chdir(const char *path);
 int api_fs_getcwd(char *buf, u32 size);
 int api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries);
+int api_fs_stat(const char *path, struct api_fs_stat *buf);
+int api_fs_rename(const char *oldpath, const char *newpath);
+int api_fs_unlink(const char *path);
 int api_proc_list(struct api_proc_info *buf, u32 max_entries);
 int api_kusr_auth(const char *password);
 int api_drm_call(u64 op, void *arg);
@@ -406,5 +448,9 @@ int api_sys_random(u8 *buf, u32 len);
 int api_timeinfo(struct api_timeinfo *buf);
 int api_time(void);
 int api_term_power(struct api_term_power *args);
+int api_term_info(struct api_term_info *info);
+int api_input_read(struct api_key_event *buf, u32 count, u32 flags);
+int api_input_poll(void);
+int api_input_flush(void);
 
 #endif

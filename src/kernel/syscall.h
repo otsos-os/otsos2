@@ -50,7 +50,11 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 
 #define	CALL_TERM_READ		0x100
 #define	CALL_TERM_WRITE		0x101
+#define	CALL_TERM_INFO		0x102
 #define	CALL_TERM_POWER		0x111
+#define	CALL_INPUT_READ		0x120
+#define	CALL_INPUT_POLL		0x121
+#define	CALL_INPUT_FLUSH	0x122
 #define	CALL_DATA_OPEN		0x200
 #define	CALL_DATA_CLOSE		0x201
 #define	CALL_DATA_READ		0x202
@@ -60,6 +64,9 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_FS_CHDIR		0x206
 #define	CALL_FS_GETCWD		0x207
 #define	CALL_FS_LISTDIR		0x208
+#define	CALL_FS_STAT		0x209
+#define	CALL_FS_RENAME		0x20A
+#define	CALL_FS_UNLINK		0x20B
 #define	CALL_MEM_MAP		0x300	
 #define	CALL_MEM_UNMAP		0x301
 #define	CALL_SHM_GET		0x302

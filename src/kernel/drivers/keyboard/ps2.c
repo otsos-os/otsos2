@@ -41,7 +41,10 @@ $define %func ps2_read_data as function with args u8 *
 $define %func ps2_update_leds as function with args void
 $define %func ps2_keyboard_init as function with args void
 $define %func buffer_write as procedure with args char
+$define %func ps2_mods as function with args void
+$define %func ps2_update_modifier as procedure with args u16, int
 $define %func ps2_keyboard_reset_state as procedure with args void
+$define %func ps2_keyboard_flush as procedure with args void
 $define %func ps2_keyboard_getchar as function with args void
 $define %func ps2_process_scancode as procedure with args u8
 $define %func ps2_handle_input as procedure with args const char *
@@ -57,47 +60,22 @@ $define %func ps2Scanf as function with args const char *, ...
 $space %internal ps2_debug_status, ps2_wait_input_clear
 $space %internal ps2_wait_output_full, ps2_flush_output
 $space %internal ps2_write_cmd, ps2_write_data, ps2_read_data
-$space %internal ps2_update_leds, buffer_write, ps2_process_scancode
+$space %internal ps2_update_leds, buffer_write, ps2_mods
+$space %internal ps2_update_modifier, ps2_process_scancode
 $space %internal ps2_handle_input, ps2_read_char_blocking
 $space %export ps2_keyboard_init, ps2_keyboard_handler
 $space %export ps2_keyboard_getchar, ps2_keyboard_poll
-$space %export ps2_keyboard_reset_state, ps2Scanf
+$space %export ps2_keyboard_reset_state, ps2_keyboard_flush, ps2Scanf
 
 */
 
 #include <kernel/drivers/keyboard/keyboard.h>
+#include <kernel/drivers/keyboard/keymap.h>
 #include <kernel/drivers/keyboard/ps2.h>
 #include <kernel/kshell/kshell.h>
 #include <kernel/drivers/power/power.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
-
-const char kbd_us[128] = {
-    0,    27,   '1', '2',  '3',  '4', '5', '6', '7', '8',
-    '9',  '0',  '-', '=',  '\b',
-    '\t', 'q',  'w', 'e',  'r',  't', 'y', 'u', 'i', 'o',
-    'p',  '[',  ']', '\n',
-    0,    'a',  's', 'd',  'f',  'g', 'h', 'j', 'k', 'l',
-    ';',  '\'', '`',
-    0,    '\\', 'z', 'x',  'c',  'v', 'b', 'n', 'm', ',',
-    '.',  '/',  0,
-    '*',  0,    ' ', 0,
-    0,    0,    0,   0,    0,    0,   0,   0,   0,   0,
-    0,    0,
-    '7',  '8',  '9', '-',  '4',  '5', '6', '+', '1', '2',
-    '3',  '0',  '.',
-    0,    0,    0,   0,    0,
-};
-
-const char kbd_us_caps[128] = {
-    0,   27,   '!',  '@', '#', '$', '%', '^', '&', '*', '(', ')', '_',
-    '+', '\b', '\t', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P',
-    '{', '}',  '\n', 0,   'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L',
-    ':', '\"', '~',  0,   '|', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<',
-    '>', '?',  0,    '*', 0,   ' ', 0,   0,   0,   0,   0,   0,   0,
-    0,   0,    0,    0,   0,   0,   '7', '8', '9', '-', '4', '5', '6', '+',
-    '1', '2',  '3',  '0', '.', 0,   0,   0,   0,   0,
-};
 
 #define	KBD_DATA_PORT		0x60
 #define	KBD_STATUS_PORT		0x64
@@ -113,9 +91,12 @@ const char kbd_us_caps[128] = {
 static char	kb_buffer[KB_BUFFER_SIZE];
 static int	kb_head;
 static int	kb_tail;
-static int	shift_pressed;
-static int	ctrl_pressed;
-static int	alt_pressed;
+static int	lshift_pressed;
+static int	rshift_pressed;
+static int	lctrl_pressed;
+static int	rctrl_pressed;
+static int	lalt_pressed;
+static int	ralt_pressed;
 static int	caps_lock;
 static int	caps_lock_down;
 static int	ps2_ready;
@@ -249,7 +230,12 @@ ps2_keyboard_init(void)
 
 	kb_head = 0;
 	kb_tail = 0;
-	shift_pressed = 0;
+	lshift_pressed = 0;
+	rshift_pressed = 0;
+	lctrl_pressed = 0;
+	rctrl_pressed = 0;
+	lalt_pressed = 0;
+	ralt_pressed = 0;
 	caps_lock = 0;
 	caps_lock_down = 0;
 	ps2_ready = 0;
@@ -369,17 +355,93 @@ buffer_write(char c)
 	}
 }
 
+static u32
+ps2_mods(void)
+{
+	u32	mods;
+
+	mods = 0;
+	if (lshift_pressed) {
+		mods |= MOD_LSHIFT;
+	}
+	if (rshift_pressed) {
+		mods |= MOD_RSHIFT;
+	}
+	if (lctrl_pressed) {
+		mods |= MOD_LCTRL;
+	}
+	if (rctrl_pressed) {
+		mods |= MOD_RCTRL;
+	}
+	if (lalt_pressed) {
+		mods |= MOD_LALT;
+	}
+	if (ralt_pressed) {
+		mods |= MOD_RALT;
+	}
+	if (caps_lock) {
+		mods |= MOD_CAPS;
+	}
+	return (mods);
+}
+
+static void
+ps2_update_modifier(u16 key, int released)
+{
+	switch (key) {
+	case KEY_LSHIFT:
+		lshift_pressed = released ? 0 : 1;
+		break;
+	case KEY_RSHIFT:
+		rshift_pressed = released ? 0 : 1;
+		break;
+	case KEY_LCTRL:
+		lctrl_pressed = released ? 0 : 1;
+		break;
+	case KEY_RCTRL:
+		rctrl_pressed = released ? 0 : 1;
+		break;
+	case KEY_LALT:
+		lalt_pressed = released ? 0 : 1;
+		break;
+	case KEY_RALT:
+		ralt_pressed = released ? 0 : 1;
+		break;
+	case KEY_CAPSLOCK:
+		if (released) {
+			caps_lock_down = 0;
+		} else if (!caps_lock_down) {
+			caps_lock = !caps_lock;
+			caps_lock_down = 1;
+			(void)ps2_update_leds();
+		}
+		break;
+	default:
+		break;
+	}
+}
+
 void
 ps2_keyboard_reset_state(void)
 {
 	kb_head = 0;
 	kb_tail = 0;
-	shift_pressed = 0;
-	ctrl_pressed = 0;
-	alt_pressed = 0;
+	lshift_pressed = 0;
+	rshift_pressed = 0;
+	lctrl_pressed = 0;
+	rctrl_pressed = 0;
+	lalt_pressed = 0;
+	ralt_pressed = 0;
 	caps_lock_down = 0;
 	scancode_extended = 0;
 	kshell_hotkey_latch = 0;
+}
+
+void
+ps2_keyboard_flush(void)
+{
+	kb_head = 0;
+	kb_tail = 0;
 }
 
 char
@@ -398,9 +460,13 @@ ps2_keyboard_getchar(void)
 static void
 ps2_process_scancode(u8 scancode)
 {
+	u32	flags;
+	u32	mods;
+	u32	ch;
+	u16	key;
 	int	released;
 	u8	code;
-	char	c;
+	int	extended;
 
 	if (scancode == 0xFA || scancode == 0xFE) {
 		return;
@@ -416,127 +482,42 @@ ps2_process_scancode(u8 scancode)
 		return;
 	}
 
-	if (scancode_extended) {
-		code = scancode & 0x7F;
-		released = (scancode & 0x80) != 0;
-		keyboard_handle_scancode(code, released, 1);
-		if (!released && code == 0x35) {
-			kbd_event_put(code, released, 1, '/');
-			buffer_write('/');
-			scancode_extended = 0;
-			return;
-		}
-		kbd_event_put(code, released, 1, 0);
-		if (code == 0x1D) {
-			ctrl_pressed = released ? 0 : 1;
-		} else if (code == 0x38) {
-			alt_pressed = released ? 0 : 1;
-		}
-		scancode_extended = 0;
-		return;
-	}
-
+	extended = scancode_extended != 0;
 	released = (scancode & 0x80) != 0;
 	code = scancode & 0x7F;
-	keyboard_handle_scancode(code, released, 0);
-	kbd_event_put(code, released, 0, 0);
+	key = keymap_ps2_set1(scancode, extended);
+	scancode_extended = 0;
 
-	if (released) {
-		scancode = code;
-		if (scancode == 0x2A || scancode == 0x36) {
-			shift_pressed = 0;
-		} else if (scancode == 0x1D) {
-			ctrl_pressed = 0;
-		} else if (scancode == 0x38) {
-			alt_pressed = 0;
-		} else if (scancode == 0x3A) {
-			if (caps_lock_down) {
-				caps_lock = !caps_lock;
-				(void)ps2_update_leds();
-			}
-			caps_lock_down = 0;
-		}
+	if (key == KEY_NONE) {
 		return;
 	}
 
-	if (scancode == 0x2A || scancode == 0x36) {
-		shift_pressed = 1;
-		return;
-	}
+	keyboard_handle_scancode(code, released, extended);
+	ps2_update_modifier(key, released);
 
-	if (scancode == 0x1D) {
-		ctrl_pressed = 1;
-		return;
+	mods = ps2_mods();
+	flags = released ? KEY_EVENT_RELEASE : KEY_EVENT_PRESS;
+	if (extended) {
+		flags |= KEY_EVENT_EXTENDED;
 	}
+	ch = released ? 0 : keymap_ascii(key, mods);
+	kbd_event_put(key, code, flags, mods, ch);
 
-	if (scancode == 0x38) {
-		alt_pressed = 1;
-		return;
-	}
-
-	if (scancode == 0x3A) {
-		caps_lock_down = 1;
-		return;
-	}
-
-	if (ctrl_pressed && alt_pressed && shift_pressed &&
-	    scancode == 0x2C) {
+	if (!released && (mods & MOD_CTRL) && (mods & MOD_ALT) &&
+	    (mods & MOD_SHIFT) && key == KEY_Z) {
 		drivers_log("[PS2] Ctrl+Alt+Shift+Z pressed, "
 		    "rebooting...\n");
 		power_controller_reboot();
 	}
 
-	if (ctrl_pressed && shift_pressed && scancode == 0x0E) {
+	if (!released && (mods & MOD_CTRL) && (mods & MOD_SHIFT) &&
+	    key == KEY_BACKSPACE) {
 		kshell_request_open();
 		return;
 	}
 
-	if (scancode == 0x4A) {
-		kbd_event_put(code, 0, 0, '-');
-		buffer_write('-');
-		return;
-	}
-
-	if (scancode == 0x4E) {
-		kbd_event_put(code, 0, 0, '+');
-		buffer_write('+');
-		return;
-	}
-
-	c = 0;
-	if (shift_pressed || caps_lock) {
-		if (caps_lock && !shift_pressed) {
-			c = kbd_us[scancode];
-			if (c >= 'a' && c <= 'z') {
-				c -= 32;
-			}
-		} else if (shift_pressed && !caps_lock) {
-			c = kbd_us_caps[scancode];
-		} else if (shift_pressed && caps_lock) {
-			c = kbd_us_caps[scancode];
-			if (c >= 'A' && c <= 'Z') {
-				c += 32;
-			}
-		} else {
-			c = kbd_us[scancode];
-		}
-	} else {
-		c = kbd_us[scancode];
-	}
-
-	if (ctrl_pressed) {
-		if (c >= '0' && c <= '9') {
-			c = 0;
-		} else if (c >= 'a' && c <= 'z') {
-			c = c - 'a' + 1;
-		} else if (c >= 'A' && c <= 'Z') {
-			c = c - 'A' + 1;
-		}
-	}
-
-	if (c != 0) {
-		kbd_event_put(code, 0, 0, c);
-		buffer_write(c);
+	if (ch != 0) {
+		buffer_write((char)ch);
 	}
 }
 

@@ -27,10 +27,14 @@
 /* !DEFINES!
 
 $define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type u64 as 64 bit unsigned
 $define %type int as 32 bit signed
 $define %type char as 8 bit signed
 $define %type keyboard_driver_t as struct with driver name and function pointers
 $define %type keyboard_scancode_callback_t as function pointer for raw scancode events
+$define %type kbd_event as struct with normalized keyboard input event
 
 $define %func keyboard_manager_init as procedure with args void
 $define %func keyboard_getchar as function with args void
@@ -38,12 +42,16 @@ $define %func keyboard_getchar_blocking as function with args void
 $define %func keyboard_common_handler as procedure with args void
 $define %func keyboard_poll as procedure with args void
 $define %func keyboard_reset_state as procedure with args void
-$define %func keyboard_start_direct_input as procedure with args void
-$define %func keyboard_stop_direct_input as procedure with args void
+$define %func keyboard_flush_chars as procedure with args void
+$define %func keyboard_flush_input as procedure with args void
 $define %func scanf as function with args const char *, ...
 $define %func keyboard_set_scancode_callback as procedure with args keyboard_scancode_callback_t
 $define %func keyboard_handle_scancode as procedure with args u8, int, int
 $define %func keyboard_get_driver_name as function with args void
+$define %func kbd_event_put as procedure with args u16, u16, u32, u32, u32
+$define %func kbd_event_get as function with args struct kbd_event *
+$define %func kbd_event_count as function with args void
+$define %func kbd_event_reset as procedure with args void
 
 */
 
@@ -52,21 +60,25 @@ $define %func keyboard_get_driver_name as function with args void
 $space %export keyboard_manager_init, keyboard_getchar
 $space %export keyboard_getchar_blocking, keyboard_common_handler
 $space %export keyboard_poll, keyboard_reset_state
+$space %export keyboard_flush_chars, keyboard_flush_input
 $space %export keyboard_start_direct_input, keyboard_stop_direct_input, scanf
 $space %export keyboard_set_scancode_callback, keyboard_handle_scancode
 $space %export keyboard_get_driver_name
+$space %export kbd_event_put, kbd_event_get, kbd_event_count, kbd_event_reset
 
 */
 
 #ifndef KEYBOARD_H
 #define KEYBOARD_H
 
+#include <kernel/drivers/keyboard/keycodes.h>
 #include <mlibc/mlibc.h>
 
 typedef int	(*keyboard_init_fn)(void);
 typedef char	(*keyboard_getchar_fn)(void);
 typedef void	(*keyboard_handler_fn)(void);
 typedef void	(*keyboard_poll_fn)(void);
+typedef void	(*keyboard_flush_fn)(void);
 
 typedef struct {
 	const char		*name;
@@ -74,20 +86,19 @@ typedef struct {
 	keyboard_getchar_fn	 getchar;
 	keyboard_handler_fn	 handler;
 	keyboard_poll_fn	 poll;
+	keyboard_flush_fn	 flush;
 } keyboard_driver_t;
 
 typedef void (*keyboard_scancode_callback_t)(u8 scancode, int released,
     int extended);
 
-/* Raw keyboard event for kqueue/EVFILT_KBD consumers.
- * Kept separate from the translated ASCII buffer so TTY and raw input
- * can coexist without stealing each other's data. */
 struct kbd_event {
-	u64	timestamp;
-	u16	scancode;
-	u8	released;
-	u8	extended;
-	char	ascii;
+	u64		timestamp;
+	u16		key;
+	u16		raw;
+	u32		flags;
+	u32		mods;
+	u32		ch;
 };
 
 #define	KBD_EVENT_RING_SIZE	256
@@ -98,6 +109,8 @@ char		keyboard_getchar_blocking(void);
 void		keyboard_common_handler(void);
 void		keyboard_poll(void);
 void		keyboard_reset_state(void);
+void		keyboard_flush_chars(void);
+void		keyboard_flush_input(void);
 void		keyboard_start_direct_input(void);
 void		keyboard_stop_direct_input(void);
 int		scanf(const char *format, ...);
@@ -107,8 +120,8 @@ void		keyboard_handle_scancode(u8 scancode, int released,
 		    int extended);
 const char	*keyboard_get_driver_name(void);
 
-void		kbd_event_put(u16 scancode, u8 released, u8 extended,
-		    char ascii);
+void		kbd_event_put(u16 key, u16 raw, u32 flags, u32 mods,
+		    u32 ch);
 int		kbd_event_get(struct kbd_event *out);
 int		kbd_event_count(void);
 void		kbd_event_reset(void);

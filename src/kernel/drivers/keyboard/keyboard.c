@@ -27,10 +27,13 @@
 /* !DEFINES!
 
 $define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
 $define %type int as 32 bit signed
 $define %type char as 8 bit signed
 $define %type keyboard_driver_t as struct with driver name and function pointers
 $define %type keyboard_scancode_callback_t as function pointer for raw scancode events
+$define %type kbd_event as struct with normalized keyboard input event
 
 $define %func keyboard_manager_init as procedure with args void
 $define %func keyboard_getchar as function with args void
@@ -38,12 +41,18 @@ $define %func keyboard_getchar_blocking as function with args void
 $define %func keyboard_common_handler as procedure with args void
 $define %func keyboard_poll as procedure with args void
 $define %func keyboard_reset_state as procedure with args void
+$define %func keyboard_flush_chars as procedure with args void
+$define %func keyboard_flush_input as procedure with args void
 $define %func keyboard_start_direct_input as procedure with args void
 $define %func keyboard_stop_direct_input as procedure with args void
 $define %func scanf as function with args const char *, ...
 $define %func keyboard_set_scancode_callback as procedure with args keyboard_scancode_callback_t
 $define %func keyboard_handle_scancode as procedure with args u8, int, int
 $define %func keyboard_get_driver_name as function with args void
+$define %func kbd_event_put as procedure with args u16, u16, u32, u32, u32
+$define %func kbd_event_get as function with args struct kbd_event *
+$define %func kbd_event_count as function with args void
+$define %func kbd_event_reset as procedure with args void
 
 */
 
@@ -52,9 +61,11 @@ $define %func keyboard_get_driver_name as function with args void
 $space %export keyboard_manager_init, keyboard_getchar
 $space %export keyboard_getchar_blocking, keyboard_common_handler
 $space %export keyboard_poll, keyboard_reset_state
+$space %export keyboard_flush_chars, keyboard_flush_input
 $space %export keyboard_start_direct_input, keyboard_stop_direct_input, scanf
 $space %export keyboard_set_scancode_callback, keyboard_handle_scancode
 $space %export keyboard_get_driver_name
+$space %export kbd_event_put, kbd_event_get, kbd_event_count, kbd_event_reset
 
 */
 
@@ -84,6 +95,7 @@ static keyboard_driver_t ps2_driver = {
 	.getchar	= ps2_keyboard_getchar,
 	.handler	= ps2_keyboard_handler,
 	.poll		= ps2_keyboard_poll,
+	.flush		= ps2_keyboard_flush,
 };
 
 void
@@ -209,6 +221,21 @@ keyboard_reset_state(void)
 }
 
 void
+keyboard_flush_chars(void)
+{
+	if (current_driver && current_driver->flush) {
+		current_driver->flush();
+	}
+}
+
+void
+keyboard_flush_input(void)
+{
+	keyboard_flush_chars();
+	kbd_event_reset();
+}
+
+void
 keyboard_start_direct_input(void)
 {
 	direct_input_depth++;
@@ -246,7 +273,7 @@ keyboard_get_driver_name(void)
 }
 
 void
-kbd_event_put(u16 scancode, u8 released, u8 extended, char ascii)
+kbd_event_put(u16 key, u16 raw, u32 flags, u32 mods, u32 ch)
 {
 	struct kbd_event	*ev;
 	int			next;
@@ -258,10 +285,11 @@ kbd_event_put(u16 scancode, u8 released, u8 extended, char ascii)
 
 	ev = &kbd_event_ring[kbd_event_head];
 	ev->timestamp = timer_get_ticks();
-	ev->scancode = scancode;
-	ev->released = released;
-	ev->extended = extended;
-	ev->ascii = ascii;
+	ev->key = key;
+	ev->raw = raw;
+	ev->flags = flags;
+	ev->mods = mods;
+	ev->ch = ch;
 
 	kbd_event_head = next;
 

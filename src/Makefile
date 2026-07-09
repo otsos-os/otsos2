@@ -32,6 +32,7 @@ MUSL_CRT1 = $(MUSL_DIR)/lib/crt1.o
 YES_BIN = $(PORTS_DIR)/yes
 FETCH_BIN = $(PORTS_DIR)/fetch
 SHELL_BIN = $(PORTS_DIR)/sh
+OVEN_BIN = $(PORTS_DIR)/oven
 SHMTEST_BIN = $(PORTS_DIR)/shmtest
 POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
 KBDTEST_BIN = $(PORTS_DIR)/kbdtest
@@ -76,6 +77,7 @@ TERMINAL_O = ../bin/console_terminal.o
 PTY_O = ../bin/console_pty.o
 PS2_O = ../bin/ps2.o
 KEYBOARD_O = ../bin/keyboard.o
+KEYMAP_O = ../bin/keymap.o
 FONT_O = ../bin/font.o
 DRM_CORE_O = ../bin/drm_core.o
 DRM_GEM_O = ../bin/drm_gem.o
@@ -128,6 +130,7 @@ THREAD_O = ../bin/thread.o
 CHDIR_O = ../bin/chdir.o
 GETCWD_O = ../bin/getcwd.o
 LISTDIR_O = ../bin/listdir.o
+FS_META_O = ../bin/fs_meta.o
 PROCLIST_O = ../bin/proclist.o
 ELF_O = ../bin/elf.o
 USERSPACE_O = ../bin/userspace.o
@@ -192,6 +195,8 @@ FUTEX_O = ../bin/futex.o
 SYS_O = ../bin/sys.o
 API_TIME_O = ../bin/api_time.o
 TERM_POWER_O = ../bin/term_power.o
+TERM_INFO_O = ../bin/term_info.o
+INPUT_O = ../bin/input.o
 
 TIME_O = ../bin/time.o
 CLOCKSOURCE_O = ../bin/clocksource.o
@@ -199,8 +204,8 @@ ET_CLOCKSOURCE_O = ../bin/et_clocksource.o
 CMOS_RTC_O = ../bin/cmos_rtc.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDIO_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(PS2_O) $(KEYBOARD_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
-      $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(THREAD_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
+      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
+      $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(THREAD_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(FS_META_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
@@ -216,7 +221,7 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(POSIX_O) $(POSIX_IO_O) $(POSIX_PROC_O) $(POSIX_FS_O) \
       $(POSIX_MEM_O) $(POSIX_SIGNAL_O) $(SIGNAL_O) \
       $(PROC_PID_O) $(THREAD_API_O) $(FUTEX_O) $(SYS_O) \
-      $(API_TIME_O) $(TERM_POWER_O) \
+      $(API_TIME_O) $(TERM_POWER_O) $(TERM_INFO_O) $(INPUT_O) \
       $(TIME_O) $(CLOCKSOURCE_O) $(ET_CLOCKSOURCE_O) $(CMOS_RTC_O)
 
 .PHONY: all ask_version check_build_tools check_run_tools
@@ -307,6 +312,11 @@ $(SHELL_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/sh"
 	@$(MAKE) -C $(PORTS_DIR) sh LIBC_ENABLED=$(LIBC_ENABLED)
 
+.PHONY: $(OVEN_BIN)
+$(OVEN_BIN): $(LIBC_DEPS)
+	@echo "  MAKE    ports/oven"
+	@$(MAKE) -C $(PORTS_DIR) oven LIBC_ENABLED=$(LIBC_ENABLED)
+
 .PHONY: $(SHMTEST_BIN)
 $(SHMTEST_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/shmtest"
@@ -339,7 +349,7 @@ $(MUSL_LIBC):
 $(MUSL_CRT1): $(MUSL_LIBC)
 	@true
 
-$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP)
+$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
 	@for m in $(MULTIBOOT_MODULES); do \
@@ -349,6 +359,7 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 			yes) src=$(YES_BIN);; \
 			fetch) src=$(FETCH_BIN);; \
 			sh) src=$(SHELL_BIN);; \
+			oven) src=$(OVEN_BIN);; \
 			shmtest) src=$(SHMTEST_BIN);; \
 			posix_hello) src=$(POSIX_HELLO_BIN);; \
 			kbdtest) src=$(KBDTEST_BIN);; \
@@ -430,6 +441,10 @@ $(PS2_O): kernel/drivers/keyboard/ps2.c
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(KEYBOARD_O): kernel/drivers/keyboard/keyboard.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(KEYMAP_O): kernel/drivers/keyboard/keymap.c kernel/drivers/keyboard/keymap.h kernel/drivers/keyboard/keycodes.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -637,6 +652,10 @@ $(LISTDIR_O): kernel/api/listdir.c kernel/drivers/fs/vfs/vfs.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+$(FS_META_O): kernel/api/fs_meta.c kernel/api/api.h kernel/drivers/fs/vfs/vfs.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
 $(PROCLIST_O): kernel/api/proclist.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
@@ -822,6 +841,14 @@ $(EVENT_KBD_O): kernel/event/filter_kbd.c kernel/event/event.h kernel/drivers/ke
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(TERM_POWER_O): kernel/api/term_power.c kernel/api/api.h kernel/console/terminal.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(TERM_INFO_O): kernel/api/term_info.c kernel/api/api.h kernel/console/terminal.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(INPUT_O): kernel/api/input.c kernel/api/api.h kernel/drivers/keyboard/keyboard.h kernel/console/terminal.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

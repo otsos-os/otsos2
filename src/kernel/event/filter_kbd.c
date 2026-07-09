@@ -53,15 +53,6 @@ $space %export filter_kbd_ops
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <mlibc/mlibc.h>
 
-/*
- * EVFILT_KBD returns raw keyboard events through the kevent data field.
- *
- * The 64-bit event data is packed as:
- *   bits  0..15  scancode
- *   bit  16      released (1 = key up, 0 = key down)
- *   bit  17      extended (E0 prefix)
- *   bits 24..31  ASCII translation (0 if none)
- */
 
 static int
 filt_kbd_attach(knote_t *kn)
@@ -88,10 +79,10 @@ filt_kbd_event(knote_t *kn, u32 nevents)
 		return (0);
 	}
 
-	data = (u64)ev.scancode;
-	data |= (u64)(ev.released ? 1 : 0) << 16;
-	data |= (u64)(ev.extended ? 1 : 0) << 17;
-	data |= (u64)(u8)ev.ascii << 24;
+	data = (u64)ev.key;
+	data |= (u64)((ev.flags & KEY_EVENT_RELEASE) ? 1 : 0) << 16;
+	data |= (u64)((ev.flags & KEY_EVENT_EXTENDED) ? 1 : 0) << 17;
+	data |= (u64)(u8)ev.ch << 24;
 
 	kn->data = (s64)data;
 

@@ -5,7 +5,7 @@
  * modification, are permitted provided that the following conditions are met:
  *
  * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
+ *    this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
@@ -26,36 +26,40 @@
 
 /* !DEFINES!
 
-$define %type char as 8 bit signed
-$define %type int as 32 bit signed
-
-$define %func ps2_keyboard_init as function with args void
-$define %func ps2_keyboard_handler as procedure with args void
-$define %func ps2_keyboard_getchar as function with args void
-$define %func ps2_keyboard_poll as procedure with args void
-$define %func ps2_keyboard_reset_state as procedure with args void
-$define %func ps2_keyboard_flush as procedure with args void
-$define %func ps2Scanf as function with args const char *, ...
+$define %type api_term_info as struct with active terminal info
+$define %func api_term_info as function with args struct api_term_info *
 
 */
 
 /* !SPACE!
 
-$space %export ps2_keyboard_init, ps2_keyboard_handler
-$space %export ps2_keyboard_getchar, ps2_keyboard_poll
-$space %export ps2_keyboard_reset_state, ps2_keyboard_flush, ps2Scanf
+$space %export api_term_info
 
 */
 
-#ifndef PS2_H
-#define PS2_H
+#include <kernel/api/api.h>
+#include <kernel/console/terminal.h>
+#include <kernel/useraddr.h>
+#include <mlibc/mlibc.h>
 
-int	ps2_keyboard_init(void);
-void	ps2_keyboard_handler(void);
-char	ps2_keyboard_getchar(void);
-void	ps2_keyboard_poll(void);
-void	ps2_keyboard_reset_state(void);
-void	ps2_keyboard_flush(void);
-int	ps2Scanf(const char *format, ...);
+int
+api_term_info(struct api_term_info *info)
+{
+	struct winsize	ws;
+	int		tty;
 
-#endif
+	if (!info || !is_user_address(info, sizeof(*info))) {
+		return (-API_ERR_BAD_ADDR);
+	}
+
+	tty = terminal_get_active();
+	terminal_get_winsize(tty, &ws);
+
+	info->tty = tty;
+	info->state = terminal_power_get(tty);
+	info->rows = ws.ws_row;
+	info->cols = ws.ws_col;
+	info->xpixel = ws.ws_xpixel;
+	info->ypixel = ws.ws_ypixel;
+	return (0);
+}
