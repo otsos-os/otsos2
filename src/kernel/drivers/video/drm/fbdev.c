@@ -474,6 +474,9 @@ static int fbdev_atomic_commit(const drm_kms_state_t *state) {
 
   dirty_valid = 0;
   full_update = (fb_id != g_primary_fb_id);
+  if (dw >= g_hw_width && dh >= g_hw_height) {
+    full_update = 1;
+  }
   if (!full_update && dw > 0 && dh > 0 &&
       (dw < g_hw_width || dh < g_hw_height)) {
     fbdev_rect_include(&dx, &dy, &dw, &dh, &dirty_valid, dx, dy, dw, dh);
