@@ -28,6 +28,7 @@
 #include <kernel/console/terminal.h>
 #include <kernel/console/pty.h>
 #include <kernel/crypto/rng/rng.h>
+#include <kernel/drivers/video/drm/fbdev.h>
 #include <kernel/process.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -353,6 +354,11 @@ devfs_init(void)
 	    dev_random_read, dev_random_write, NULL, NULL, NULL);
 	devfs_register("urandom", DEVFS_DEV_URANDOM,
 	    dev_urandom_read, dev_urandom_write, NULL, NULL, NULL);
+	if (drm_fbdev_is_ready()) {
+		devfs_register("fb0", DEVFS_DEV_FB0,
+		    drm_fbdev_vnode_read, drm_fbdev_vnode_write,
+		    drm_fbdev_vnode_ioctl, drm_fbdev_vnode_stat, NULL);
+	}
 
 	pty_init();
 
@@ -396,6 +402,12 @@ devfs_lookup(const char *path)
 	vn->ioctl_fn = dev->ioctl_fn;
 	vn->stat_fn = dev->stat_fn ? dev->stat_fn : vnode_simple_stat;
 	vn->readdir_fn = NULL;
+
+	if (dev->device_id == DEVFS_DEV_FB0) {
+		vn->mode = POSIX_S_IFCHR | 0600;
+		vn->uid = 0;
+		vn->gid = 0;
+	}
 
 	if (dev->device_id == DEVFS_DEV_TTY) {
 		proc = process_current();

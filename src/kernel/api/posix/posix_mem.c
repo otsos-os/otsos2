@@ -28,6 +28,7 @@
 #include <kernel/api/api.h>
 #include <kernel/api/shm.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
+#include <kernel/drivers/video/drm/fbdev.h>
 #include <kernel/drivers/video/drm/gem.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
@@ -60,6 +61,59 @@ page_flags_for_prot(u64 prot)
 		flags |= PTE_NX;
 	}
 	return (flags);
+}
+
+static s64
+posix_mmap_fbdev(struct process *proc, vnode_t *vn, u64 addr, u64 length,
+    u64 prot, u64 flags, u64 offset)
+{
+	drm_fbdev_info_t	info;
+	vm_object_t		*obj;
+	u64			map_size;
+	u32			api_prot;
+	u32			api_flags;
+
+	(void)vn;
+	if (!proc_has_privilege(proc)) {
+		return (-POSIX_EACCES);
+	}
+	if ((flags & POSIX_MAP_SHARED) == 0) {
+		return (-POSIX_EINVAL);
+	}
+	if ((offset & (PAGE_SIZE - 1)) != 0) {
+		return (-POSIX_EINVAL);
+	}
+	if (drm_fbdev_get_info(&info) != 0) {
+		return (-POSIX_ENODEV);
+	}
+	if ((info.hw_address & (PAGE_SIZE - 1)) != 0) {
+		return (-POSIX_ENODEV);
+	}
+	if (offset >= info.size || length > info.size - offset) {
+		return (-POSIX_EINVAL);
+	}
+
+	map_size = align_up(length, PAGE_SIZE);
+	api_prot = 0;
+	if (prot & POSIX_PROT_READ) api_prot |= API_MAP_READ;
+	if (prot & POSIX_PROT_WRITE) api_prot |= API_MAP_WRITE;
+	if (prot & POSIX_PROT_EXEC) api_prot |= API_MAP_EXEC;
+
+	api_flags = API_MAP_SHARED;
+	if (flags & POSIX_MAP_FIXED) api_flags |= API_MAP_FIXED;
+
+	obj = vm_object_create(VM_OBJ_DEVICE, map_size,
+	    (void *)(info.hw_address + offset));
+	if (!obj) {
+		return (-POSIX_ENOMEM);
+	}
+	if (vm_map_insert(proc, addr, addr + map_size, api_prot,
+	    api_flags, 0, obj, 0) != 0) {
+		vm_object_unref(obj);
+		return (-POSIX_ENOMEM);
+	}
+	vm_object_unref(obj);
+	return ((s64)addr);
 }
 
 struct posix_ipc_perm {
@@ -187,6 +241,10 @@ posix_mmap(u64 addr_u, u64 length, u64 prot, u64 flags, u64 fd_u,
 
 		vn = pfd->vnode;
 		if (vn->type == VCHR) {
+			if (strcmp(vn->name, "fb0") == 0) {
+				return (posix_mmap_fbdev(proc, vn, addr,
+				    length, prot, flags, offset));
+			}
 			return (-POSIX_ENODEV);
 		}
 

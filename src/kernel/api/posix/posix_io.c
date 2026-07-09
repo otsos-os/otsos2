@@ -654,7 +654,9 @@ posix_lseek(u64 fd_u, u64 offset_u, u64 whence_u, u64 a4, u64 a5,
 		return (-POSIX_EBADF);
 	}
 
-	if (pfd->vnode->type == VCHR || pfd->vnode->type == VPIPE) {
+	if ((pfd->vnode->type == VCHR &&
+	    strcmp(pfd->vnode->name, "fb0") != 0) ||
+	    pfd->vnode->type == VPIPE) {
 		return (-POSIX_ESPIPE);
 	}
 
@@ -715,8 +717,9 @@ posix_pread64(u64 fd_u, u64 buf_u, u64 count, u64 pos_u, u64 a5,
 		return (-POSIX_EFAULT);
 	}
 
-	if (pfd->vnode == NULL || pfd->vnode->type == VCHR ||
-	    pfd->vnode->type == VPIPE) {
+	if (pfd->vnode == NULL || pfd->vnode->type == VPIPE ||
+	    (pfd->vnode->type == VCHR &&
+	    strcmp(pfd->vnode->name, "fb0") != 0)) {
 		return (-POSIX_ESPIPE);
 	}
 
@@ -760,8 +763,9 @@ posix_pwrite64(u64 fd_u, u64 buf_u, u64 count, u64 pos_u, u64 a5,
 		return (-POSIX_EFAULT);
 	}
 
-	if (pfd->vnode == NULL || pfd->vnode->type == VCHR ||
-	    pfd->vnode->type == VPIPE) {
+	if (pfd->vnode == NULL || pfd->vnode->type == VPIPE ||
+	    (pfd->vnode->type == VCHR &&
+	    strcmp(pfd->vnode->name, "fb0") != 0)) {
 		return (-POSIX_ESPIPE);
 	}
 
@@ -1144,6 +1148,11 @@ posix_ioctl(u64 fd_u, u64 cmd_u, u64 arg_u, u64 a4, u64 a5, u64 a6,
 	pfd = posix_get_fd(proc, (int)fd_u);
 	if (!pfd) {
 		return (-POSIX_EBADF);
+	}
+
+	if (pfd->vnode && pfd->vnode->type == VCHR &&
+	    strcmp(pfd->vnode->name, "fb0") == 0) {
+		return (vnode_ioctl(pfd->vnode, cmd_u, (void *)arg_u));
 	}
 
 	switch ((int)cmd_u) {

@@ -95,6 +95,7 @@ vm_object_create(u32 type, u64 size, void *backing)
 		    (const char *)backing, size);
 		break;
 	case VM_OBJ_GEM:
+	case VM_OBJ_DEVICE:
 		obj->pager = vm_pager_create_device(backing, size);
 		break;
 	default:
@@ -197,7 +198,9 @@ vm_object_unref(vm_object_t *obj)
 
 	if (obj->pages != NULL) {
 		for (i = 0; i < obj->page_count; i++) {
-			if (obj->pages[i] != 0)
+			if (obj->pages[i] != 0 &&
+			    obj->type != VM_OBJ_GEM &&
+			    obj->type != VM_OBJ_DEVICE)
 				vm_page_free_phys(obj->pages[i]);
 		}
 		kmem_free(obj->pages);
@@ -270,7 +273,8 @@ vm_object_get_page(vm_object_t *obj, u64 index, u64 file_offset)
 	    &page_phys) != 0)
 		return (0);
 
-	if (index < p->page_count)
+	if (index < p->page_count && p->type != VM_OBJ_GEM &&
+	    p->type != VM_OBJ_DEVICE)
 		p->pages[index] = page_phys;
 
 	return (page_phys);

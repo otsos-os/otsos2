@@ -57,7 +57,9 @@ api_data_seek(int handle, long offset, int whence)
 		return (-API_ERR_NOT_SEEKABLE);
 	}
 
-	if (objects[object_index].type == API_OBJECT_VNODE) {
+	if (objects[object_index].type == API_OBJECT_VNODE &&
+	    (objects[object_index].vn == NULL ||
+	    strcmp(objects[object_index].vn->name, "fb0") != 0)) {
 		return (-API_ERR_NOT_SEEKABLE);
 	}
 

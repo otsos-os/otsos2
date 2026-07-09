@@ -27,6 +27,7 @@
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/api/api.h>
 #include <kernel/other/restrict.h>
+#include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -149,6 +150,13 @@ api_data_open(const char *path, int flags)
 		vnode_release(vn);
 		kmem_free(kpath);
 		return (-API_ERR_IS_DIR);
+	}
+
+	if (vn->type == VCHR && strcmp(vn->name, "fb0") == 0 &&
+	    !proc_has_privilege(process_current())) {
+		vnode_release(vn);
+		kmem_free(kpath);
+		return (-API_ERR_PERM);
 	}
 
 	if (flags & API_OPEN_TRUNC) {

@@ -61,7 +61,9 @@ Monolithic kernel with the following rough layers:
   superblock + file table + block map + chained data). Tooling in `chainfs.py`.
 - `drivers/fs/vfs/` — tiny vnode-based VFS; used by POSIX personality and devfs.
 - `drivers/fs/devfs/` — device nodes: `/dev/null`, `/dev/zero`, `/dev/random`,
-  `/dev/urandom`, `/dev/tty`, `/dev/console`, `/dev/ptmx`, `/dev/pts/*`.
+  `/dev/urandom`, `/dev/tty`, `/dev/console`, `/dev/fb0`, `/dev/ptmx`,
+  `/dev/pts/*`. `/dev/fb0` is a root-only Linux fbdev-compatible character
+  device backed by the boot linear framebuffer.
 - `drivers/video/drm/` — minimal DRM: GEM buffers, KMS objects, atomic commit,
   fbdev, render helpers (`rapi`), and a virtio-gpu backend.
 - `console/` — kernel terminal, pty, and console rendering.
@@ -231,6 +233,9 @@ User need to test, dont run test manually, ask user.
   copy/spawn.  Non-root / non-kusr processes are blocked from `/conf` and from
   dangerous syscalls (kmeminfo, DRM master ops, terminal disable/reset).  POSIX
   programs can drop or swap credentials via `setuid`/`setgid` (syscalls 105/106).
+- `/dev/fb0` follows the same root privilege check in its vnode operations and
+  native open path; POSIX mode is `0600`, and POSIX `mmap()` maps the device via
+  a device-backed VM object.
 
 ## Dependencies Between Modules
 

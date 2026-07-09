@@ -29,17 +29,279 @@
 #include <drm/kms/crtc.h>
 #include <drm/kms/plane.h>
 #include <drm/kms/framebuffer.h>
+#include <kernel/api/posix/posix.h>
+#include <kernel/process.h>
+#include <kernel/useraddr.h>
 #include <mm/vm/pmap.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define PAGE_SIZE 4096
+#define FBDEV_MAX_IO 0x7FFFFFFF
+
+typedef struct fb_bitfield {
+  u32 offset;
+  u32 length;
+  u32 msb_right;
+} fb_bitfield_t;
+
+typedef struct fb_fix_screeninfo {
+  char id[16];
+  unsigned long smem_start;
+  u32 smem_len;
+  u32 type;
+  u32 type_aux;
+  u32 visual;
+  u16 xpanstep;
+  u16 ypanstep;
+  u16 ywrapstep;
+  u32 line_length;
+  unsigned long mmio_start;
+  u32 mmio_len;
+  u32 accel;
+  u16 capabilities;
+  u16 reserved[2];
+} fb_fix_screeninfo_t;
+
+typedef struct fb_var_screeninfo {
+  u32 xres;
+  u32 yres;
+  u32 xres_virtual;
+  u32 yres_virtual;
+  u32 xoffset;
+  u32 yoffset;
+  u32 bits_per_pixel;
+  u32 grayscale;
+  fb_bitfield_t red;
+  fb_bitfield_t green;
+  fb_bitfield_t blue;
+  fb_bitfield_t transp;
+  u32 nonstd;
+  u32 activate;
+  u32 height;
+  u32 width;
+  u32 accel_flags;
+  u32 pixclock;
+  u32 left_margin;
+  u32 right_margin;
+  u32 upper_margin;
+  u32 lower_margin;
+  u32 hsync_len;
+  u32 vsync_len;
+  u32 sync;
+  u32 vmode;
+  u32 rotate;
+  u32 colorspace;
+  u32 reserved[4];
+} fb_var_screeninfo_t;
+
+typedef struct fb_cmap {
+  u32 start;
+  u32 len;
+  u16 *red;
+  u16 *green;
+  u16 *blue;
+  u16 *transp;
+} fb_cmap_t;
+
+typedef struct fb_con2fbmap {
+  u32 console;
+  u32 framebuffer;
+} fb_con2fbmap_t;
+
+typedef struct fb_vblank {
+  u32 flags;
+  u32 count;
+  u32 vcount;
+  u32 hcount;
+  u32 reserved[4];
+} fb_vblank_t;
 
 static u8 *g_hw_base;
+static u64 g_hw_phys;
+static u64 g_hw_size;
 static u32 g_hw_pitch;
 static u32 g_hw_width;
 static u32 g_hw_height;
+static u32 g_fb_xoffset;
+static u32 g_fb_yoffset;
+static u32 g_fb_blank;
 static u8 g_hw_bpp;
+
+static int fbdev_ready(void) {
+  return (g_hw_base != NULL && g_hw_phys != 0 && g_hw_size != 0 &&
+          g_hw_pitch != 0 && g_hw_width != 0 && g_hw_height != 0 &&
+          g_hw_bpp != 0);
+}
+
+static int fbdev_require_privilege(void) {
+  if (!proc_has_privilege(process_current())) {
+    return -POSIX_EACCES;
+  }
+  return 0;
+}
+
+static void fbdev_bitfields(fb_var_screeninfo_t *var) {
+  memset(&var->red, 0, sizeof(var->red));
+  memset(&var->green, 0, sizeof(var->green));
+  memset(&var->blue, 0, sizeof(var->blue));
+  memset(&var->transp, 0, sizeof(var->transp));
+
+  if (g_hw_bpp == 16) {
+    var->red.offset = 11;
+    var->red.length = 5;
+    var->green.offset = 5;
+    var->green.length = 6;
+    var->blue.offset = 0;
+    var->blue.length = 5;
+  } else if (g_hw_bpp == 24 || g_hw_bpp == 32) {
+    var->red.offset = 16;
+    var->red.length = 8;
+    var->green.offset = 8;
+    var->green.length = 8;
+    var->blue.offset = 0;
+    var->blue.length = 8;
+    if (g_hw_bpp == 32) {
+      var->transp.offset = 24;
+      var->transp.length = 8;
+    }
+  } else {
+    var->red.length = g_hw_bpp;
+    var->green.length = g_hw_bpp;
+    var->blue.length = g_hw_bpp;
+  }
+}
+
+static void fbdev_fill_fix(fb_fix_screeninfo_t *fix) {
+  memset(fix, 0, sizeof(*fix));
+  memcpy(fix->id, "otsos2-fb", 9);
+  fix->smem_start = (unsigned long)g_hw_phys;
+  fix->smem_len = (u32)g_hw_size;
+  fix->type = DRM_FB_TYPE_PACKED_PIXELS;
+  fix->visual = DRM_FB_VISUAL_TRUECOLOR;
+  fix->line_length = g_hw_pitch;
+  fix->accel = DRM_FB_ACCEL_NONE;
+}
+
+static void fbdev_fill_var(fb_var_screeninfo_t *var) {
+  memset(var, 0, sizeof(*var));
+  var->xres = g_hw_width;
+  var->yres = g_hw_height;
+  var->xres_virtual = g_hw_width;
+  var->yres_virtual = g_hw_height;
+  var->xoffset = g_fb_xoffset;
+  var->yoffset = g_fb_yoffset;
+  var->bits_per_pixel = g_hw_bpp;
+  var->height = 0xFFFFFFFF;
+  var->width = 0xFFFFFFFF;
+  var->vmode = DRM_FB_VMODE_NONINTERLACED;
+  fbdev_bitfields(var);
+}
+
+static int fbdev_check_var(const fb_var_screeninfo_t *var) {
+  u32 activate;
+
+  activate = var->activate & DRM_FB_ACTIVATE_MASK;
+  if (activate != 0 && activate != DRM_FB_ACTIVATE_TEST) {
+    return -POSIX_EINVAL;
+  }
+  if (var->xres != g_hw_width || var->yres != g_hw_height) {
+    return -POSIX_EINVAL;
+  }
+  if (var->xres_virtual != 0 && var->xres_virtual != g_hw_width) {
+    return -POSIX_EINVAL;
+  }
+  if (var->yres_virtual != 0 && var->yres_virtual != g_hw_height) {
+    return -POSIX_EINVAL;
+  }
+  if (var->bits_per_pixel != 0 && var->bits_per_pixel != g_hw_bpp) {
+    return -POSIX_EINVAL;
+  }
+  if (var->xoffset != 0 || var->yoffset != 0) {
+    return -POSIX_EINVAL;
+  }
+  return 0;
+}
+
+static int fbdev_clip_io(u64 offset, u64 count, u64 *out_count) {
+  if (!fbdev_ready()) {
+    return -POSIX_ENODEV;
+  }
+  if (offset >= g_hw_size) {
+    *out_count = 0;
+    return 0;
+  }
+  if (count > g_hw_size - offset) {
+    count = g_hw_size - offset;
+  }
+  if (count > FBDEV_MAX_IO) {
+    count = FBDEV_MAX_IO;
+  }
+  *out_count = count;
+  return 0;
+}
+
+static int fbdev_cmap_validate(const fb_cmap_t *cmap) {
+  u64 bytes;
+
+  if (cmap->len == 0) {
+    return 0;
+  }
+  if (cmap->start >= 256 || cmap->len > 256 ||
+      cmap->start + cmap->len > 256) {
+    return -POSIX_EINVAL;
+  }
+  bytes = (u64)cmap->len * sizeof(u16);
+  if (!cmap->red || !cmap->green || !cmap->blue) {
+    return -POSIX_EFAULT;
+  }
+  if (!is_user_address(cmap->red, bytes) ||
+      !is_user_address(cmap->green, bytes) ||
+      !is_user_address(cmap->blue, bytes)) {
+    return -POSIX_EFAULT;
+  }
+  if (cmap->transp && !is_user_address(cmap->transp, bytes)) {
+    return -POSIX_EFAULT;
+  }
+  return 0;
+}
+
+static int fbdev_get_cmap(void *arg) {
+  fb_cmap_t cmap;
+  u32 i, idx;
+  u16 val;
+  int rc;
+
+  if (!arg || !is_user_address(arg, sizeof(cmap))) {
+    return -POSIX_EFAULT;
+  }
+  memcpy(&cmap, arg, sizeof(cmap));
+  rc = fbdev_cmap_validate(&cmap);
+  if (rc != 0 || cmap.len == 0) {
+    return rc;
+  }
+  for (i = 0; i < cmap.len; i++) {
+    idx = cmap.start + i;
+    val = (u16)((idx << 8) | idx);
+    cmap.red[i] = val;
+    cmap.green[i] = val;
+    cmap.blue[i] = val;
+    if (cmap.transp) {
+      cmap.transp[i] = 0xFFFF;
+    }
+  }
+  return 0;
+}
+
+static int fbdev_put_cmap(void *arg) {
+  fb_cmap_t cmap;
+
+  if (!arg || !is_user_address(arg, sizeof(cmap))) {
+    return -POSIX_EFAULT;
+  }
+  memcpy(&cmap, arg, sizeof(cmap));
+  return fbdev_cmap_validate(&cmap);
+}
 
 static int fbdev_probe(const void *boot_info) {
   const drm_fbdev_boot_t *boot = (const drm_fbdev_boot_t *)boot_info;
@@ -71,10 +333,15 @@ static int fbdev_init(const void *boot_info) {
   fbdev_map_hw(boot->hw_address, size);
 
   g_hw_base = (u8 *)boot->hw_address;
+  g_hw_phys = boot->hw_address;
+  g_hw_size = size;
   g_hw_pitch = boot->pitch;
   g_hw_width = boot->width;
   g_hw_height = boot->height;
   g_hw_bpp = boot->bpp;
+  g_fb_xoffset = 0;
+  g_fb_yoffset = 0;
+  g_fb_blank = 0;
 
   /* Publish geometry so the KMS layer knows the active mode. */
   drm_crtc_set_mode_geometry(boot->width, boot->height, boot->pitch,
@@ -168,3 +435,189 @@ static const drm_driver_t g_fbdev_driver = {
 };
 
 const drm_driver_t *drm_fbdev_driver_get(void) { return &g_fbdev_driver; }
+
+int drm_fbdev_is_ready(void) { return fbdev_ready(); }
+
+int drm_fbdev_get_info(drm_fbdev_info_t *info) {
+  if (!info) {
+    return -1;
+  }
+  if (!fbdev_ready()) {
+    return -1;
+  }
+  info->hw_address = g_hw_phys;
+  info->size = g_hw_size;
+  info->pitch = g_hw_pitch;
+  info->width = g_hw_width;
+  info->height = g_hw_height;
+  info->bpp = g_hw_bpp;
+  return 0;
+}
+
+int
+drm_fbdev_vnode_read(vnode_t *vn, void *buf, u64 count, u64 offset)
+{
+  u64 n;
+  int rc;
+
+  (void)vn;
+  rc = fbdev_require_privilege();
+  if (rc != 0) {
+    return rc;
+  }
+  rc = fbdev_clip_io(offset, count, &n);
+  if (rc != 0 || n == 0) {
+    return rc;
+  }
+  memcpy(buf, g_hw_base + offset, n);
+  return (int)n;
+}
+
+int
+drm_fbdev_vnode_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
+{
+  u64 n;
+  int rc;
+
+  (void)vn;
+  if (count == 0) {
+    return 0;
+  }
+  if (!buf) {
+    return -POSIX_EFAULT;
+  }
+  rc = fbdev_require_privilege();
+  if (rc != 0) {
+    return rc;
+  }
+  rc = fbdev_clip_io(offset, count, &n);
+  if (rc != 0 || n == 0) {
+    return rc;
+  }
+  memcpy(g_hw_base + offset, buf, n);
+  return (int)n;
+}
+
+int
+drm_fbdev_vnode_ioctl(vnode_t *vn, u64 cmd, void *arg)
+{
+  fb_fix_screeninfo_t fix;
+  fb_var_screeninfo_t var;
+  fb_con2fbmap_t conmap;
+  fb_vblank_t vblank;
+  int rc;
+
+  (void)vn;
+  rc = fbdev_require_privilege();
+  if (rc != 0) {
+    return rc;
+  }
+  if (!fbdev_ready()) {
+    return -POSIX_ENODEV;
+  }
+
+  switch (cmd) {
+  case DRM_FBIOGET_FSCREENINFO:
+    if (!arg || !is_user_address(arg, sizeof(fix))) {
+      return -POSIX_EFAULT;
+    }
+    fbdev_fill_fix(&fix);
+    memcpy(arg, &fix, sizeof(fix));
+    return 0;
+  case DRM_FBIOGET_VSCREENINFO:
+    if (!arg || !is_user_address(arg, sizeof(var))) {
+      return -POSIX_EFAULT;
+    }
+    fbdev_fill_var(&var);
+    memcpy(arg, &var, sizeof(var));
+    return 0;
+  case DRM_FBIOPUT_VSCREENINFO:
+    if (!arg || !is_user_address(arg, sizeof(var))) {
+      return -POSIX_EFAULT;
+    }
+    memcpy(&var, arg, sizeof(var));
+    rc = fbdev_check_var(&var);
+    if (rc != 0) {
+      return rc;
+    }
+    if ((var.activate & DRM_FB_ACTIVATE_MASK) != DRM_FB_ACTIVATE_TEST) {
+      g_fb_xoffset = var.xoffset;
+      g_fb_yoffset = var.yoffset;
+    }
+    fbdev_fill_var(&var);
+    memcpy(arg, &var, sizeof(var));
+    return 0;
+  case DRM_FBIOPAN_DISPLAY:
+    if (!arg || !is_user_address(arg, sizeof(var))) {
+      return -POSIX_EFAULT;
+    }
+    memcpy(&var, arg, sizeof(var));
+    if (var.xoffset != 0 || var.yoffset != 0) {
+      return -POSIX_EINVAL;
+    }
+    g_fb_xoffset = 0;
+    g_fb_yoffset = 0;
+    fbdev_fill_var(&var);
+    memcpy(arg, &var, sizeof(var));
+    return 0;
+  case DRM_FBIOGETCMAP:
+    return fbdev_get_cmap(arg);
+  case DRM_FBIOPUTCMAP:
+    return fbdev_put_cmap(arg);
+  case DRM_FBIOBLANK:
+    if ((u64)arg > 4) {
+      return -POSIX_EINVAL;
+    }
+    g_fb_blank = (u32)(u64)arg;
+    return 0;
+  case DRM_FBIOGET_CON2FBMAP:
+    if (!arg || !is_user_address(arg, sizeof(conmap))) {
+      return -POSIX_EFAULT;
+    }
+    memcpy(&conmap, arg, sizeof(conmap));
+    conmap.framebuffer = 0;
+    memcpy(arg, &conmap, sizeof(conmap));
+    return 0;
+  case DRM_FBIOPUT_CON2FBMAP:
+    if (!arg || !is_user_address(arg, sizeof(conmap))) {
+      return -POSIX_EFAULT;
+    }
+    memcpy(&conmap, arg, sizeof(conmap));
+    return (conmap.framebuffer == 0) ? 0 : -POSIX_EINVAL;
+  case DRM_FBIOGET_VBLANK:
+    if (!arg || !is_user_address(arg, sizeof(vblank))) {
+      return -POSIX_EFAULT;
+    }
+    memset(&vblank, 0, sizeof(vblank));
+    memcpy(arg, &vblank, sizeof(vblank));
+    return 0;
+  case DRM_FBIO_WAITFORVSYNC:
+    if (arg && !is_user_address(arg, sizeof(u32))) {
+      return -POSIX_EFAULT;
+    }
+    return 0;
+  default:
+    return -POSIX_ENOTTY;
+  }
+}
+
+int
+drm_fbdev_vnode_stat(vnode_t *vn, posix_stat_t *st)
+{
+  (void)vn;
+  if (!st) {
+    return -1;
+  }
+  if (!fbdev_ready()) {
+    return -POSIX_ENODEV;
+  }
+  memset(st, 0, sizeof(*st));
+  st->st_mode = POSIX_S_IFCHR | 0600;
+  st->st_size = (s64)g_hw_size;
+  st->st_blksize = PAGE_SIZE;
+  st->st_blocks = (s64)((g_hw_size + PAGE_SIZE - 1) / PAGE_SIZE);
+  st->st_nlink = 1;
+  st->st_uid = 0;
+  st->st_gid = 0;
+  return 0;
+}
