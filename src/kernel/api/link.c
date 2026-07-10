@@ -30,7 +30,7 @@ $define %type u32 as 32 bit unsigned
 $define %type int as 32 bit signed
 
 $define %func copy_user_path as function with args const char *, char *
-$define %func api_fs_linknew as function with args const char *, const char *
+$define %func api_fs_linknew as function with args const char *, const char *, u32
 $define %func api_fs_linkgo as function with args const char *, char *, u32
 
 */
@@ -47,6 +47,7 @@ $space %export api_fs_linknew, api_fs_linkgo
 #include <kernel/other/restrict.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
+
 static int
 copy_user_path(const char *path, char *out)
 {
@@ -73,7 +74,7 @@ copy_user_path(const char *path, char *out)
 }
 
 int
-api_fs_linknew(const char *target, const char *linkpath)
+api_fs_linknew(const char *target, const char *linkpath, u32 flags)
 {
 	char	ktarget[256];
 	char	klinkpath[256];
@@ -90,8 +91,19 @@ api_fs_linknew(const char *target, const char *linkpath)
 	if (restrict_kusr_check(ktarget) || restrict_kusr_check(klinkpath)) {
 		return (-API_ERR_PERM);
 	}
-	if (vfs_symlink(ktarget, klinkpath) != 0) {
-		return (-API_ERR_IO);
+	switch (flags) {
+	case API_LINK_SYMLINK:
+		if (vfs_symlink(ktarget, klinkpath) != 0) {
+			return (-API_ERR_IO);
+		}
+		break;
+	case API_LINK_HARD:
+		if (vfs_link(ktarget, klinkpath) != 0) {
+			return (-API_ERR_IO);
+		}
+		break;
+	default:
+		return (-API_ERR_BAD_VALUE);
 	}
 	return (0);
 }

@@ -404,7 +404,7 @@ chainfs_vnode_stat(vnode_t *vn, posix_stat_t *st)
 	st->st_blksize = CHAINFS_BLOCK_SIZE;
 	st->st_blocks = (s64)((entry.size + CHAINFS_BLOCK_SIZE - 1) /
 	    CHAINFS_BLOCK_SIZE);
-  st->st_nlink = 1;
+  st->st_nlink = entry.nlink;
   st->st_uid = vn->uid;
   st->st_gid = vn->gid;
   st->st_ino = (u64)entry_block;
@@ -882,6 +882,20 @@ vfs_symlink(const char *target, const char *linkpath)
 	}
 
 	return (chainfs_symlink(target, linkpath));
+}
+int
+vfs_link(const char *oldpath, const char *newpath)
+{
+	if (path_starts_with(oldpath, "/dev") ||
+	    path_starts_with(newpath, "/dev")) {
+		return (-1);
+	}
+
+	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+		return (-1);
+	}
+
+	return (chainfs_link(oldpath, newpath));
 }
 int
 vfs_readlink(const char *path, char *buf, size_t bufsize)

@@ -329,7 +329,29 @@ s64
 posix_link(u64 oldpath_u, u64 newpath_u, u64 a3, u64 a4, u64 a5,
     u64 a6, registers_t *regs)
 {
-	(void)oldpath_u; (void)newpath_u; (void)a3; (void)a4; (void)a5;
-	(void)a6; (void)regs;
-	return (-POSIX_EPERM);
+	char	*oldpath;
+	char	*newpath;
+	int	ret;
+
+	(void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
+
+	oldpath = copy_user_string((const char *)oldpath_u, 256);
+	if (!oldpath) {
+		return (-POSIX_EFAULT);
+	}
+
+	newpath = copy_user_string((const char *)newpath_u, 256);
+	if (!newpath) {
+		kmem_free(oldpath);
+		return (-POSIX_EFAULT);
+	}
+
+	ret = vfs_link(oldpath, newpath);
+	kmem_free(oldpath);
+	kmem_free(newpath);
+
+	if (ret != 0) {
+		return (-POSIX_EPERM);
+	}
+	return (0);
 }

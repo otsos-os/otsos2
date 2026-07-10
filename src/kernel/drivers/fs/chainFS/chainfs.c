@@ -47,6 +47,7 @@ $define %func chainfs_free_block_chain as procedure with args u32
 $define %func chainfs_read_file as function with args const char *, u8 *, u32, u32 *
 $define %func chainfs_read_file_range as function with args const char *, u8 *, u32, u32, u32 *
 $define %func chainfs_write_file as function with args const char *, const u8 *, u32
+$define %func chainfs_link as function with args const char *, const char *
 $define %func chainfs_delete_file as function with args const char *
 $define %func chainfs_get_file_list as function with args chainfs_file_entry_t *, u32, u32 *
 $define %func read_entry_by_index as function with args u32, chainfs_file_entry_t *, u32 *, u32 *
@@ -69,7 +70,7 @@ $space %export chainfs_find_free_file_entry, chainfs_read_block_map_entry
 $space %export chainfs_write_block_map_entry, chainfs_find_free_blocks
 $space %export chainfs_free_block_chain, chainfs_read_file
 $space %export chainfs_read_file_range, chainfs_write_file
-$space %export chainfs_delete_file, chainfs_get_file_list
+$space %export chainfs_link, chainfs_delete_file, chainfs_get_file_list
 $space %export chainfs_find_in_directory, chainfs_resolve_path
 $space %export chainfs_mkdir, chainfs_chdir, chainfs_list_dir
 $space %export chainfs_get_current_path, chainfs_rmdir
@@ -215,6 +216,7 @@ chainfs_format(u32 total_blocks, u32 max_files)
 	entries[0].size = 0;
 	entries[0].start_block = 0;
 	entries[0].parent_block = 0xFFFFFFFF;
+	entries[0].nlink = 1;
 
 	disk_write(g_chainfs.disk, 1, g_chainfs.sector_buffer);
 
@@ -694,6 +696,9 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size)
 	entries[entry_offset].size = size;
 	entries[entry_offset].start_block = allocated_blocks[0];
 	entries[entry_offset].parent_block = parent_block;
+	if (!file_exists) {
+		entries[entry_offset].nlink = 1;
+	}
 
 	disk_write(g_chainfs.disk, entry_block,
 	    g_chainfs.sector_buffer);
@@ -792,8 +797,9 @@ chainfs_symlink(const char *target, const char *linkpath)
 
 	entries[entry_offset].size = target_len;
 	entries[entry_offset].parent_block = parent_block;
+	entries[entry_offset].nlink = 1;
 
-	if (target_len <= 16) {
+	if (target_len <= 12) {
 		for (i = 0; i < target_len; i++) {
 			entries[entry_offset].reserved[i] =
 			    (u8)target[i];
@@ -871,6 +877,108 @@ chainfs_symlink(const char *target, const char *linkpath)
 }
 
 int
+chainfs_link(const char *oldpath, const char *newpath)
+{
+	chainfs_file_entry_t	old_entry, parent_entry;
+	u32			old_block, old_offset;
+	u32			entry_block, entry_offset;
+	u32			parent_entry_block, parent_entry_offset;
+	u32			parent_block, i, path_len, last_slash;
+	char			file_name[32];
+	char			parent_path[CHAINFS_MAX_PATH];
+	chainfs_file_entry_t	*entries;
+
+	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+		return (-1);
+	}
+
+	if (chainfs_find_file(oldpath, &old_entry, &old_block,
+	    &old_offset) != 0) {
+		return (-1);
+	}
+
+	if (old_entry.type == CHAINFS_TYPE_DIR) {
+		return (-1);
+	}
+
+	parent_block = g_chainfs.current_dir_block;
+
+	if (strchr(newpath, '/') != 0) {
+		path_len = strlen(newpath);
+		last_slash = 0;
+
+		for (i = path_len - 1; i > 0; i--) {
+			if (newpath[i] == '/') {
+				last_slash = i;
+				break;
+			}
+		}
+
+		if (last_slash == 0) {
+			parent_block =
+			    g_chainfs.superblock.root_dir_block;
+			strcpy(file_name, newpath + 1);
+		} else {
+			for (i = 0; i < last_slash; i++) {
+				parent_path[i] = newpath[i];
+			}
+			parent_path[last_slash] = '\0';
+			strcpy(file_name, newpath + last_slash + 1);
+
+			if (chainfs_resolve_path(parent_path,
+			    &parent_entry, &parent_entry_block,
+			    &parent_entry_offset) != 0) {
+				return (-1);
+			}
+			if (parent_entry.type != CHAINFS_TYPE_DIR) {
+				return (-1);
+			}
+			parent_block =
+			    (parent_entry_block - 1) *
+			    ENTRIES_PER_BLOCK + parent_entry_offset;
+		}
+	} else {
+		strcpy(file_name, newpath);
+	}
+
+	if (chainfs_find_free_file_entry(&entry_block,
+	    &entry_offset) != 0) {
+		return (-1);
+	}
+
+	disk_read(g_chainfs.disk, old_block,
+	    g_chainfs.sector_buffer);
+	entries = (chainfs_file_entry_t *)
+	    g_chainfs.sector_buffer;
+	entries[old_offset].nlink++;
+	disk_write(g_chainfs.disk, old_block,
+	    g_chainfs.sector_buffer);
+
+	disk_read(g_chainfs.disk, entry_block,
+	    g_chainfs.sector_buffer);
+	entries = (chainfs_file_entry_t *)
+	    g_chainfs.sector_buffer;
+
+	entries[entry_offset].status = 1;
+	entries[entry_offset].type = old_entry.type;
+	for (i = 0; i < 30; i++) {
+		entries[entry_offset].name[i] = 0;
+	}
+	for (i = 0; i < 29 && file_name[i] != '\0'; i++) {
+		entries[entry_offset].name[i] = file_name[i];
+	}
+	entries[entry_offset].size = old_entry.size;
+	entries[entry_offset].start_block = old_entry.start_block;
+	entries[entry_offset].parent_block = parent_block;
+	entries[entry_offset].nlink = 1;
+
+	disk_write(g_chainfs.disk, entry_block,
+	    g_chainfs.sector_buffer);
+
+	return (0);
+}
+
+int
 chainfs_readlink(const char *path, char *buf, u32 bufsize)
 {
 	chainfs_file_entry_t	entry;
@@ -891,7 +999,7 @@ chainfs_readlink(const char *path, char *buf, u32 bufsize)
 		return (-1);
 	}
 
-	if (entry.size <= 16 && entry.start_block ==
+	if (entry.size <= 12 && entry.start_block ==
 	    CHAINFS_EOF_MARKER) {
 		u32	i;
 		u32	copy_len;
@@ -937,13 +1045,18 @@ chainfs_delete_file(const char *filename)
 		return (-1);
 	}
 
-	chainfs_free_block_chain(entry.start_block);
-
 	disk_read(g_chainfs.disk, entry_block,
 	    g_chainfs.sector_buffer);
 	entries = (chainfs_file_entry_t *)
 	    g_chainfs.sector_buffer;
-	entries[entry_offset].status = 0;
+
+	if (entries[entry_offset].nlink > 1) {
+		entries[entry_offset].nlink--;
+	} else {
+		chainfs_free_block_chain(entry.start_block);
+		entries[entry_offset].status = 0;
+	}
+
 	disk_write(g_chainfs.disk, entry_block,
 	    g_chainfs.sector_buffer);
 
@@ -1194,6 +1307,7 @@ chainfs_mkdir(const char *path)
 	entries[entry_offset].size = 0;
 	entries[entry_offset].start_block = 0;
 	entries[entry_offset].parent_block = parent_block;
+	entries[entry_offset].nlink = 1;
 
 	disk_write(g_chainfs.disk, entry_block,
 	    g_chainfs.sector_buffer);

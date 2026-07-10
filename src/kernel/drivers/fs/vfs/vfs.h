@@ -46,6 +46,7 @@ $define %func vfs_unlink as function with args const char *
 $define %func vfs_rename as function with args const char *, const char *
 $define %func vfs_truncate as function with args const char *, u64
 $define %func vfs_symlink as function with args const char *, const char *
+$define %func vfs_link as function with args const char *, const char *
 $define %func vfs_readlink as function with args const char *, char *, size_t
 $define %func vnode_acquire as function with args vnode_t *
 $define %func vnode_release as procedure with args vnode_t *
@@ -63,7 +64,7 @@ $define %func vnode_readlink as function with args vnode_t *, char *, size_t
 
 $space %export vfs_init, vfs_resolve, vfs_resolve_nofollow, vfs_create_file
 $space %export vfs_mkdir, vfs_rmdir, vfs_unlink, vfs_rename
-$space %export vfs_truncate, vfs_symlink, vfs_readlink
+$space %export vfs_truncate, vfs_symlink, vfs_link, vfs_readlink
 $space %export vnode_acquire, vnode_release
 $space %export vnode_read, vnode_write, vnode_stat, vnode_readdir
 $space %export vnode_readlink
@@ -147,8 +148,9 @@ int		vfs_rmdir(const char *path);
 int		vfs_unlink(const char *path);
 int		vfs_rename(const char *oldpath, const char *newpath);
 int		vfs_truncate(const char *path, u64 length);
-int		vfs_symlink(const char *target, const char *linkpath);
-int		vfs_readlink(const char *path, char *buf, size_t bufsize);
+int	vfs_symlink(const char *target, const char *linkpath);
+int	vfs_link(const char *oldpath, const char *newpath);
+int	vfs_readlink(const char *path, char *buf, size_t bufsize);
 int		vfs_chdir(const char *path);
 int		vfs_getcwd(char *buf, u32 size);
 int		vfs_read_file_full(const char *path, u8 *buf, u32 bufsize,

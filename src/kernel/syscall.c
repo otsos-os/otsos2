@@ -198,7 +198,7 @@ void syscall_handler(registers_t *regs) {
     break;
   case CALL_FS_LINKNEW:
     regs->rax = (u64)api_fs_linknew((const char *)arg1,
-                                (const char *)arg2);
+                                (const char *)arg2, (u32)arg3);
     break;
   case CALL_FS_LINKGO:
     regs->rax = (u64)api_fs_linkgo((const char *)arg1,

@@ -445,7 +445,10 @@ int api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries);
 int api_fs_stat(const char *path, struct api_fs_stat *buf);
 int api_fs_rename(const char *oldpath, const char *newpath);
 int api_fs_unlink(const char *path);
-int api_fs_linknew(const char *target, const char *linkpath);
+#define	API_LINK_SYMLINK	0
+#define	API_LINK_HARD		1
+
+int api_fs_linknew(const char *target, const char *linkpath, u32 flags);
 int api_fs_linkgo(const char *path, char *buf, u32 bufsize);
 int api_proc_list(struct api_proc_info *buf, u32 max_entries);
 int api_kusr_auth(const char *password);

@@ -42,6 +42,7 @@ $define %func chainfs_read_file as function with args const char *, u8 *, u32, u
 $define %func chainfs_read_file_range as function with args const char *, u8 *, u32, u32, u32 *
 $define %func chainfs_write_file as function with args const char *, const u8 *, u32
 $define %func chainfs_symlink as function with args const char *, const char *
+$define %func chainfs_link as function with args const char *, const char *
 $define %func chainfs_readlink as function with args const char *, char *, u32
 $define %func chainfs_delete_file as function with args const char *
 $define %func chainfs_get_file_list as function with args chainfs_file_entry_t *, u32, u32 *
@@ -65,7 +66,7 @@ $define %func chainfs_free_block_chain as procedure with args u32
 
 $space %export chainfs_init, chainfs_format, chainfs_read_file
 $space %export chainfs_read_file_range, chainfs_write_file
-$space %export chainfs_symlink, chainfs_readlink
+$space %export chainfs_symlink, chainfs_link, chainfs_readlink
 $space %export chainfs_delete_file, chainfs_get_file_list
 $space %export chainfs_mkdir, chainfs_rmdir, chainfs_chdir
 $space %export chainfs_list_dir, chainfs_get_current_path
@@ -113,7 +114,8 @@ typedef struct {
 	u32	size;
 	u32	start_block;
 	u32	parent_block;
-	u8	reserved[16];
+	u32	nlink;
+	u8	reserved[12];
 } __attribute__((packed)) chainfs_file_entry_t;
 
 #include <kernel/drivers/disk/disk.h>
@@ -138,6 +140,7 @@ int	chainfs_read_file_range(const char *filename, u8 *buffer,
 int	chainfs_write_file(const char *filename,
 	    const u8 *data, u32 size);
 int	chainfs_symlink(const char *target, const char *linkpath);
+int	chainfs_link(const char *oldpath, const char *newpath);
 int	chainfs_readlink(const char *path, char *buf, u32 bufsize);
 int	chainfs_delete_file(const char *filename);
 int	chainfs_get_file_list(chainfs_file_entry_t *files,
