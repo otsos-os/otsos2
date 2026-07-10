@@ -419,6 +419,9 @@ posix_syscall_handler(registers_t *regs)
 	case SYS_arch_prctl:
 		ret = posix_arch_prctl(a1, a2, a3, a4, a5, a6, regs);
 		break;
+	case SYS_getrandom:
+		ret = posix_getrandom(a1, a2, a3, a4, a5, a6, regs);
+		break;
 	default:
 		printk("[POSIX] unknown syscall: %d\n", (int)num);
 		ret = -POSIX_ENOSYS;

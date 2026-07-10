@@ -212,18 +212,18 @@ vm_map_remove(process_t *proc, u64 addr)
 	return (-1);
 }
 
-vma_t *
-vm_map_lookup(process_t *proc, u64 addr)
-{
-	vma_t	*v;
+	vma_t *
+	vm_map_lookup(process_t *proc, u64 addr)
+	{
+		vma_t	*v;
 
-	for (v = proc->vma_list; v != NULL; v = v->next) {
-		if (addr >= v->start && addr < v->end) {
-			return (v);
+		for (v = proc->vma_list; v != NULL; v = v->next) {
+			if (addr >= v->start && addr < v->end) {
+				return (v);
+			}
 		}
+		return (NULL);
 	}
-	return (NULL);
-}
 
 void
 vm_map_free_all(process_t *proc)

@@ -50,6 +50,7 @@ $define %func posix_alloc_fd as function with args struct process *
 $define %func posix_get_fd as function with args struct process *, int
 $define %func posix_signal_pending as function with args struct process *
 $define %func posix_signal_deliver as procedure with args struct process *, registers_t *
+$define %func posix_getrandom as function with args u64, u64, u64, u64, u64, u64, registers_t *
 
 */
 
@@ -59,6 +60,7 @@ $space %export posix_syscall_handler
 $space %export posix_init_process, posix_copy_fds, posix_cleanup_process
 $space %export posix_alloc_fd, posix_get_fd
 $space %export posix_signal_pending, posix_signal_deliver
+$space %export posix_getrandom
 
 */
 
@@ -258,6 +260,7 @@ $space %export posix_signal_pending, posix_signal_deliver
 #define SYS_gettid		186
 #define SYS_futex		202
 #define SYS_arch_prctl		158
+#define SYS_getrandom		318
 #define POSIX_CLOCK_REALTIME	0
 #define POSIX_CLOCK_MONOTONIC	1
 #define POSIX_CLOCK_TIMER_ABSTIME	1
@@ -357,6 +360,8 @@ s64	posix_clock_nanosleep(u64 clock_id, u64 flags, u64 req,
 s64	posix_times(u64 buf, u64 a2, u64 a3, u64 a4, u64 a5,
     u64 a6, registers_t *regs);
 
+s64	posix_getrandom(u64 buf, u64 buflen, u64 flags, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
 s64	posix_setpgid(u64 pid_u, u64 pgid_u, u64 a3, u64 a4, u64 a5,
     u64 a6, registers_t *regs);
 s64	posix_getpgrp(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5,

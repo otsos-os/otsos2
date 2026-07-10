@@ -1517,6 +1517,24 @@ posix_arch_prctl(u64 code, u64 addr, u64 a3, u64 a4, u64 a5, u64 a6,
 		return (-POSIX_EINVAL);
 	}
 }
+s64
+posix_getrandom(u64 buf_u, u64 buflen, u64 flags, u64 a4, u64 a5,
+    u64 a6, registers_t *regs)
+{
+	(void)a4; (void)a5; (void)a6; (void)regs;
+
+	if (flags & ~3) {
+		return (-POSIX_EINVAL);
+	}
+	if (buflen == 0) {
+		return (0);
+	}
+	if (!is_user_address((void *)buf_u, buflen)) {
+		return (-POSIX_EFAULT);
+	}
+
+	return ((s64)api_sys_random((u8 *)buf_u, (u32)buflen));
+}
 
 s64
 posix_time(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
