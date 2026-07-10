@@ -704,6 +704,224 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size)
 	    "%u blocks\n", size, filename, blocks_needed);
 	return (0);
 }
+int
+chainfs_symlink(const char *target, const char *linkpath)
+{
+	chainfs_file_entry_t	entry, parent_entry;
+	u32			entry_block, entry_offset;
+	u32			parent_entry_block, parent_entry_offset;
+	u32			parent_block;
+	u32			i, name_len, path_len, last_slash;
+	u32			target_len;
+	char			file_name[32];
+	char			parent_path[CHAINFS_MAX_PATH];
+	chainfs_file_entry_t	*entries;
+
+	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+		return (-1);
+	}
+
+	target_len = strlen(target);
+	if (target_len == 0 || target_len >= 256) {
+		return (-1);
+	}
+
+	parent_block = g_chainfs.current_dir_block;
+
+	if (strchr(linkpath, '/') != 0) {
+		path_len = strlen(linkpath);
+		last_slash = 0;
+
+		for (i = path_len - 1; i > 0; i--) {
+			if (linkpath[i] == '/') {
+				last_slash = i;
+				break;
+			}
+		}
+
+		if (last_slash == 0) {
+			parent_block =
+			    g_chainfs.superblock.root_dir_block;
+			strcpy(file_name, linkpath + 1);
+		} else {
+			for (i = 0; i < last_slash; i++) {
+				parent_path[i] = linkpath[i];
+			}
+			parent_path[last_slash] = '\0';
+			strcpy(file_name, linkpath + last_slash + 1);
+
+			if (chainfs_resolve_path(parent_path,
+			    &parent_entry, &parent_entry_block,
+			    &parent_entry_offset) != 0) {
+				return (-1);
+			}
+			if (parent_entry.type != CHAINFS_TYPE_DIR) {
+				return (-1);
+			}
+			parent_block =
+			    (parent_entry_block - 1) *
+			    ENTRIES_PER_BLOCK + parent_entry_offset;
+		}
+	} else {
+		strcpy(file_name, linkpath);
+	}
+
+	if (chainfs_find_free_file_entry(&entry_block,
+	    &entry_offset) != 0) {
+		return (-1);
+	}
+
+	disk_read(g_chainfs.disk, entry_block,
+	    g_chainfs.sector_buffer);
+	entries = (chainfs_file_entry_t *)
+	    g_chainfs.sector_buffer;
+
+	entries[entry_offset].status = 1;
+	entries[entry_offset].type = CHAINFS_TYPE_SYMLINK;
+	for (i = 0; i < 30; i++) {
+		entries[entry_offset].name[i] = 0;
+	}
+
+	name_len = strlen(file_name);
+	if (name_len > 29) {
+		name_len = 29;
+	}
+	for (i = 0; i < name_len; i++) {
+		entries[entry_offset].name[i] = file_name[i];
+	}
+
+	entries[entry_offset].size = target_len;
+	entries[entry_offset].parent_block = parent_block;
+
+	if (target_len <= 16) {
+		for (i = 0; i < target_len; i++) {
+			entries[entry_offset].reserved[i] =
+			    (u8)target[i];
+		}
+		entries[entry_offset].start_block =
+		    CHAINFS_EOF_MARKER;
+	} else {
+		u32		blocks_needed;
+		u32		*allocated_blocks;
+		u32		remaining, data_offset, to_copy;
+		u32		real_sector, next_block;
+		u32		j;
+
+		blocks_needed = (target_len + CHAINFS_BLOCK_SIZE -
+		    1) / CHAINFS_BLOCK_SIZE;
+
+		allocated_blocks = (u32 *)kmem_alloc(
+		    blocks_needed * sizeof(u32));
+		if (!allocated_blocks) {
+			disk_write(g_chainfs.disk, entry_block,
+			    g_chainfs.sector_buffer);
+			return (-1);
+		}
+
+		if (chainfs_find_free_blocks(blocks_needed,
+		    allocated_blocks) != 0) {
+			kmem_free(allocated_blocks);
+			disk_write(g_chainfs.disk, entry_block,
+			    g_chainfs.sector_buffer);
+			return (-1);
+		}
+
+		remaining = target_len;
+		data_offset = 0;
+
+		for (i = 0; i < blocks_needed; i++) {
+			for (j = 0; j < CHAINFS_BLOCK_SIZE; j++) {
+				g_chainfs.sector_buffer[j] = 0;
+			}
+
+			to_copy = remaining;
+			if (to_copy > CHAINFS_BLOCK_SIZE) {
+				to_copy = CHAINFS_BLOCK_SIZE;
+			}
+
+			for (j = 0; j < to_copy; j++) {
+				g_chainfs.sector_buffer[j] =
+				    (u8)target[data_offset + j];
+			}
+
+			real_sector = g_chainfs.data_area_start +
+			    allocated_blocks[i];
+			disk_write(g_chainfs.disk, real_sector,
+			    g_chainfs.sector_buffer);
+
+			next_block = (i + 1 < blocks_needed) ?
+			    allocated_blocks[i + 1] :
+			    CHAINFS_EOF_MARKER;
+			chainfs_write_block_map_entry(
+			    allocated_blocks[i], next_block);
+
+			remaining -= to_copy;
+			data_offset += to_copy;
+		}
+
+		entries[entry_offset].start_block =
+		    allocated_blocks[0];
+		kmem_free(allocated_blocks);
+	}
+
+	disk_write(g_chainfs.disk, entry_block,
+	    g_chainfs.sector_buffer);
+
+	return (0);
+}
+
+int
+chainfs_readlink(const char *path, char *buf, u32 bufsize)
+{
+	chainfs_file_entry_t	entry;
+	u32			entry_block, entry_offset;
+	u32			to_read;
+	u32			bytes_read;
+
+	if (chainfs_find_file(path, &entry, &entry_block,
+	    &entry_offset) != 0) {
+		return (-1);
+	}
+
+	if (entry.type != CHAINFS_TYPE_SYMLINK) {
+		return (-1);
+	}
+
+	if (bufsize == 0) {
+		return (-1);
+	}
+
+	if (entry.size <= 16 && entry.start_block ==
+	    CHAINFS_EOF_MARKER) {
+		u32	i;
+		u32	copy_len;
+
+		copy_len = entry.size;
+		if (copy_len >= bufsize) {
+			copy_len = bufsize - 1;
+		}
+
+		for (i = 0; i < copy_len; i++) {
+			buf[i] = (char)entry.reserved[i];
+		}
+		buf[copy_len] = '\0';
+		return ((int)copy_len);
+	}
+
+	to_read = entry.size;
+	if (to_read >= bufsize) {
+		to_read = bufsize - 1;
+	}
+
+	bytes_read = 0;
+	if (chainfs_read_file_range(path, (u8 *)buf, to_read,
+	    0, &bytes_read) != 0) {
+		return (-1);
+	}
+
+	buf[bytes_read] = '\0';
+	return ((int)bytes_read);
+}
 
 int
 chainfs_delete_file(const char *filename)

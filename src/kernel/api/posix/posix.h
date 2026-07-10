@@ -233,6 +233,7 @@ $space %export posix_getrandom
 #define SYS_rmdir		84
 #define SYS_creat		85
 #define SYS_link		86
+#define SYS_symlink		88
 #define SYS_unlink		87
 #define SYS_readlink		89
 #define SYS_chmod		90

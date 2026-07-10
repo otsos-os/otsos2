@@ -38,12 +38,15 @@ $define %type posix_stat_t as struct with POSIX stat fields
 
 $define %func vfs_init as procedure with args void
 $define %func vfs_resolve as function with args const char *, vnode_t **
+$define %func vfs_resolve_nofollow as function with args const char *, vnode_t **
 $define %func vfs_create_file as function with args const char *
 $define %func vfs_mkdir as function with args const char *
 $define %func vfs_rmdir as function with args const char *
 $define %func vfs_unlink as function with args const char *
 $define %func vfs_rename as function with args const char *, const char *
 $define %func vfs_truncate as function with args const char *, u64
+$define %func vfs_symlink as function with args const char *, const char *
+$define %func vfs_readlink as function with args const char *, char *, size_t
 $define %func vnode_acquire as function with args vnode_t *
 $define %func vnode_release as procedure with args vnode_t *
 $define %func vnode_read as function with args vnode_t *, void *, u64, u64
@@ -52,16 +55,18 @@ $define %func vnode_stat as function with args vnode_t *, posix_stat_t *
 $define %func vnode_readdir as function with args vnode_t *, u32, char *, int *
 $define %func vnode_alloc as function with args int, const char *
 $define %func vfs_is_initialized as function with args void
+$define %func vnode_readlink as function with args vnode_t *, char *, size_t
 
 */
 
 /* !SPACE!
 
-$space %export vfs_init, vfs_resolve, vfs_create_file
+$space %export vfs_init, vfs_resolve, vfs_resolve_nofollow, vfs_create_file
 $space %export vfs_mkdir, vfs_rmdir, vfs_unlink, vfs_rename
-$space %export vfs_truncate
+$space %export vfs_truncate, vfs_symlink, vfs_readlink
 $space %export vnode_acquire, vnode_release
 $space %export vnode_read, vnode_write, vnode_stat, vnode_readdir
+$space %export vnode_readlink
 $space %export vnode_alloc
 $space %export vfs_is_initialized
 
@@ -76,6 +81,7 @@ $space %export vfs_is_initialized
 #define VDIR	2
 #define VCHR	3
 #define VPIPE	4
+#define VLNK	5
 
 #define VFS_MAX_VNODES	256
 
@@ -84,6 +90,7 @@ $space %export vfs_is_initialized
 #define POSIX_S_IFDIR	0x4000
 #define POSIX_S_IFCHR	0x2000
 #define POSIX_S_IFIFO	0x1000
+#define POSIX_S_IFLNK	0xA000
 #define POSIX_S_IRWXU	0x01C0
 #define POSIX_S_IRWXG	0x0038
 #define POSIX_S_IRWXO	0x0007
@@ -127,17 +134,21 @@ typedef struct vnode {
 	int		(*stat_fn)(struct vnode *, posix_stat_t *);
 	int		(*readdir_fn)(struct vnode *, u32, char *, int *);
 	int		(*ioctl_fn)(struct vnode *, u64, void *);
+	int		(*readlink_fn)(struct vnode *, char *, size_t);
 } vnode_t;
 
 void		vfs_init(void);
 int		vfs_is_initialized(void);
 int		vfs_resolve(const char *path, vnode_t **out);
+int		vfs_resolve_nofollow(const char *path, vnode_t **out);
 int		vfs_create_file(const char *path);
 int		vfs_mkdir(const char *path);
 int		vfs_rmdir(const char *path);
 int		vfs_unlink(const char *path);
 int		vfs_rename(const char *oldpath, const char *newpath);
 int		vfs_truncate(const char *path, u64 length);
+int		vfs_symlink(const char *target, const char *linkpath);
+int		vfs_readlink(const char *path, char *buf, size_t bufsize);
 int		vfs_chdir(const char *path);
 int		vfs_getcwd(char *buf, u32 size);
 int		vfs_read_file_full(const char *path, u8 *buf, u32 bufsize,
@@ -154,5 +165,6 @@ int		vnode_stat(vnode_t *vn, posix_stat_t *st);
 int		vnode_readdir(vnode_t *vn, u32 index, char *name,
 		    int *type);
 int		vnode_ioctl(vnode_t *vn, u64 cmd, void *arg);
+int		vnode_readlink(vnode_t *vn, char *buf, size_t bufsize);
 
 #endif

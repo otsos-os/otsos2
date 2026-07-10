@@ -67,6 +67,8 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_FS_STAT		0x209
 #define	CALL_FS_RENAME		0x20A
 #define	CALL_FS_UNLINK		0x20B
+#define	CALL_FS_LINKNEW		0x20C
+#define	CALL_FS_LINKGO		0x20D
 #define	CALL_MEM_MAP		0x300	
 #define	CALL_MEM_UNMAP		0x301
 #define	CALL_SHM_GET		0x302

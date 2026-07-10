@@ -132,6 +132,8 @@ s64	posix_link(u64 oldpath, u64 newpath, u64 a3, u64 a4, u64 a5,
 	    u64 a6, registers_t *regs);
 s64	posix_unlink(u64 path, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	    registers_t *regs);
+s64	posix_symlink(u64 target, u64 linkpath, u64 a3, u64 a4, u64 a5,
+	    u64 a6, registers_t *regs);
 s64	posix_readlink(u64 path, u64 buf, u64 bufsize, u64 a4, u64 a5,
 	    u64 a6, registers_t *regs);
 s64	posix_chmod(u64 path, u64 mode, u64 a3, u64 a4, u64 a5, u64 a6,
@@ -352,6 +354,9 @@ posix_syscall_handler(registers_t *regs)
 		break;
 	case SYS_unlink:
 		ret = posix_unlink(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_symlink:
+		ret = posix_symlink(a1, a2, a3, a4, a5, a6, regs);
 		break;
 	case SYS_readlink:
 		ret = posix_readlink(a1, a2, a3, a4, a5, a6, regs);

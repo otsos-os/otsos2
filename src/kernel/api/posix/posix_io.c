@@ -850,7 +850,37 @@ s64
 posix_lstat(u64 path_u, u64 buf_u, u64 a3, u64 a4, u64 a5, u64 a6,
     registers_t *regs)
 {
-	return (posix_stat(path_u, buf_u, a3, a4, a5, a6, regs));
+	char		*path;
+	vnode_t		*vn;
+	posix_stat_t	*st;
+
+	(void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
+
+	path = copy_user_string((const char *)path_u, 256);
+	if (!path) {
+		return (-POSIX_EFAULT);
+	}
+
+	if (!is_user_address((void *)buf_u, sizeof(posix_stat_t))) {
+		kmem_free(path);
+		return (-POSIX_EFAULT);
+	}
+
+	if (vfs_resolve_nofollow(path, &vn) != 0 || vn == NULL) {
+		kmem_free(path);
+		return (-POSIX_ENOENT);
+	}
+
+	st = (posix_stat_t *)buf_u;
+	if (vnode_stat(vn, st) != 0) {
+		vnode_release(vn);
+		kmem_free(path);
+		return (-POSIX_EIO);
+	}
+
+	vnode_release(vn);
+	kmem_free(path);
+	return (0);
 }
 
 s64	posix_pipe2(u64 pipefd_u, u64 flags, u64 a3, u64 a4, u64 a5,

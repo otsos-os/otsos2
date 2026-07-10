@@ -142,6 +142,9 @@ vnode_alloc(int type, const char *name)
 	case VPIPE:
 		vn->mode = POSIX_S_IFIFO | 0600;
 		break;
+	case VLNK:
+		vn->mode = POSIX_S_IFLNK | 0777;
+		break;
 	default:
 		vn->mode = 0;
 		break;
@@ -180,6 +183,7 @@ vnode_release(vnode_t *vn)
 		vn->stat_fn = NULL;
 		vn->readdir_fn = NULL;
 		vn->ioctl_fn = NULL;
+		vn->readlink_fn = NULL;
 	}
 }
 
@@ -249,6 +253,23 @@ vnode_ioctl(vnode_t *vn, u64 cmd, void *arg)
 	}
 
 	return (-POSIX_ENOTTY);
+}
+int
+vnode_readlink(vnode_t *vn, char *buf, size_t bufsize)
+{
+	if (!vn || !buf || bufsize == 0) {
+		return (-1);
+	}
+
+	if (vn->type != VLNK) {
+		return (-1);
+	}
+
+	if (!vn->readlink_fn) {
+		return (-1);
+	}
+
+	return (vn->readlink_fn(vn, buf, bufsize));
 }
 
 static int
@@ -347,6 +368,18 @@ chainfs_vnode_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
 	vn->size = new_size;
 	return ((int)count);
 }
+static int
+chainfs_vnode_readlink(vnode_t *vn, char *buf, size_t bufsize)
+{
+	char	*path;
+
+	path = (char *)vn->data;
+	if (!path) {
+		return (-1);
+	}
+
+	return (chainfs_readlink(path, buf, (u32)bufsize));
+}
 
 static int
 chainfs_vnode_stat(vnode_t *vn, posix_stat_t *st)
@@ -408,8 +441,14 @@ chainfs_vnode_readdir(vnode_t *vn, u32 index, char *name, int *type)
 	name[j] = '\0';
 
 	if (type) {
-		*type = (entries[index].type == CHAINFS_TYPE_DIR) ?
-		    VDIR : VREG;
+		if (entries[index].type == CHAINFS_TYPE_DIR) {
+			*type = VDIR;
+		} else if (entries[index].type ==
+		    CHAINFS_TYPE_SYMLINK) {
+			*type = VLNK;
+		} else {
+			*type = VREG;
+		}
 	}
 
 	return (1);
@@ -444,8 +483,14 @@ vfs_root_readdir(vnode_t *vn, u32 index, char *name, int *type)
 		}
 		name[j] = '\0';
 		if (type) {
-			*type = (entries[index].type ==
-			    CHAINFS_TYPE_DIR) ? VDIR : VREG;
+			if (entries[index].type == CHAINFS_TYPE_DIR) {
+				*type = VDIR;
+			} else if (entries[index].type ==
+			    CHAINFS_TYPE_SYMLINK) {
+				*type = VLNK;
+			} else {
+				*type = VREG;
+			}
 		}
 		return (1);
 	}
@@ -480,6 +525,8 @@ vfs_lookup_chainfs(const char *path)
 
 	if (entry.type == CHAINFS_TYPE_DIR) {
 		vtype = VDIR;
+	} else if (entry.type == CHAINFS_TYPE_SYMLINK) {
+		vtype = VLNK;
 	} else {
 		vtype = VREG;
 	}
@@ -511,6 +558,7 @@ vfs_lookup_chainfs(const char *path)
 	vn->write_fn = chainfs_vnode_write;
 	vn->stat_fn = chainfs_vnode_stat;
 	vn->readdir_fn = chainfs_vnode_readdir;
+	vn->readlink_fn = chainfs_vnode_readlink;
 
 	/*
 	 * The root directory merges ChainFS entries with the virtual
@@ -547,7 +595,7 @@ vfs_lookup_devfs(const char *path)
 }
 
 int
-vfs_resolve(const char *path, vnode_t **out)
+vfs_resolve_nofollow(const char *path, vnode_t **out)
 {
 	vnode_t	*vn;
 
@@ -575,6 +623,83 @@ vfs_resolve(const char *path, vnode_t **out)
 	}
 
 	return (-1);
+}
+
+int
+vfs_resolve(const char *path, vnode_t **out)
+{
+	vnode_t	*vn;
+	char	link_target[256];
+	char	resolved[256];
+	int	link_count, last_slash, i;
+
+	if (!path || !out) {
+		return (-1);
+	}
+
+	if (path[0] == '\0') {
+		return (-1);
+	}
+
+	if (path_starts_with(path, "/dev")) {
+		vn = vfs_lookup_devfs(path);
+		if (vn) {
+			*out = vn;
+			return (0);
+		}
+		return (-1);
+	}
+
+	link_count = 0;
+	for (;;) {
+		vn = vfs_lookup_chainfs(path);
+		if (!vn) {
+			return (-1);
+		}
+
+		if (vn->type != VLNK) {
+			*out = vn;
+			return (0);
+		}
+
+		if (!vn->readlink_fn) {
+			vnode_release(vn);
+			return (-1);
+		}
+
+		if (link_count++ >= 40) {
+			vnode_release(vn);
+			return (-1);
+		}
+
+		if (vn->readlink_fn(vn, link_target,
+		    sizeof(link_target)) < 0) {
+			vnode_release(vn);
+			return (-1);
+		}
+
+		vnode_release(vn);
+
+		if (link_target[0] == '/') {
+			path = link_target;
+		} else {
+			last_slash = -1;
+			for (i = 0; path[i] != '\0'; i++) {
+				if (path[i] == '/') {
+					last_slash = i;
+				}
+			}
+			if (last_slash > 0) {
+				memcpy(resolved, path, last_slash);
+				resolved[last_slash] = '\0';
+				strcat(resolved, "/");
+				strcat(resolved, link_target);
+			} else {
+				strcpy(resolved, link_target);
+			}
+			path = resolved;
+		}
+	}
 }
 
 int
@@ -744,6 +869,55 @@ vfs_truncate(const char *path, u64 length)
 
 	kmem_free(buf);
 	return (0);
+}
+int
+vfs_symlink(const char *target, const char *linkpath)
+{
+	if (path_starts_with(linkpath, "/dev")) {
+		return (-1);
+	}
+
+	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+		return (-1);
+	}
+
+	return (chainfs_symlink(target, linkpath));
+}
+int
+vfs_readlink(const char *path, char *buf, size_t bufsize)
+{
+	vnode_t	*vn;
+	if (!path || !buf || bufsize == 0) {
+		return (-1);
+	}
+
+	if (path_starts_with(path, "/dev")) {
+		return (-1);
+	}
+
+	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+		return (-1);
+	}
+	vn = vfs_lookup_chainfs(path);
+	if (!vn) {
+		return (-1);
+	}
+
+	if (vn->type != VLNK) {
+		vnode_release(vn);
+		return (-1);
+	}
+
+	if (!vn->readlink_fn) {
+		vnode_release(vn);
+		return (-1);
+	}
+
+	int	ret;
+
+	ret = vn->readlink_fn(vn, buf, bufsize);
+	vnode_release(vn);
+	return (ret);
 }
 
 int

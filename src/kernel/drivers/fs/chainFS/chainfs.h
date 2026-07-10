@@ -41,6 +41,8 @@ $define %func chainfs_format as function with args u32, u32
 $define %func chainfs_read_file as function with args const char *, u8 *, u32, u32 *
 $define %func chainfs_read_file_range as function with args const char *, u8 *, u32, u32, u32 *
 $define %func chainfs_write_file as function with args const char *, const u8 *, u32
+$define %func chainfs_symlink as function with args const char *, const char *
+$define %func chainfs_readlink as function with args const char *, char *, u32
 $define %func chainfs_delete_file as function with args const char *
 $define %func chainfs_get_file_list as function with args chainfs_file_entry_t *, u32, u32 *
 $define %func chainfs_mkdir as function with args const char *
@@ -63,6 +65,7 @@ $define %func chainfs_free_block_chain as procedure with args u32
 
 $space %export chainfs_init, chainfs_format, chainfs_read_file
 $space %export chainfs_read_file_range, chainfs_write_file
+$space %export chainfs_symlink, chainfs_readlink
 $space %export chainfs_delete_file, chainfs_get_file_list
 $space %export chainfs_mkdir, chainfs_rmdir, chainfs_chdir
 $space %export chainfs_list_dir, chainfs_get_current_path
@@ -91,6 +94,7 @@ $space %export g_chainfs, g_chainfs_phys
 
 #define	CHAINFS_TYPE_FILE	0
 #define	CHAINFS_TYPE_DIR	1
+#define	CHAINFS_TYPE_SYMLINK	2
 
 typedef struct {
 	u32	magic;
@@ -133,6 +137,8 @@ int	chainfs_read_file_range(const char *filename, u8 *buffer,
 	    u32 buffer_size, u32 offset, u32 *bytes_read);
 int	chainfs_write_file(const char *filename,
 	    const u8 *data, u32 size);
+int	chainfs_symlink(const char *target, const char *linkpath);
+int	chainfs_readlink(const char *path, char *buf, u32 bufsize);
 int	chainfs_delete_file(const char *filename);
 int	chainfs_get_file_list(chainfs_file_entry_t *files,
 	    u32 max_files, u32 *file_count);

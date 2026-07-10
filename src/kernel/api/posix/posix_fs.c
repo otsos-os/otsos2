@@ -239,9 +239,72 @@ s64
 posix_readlink(u64 path_u, u64 buf_u, u64 bufsize, u64 a4, u64 a5,
     u64 a6, registers_t *regs)
 {
-	(void)path_u; (void)buf_u; (void)bufsize; (void)a4; (void)a5;
-	(void)a6; (void)regs;
-	return (-POSIX_EINVAL);
+	char	*path;
+	char	*kbuf;
+	int	ret;
+	(void)a4; (void)a5; (void)a6; (void)regs;
+	path = copy_user_string((const char *)path_u, 256);
+	if (!path) {
+		return (-POSIX_EFAULT);
+	}
+	if (!buf_u || bufsize == 0) {
+		kmem_free(path);
+		return (-POSIX_EINVAL);
+	}
+
+	if (!is_user_address((void *)buf_u, bufsize)) {
+		kmem_free(path);
+		return (-POSIX_EFAULT);
+	}
+
+	kbuf = (char *)kmem_calloc(bufsize, 1);
+	if (!kbuf) {
+		kmem_free(path);
+		return (-POSIX_ENOMEM);
+	}
+
+	ret = vfs_readlink(path, kbuf, bufsize);
+	kmem_free(path);
+
+	if (ret < 0) {
+		kmem_free(kbuf);
+		return (-POSIX_EINVAL);
+	}
+
+	memcpy((void *)buf_u, kbuf, ret);
+	kmem_free(kbuf);
+	return ((s64)ret);
+}
+s64
+posix_symlink(u64 target_u, u64 linkpath_u, u64 a3, u64 a4, u64 a5,
+    u64 a6, registers_t *regs)
+{
+	char	*target;
+	char	*linkpath;
+	int	ret;
+
+	(void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
+
+	target = copy_user_string((const char *)target_u, 256);
+	if (!target) {
+		return (-POSIX_EFAULT);
+	}
+
+	linkpath = copy_user_string((const char *)linkpath_u, 256);
+	if (!linkpath) {
+		kmem_free(target);
+		return (-POSIX_EFAULT);
+	}
+
+	ret = vfs_symlink(target, linkpath);
+	kmem_free(target);
+	kmem_free(linkpath);
+
+	if (ret != 0) {
+		return (-POSIX_EIO);
+	}
+
+	return (0);
 }
 
 s64

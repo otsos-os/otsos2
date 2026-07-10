@@ -196,6 +196,14 @@ void syscall_handler(registers_t *regs) {
   case CALL_FS_UNLINK:
     regs->rax = (u64)api_fs_unlink((const char *)arg1);
     break;
+  case CALL_FS_LINKNEW:
+    regs->rax = (u64)api_fs_linknew((const char *)arg1,
+                                (const char *)arg2);
+    break;
+  case CALL_FS_LINKGO:
+    regs->rax = (u64)api_fs_linkgo((const char *)arg1,
+                                (char *)arg2, (u32)arg3);
+    break;
   case CALL_MEM_MAP:
     regs->rax = (u64)api_mem_map((const void *)arg1);
     break;

@@ -126,6 +126,7 @@ struct api_term_info {
 #define	API_FS_TYPE_DIR		2
 #define	API_FS_TYPE_CHR		3
 #define	API_FS_TYPE_PIPE	4
+#define	API_FS_TYPE_LNK		5
 
 struct api_fs_stat {
 	u32	type;
@@ -444,6 +445,8 @@ int api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries);
 int api_fs_stat(const char *path, struct api_fs_stat *buf);
 int api_fs_rename(const char *oldpath, const char *newpath);
 int api_fs_unlink(const char *path);
+int api_fs_linknew(const char *target, const char *linkpath);
+int api_fs_linkgo(const char *path, char *buf, u32 bufsize);
 int api_proc_list(struct api_proc_info *buf, u32 max_entries);
 int api_kusr_auth(const char *password);
 int api_drm_call(u64 op, void *arg);
