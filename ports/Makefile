@@ -40,6 +40,7 @@ MUSL_TEST_BIN = musl_test
 MUSL_TEST_OBJS = musl_test.o
 LUA_BIN = lua/lua/lua
 LUA_DIR = lua/lua
+LUA_SETUP = lua/setup.sh
 LIBC_ENABLED ?= true
 
 ifeq ($(LIBC_ENABLED),true)
@@ -114,6 +115,8 @@ $(MUSL_TEST_BIN): $(MUSL_CRT1) $(MUSL_TEST_OBJS) $(MUSL_LIBC)
 lua: $(LUA_BIN)
 
 $(LUA_BIN): $(MUSL_CRT1) $(MUSL_LIBC)
+	@echo "  SETUP   ports/lua"
+	@$(SHELL) $(LUA_SETUP)
 	@echo "  MAKE    ports/lua"
 	@$(MAKE) -C $(LUA_DIR)
 
@@ -128,7 +131,7 @@ musl_test.o: musl_test.c
 	    -I$(MUSL_DIR)/obj/include -I$(MUSL_DIR)/include -c $< -o $@
 
 clean:
-	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN) $(OVEN_OBJS) $(OVEN_BIN) $(CURSORD_OBJS) $(CURSORD_BIN) $(SHMTEST_OBJS) $(SHMTEST_BIN) $(POSIX_HELLO_OBJS) $(POSIX_HELLO_BIN) $(KBDTEST_OBJS) $(KBDTEST_BIN) $(MUSL_TEST_OBJS) $(MUSL_TEST_BIN)
+	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN) $(OVEN_OBJS) $(OVEN_BIN) $(CURSORD_OBJS) $(CURSORD_BIN) $(SHMTEST_OBJS) $(SHMTEST_BIN) $(POSIX_HELLO_OBJS) $(POSIX_HELLO_BIN) $(KBDTEST_OBJS) $(KBDTEST_BIN) $(MUSL_TEST_OBJS) $(MUSL_TEST_BIN) $(LUA_BIN)
 	$(MAKE) -C $(LUA_DIR) clean
 
 .PHONY: all clean lua
