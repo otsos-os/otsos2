@@ -88,6 +88,8 @@ $space %export kmain
 #include <kernel/drivers/video/card/virtio-gpu/virtio-gpu.h>
 #include <kernel/drivers/net/virtio-net/virtio_net.h>
 #include <kernel/drivers/watchdog/watchdog.h>
+#include <kernel/net/net.h>
+#include <kernel/net/arp.h>
 #include <kernel/event/event.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/console/console.h>
@@ -401,6 +403,70 @@ kernel_install_module_cb(const char *name, const char *dest, void *ctx)
 	}
 }
 
+static void
+net_test(void)
+{
+	net_iface_t	*iface;
+	netdev_t	*ndev;
+	u32		test_ip;
+	int		i;
+
+	if (!net_is_initialized()) {
+		printk("[NET_TEST] network subsystem not initialized\n");
+		return;
+	}
+	printk("[NET_TEST] %d device(s) %d interface(s)\n",
+	    netdev_count(), net_iface_count());
+	netdev_dump_all();
+	net_dump_ifaces();
+
+	for (i = 0; i < netdev_count(); i++) {
+		ndev = netdev_get(i);
+		if (!ndev || !(ndev->flags & NETDEV_F_UP)) {
+			continue;
+		}
+
+		printk("[NET_TEST] polling %s\n", ndev->name);
+		ndev->ops->poll(ndev);
+		printk("[NET_TEST] %s mac=%02x:%02x:%02x:%02x:%02x:%02x "
+		    "link=%s\n",
+		    ndev->name,
+		    ndev->mac[0], ndev->mac[1], ndev->mac[2],
+		    ndev->mac[3], ndev->mac[4], ndev->mac[5],
+		    ndev->ops->is_link_up(ndev) ? "up" : "down");
+
+		iface = net_iface_find_by_ndev(ndev);
+		if (!iface) {
+			continue;
+		}
+
+		if (!ndev->ops->is_link_up(ndev)) {
+			continue;
+		}
+		if (iface->ip_addr == 0) {
+			printk("[NET_TEST] %s: no IP set, "
+			    "assigning 10.0.2.15/24 "
+			    "(QEMU user-net)\n", ndev->name);
+			iface->ip_addr = (10u << 24) |
+			    (0u << 16) | (2u << 8) | 15u;
+			iface->netmask = (255u << 24) |
+			    (255u << 16) | (255u << 8) | 0u;
+			iface->gw_addr = (10u << 24) |
+			    (0u << 16) | (2u << 8) | 1u;
+		}
+
+		test_ip = iface->gw_addr ? iface->gw_addr :
+		    (iface->ip_addr & iface->netmask) | 1;
+		printk("[NET_TEST] sending ARP request for "
+		    "gw %d.%d.%d.%d...\n",
+		    (test_ip >> 24) & 0xFF,
+		    (test_ip >> 16) & 0xFF,
+		    (test_ip >> 8) & 0xFF,
+		    test_ip & 0xFF);
+		arp_send_request(iface, test_ip);
+	}
+}
+
 void
 kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 {
@@ -584,6 +650,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	power_init();
 	drm_virtio_gpu_pci_register();
 	virtio_net_pci_register();
+	net_init();
 	pci_init();
 	watchdog_init();
 	if (watchdog_device_count() > 0) {
@@ -632,6 +699,8 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	status_line("power", power_ok);
 	status_line("pci scan", pci_ok);
 	status_line("watchdog", watchdog_ok);
+
+	net_test();
 
 	sleep(430);
 

@@ -25,21 +25,50 @@
 
 /* !DEFINES!
 
+$define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
 $define %type int as 32 bit signed
+$define %type net_iface_t as struct with network interface state
+$define %type udp_header_t as packed struct with UDP src/dst port + length + checksum
 
-$define %func virtio_net_pci_register as function with args void
+$define %func udp_input as function with args net_iface_t *, u32, const u8 *, u16
 
 */
 
 /* !SPACE!
 
-$space %export virtio_net_pci_register
+$space %export udp_input
 
 */
 
-#ifndef VIRTIO_NET_H
-#define VIRTIO_NET_H
+#include <kernel/net/udp.h>
+#include <mlibc/stdio.h>
+#include <mlibc/mlibc.h>
 
-int	virtio_net_pci_register(void);
+int
+udp_input(net_iface_t *iface, u32 src_ip,
+    const u8 *data, u16 len)
+{
+	const udp_header_t	*udp;
+	u16			udp_len;
 
-#endif
+	(void)iface;
+	(void)src_ip;
+	if (!data || len < UDP_HEADER_LEN) {
+		return (-1);
+	}
+
+	udp = (const udp_header_t *)data;
+	udp_len = __builtin_bswap16(udp->length);
+	if (udp_len < UDP_HEADER_LEN || udp_len > len) {
+		return (-1);
+	}
+
+	drivers_log("[UDP] port %d -> %d (%d bytes)\n",
+	    __builtin_bswap16(udp->src_port),
+	    __builtin_bswap16(udp->dst_port),
+	    udp_len - UDP_HEADER_LEN);
+
+	return (0);
+}

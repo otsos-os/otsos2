@@ -25,21 +25,61 @@
 
 /* !DEFINES!
 
+$define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
 $define %type int as 32 bit signed
+$define %type net_iface_t as struct with network interface state
+$define %type ipv4_header_t as packed struct with IPv4 fields
 
-$define %func virtio_net_pci_register as function with args void
+$define %func ipv4_input as function with args net_iface_t *, const u8 *, const u8 *, u16
+$define %func ipv4_output as function with args net_iface_t *, u32, u8, const u8 *, u16
+$define %func ipv4_checksum as function with args const void *, int
 
 */
 
 /* !SPACE!
 
-$space %export virtio_net_pci_register
+$space %export ipv4_input, ipv4_output, ipv4_checksum
 
 */
 
-#ifndef VIRTIO_NET_H
-#define VIRTIO_NET_H
+#ifndef NET_IPV4_H
+#define NET_IPV4_H
 
-int	virtio_net_pci_register(void);
+#include <kernel/net/net.h>
+#include <mlibc/mlibc.h>
+
+#define	IPV4_VERSION		4
+#define	IPV4_IHL_MIN		5
+#define	IPV4_TTL_DEFAULT	64
+
+#define	IPV4_PROTO_ICMP		1
+#define	IPV4_PROTO_TCP		6
+#define	IPV4_PROTO_UDP		17
+
+typedef struct {
+	u8	ver_ihl;
+	u8	dscp_ecn;
+	u16	total_len;
+	u16	id;
+	u16	flags_frag;
+	u8	ttl;
+	u8	protocol;
+	u16	checksum;
+	u32	src;
+	u32	dst;
+} __attribute__((packed)) ipv4_header_t;
+
+typedef struct {
+	ipv4_header_t	hdr;
+	u8		options[];
+} __attribute__((packed)) ipv4_packet_t;
+
+int	ipv4_input(net_iface_t *iface, const u8 *src_mac,
+    const u8 *data, u16 len);
+int	ipv4_output(net_iface_t *iface, u32 dst_ip, u8 protocol,
+    const u8 *data, u16 len);
+u16	ipv4_checksum(const void *buf, int len);
 
 #endif

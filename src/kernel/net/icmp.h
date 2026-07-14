@@ -25,21 +25,41 @@
 
 /* !DEFINES!
 
+$define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
 $define %type int as 32 bit signed
+$define %type net_iface_t as struct with network interface state
+$define %type icmp_header_t as packed struct with ICMP type/code/checksum
 
-$define %func virtio_net_pci_register as function with args void
+$define %func icmp_input as function with args net_iface_t *, u32, const u8 *, u16
 
 */
 
 /* !SPACE!
 
-$space %export virtio_net_pci_register
+$space %export icmp_input
 
 */
 
-#ifndef VIRTIO_NET_H
-#define VIRTIO_NET_H
+#ifndef NET_ICMP_H
+#define NET_ICMP_H
 
-int	virtio_net_pci_register(void);
+#include <kernel/net/net.h>
+#include <mlibc/mlibc.h>
+
+#define	ICMP_TYPE_ECHO_REPLY	0
+#define	ICMP_TYPE_ECHO_REQUEST	8
+
+typedef struct {
+	u8	type;
+	u8	code;
+	u16	checksum;
+	u16	id;
+	u16	seq;
+} __attribute__((packed)) icmp_header_t;
+
+int	icmp_input(net_iface_t *iface, u32 src_ip,
+    const u8 *data, u16 len);
 
 #endif

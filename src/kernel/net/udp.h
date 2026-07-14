@@ -25,21 +25,39 @@
 
 /* !DEFINES!
 
+$define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
 $define %type int as 32 bit signed
+$define %type net_iface_t as struct with network interface state
+$define %type udp_header_t as packed struct with UDP src/dst port + length + checksum
 
-$define %func virtio_net_pci_register as function with args void
+$define %func udp_input as function with args net_iface_t *, u32, const u8 *, u16
 
 */
 
 /* !SPACE!
 
-$space %export virtio_net_pci_register
+$space %export udp_input
 
 */
 
-#ifndef VIRTIO_NET_H
-#define VIRTIO_NET_H
+#ifndef NET_UDP_H
+#define NET_UDP_H
 
-int	virtio_net_pci_register(void);
+#include <kernel/net/net.h>
+#include <mlibc/mlibc.h>
+
+#define	UDP_HEADER_LEN	8
+
+typedef struct {
+	u16	src_port;
+	u16	dst_port;
+	u16	length;
+	u16	checksum;
+} __attribute__((packed)) udp_header_t;
+
+int	udp_input(net_iface_t *iface, u32 src_ip,
+    const u8 *data, u16 len);
 
 #endif
