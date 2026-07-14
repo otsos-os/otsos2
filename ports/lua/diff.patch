@@ -1,6 +1,6 @@
---- makefile.orig	2026-07-10 23:25:20.312240921 +0300
-+++ makefile	2026-07-10 23:25:35.764187119 +0300
-@@ -75,16 +75,23 @@
+--- makefile.orig	2026-07-14 16:00:00.000000000 +0300
++++ makefile	2026-07-14 16:00:00.000000000 +0300
+@@ -75,16 +75,26 @@
  # For C89, "-std=c89 -DLUA_USE_C89"
  # Note that Linux/Posix options are not compatible with C89
  # (For 32-bit, add option "-m32" to MYCFLAGS and MYLDFLAGS.)
@@ -19,22 +19,25 @@
 +	-I../../../libc/musl/arch/generic \
 +	-I../../../libc/musl/obj/include \
 +	-I../../../libc/musl/include
-+MYLDFLAGS= -static
++MYLDFLAGS=
 +MYLIBS=
 +
 +
 +CC= clang --target=x86_64-linux-musl
-+CFLAGS= -Wall -O2 -g -fno-pic $(MYCFLAGS) -fno-stack-protector -fno-common
++CFLAGS= -Wall -O2 -g -fPIE $(MYCFLAGS) -fno-stack-protector -fno-common
 +AR= llvm-ar rc
 +RANLIB= llvm-ranlib
 +LD= ld.lld
-+LDFLAGS= -m elf_x86_64 -T ../../../init/linker.ld --oformat=elf64-x86_64 -nostdlib
-+MUSL_CRT= ../../../libc/musl/lib/crt1.o
-+MUSL_LIBC= ../../../libc/musl/lib/libc.a
++OBJCOPY= llvm-objcopy
++LDFLAGS= -m elf_x86_64 -pie --oformat=elf64-x86-64 -nostdlib \
++	-L../../../libc/musl/lib \
++	-dynamic-linker /lib/ld-musl-x86_64.so.1
++MUSL_CRT= ../../../libc/musl/lib/Scrt1.o
++MUSL_LIBC= -lc
  RM= rm -f
  
  
-@@ -92,7 +99,7 @@
+@@ -92,7 +102,7 @@
  # == END OF USER SETTINGS. NO NEED TO CHANGE ANYTHING BELOW THIS LINE =========
  
  
@@ -43,13 +46,13 @@
  
  CORE_T=	liblua.a
  CORE_O=	lapi.o lcode.o lctype.o ldebug.o ldo.o ldump.o lfunc.o lgc.o llex.o \
-@@ -121,8 +128,9 @@
+@@ -121,8 +131,9 @@
  	$(AR) $@ $?
  	$(RANLIB) $@
  
 -$(LUA_T): $(LUA_O) $(CORE_T)
 -	$(CC) -o $@ $(MYLDFLAGS) $(LUA_O) $(CORE_T) $(LIBS) $(MYLIBS) $(DL)
-+$(LUA_T): $(LUA_O) $(CORE_T) $(MUSL_CRT) $(MUSL_LIBC)
++$(LUA_T): $(LUA_O) $(CORE_T) $(MUSL_CRT)
 +	$(LD) $(LDFLAGS) $(MUSL_CRT) $(LUA_O) $(CORE_T) $(MUSL_LIBC) -o $@
 +	llvm-size $@
  

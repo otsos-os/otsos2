@@ -29,5 +29,5 @@ ALL_TOOLS =  obj/musl-clang obj/ld.musl-clang
 TOOL_LIBS = 
 ADD_CFI = yes
 MALLOC_DIR = mallocng
-SHARED_LIBS =
+# SHARED_LIBS =
 WRAPCC_CLANG = $(CC)

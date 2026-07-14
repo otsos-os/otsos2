@@ -350,6 +350,7 @@ posix_mprotect(u64 addr_u, u64 length, u64 prot, u64 a4, u64 a5,
 	vma_t		*vma;
 	u64		pflags;
 	u64		off;
+	int		any_mapped;
 
 	(void)a4; (void)a5; (void)a6; (void)regs;
 
@@ -364,29 +365,32 @@ posix_mprotect(u64 addr_u, u64 length, u64 prot, u64 a4, u64 a5,
 	}
 
 	aligned = align_up(length, PAGE_SIZE);
-	vma = vm_map_lookup(proc, vaddr);
-	if (!vma) {
-		return (-POSIX_ENOMEM);
-	}
-
 	pflags = page_flags_for_prot(prot);
 
-	for (off = 0; off < aligned && vaddr + off < vma->end;
-	    off += PAGE_SIZE) {
+	any_mapped = 0;
+	for (off = 0; off < aligned; off += PAGE_SIZE) {
 		u64	va;
 		u64	phys;
 		va = vaddr + off;
 		phys = pmap_extract(va);
 		if (phys) {
+			any_mapped = 1;
 			pmap_remove(va);
 			pmap_enter(va, phys, pflags);
 		}
 	}
 
-	vma->prot = 0;
-	if (prot & POSIX_PROT_READ) vma->prot |= API_MAP_READ;
-	if (prot & POSIX_PROT_WRITE) vma->prot |= API_MAP_WRITE;
-	if (prot & POSIX_PROT_EXEC) vma->prot |= API_MAP_EXEC;
+	if (!any_mapped) {
+		return (-POSIX_ENOMEM);
+	}
+
+	vma = vm_map_lookup(proc, vaddr);
+	if (vma) {
+		vma->prot = 0;
+		if (prot & POSIX_PROT_READ) vma->prot |= API_MAP_READ;
+		if (prot & POSIX_PROT_WRITE) vma->prot |= API_MAP_WRITE;
+		if (prot & POSIX_PROT_EXEC) vma->prot |= API_MAP_EXEC;
+	}
 
 	return (0);
 }

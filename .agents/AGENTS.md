@@ -103,14 +103,35 @@ Monolithic kernel with the following rough layers:
   daemons.
 - `ports/posix_hello.c` and `kbdtest.c` use Linux x86-64 syscall numbers and
   expect the POSIX personality.
-- `ports/musl_test.c` uses real musl headers and is linked against vendored
-  musl.
+- `ports/musl_test.c` uses real musl headers and is statically linked against
+  vendored musl.
+- `ports/lua/` — Lua interpreter port, uses musl's `Scrt1.o` and is dynamically
+  linked as a PIE against shared `libc.so` (via `-pie -dynamic-linker /lib/ld-musl-x86_64.so.1`).
+  Patched via `ports/lua/diff.patch`, set up by `ports/lua/setup.sh`.
 
 ### Vendored libc (`libc/musl/`)
 
-- Pre-configured musl build (`config.mak`). The kernel build optionally links
-  `ports/musl_test` against it. Do not modify upstream musl unless you know what
-  you are doing.
+- Configured for x86_64-linux-musl with shared libraries enabled.
+- Builds both `lib/libc.a` (static) and `lib/libc.so` (shared + dynamic linker).
+- The dynamic linker (`ld-musl-x86_64.so.1`) is `libc.so` itself (musl unified model).
+- `lib/Scrt1.o` — PIE startup crt, used by dynamically linked programs.
+- The kernel build optionally links `ports/musl_test` statically against it.
+  Do not modify upstream musl unless you know what you are doing.
+
+### Dynamic linking support
+
+- The kernel already handles `PT_INTERP` in both `spawn.c` (`api_proc_spawn`)
+  and `posix_proc.c` (`posix_execve`):
+  - Loads the main ELF via `elf_load_full`.
+  - If `li.interp_off != 0`, reads the interpreter path from the ELF.
+  - Loads the interpreter binary from the filesystem at `ELF_INTERP_BASE` (0x40000000).
+  - Sets `aux.at_base = ELF_INTERP_BASE` and entry point to interpreter entry.
+  - The dynamic linker (musl's `libc.so`) performs symbol resolution and jumps
+    to the program's `_start`.
+- The dynamic linker is installed as a multiboot module `ld-musl` →
+  `/lib/ld-musl-x86_64.so.1` (copied from `libc.so`).
+- Programs using dynamic linking must be built as PIE (`-pie`), linked against
+  musl's `Scrt1.o` and `-lc` (shared), with `-dynamic-linker /lib/ld-musl-x86_64.so.1`.
 
 ### Configuration
 
@@ -122,6 +143,8 @@ Monolithic kernel with the following rough layers:
   section at boot to copy modules into ChainFS; the module named `init` is also
   used to start the first userspace process.  The Makefile and ISO generator use
   the same list via `tools/modules.sh`.
+- The `ld-musl` module in `[modules]` provides the musl dynamic linker at
+  `/lib/ld-musl-x86_64.so.1` for dynamically linked programs.
 
 ### Tooling / scripts
 

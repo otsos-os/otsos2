@@ -35,7 +35,9 @@ KBDTEST_OBJS = kbdtest.o
 
 MUSL_DIR = ../libc/musl
 MUSL_LIBC = $(MUSL_DIR)/lib/libc.a
+MUSL_LDSO = $(MUSL_DIR)/lib/libc.so
 MUSL_CRT1 = $(MUSL_DIR)/lib/crt1.o
+MUSL_SCRT1 = $(MUSL_DIR)/lib/Scrt1.o
 MUSL_TEST_BIN = musl_test
 MUSL_TEST_OBJS = musl_test.o
 LUA_BIN = lua/lua/lua
@@ -99,11 +101,11 @@ $(KBDTEST_BIN): $(KBDTEST_OBJS)
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
-$(MUSL_LIBC):
+$(MUSL_LIBC) $(MUSL_LDSO):
 	@echo "  MAKE    musl libc"
 	@$(MAKE) -C $(MUSL_DIR)
 
-$(MUSL_CRT1): $(MUSL_LIBC)
+$(MUSL_CRT1) $(MUSL_SCRT1): $(MUSL_LIBC)
 	@true
 
 $(MUSL_TEST_BIN): $(MUSL_CRT1) $(MUSL_TEST_OBJS) $(MUSL_LIBC)
@@ -114,7 +116,7 @@ $(MUSL_TEST_BIN): $(MUSL_CRT1) $(MUSL_TEST_OBJS) $(MUSL_LIBC)
 
 lua: $(LUA_BIN)
 
-$(LUA_BIN): $(MUSL_CRT1) $(MUSL_LIBC)
+$(LUA_BIN): $(MUSL_SCRT1) $(MUSL_LDSO)
 	@echo "  SETUP   ports/lua"
 	@$(SHELL) $(LUA_SETUP)
 	@echo "  MAKE    ports/lua"

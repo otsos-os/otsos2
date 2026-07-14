@@ -436,7 +436,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	bootmem_init(magic, addr, 0x100000,
     (u64)&kernel_end - KERNEL_VMA);
 	kmem_init();
-	ramdisk_mem = bootmem_alloc(4 * 1024 * 1024, PAGE_SIZE);
+	ramdisk_mem = bootmem_alloc(16 * 1024 * 1024, PAGE_SIZE);
 
 	if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
 		mboot2_ptr = (multiboot2_info_t *)addr;
@@ -483,7 +483,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 #endif
 
 	if (ramdisk_mem) {
-		ramdisk_init(ramdisk_mem, 4 * 1024 * 1024);
+		ramdisk_init(ramdisk_mem, 16 * 1024 * 1024);
 	} else {
 		printk("[RAMDISK] bootmem allocation "
 		    "failed\n");

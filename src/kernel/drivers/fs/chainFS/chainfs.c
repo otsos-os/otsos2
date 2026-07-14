@@ -526,8 +526,8 @@ chainfs_read_file_range(const char *filename, u8 *buffer,
 	}
 
 	*bytes_read = copied;
-	drivers_log("ChainFS: Read %u bytes from '%s' "
-	    "(offset %u)\n", copied, filename, offset);
+	/*drivers_log("ChainFS: Read %u bytes from '%s' "
+	    "(offset %u)\n", copied, filename, offset);*/
 	return (0);
 }
 

@@ -39,6 +39,8 @@ POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
 KBDTEST_BIN = $(PORTS_DIR)/kbdtest
 MUSL_TEST_BIN = $(PORTS_DIR)/musl_test
 LUA_BIN = $(PORTS_DIR)/lua/lua/lua
+MUSL_LDSO = $(MUSL_DIR)/lib/libc.so
+LDSO_BIN = $(PORTS_DIR)/ld-musl-x86_64.so.1
 LIBC_ENABLED := $(shell sh ../tools/toml_get.sh config.toml libc enabled true)
 MULTIBOOT_MODULES := $(shell perl ../tools/modules.pl config.toml)
 
@@ -47,12 +49,18 @@ ISO_MUSL_TEST_DEP = $(MUSL_TEST_BIN)
 ISO_MUSL_TEST_COPY = @cp $(MUSL_TEST_BIN) $(ISODIR)/boot/musl_test
 GRUB_MUSL_TEST = @echo '    module2 /boot/musl_test musl_test' >> $(ISODIR)/boot/grub/grub.cfg
 ISO_LUA_DEP = $(LUA_BIN)
+ISO_LDSO_DEP = $(LDSO_BIN)
+ISO_LDSO_COPY = @cp $(LDSO_BIN) $(ISODIR)/boot/ld-musl
+GRUB_LDSO = @echo '    module2 /boot/ld-musl ld-musl' >> $(ISODIR)/boot/grub/grub.cfg
 LIBC_DEPS = $(MUSL_LIBC) $(MUSL_CRT1)
 else
 ISO_MUSL_TEST_DEP =
 ISO_MUSL_TEST_COPY =
 GRUB_MUSL_TEST =
 ISO_LUA_DEP =
+ISO_LDSO_DEP =
+ISO_LDSO_COPY =
+GRUB_LDSO =
 LIBC_DEPS =
 endif
 
@@ -359,7 +367,11 @@ $(MUSL_LIBC):
 $(MUSL_CRT1): $(MUSL_LIBC)
 	@true
 
-$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP)
+$(LDSO_BIN): $(MUSL_LDSO)
+	@echo "  CP      $@"
+	@cp $(MUSL_LDSO) $@
+
+$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_LDSO_DEP)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
 	@for m in $(MULTIBOOT_MODULES); do \
@@ -376,6 +388,7 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 			kbdtest) src=$(KBDTEST_BIN);; \
 			musl_test) src=$(MUSL_TEST_BIN);; \
 			lua) src=$(LUA_BIN);; \
+			ld-musl) src=$(LDSO_BIN);; \
 		esac; \
 		if [ -n "$$src" ] && [ -f "$$src" ]; then \
 			cp "$$src" "$(ISODIR)/boot/$$m"; \
@@ -991,7 +1004,7 @@ $(BOOTMEM_O): kernel/bootmem.c kernel/bootmem.h kernel/multiboot.h kernel/multib
 $(DISK_IMG):
 	@echo "  IMG     $(DISK_IMG)"
 	@mkdir -p $(dir $(DISK_IMG))
-	@dd if=/dev/zero of=$(DISK_IMG) bs=1M count=10 2>/dev/null
+	@dd if=/dev/zero of=$(DISK_IMG) bs=1M count=16 2>/dev/null
 
 OVMF ?= /usr/share/ovmf/OVMF.fd
 
