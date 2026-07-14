@@ -1,7 +1,26 @@
 /*
  * Copyright (c) 2026, otsos team
  *
- * [.BSD-2-clause license text...]
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice, this
+ *    list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /* !DEFINES!
@@ -43,8 +62,8 @@ $space %export virtio_vq_send_recv
 
 */
 
-#include <kernel/drivers/video/card/virtio-gpu/virtio_queue.h>
-#include <kernel/drivers/video/card/virtio-gpu/virtio_hw.h>
+#include <kernel/drivers/virtio/virtio_queue.h>
+#include <kernel/drivers/virtio/virtio_hw.h>
 #include <kernel/mm/vm/pmap.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -101,7 +120,7 @@ virtio_vq_create(virtio_vq_t *vq, u16 queue_size)
 	avail_sz = avail_ring_size(queue_size);
 	used_sz = used_ring_size(queue_size);
 
-	total = desc_sz + 16 + avail_sz + 16 + used_sz + 16;
+	total = desc_sz + 16 + avail_sz + PAGE_SIZE + used_sz;
 	total = (total + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
 
 	mem = kmem_alloc_aligned(total, PAGE_SIZE);
@@ -121,7 +140,8 @@ virtio_vq_create(virtio_vq_t *vq, u16 queue_size)
 
 	vq->avail = (virtq_avail_t *)((u8 *)mem + offset);
 	vq->phys_avail = mem_phys + offset;
-	offset += (avail_sz + 15) & ~15u;
+	offset += (avail_sz + PAGE_SIZE - 1) &
+	    ~((u32)PAGE_SIZE - 1);
 
 	vq->used = (virtq_used_t *)((u8 *)mem + offset);
 	vq->phys_used = mem_phys + offset;
@@ -235,6 +255,12 @@ virtio_vq_kick(virtio_vq_t *vq, u16 head_idx)
 u16
 virtio_vq_poll(virtio_vq_t *vq)
 {
+	return (virtio_vq_poll_used(vq, NULL));
+}
+
+u16
+virtio_vq_poll_used(virtio_vq_t *vq, u32 *len)
+{
 	u64	i;
 	u16	used_pos, head;
 
@@ -246,12 +272,33 @@ virtio_vq_poll(virtio_vq_t *vq)
 		if (vq->used->idx != vq->used_idx) {
 			used_pos = vq->used_idx % vq->size;
 			head = (u16)vq->used->ring[used_pos].id;
+			if (len) {
+				*len = vq->used->ring[used_pos].len;
+			}
 			vq->used_idx++;
 			return (head);
 		}
 		__asm__ volatile("pause");
 	}
 	return ((u16)-1);
+}
+
+u16
+virtio_vq_pop_used(virtio_vq_t *vq, u32 *len)
+{
+	u16	used_pos, head;
+
+	if (!vq || vq->used->idx == vq->used_idx) {
+		return ((u16)-1);
+	}
+	__asm__ volatile("" ::: "memory");
+	used_pos = vq->used_idx % vq->size;
+	head = (u16)vq->used->ring[used_pos].id;
+	if (len) {
+		*len = vq->used->ring[used_pos].len;
+	}
+	vq->used_idx++;
+	return (head);
 }
 
 void

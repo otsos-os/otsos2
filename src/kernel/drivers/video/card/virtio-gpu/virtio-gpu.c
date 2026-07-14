@@ -52,8 +52,8 @@ $space %export drm_virtio_gpu_driver_get
 */
 
 #include <kernel/drivers/video/card/virtio-gpu/virtio-gpu.h>
-#include <kernel/drivers/video/card/virtio-gpu/virtio_hw.h>
-#include <kernel/drivers/video/card/virtio-gpu/virtio_queue.h>
+#include <kernel/drivers/virtio/virtio_pci.h>
+#include <kernel/drivers/virtio/virtio_queue.h>
 #include <kernel/drivers/video/card/virtio-gpu/virtio_gpu_cmds.h>
 #include <drm/drm.h>
 #include <drm/kms/crtc.h>
@@ -195,7 +195,7 @@ virtio_gpu_pci_probe(pci_device_t *dev, const pci_match_t *match)
 	drivers_log("[VIRTIO_GPU] probing PCI\n");
 	memset(&g_state, 0, sizeof(g_state));
 	g_state.backing_resource_id = VIRTIO_GPU_RESOURCE_ID;
-	if (virtio_hw_init(&g_state.hw, dev) != 0) {
+	if (virtio_pci_init(&g_state.hw, dev, 0) != 0) {
 		drivers_log("[VIRTIO_GPU] transport init "
 		    "failed\n");
 		return (-1);
@@ -230,7 +230,7 @@ virtio_gpu_pci_probe(pci_device_t *dev, const pci_match_t *match)
 
 static pci_match_t virtio_gpu_matches[] = {
 	{
-		.vendor_id	= VIRTIO_VENDOR_ID,
+		.vendor_id	= VIRTIO_PCI_VENDOR_ID,
 		.device_id	= VIRTIO_GPU_DEVICE_ID,
 		.class_code	= PCI_ANY_CLASS,
 		.subclass	= PCI_ANY_SUBCLASS,

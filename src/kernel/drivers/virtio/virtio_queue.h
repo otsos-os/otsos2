@@ -1,7 +1,26 @@
 /*
  * Copyright (c) 2026, otsos team
  *
- * [.BSD-2-clause license text...]
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice, this
+ *    list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /* !DEFINES!
@@ -44,14 +63,12 @@ $space %export virtio_vq_send_recv
 #define VIRTIO_QUEUE_H
 
 #include <mlibc/mlibc.h>
-#include <kernel/drivers/video/card/virtio-gpu/virtio_hw.h>
+#include <kernel/drivers/virtio/virtio_hw.h>
 
 #define	VIRTQ_DESC_F_NEXT		1
 #define	VIRTQ_DESC_F_WRITE		2
 #define	VIRTQ_DESC_F_INDIRECT		4
-
 #define	VIRTQ_AVAIL_F_NO_INTERRUPT	1
-
 #define	VIRTQ_USED_F_NO_NOTIFY		1
 
 typedef struct {
@@ -110,8 +127,9 @@ void	virtio_vq_set_desc(virtio_vq_t *vq, u16 idx, u64 addr,
     u32 len, u16 flags, u16 next_idx);
 void	virtio_vq_kick(virtio_vq_t *vq, u16 head_idx);
 u16	virtio_vq_poll(virtio_vq_t *vq);
+u16	virtio_vq_poll_used(virtio_vq_t *vq, u32 *len);
+u16	virtio_vq_pop_used(virtio_vq_t *vq, u32 *len);
 void	virtio_vq_free_chain(virtio_vq_t *vq, u16 head_idx);
 int	virtio_vq_send_recv(virtio_vq_t *vq, const void *cmd,
     u32 cmd_size, void *resp, u32 resp_size);
-
 #endif

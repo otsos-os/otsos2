@@ -1,7 +1,26 @@
 /*
  * Copyright (c) 2026, otsos team
  *
- * [.BSD-2-clause license text...]
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice, this
+ *    list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /* !DEFINES!
@@ -88,7 +107,7 @@ $space %export virtio_hw_read_isr, virtio_hw_read_gpu_config
 
 */
 
-#include <kernel/drivers/video/card/virtio-gpu/virtio_hw.h>
+#include <kernel/drivers/virtio/virtio_hw.h>
 #include <kernel/pci/utils/bar.h>
 #include <kernel/pci/utils/io.h>
 #include <kernel/mm/vm/pmap.h>
@@ -283,6 +302,7 @@ parse_capability(virtio_hw_t *hw, u8 cfg_type, u8 bar,
 			hw->dev_base = bar_info.base;
 		}
 		hw->dev_offset = offset;
+		hw->dev_length = length;
 		drivers_log("[VIRTIO] device cfg: %s %p+0x%x\n",
 		    bar_info.is_io ? "IO" : "MMIO",
 		    (void *)(bar_info.is_io ? struct_phys :
@@ -453,8 +473,6 @@ common_write64(virtio_hw_t *hw, u32 off, u64 val)
 int
 virtio_hw_init(virtio_hw_t *hw, pci_device_t *dev)
 {
-	u32	dev_lo, dev_hi, drv_lo, drv_hi;
-	u8	status;
 
 	if (!hw || !dev) {
 		return (-1);
@@ -481,29 +499,7 @@ virtio_hw_init(virtio_hw_t *hw, pci_device_t *dev)
 	virtio_hw_set_status(hw, VIRTIO_STATUS_ACKNOWLEDGE |
 	    VIRTIO_STATUS_DRIVER);
 
-	dev_lo = virtio_hw_get_features(hw);
-	dev_hi = virtio_hw_get_features_hi(hw);
-	drv_lo = 0;
-	drv_hi = 0;
-	if (dev_hi & (1u << (VIRTIO_F_VERSION_1 - 32))) {
-		drv_hi |= (1u << (VIRTIO_F_VERSION_1 - 32));
-	}
-	virtio_hw_set_features(hw, drv_lo);
-	virtio_hw_set_features_hi(hw, drv_hi);
-	hw->features = drv_lo;
-
-	virtio_hw_set_status(hw, VIRTIO_STATUS_ACKNOWLEDGE |
-	    VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK);
-	status = virtio_hw_get_status(hw);
-	if ((status & VIRTIO_STATUS_FEATURES_OK) == 0) {
-		drivers_log("[VIRTIO] feature negotiation "
-		    "failed\n");
-		virtio_hw_set_status(hw, VIRTIO_STATUS_FAILED);
-		return (-1);
-	}
-
-	hw->ready = 1;
-	drivers_log("[VIRTIO] transport initialised\n");
+	drivers_log("[VIRTIO] transport discovered\n");
 	return (0);
 }
 
@@ -643,29 +639,44 @@ virtio_hw_read_isr(virtio_hw_t *hw)
 	return (mmio_read8((volatile void *)(u64)addr));
 }
 
+u8
+virtio_hw_get_config_generation(virtio_hw_t *hw)
+{
+	return (common_read8(hw, OFF_CONFIG_GENERATION));
+}
+
+int
+virtio_hw_read_device_config(virtio_hw_t *hw, u32 offset, void *buf,
+    u32 len)
+{
+	u8	*dst;
+	u32	i;
+
+	if (!hw || !buf || len == 0 || offset > hw->dev_length ||
+	    len > hw->dev_length - offset) {
+		return (-1);
+	}
+
+	dst = buf;
+	for (i = 0; i < len; i++) {
+		if (hw->dev_is_io) {
+			dst[i] = io_read8(hw->dev_base,
+			    hw->dev_offset + offset + i);
+		} else {
+			dst[i] = mmio_read8((volatile void *)(u64)
+			    (hw->dev_base + hw->dev_offset + offset + i));
+		}
+	}
+	return (0);
+}
+
 void
 virtio_hw_read_gpu_config(virtio_hw_t *hw, virtio_gpu_config_t *out)
 {
-	if (!out) {
-		return;
-	}
-	if (hw->dev_is_io) {
-		u64	base;
-
-		base = hw->dev_base + hw->dev_offset;
-		out->events_read = io_read32(base, 0);
-		out->events_clear = io_read32(base, 4);
-		out->num_scanouts = io_read32(base, 8);
-		out->num_capsets = io_read32(base, 12);
-	} else if (hw->dev_mmio) {
-		volatile virtio_gpu_config_t	*cfg;
-
-		cfg = hw->dev_mmio;
-		out->events_read = cfg->events_read;
-		out->events_clear = cfg->events_clear;
-		out->num_scanouts = cfg->num_scanouts;
-		out->num_capsets = cfg->num_capsets;
-	} else {
-		memset(out, 0, sizeof(*out));
+	if (!out || virtio_hw_read_device_config(hw, 0, out,
+	    sizeof(*out)) != 0) {
+		if (out) {
+			memset(out, 0, sizeof(*out));
+		}
 	}
 }

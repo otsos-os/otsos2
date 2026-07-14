@@ -86,6 +86,7 @@ $space %export kmain
 #include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/init.h>
 #include <kernel/drivers/video/card/virtio-gpu/virtio-gpu.h>
+#include <kernel/drivers/net/virtio-net/virtio_net.h>
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/event/event.h>
 #include <kernel/interrupts/idt.h>
@@ -582,6 +583,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 
 	power_init();
 	drm_virtio_gpu_pci_register();
+	virtio_net_pci_register();
 	pci_init();
 	watchdog_init();
 	if (watchdog_device_count() > 0) {

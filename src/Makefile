@@ -179,8 +179,10 @@ CRYPTO_CHACHA20_O = ../bin/crypto_chacha20.o
 
 VIRTIO_HW_O = ../bin/virtio_hw.o
 VIRTIO_QUEUE_O = ../bin/virtio_queue.o
+VIRTIO_PCI_O = ../bin/virtio_pci.o
 VIRTIO_GPU_CMDS_O = ../bin/virtio_gpu_cmds.o
 VIRTIO_GPU_O = ../bin/virtio_gpu.o
+VIRTIO_NET_O = ../bin/virtio_net.o
 
 EVENT_O = ../bin/event.o
 EVENT_READ_O = ../bin/event_read.o
@@ -226,7 +228,7 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(KSHELL_OBJ) \
       $(TOML_O) $(KUSR_O) $(KUSR_AUTH_O) $(CONFIG_O) $(DRM_API_O) $(RESTRICT_O) \
       $(CRYPTO_UTIL_O) $(CRYPTO_SHA256_O) $(CRYPTO_HMAC_O) $(CRYPTO_PBKDF2_O) $(CRYPTO_RNG_O) $(CRYPTO_CHACHA20_O) \
-      $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O) \
+       $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_PCI_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O) $(VIRTIO_NET_O) \
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
       $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
       $(EVENT_KBD_O) $(EVENT_MOUSE_O) \
@@ -820,19 +822,27 @@ $(CRYPTO_CHACHA20_O): kernel/crypto/cipher/chacha20.c kernel/crypto/cipher/chach
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(VIRTIO_HW_O): kernel/drivers/video/card/virtio-gpu/virtio_hw.c kernel/drivers/video/card/virtio-gpu/virtio_hw.h
+$(VIRTIO_HW_O): kernel/drivers/virtio/virtio_hw.c kernel/drivers/virtio/virtio_hw.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(VIRTIO_QUEUE_O): kernel/drivers/video/card/virtio-gpu/virtio_queue.c kernel/drivers/video/card/virtio-gpu/virtio_queue.h kernel/drivers/video/card/virtio-gpu/virtio_hw.h
+$(VIRTIO_QUEUE_O): kernel/drivers/virtio/virtio_queue.c kernel/drivers/virtio/virtio_queue.h kernel/drivers/virtio/virtio_hw.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(VIRTIO_GPU_CMDS_O): kernel/drivers/video/card/virtio-gpu/virtio_gpu_cmds.c kernel/drivers/video/card/virtio-gpu/virtio_gpu_cmds.h kernel/drivers/video/card/virtio-gpu/virtio_hw.h kernel/drivers/video/card/virtio-gpu/virtio_queue.h
+$(VIRTIO_PCI_O): kernel/drivers/virtio/virtio_pci.c kernel/drivers/virtio/virtio_pci.h kernel/drivers/virtio/virtio_hw.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(VIRTIO_GPU_O): kernel/drivers/video/card/virtio-gpu/virtio-gpu.c kernel/drivers/video/card/virtio-gpu/virtio-gpu.h kernel/drivers/video/card/virtio-gpu/virtio_hw.h kernel/drivers/video/card/virtio-gpu/virtio_queue.h kernel/drivers/video/card/virtio-gpu/virtio_gpu_cmds.h kernel/drivers/video/drm/drm.h kernel/drivers/video/drm/kms/crtc.h kernel/drivers/video/drm/rapi/rapi.h
+$(VIRTIO_GPU_CMDS_O): kernel/drivers/video/card/virtio-gpu/virtio_gpu_cmds.c kernel/drivers/video/card/virtio-gpu/virtio_gpu_cmds.h kernel/drivers/virtio/virtio_hw.h kernel/drivers/virtio/virtio_queue.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(VIRTIO_GPU_O): kernel/drivers/video/card/virtio-gpu/virtio-gpu.c kernel/drivers/video/card/virtio-gpu/virtio-gpu.h kernel/drivers/virtio/virtio_pci.h kernel/drivers/virtio/virtio_queue.h kernel/drivers/video/card/virtio-gpu/virtio_gpu_cmds.h kernel/drivers/video/drm/drm.h kernel/drivers/video/drm/kms/crtc.h kernel/drivers/video/drm/rapi/rapi.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(VIRTIO_NET_O): kernel/drivers/net/virtio-net/virtio_net.c kernel/drivers/net/virtio-net/virtio_net.h kernel/drivers/virtio/virtio_pci.h kernel/drivers/virtio/virtio_queue.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1021,12 +1031,12 @@ run_bios: check_build_tools $(ISO_IMAGE) $(DISK_IMG)
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -device i6300esb -watchdog-action reset
 
 virtio: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
-	@echo "  RUN     QEMU (virtio-gpu)"
-	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device virtio-gpu-pci -device i6300esb -watchdog-action reset
+	@echo "  RUN     QEMU (virtio-gpu, virtio-net)"
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device virtio-gpu-pci -netdev user,id=net0 -device virtio-net-pci,netdev=net0,disable-legacy=on -device i6300esb -watchdog-action reset
 
 virtio_nodis: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
-	@echo "  RUN     QEMU (virtio-gpu, terminal)"
-	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_NODISPLAY_OPTS) -device virtio-gpu-pci -device i6300esb -watchdog-action reset
+	@echo "  RUN     QEMU (virtio-gpu, virtio-net, terminal)"
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_NODISPLAY_OPTS) -device virtio-gpu-pci -netdev user,id=net0 -device virtio-net-pci,netdev=net0,disable-legacy=on -device i6300esb -watchdog-action reset
 
 debug: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  DEBUG   QEMU"

@@ -170,8 +170,8 @@ typedef struct {
 	u32			padding;
 } __attribute__((packed)) virtio_gpu_resource_detach_backing_t;
 
-#include <kernel/drivers/video/card/virtio-gpu/virtio_hw.h>
-#include <kernel/drivers/video/card/virtio-gpu/virtio_queue.h>
+#include <kernel/drivers/virtio/virtio_hw.h>
+#include <kernel/drivers/virtio/virtio_queue.h>
 
 int	virtio_gpu_cmd_get_display_info(virtio_hw_t *hw,
     virtio_vq_t *vq, virtio_gpu_resp_display_info_t *info);

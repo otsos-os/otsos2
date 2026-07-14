@@ -1,7 +1,26 @@
 /*
  * Copyright (c) 2026, otsos team
  *
- * [.BSD-2-clause license text...]
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice, this
+ *    list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /* !DEFINES!
@@ -161,6 +180,7 @@ typedef struct {
 	u8			dev_is_io;
 	u64			dev_base;
 	u32			dev_offset;
+	u32			dev_length;
 	virtio_gpu_config_t	*dev_mmio;
 	u32			features;
 	u8			ready;
@@ -191,6 +211,9 @@ void	virtio_hw_enable_queue(virtio_hw_t *hw);
 void	virtio_hw_notify_queue(virtio_hw_t *hw, u16 queue_index);
 
 u8	virtio_hw_read_isr(virtio_hw_t *hw);
+u8	virtio_hw_get_config_generation(virtio_hw_t *hw);
+int	virtio_hw_read_device_config(virtio_hw_t *hw, u32 offset,
+    void *buf, u32 len);
 void	virtio_hw_read_gpu_config(virtio_hw_t *hw,
     virtio_gpu_config_t *out);
 
