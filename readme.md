@@ -25,3 +25,22 @@ there are only 2 test lines: my pc (ASUS TUF Gaming FX706LI-H7010) and qemu.
 
 ### Where all possibilities in readme?
 There is not, i dont want to make readme full of every detail describing what's in here. If someone is interested in something, they should read the code.
+
+
+
+
+
+
+
+Source roadmap:
+-------------------
+| Directory | Description |
+| --------- | ----------- |
+| src | Source code for kernel bootloader and klib (see [src/README.md](src/README.md)) |
+| ports | Programs and ports for otsos |
+| libc | musl libc port |
+| init | init binary for otsos |
+| tools | some tools for build |
+
+
+
