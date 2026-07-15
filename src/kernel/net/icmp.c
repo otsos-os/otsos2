@@ -33,13 +33,11 @@ $define %type net_iface_t as struct with network interface state
 $define %type icmp_header_t as packed struct with ICMP type/code/checksum
 
 $define %func icmp_input as function with args net_iface_t *, u32, const u8 *, u16
-$define %func icmp_checksum as function with args const void *, int
 
 */
 
 /* !SPACE!
 
-$space %internal icmp_checksum
 $space %export icmp_input
 
 */
@@ -48,27 +46,6 @@ $space %export icmp_input
 #include <kernel/net/ipv4.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
-
-static u16
-icmp_checksum(const void *buf, int len)
-{
-	const u16	*p;
-	u32		sum;
-	int		i;
-
-	p = (const u16 *)buf;
-	sum = 0;
-	for (i = 0; i < len / 2; i++) {
-		sum += __builtin_bswap16(p[i]);
-	}
-	if (len & 1) {
-		sum += (u16)((const u8 *)buf)[len - 1] << 8;
-	}
-	while (sum >> 16) {
-		sum = (sum & 0xFFFF) + (sum >> 16);
-	}
-	return ((u16)(~sum & 0xFFFF));
-}
 
 int
 icmp_input(net_iface_t *iface, u32 src_ip,
@@ -84,14 +61,13 @@ icmp_input(net_iface_t *iface, u32 src_ip,
 	}
 
 	icmp = (const icmp_header_t *)data;
-	if (icmp_checksum(data, len) != 0) {
+	if (ipv4_checksum(data, len) != 0) {
 		return (0);
 	}
 
 	if (icmp->type == ICMP_TYPE_ECHO_REQUEST &&
 	    icmp->code == 0) {
-		reply_len = len > sizeof(reply) - sizeof(icmp_header_t) ?
-		    sizeof(reply) : len;
+		reply_len = len > sizeof(reply) ? sizeof(reply) : len;
 
 		memset(reply, 0, sizeof(reply));
 		rep = (icmp_header_t *)reply;
@@ -105,7 +81,7 @@ icmp_input(net_iface_t *iface, u32 src_ip,
 		    reply_len - sizeof(icmp_header_t));
 
 		rep->checksum = __builtin_bswap16(
-		    icmp_checksum(reply, reply_len));
+		    ipv4_checksum(reply, reply_len));
 
 		ipv4_output(iface, src_ip, IPV4_PROTO_ICMP,
 		    reply, reply_len);

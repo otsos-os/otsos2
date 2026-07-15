@@ -39,13 +39,14 @@ $define %func arp_input as function with args net_iface_t *, const u8 *, u16
 $define %func arp_resolve as function with args net_iface_t *, u32, u8 *
 $define %func arp_lookup as function with args net_iface_t *, u32
 $define %func arp_send_request as function with args net_iface_t *, u32
+$define %func arp_hold_packet as function with args net_iface_t *, u32, u16, const u8 *, u16
 
 */
 
 /* !SPACE!
 
 $space %export arp_cache_init, arp_input, arp_resolve, arp_lookup
-$space %export arp_send_request
+$space %export arp_send_request, arp_hold_packet
 
 */
 
@@ -65,6 +66,9 @@ $space %export arp_send_request
 #define	ARP_OP_REPLY		2
 
 #define	ARP_CACHE_SIZE		16
+#define	ARP_ENTRY_TTL_SECS	120
+#define	ARP_PENDING_SLOTS	4
+#define	ARP_PENDING_BUFSZ	ETHERNET_MTU
 
 typedef struct {
 	u16	htype;
@@ -80,15 +84,27 @@ typedef struct {
 
 typedef struct {
 	net_iface_t	*iface;
+	u64	created;
 	u32	ip;
 	u8	mac[ETHERNET_ADDR_LEN];
 	int	valid;
 } arp_cache_entry_t;
+
+typedef struct {
+	net_iface_t	*iface;
+	u32	ip;
+	u16	ethertype;
+	u16	len;
+	u8	data[ARP_PENDING_BUFSZ];
+	int	valid;
+} arp_pending_t;
 
 void	arp_cache_init(void);
 int	arp_input(net_iface_t *iface, const u8 *data, u16 len);
 int	arp_resolve(net_iface_t *iface, u32 ip, u8 *mac_out);
 arp_cache_entry_t *arp_lookup(net_iface_t *iface, u32 ip);
 int	arp_send_request(net_iface_t *iface, u32 target_ip);
+int	arp_hold_packet(net_iface_t *iface, u32 ip, u16 ethertype,
+    const u8 *data, u16 len);
 
 #endif

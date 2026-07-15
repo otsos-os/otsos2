@@ -46,6 +46,8 @@ $define %func status_line as procedure with args const char *, int
 $define %func disk_has_type as function with args disk_type_t
 $define %func disk_find_type as function with args disk_type_t
 $define %func timer_sanity_check as function with args void
+$define %func parse_ipv4 as function with args const char *, u32 *
+$define %func net_apply_config as procedure with args net_iface_t *
 $define %func net_test as procedure with args void
 $define %func enable_sse as procedure with args void
 $define %func kernel_ensure_parent_dirs as function with args const char *
@@ -60,6 +62,7 @@ $space %internal debug_multiboot_info, debug_multiboot2_tags
 $space %internal mb2_find_module, status_line
 $space %internal disk_has_type, disk_find_type
 $space %internal timer_sanity_check, net_test, enable_sse
+$space %internal parse_ipv4, net_apply_config
 $space %internal kernel_ensure_parent_dirs, kernel_install_module_cb
 $space %export kmain
 
@@ -404,6 +407,85 @@ kernel_install_module_cb(const char *name, const char *dest, void *ctx)
 	}
 }
 
+static int
+parse_ipv4(const char *str, u32 *out)
+{
+	u32	octets[4];
+	u32	value;
+	int	part, digits;
+
+	if (!str || !out) {
+		return (-1);
+	}
+	part = 0;
+	digits = 0;
+	value = 0;
+	while (*str) {
+		if (*str >= '0' && *str <= '9') {
+			value = value * 10 + (u32)(*str - '0');
+			if (value > 255) {
+				return (-1);
+			}
+			digits++;
+		} else if (*str == '.') {
+			if (digits == 0 || part >= 3) {
+				return (-1);
+			}
+			octets[part++] = value;
+			value = 0;
+			digits = 0;
+		} else {
+			return (-1);
+		}
+		str++;
+	}
+	if (digits == 0 || part != 3) {
+		return (-1);
+	}
+	octets[3] = value;
+
+	*out = (octets[0] << 24) | (octets[1] << 16) |
+	    (octets[2] << 8) | octets[3];
+	return (0);
+}
+
+static void
+net_apply_config(net_iface_t *iface)
+{
+	const char	*ip_str, *mask_str, *gw_str;
+	u32		ip, mask, gw;
+
+	if (!iface || iface->ip_addr != 0) {
+		return;
+	}
+	if (!config_get_bool("net", "enabled", 1)) {
+		return;
+	}
+	ip_str = config_get_string("net", "ip", "");
+	if (!ip_str || ip_str[0] == '\0' || parse_ipv4(ip_str, &ip) != 0) {
+		return;
+	}
+	mask_str = config_get_string("net", "netmask", "255.255.255.0");
+	gw_str = config_get_string("net", "gateway", "");
+	if (parse_ipv4(mask_str, &mask) != 0) {
+		mask = 0xFFFFFF00u;
+	}
+	if (!gw_str || gw_str[0] == '\0' || parse_ipv4(gw_str, &gw) != 0) {
+		gw = 0;
+	}
+	iface->ip_addr = ip;
+	iface->netmask = mask;
+	iface->gw_addr = gw;
+	printk("[NET] %s configured %d.%d.%d.%d/%d.%d.%d.%d gw "
+	    "%d.%d.%d.%d\n", iface->name,
+	    (ip >> 24) & 0xFF, (ip >> 16) & 0xFF,
+	    (ip >> 8) & 0xFF, ip & 0xFF,
+	    (mask >> 24) & 0xFF, (mask >> 16) & 0xFF,
+	    (mask >> 8) & 0xFF, mask & 0xFF,
+	    (gw >> 24) & 0xFF, (gw >> 16) & 0xFF,
+	    (gw >> 8) & 0xFF, gw & 0xFF);
+}
+
 static void
 net_test(void)
 {
@@ -447,15 +529,12 @@ net_test(void)
 			continue;
 		}
 		if (iface->ip_addr == 0) {
-			printk("[NET_TEST] %s: no IP set, "
-			    "assigning 10.0.2.15/24 "
-			    "(QEMU user-net)\n", ndev->name);
-			iface->ip_addr = (10u << 24) |
-			    (0u << 16) | (2u << 8) | 15u;
-			iface->netmask = (255u << 24) |
-			    (255u << 16) | (255u << 8) | 0u;
-			iface->gw_addr = (10u << 24) |
-			    (0u << 16) | (2u << 8) | 2u;
+			net_apply_config(iface);
+		}
+		if (iface->ip_addr == 0) {
+			printk("[NET_TEST] %s: no IP  "
+			    "skipping\n", ndev->name);
+			continue;
 		}
 
 		test_ip = iface->gw_addr ? iface->gw_addr :

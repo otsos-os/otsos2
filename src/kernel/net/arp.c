@@ -40,22 +40,29 @@ $define %func arp_lookup as function with args net_iface_t *, u32
 $define %func arp_send_request as function with args net_iface_t *, u32
 $define %func arp_send_reply as function with args net_iface_t *, arp_header_t *, u32
 $define %func arp_cache_update as procedure with args net_iface_t *, u32, const u8 *
+$define %func arp_hold_packet as function with args net_iface_t *, u32, u16, const u8 *, u16
+$define %func arp_flush_pending as procedure with args net_iface_t *, u32
+$define %func arp_entry_expired as function with args const arp_cache_entry_t *
 
 */
 
 /* !SPACE!
 
 $space %internal arp_send_request, arp_send_reply, arp_cache_update
+$space %internal arp_flush_pending, arp_entry_expired
 $space %export arp_cache_init, arp_input, arp_resolve, arp_lookup
+$space %export arp_hold_packet
 
 */
 
 #include <kernel/net/arp.h>
 #include <kernel/net/ethernet.h>
+#include <kernel/drivers/timer.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 static arp_cache_entry_t	g_arp_cache[ARP_CACHE_SIZE];
+static arp_pending_t		g_arp_pending[ARP_PENDING_SLOTS];
 static int			g_arp_cache_next;
 
 void
@@ -66,20 +73,41 @@ arp_cache_init(void)
 	for (i = 0; i < ARP_CACHE_SIZE; i++) {
 		memset(&g_arp_cache[i], 0, sizeof(g_arp_cache[i]));
 	}
+	for (i = 0; i < ARP_PENDING_SLOTS; i++) {
+		memset(&g_arp_pending[i], 0, sizeof(g_arp_pending[i]));
+	}
 	g_arp_cache_next = 0;
+}
+static int
+arp_entry_expired(const arp_cache_entry_t *entry)
+{
+	u64	freq, age;
+
+	if (!timer_is_initialized()) {
+		return (0);
+	}
+	freq = timer_get_frequency();
+	if (freq == 0) {
+		return (0);
+	}
+	age = timer_get_ticks() - entry->created;
+	return (age > (u64)ARP_ENTRY_TTL_SECS * freq);
 }
 
 static void
 arp_cache_update(net_iface_t *iface, u32 ip, const u8 *mac)
 {
 	arp_cache_entry_t	*entry;
+	u64			now;
 	int			i;
 
+	now = timer_is_initialized() ? timer_get_ticks() : 0;
 	for (i = 0; i < ARP_CACHE_SIZE; i++) {
 		entry = &g_arp_cache[i];
 		if (entry->valid && entry->iface == iface &&
 		    entry->ip == ip) {
 			memcpy(entry->mac, mac, ETHERNET_ADDR_LEN);
+			entry->created = now;
 			return;
 		}
 	}
@@ -87,6 +115,7 @@ arp_cache_update(net_iface_t *iface, u32 ip, const u8 *mac)
 	entry = &g_arp_cache[g_arp_cache_next];
 	entry->iface = iface;
 	entry->ip = ip;
+	entry->created = now;
 	memcpy(entry->mac, mac, ETHERNET_ADDR_LEN);
 	entry->valid = 1;
 	g_arp_cache_next = (g_arp_cache_next + 1) % ARP_CACHE_SIZE;
@@ -95,12 +124,18 @@ arp_cache_update(net_iface_t *iface, u32 ip, const u8 *mac)
 arp_cache_entry_t *
 arp_lookup(net_iface_t *iface, u32 ip)
 {
-	int	i;
+	arp_cache_entry_t	*entry;
+	int			i;
 
 	for (i = 0; i < ARP_CACHE_SIZE; i++) {
-		if (g_arp_cache[i].valid && g_arp_cache[i].iface == iface &&
-		    g_arp_cache[i].ip == ip) {
-			return (&g_arp_cache[i]);
+		entry = &g_arp_cache[i];
+		if (entry->valid && entry->iface == iface &&
+		    entry->ip == ip) {
+			if (arp_entry_expired(entry)) {
+				entry->valid = 0;
+				return (NULL);
+			}
+			return (entry);
 		}
 	}
 	return (NULL);
@@ -121,6 +156,61 @@ arp_resolve(net_iface_t *iface, u32 ip, u8 *mac_out)
 	}
 
 	return (-1);
+}
+int
+arp_hold_packet(net_iface_t *iface, u32 ip, u16 ethertype,
+    const u8 *data, u16 len)
+{
+	arp_pending_t	*slot;
+	int		i, free_idx;
+
+	if (!iface || !data || len == 0 || len > ARP_PENDING_BUFSZ) {
+		return (-1);
+	}
+	free_idx = -1;
+	for (i = 0; i < ARP_PENDING_SLOTS; i++) {
+		slot = &g_arp_pending[i];
+		if (slot->valid && slot->iface == iface && slot->ip == ip) {
+			free_idx = i;
+			break;
+		}
+		if (!slot->valid && free_idx < 0) {
+			free_idx = i;
+		}
+	}
+	if (free_idx < 0) {
+		free_idx = 0;
+	}
+
+	slot = &g_arp_pending[free_idx];
+	slot->iface = iface;
+	slot->ip = ip;
+	slot->ethertype = ethertype;
+	slot->len = len;
+	memcpy(slot->data, data, len);
+	slot->valid = 1;
+	return (0);
+}
+
+static void
+arp_flush_pending(net_iface_t *iface, u32 ip)
+{
+	arp_pending_t	*slot;
+	u8		mac[ETHERNET_ADDR_LEN];
+	int		i;
+
+	if (arp_resolve(iface, ip, mac) != 0) {
+		return;
+	}
+	for (i = 0; i < ARP_PENDING_SLOTS; i++) {
+		slot = &g_arp_pending[i];
+		if (!slot->valid || slot->iface != iface || slot->ip != ip) {
+			continue;
+		}
+		slot->valid = 0;
+		ethernet_output(iface, mac, slot->ethertype,
+		    slot->data, slot->len);
+	}
 }
 
 int
@@ -198,6 +288,7 @@ arp_input(net_iface_t *iface, const u8 *data, u16 len)
 	}
 
 	arp_cache_update(iface, __builtin_bswap32(arp->spa), arp->sha);
+	arp_flush_pending(iface, __builtin_bswap32(arp->spa));
 
 	if (__builtin_bswap16(arp->oper) == ARP_OP_REQUEST) {
 		if (__builtin_bswap32(arp->tpa) == iface->ip_addr) {

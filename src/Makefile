@@ -867,7 +867,7 @@ $(NET_ETHERNET_O): kernel/net/ethernet.c kernel/net/ethernet.h kernel/net/net.h 
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(NET_ARP_O): kernel/net/arp.c kernel/net/arp.h kernel/net/ethernet.h
+$(NET_ARP_O): kernel/net/arp.c kernel/net/arp.h kernel/net/ethernet.h kernel/drivers/timer.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -879,7 +879,7 @@ $(NET_ICMP_O): kernel/net/icmp.c kernel/net/icmp.h kernel/net/ipv4.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(NET_UDP_O): kernel/net/udp.c kernel/net/udp.h
+$(NET_UDP_O): kernel/net/udp.c kernel/net/udp.h kernel/net/ipv4.h kernel/net/ethernet.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

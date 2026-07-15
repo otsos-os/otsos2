@@ -152,8 +152,8 @@ ipv4_output(net_iface_t *iface, u32 dst_ip, u8 protocol,
 	ipv4_header_t		*ip;
 	u16			total_len;
 	static u16		packet_id;
+	u32			next_hop;
 	u8			dst_mac[ETHERNET_ADDR_LEN];
-	int			resolved;
 
 	if (!iface || !iface->ndev || !data || iface->ip_addr == 0 ||
 	    dst_ip == 0) {
@@ -162,17 +162,6 @@ ipv4_output(net_iface_t *iface, u32 dst_ip, u8 protocol,
 	total_len = (u16)(sizeof(ipv4_header_t) + len);
 	if (total_len > ETHERNET_MTU) {
 		return (-1);
-	}
-
-	if (dst_ip == 0xFFFFFFFF) {
-		memset(dst_mac, 0xFF, ETHERNET_ADDR_LEN);
-		resolved = 0;
-	} else {
-		resolved = arp_resolve(iface, dst_ip, dst_mac);
-		if (resolved != 0) {
-			arp_send_request(iface, dst_ip);
-			return (-1);
-		}
 	}
 
 	memset(packet, 0, sizeof(packet));
@@ -186,8 +175,33 @@ ipv4_output(net_iface_t *iface, u32 dst_ip, u8 protocol,
 	ip->dst = __builtin_bswap32(dst_ip);
 	ip->checksum = __builtin_bswap16(
 	    ipv4_checksum(ip, sizeof(ipv4_header_t)));
-
 	memcpy(packet + sizeof(ipv4_header_t), data, len);
+
+	if (dst_ip == 0xFFFFFFFF) {
+		memset(dst_mac, 0xFF, ETHERNET_ADDR_LEN);
+	} else {
+		if (iface->netmask != 0 &&
+		    (dst_ip & iface->netmask) !=
+		    (iface->ip_addr & iface->netmask)) {
+			if (iface->gw_addr == 0) {
+				return (-1);
+			}
+			next_hop = iface->gw_addr;
+		} else {
+			next_hop = dst_ip;
+		}
+		if (arp_resolve(iface, next_hop, dst_mac) != 0) {
+			/*
+			 * MAC unknown: park the frame in the ARP pending
+			 * queue and kick off resolution.  It is flushed
+			 * when the reply arrives instead of being dropped.
+			 */
+			arp_hold_packet(iface, next_hop, ETHERTYPE_IPV4,
+			    packet, total_len);
+			arp_send_request(iface, next_hop);
+			return (-1);
+		}
+	}
 
 	return (ethernet_output(iface, dst_mac, ETHERTYPE_IPV4,
 	    packet, total_len));

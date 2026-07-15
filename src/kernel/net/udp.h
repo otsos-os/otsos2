@@ -31,14 +31,20 @@ $define %type u32 as 32 bit unsigned
 $define %type int as 32 bit signed
 $define %type net_iface_t as struct with network interface state
 $define %type udp_header_t as packed struct with UDP src/dst port + length + checksum
+$define %type udp_rx_handler_t as callback for a delivered UDP datagram
+$define %type udp_binding_t as struct with bound port and receive handler
 
 $define %func udp_input as function with args net_iface_t *, u32, const u8 *, u16
+$define %func udp_output as function with args net_iface_t *, u32, u16, u16, const u8 *, u16
+$define %func udp_bind as function with args u16, udp_rx_handler_t, void *
+$define %func udp_unbind as procedure with args u16
+$define %func udp_checksum as function with args u32, u32, const u8 *, u16
 
 */
 
 /* !SPACE!
 
-$space %export udp_input
+$space %export udp_input, udp_output, udp_bind, udp_unbind, udp_checksum
 
 */
 
@@ -48,7 +54,8 @@ $space %export udp_input
 #include <kernel/net/net.h>
 #include <mlibc/mlibc.h>
 
-#define	UDP_HEADER_LEN	8
+#define	UDP_HEADER_LEN		8
+#define	UDP_MAX_BINDINGS	16
 
 typedef struct {
 	u16	src_port;
@@ -56,8 +63,22 @@ typedef struct {
 	u16	length;
 	u16	checksum;
 } __attribute__((packed)) udp_header_t;
+typedef void (*udp_rx_handler_t)(net_iface_t *iface, u32 src_ip,
+    u16 src_port, u16 dst_port, const u8 *data, u16 len, void *ctx);
+
+typedef struct {
+	udp_rx_handler_t	handler;
+	void			*ctx;
+	u16			port;
+	int			valid;
+} udp_binding_t;
 
 int	udp_input(net_iface_t *iface, u32 src_ip,
     const u8 *data, u16 len);
+int	udp_output(net_iface_t *iface, u32 dst_ip, u16 src_port,
+    u16 dst_port, const u8 *data, u16 len);
+int	udp_bind(u16 port, udp_rx_handler_t handler, void *ctx);
+void	udp_unbind(u16 port);
+u16	udp_checksum(u32 src_ip, u32 dst_ip, const u8 *segment, u16 len);
 
 #endif
