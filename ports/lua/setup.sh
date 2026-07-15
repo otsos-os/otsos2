@@ -5,7 +5,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 echo "  SETUP    ports/lua"
 if [ ! -f "$SCRIPT_DIR/lua/makefile" ]; then
 	cd "$REPO_ROOT"
-	git submodule update --init ports/lua/lua
+	git submodule update --init --depth 1 ports/lua/lua
 fi
 if [ -f "$SCRIPT_DIR/lua/makefile" ] && \
    grep -q 'clang --target=x86_64-linux-musl' "$SCRIPT_DIR/lua/makefile" 2>/dev/null; then

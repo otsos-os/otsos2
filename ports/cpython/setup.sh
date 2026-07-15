@@ -7,13 +7,13 @@ MUSL_DIR="../../../libc/musl"
 SRC_DIR="$SCRIPT_DIR/cpython"
 if [ ! -f "$SRC_DIR/configure" ]; then
 	cd "$REPO_ROOT"
-	git submodule update --init ports/cpython/cpython
+	git submodule update --init --depth 1 ports/cpython/cpython
 fi
 if grep -q 'otsos: all' "$SRC_DIR/Makefile.pre.in" 2>/dev/null; then
 	echo "  PATCH    already"
 else
 	cd "$SRC_DIR"
-	patch -p0 < "$SCRIPT_DIR/diff.patch"
+	patch -p1 < "$SCRIPT_DIR/diff.patch"
 	echo "  PATCH    applied"
 fi
 if [ ! -f "$SRC_DIR/config.site" ]; then
