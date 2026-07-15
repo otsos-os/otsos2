@@ -49,6 +49,6 @@ $space %export ramdisk_init
 
 #include <mlibc/mlibc.h>
 
-void	ramdisk_init(void *location, u32 size);
+void	ramdisk_init(void *pool, u32 pool_size);
 
 #endif

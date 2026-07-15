@@ -503,10 +503,9 @@ chainfs_read_file_range(const char *filename, u8 *buffer,
 			to_copy = remaining;
 		}
 
-		for (i = 0; i < to_copy; i++) {
-			buffer[copied + i] =
-			    g_chainfs.sector_buffer[intra_offset + i];
-		}
+			memcpy(buffer + copied,
+		    g_chainfs.sector_buffer + intra_offset,
+		    to_copy);
 
 		copied += to_copy;
 		remaining -= to_copy;

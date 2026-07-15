@@ -1,70 +1,10 @@
 #include <kernel/drivers/net/unix_sock.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
-#include <kernel/api/errno.h>
+#include <kernel/api/posix/posix.h>
 #include <kernel/process.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
-
-#define	UNIX_SOCK_MAX		128
-#define	UNIX_SOCK_BUF_SIZE	4096
-#define	UNIX_SOCK_BACKLOG	8
-
-enum unix_sock_state {
-	UNIX_SOCK_FREE = 0,
-	UNIX_SOCK_UNBOUND,
-	UNIX_SOCK_BOUND,
-	UNIX_SOCK_LISTENING,
-	UNIX_SOCK_CONNECTED,
-	UNIX_SOCK_CLOSED
-};
-
-typedef struct dgram_msg {
-	struct dgram_msg	*next;
-	int			len;
-	char			from_path[108];
-	char			data[];
-} dgram_msg_t;
-
-struct unix_sock {
-	int			id;
-	int			state;
-	int			domain;
-	int			type;
-	int			protocol;
-	int			refcount;
-
-	struct unix_sock	*peer;
-
-	char			bound_path[108];
-
-	int			accept_queue[UNIX_SOCK_BACKLOG];
-	int			accept_head;
-	int			accept_tail;
-	int			accept_count;
-
-	char			stream_buf[UNIX_SOCK_BUF_SIZE];
-	int			stream_head;
-	int			stream_tail;
-	int			stream_count;
-
-	dgram_msg_t		*msg_head;
-	dgram_msg_t		*msg_tail;
-	int			msg_count;
-
-	int			read_wait;
-	int			write_wait;
-	int			accept_wait;
-
-	int			shut_rd;
-	int			shut_wr;
-
-	int			error;
-
-	u32			uid;
-	u32			gid;
-	u32			pid;
-};
 
 static unix_sock_t	unix_socks[UNIX_SOCK_MAX];
 
@@ -180,16 +120,16 @@ unix_sock_bind(unix_sock_t *s, const char *path)
 
 	len = strlen(path);
 	if (len <= 0 || len >= 108)
-		return (-EINVAL);
+		return (-POSIX_EINVAL);
 
 	if (unix_sock_find_by_path(path) != NULL)
-		return (-EADDRINUSE);
+		return (-POSIX_EADDRINUSE);
 
 	strcpy(s->bound_path, path);
 
 	if (chainfs_create_socket(path) != 0) {
 		s->bound_path[0] = '\0';
-		return (-EIO);
+		return (-POSIX_EIO);
 	}
 
 	s->state = UNIX_SOCK_BOUND;
@@ -209,9 +149,9 @@ int
 unix_sock_listen(unix_sock_t *s)
 {
 	if (s->type != SOCK_STREAM)
-		return (-EOPNOTSUPP);
+		return (-POSIX_EOPNOTSUPP);
 	if (s->state != UNIX_SOCK_BOUND)
-		return (-EINVAL);
+		return (-POSIX_EINVAL);
 
 	s->state = UNIX_SOCK_LISTENING;
 	return (0);
@@ -225,12 +165,12 @@ unix_sock_connect_stream(unix_sock_t *c, unix_sock_t *target)
 
 	n = unix_sock_alloc(AF_UNIX, SOCK_STREAM, 0);
 	if (!n)
-		return (-ENOMEM);
+		return (-POSIX_ENOMEM);
 
 	if (target->accept_count >= UNIX_SOCK_BACKLOG) {
 		sock_cleanup(n);
 		n->state = UNIX_SOCK_FREE;
-		return (-ECONNREFUSED);
+		return (-POSIX_ECONNREFUSED);
 	}
 
 	c->peer = n;
@@ -281,7 +221,7 @@ unix_sock_stream_read(unix_sock_t *s, void *buf, u32 count, int nonblock)
 	int	n;
 
 	if (!s || s->state == UNIX_SOCK_FREE)
-		return (-EBADF);
+		return (-POSIX_EBADF);
 	if (s->shut_rd)
 		return (0);
 	if (!s->peer || s->peer->state == UNIX_SOCK_FREE ||
@@ -300,7 +240,7 @@ unix_sock_stream_read(unix_sock_t *s, void *buf, u32 count, int nonblock)
 			proc_wakeup(&s->peer->write_wait);
 		} else if (nonblock) {
 			if (n == 0)
-				return (-EAGAIN);
+				return (-POSIX_EAGAIN);
 			break;
 		} else if (s->peer->shut_wr ||
 		    s->peer->state == UNIX_SOCK_CLOSED ||
@@ -323,12 +263,12 @@ unix_sock_stream_write(unix_sock_t *s, const void *buf, u32 count,
 	int		i;
 
 	if (!s || s->state == UNIX_SOCK_FREE)
-		return (-EBADF);
+		return (-POSIX_EBADF);
 	if (s->shut_wr)
-		return (-EPIPE);
+		return (-POSIX_EPIPE);
 	if (!s->peer || s->peer->state == UNIX_SOCK_FREE ||
 	    s->peer->state == UNIX_SOCK_CLOSED)
-		return (-EPIPE);
+		return (-POSIX_EPIPE);
 
 	data = (const char *)buf;
 	for (i = 0; i < (int)count; i++) {
@@ -338,16 +278,16 @@ unix_sock_stream_write(unix_sock_t *s, const void *buf, u32 count,
 		while (next == s->peer->stream_tail) {
 			if (nonblock) {
 				if (i == 0)
-					return (-EAGAIN);
+					return (-POSIX_EAGAIN);
 				return (i);
 			}
 			proc_sleep(&s->write_wait);
 			if (s->shut_wr)
-				return (-EPIPE);
+				return (-POSIX_EPIPE);
 			if (!s->peer ||
 			    s->peer->state == UNIX_SOCK_FREE ||
 			    s->peer->state == UNIX_SOCK_CLOSED)
-				return (-EPIPE);
+				return (-POSIX_EPIPE);
 			next = (s->peer->stream_head + 1) %
 			    UNIX_SOCK_BUF_SIZE;
 		}
@@ -367,19 +307,19 @@ unix_sock_dgram_sendto(unix_sock_t *s, const void *buf, u32 len,
 	dgram_msg_t	*msg;
 
 	if (!s || s->state == UNIX_SOCK_FREE)
-		return (-EBADF);
+		return (-POSIX_EBADF);
 	if (!dest_path || dest_path[0] == '\0')
-		return (-EDESTADDRREQ);
+		return (-POSIX_EDESTADDRREQ);
 
 	target = unix_sock_find_by_path(dest_path);
 	if (!target)
-		return (-ECONNREFUSED);
+		return (-POSIX_ECONNREFUSED);
 	if (target->type != SOCK_DGRAM)
-		return (-EPROTOTYPE);
+		return (-POSIX_EPROTOTYPE);
 
 	msg = (dgram_msg_t *)kmem_alloc(sizeof(dgram_msg_t) + len);
 	if (!msg)
-		return (-ENOBUFS);
+		return (-POSIX_ENOBUFS);
 
 	msg->next = NULL;
 	msg->len = (int)len;
@@ -408,13 +348,13 @@ unix_sock_dgram_recvfrom(unix_sock_t *s, void *buf, u32 len,
 	int		copy_len;
 
 	if (!s || s->state == UNIX_SOCK_FREE)
-		return (-EBADF);
+		return (-POSIX_EBADF);
 	if (s->shut_rd)
 		return (0);
 
 	while (!s->msg_head) {
 		if (nonblock)
-			return (-EAGAIN);
+			return (-POSIX_EAGAIN);
 		proc_sleep(&s->read_wait);
 		if (s->shut_rd)
 			return (0);
@@ -451,7 +391,7 @@ int
 unix_sock_pair(unix_sock_t *a, unix_sock_t *b)
 {
 	if (!a || !b)
-		return (-EINVAL);
+		return (-POSIX_EINVAL);
 
 	a->peer = b;
 	b->peer = a;
@@ -483,7 +423,7 @@ vnode_write_wrapper(vnode_t *vn, const void *buf, u64 count, u64 offset)
 	else if (s->peer)
 		return (unix_sock_dgram_sendto(s, buf, (u32)count,
 		    s->peer->bound_path));
-	return (-EPIPE);
+	return (-POSIX_EPIPE);
 }
 
 int
@@ -548,7 +488,7 @@ int
 unix_sock_getsockname(unix_sock_t *s, char *path, int *path_len)
 {
 	if (!s || !path || !path_len)
-		return (-EINVAL);
+		return (-POSIX_EINVAL);
 
 	int len = strlen(s->bound_path);
 	if (len >= *path_len)
@@ -565,7 +505,7 @@ int
 unix_sock_getpeername(unix_sock_t *s, char *path, int *path_len)
 {
 	if (!s || !s->peer)
-		return (-ENOTCONN);
+		return (-POSIX_ENOTCONN);
 
 	return (unix_sock_getsockname(s->peer, path, path_len));
 }

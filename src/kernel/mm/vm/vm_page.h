@@ -100,6 +100,7 @@ vm_page_t	*vm_page_alloc(u32 flags);
 void		vm_page_free(vm_page_t *page);
 u64		vm_page_alloc_phys(u32 flags);
 int		vm_page_free_phys(u64 phys_addr);
+void		vm_page_reserve_range(u64 phys_start, u64 size);
 void		vm_page_ref(vm_page_t *page);
 void		vm_page_unref(vm_page_t *page);
 void		vm_page_ref_phys(u64 phys_addr);

@@ -43,7 +43,7 @@ ip = "10.0.2.15"
 netmask = "255.255.255.0"
 gateway = "10.0.2.2"
 [libc]
-enabled = false
+enabled = true
 type = "musl"
 
 [modules]
@@ -58,6 +58,7 @@ posix_hello = "/bin/posix_hello"
 # kbdtest = "/bin/kbdtest"
 musl_test = "/bin/musl_test"
 lua = "/bin/lua"
+python = "/bin/python"
 ld-musl = "/lib/ld-musl-x86_64.so.1"
 
 [kshell.commands.help]

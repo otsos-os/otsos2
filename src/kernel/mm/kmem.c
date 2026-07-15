@@ -58,6 +58,7 @@ $define %func kmem_total_bytes as function with args void
 $define %func kmem_used_bytes as function with args void
 $define %func kmem_is_initialized as function with args void
 $define %func kmem_dump as procedure with args void
+$define %func kmem_set_growth_pool as procedure with args void *, size_t
 
 */
 
@@ -73,12 +74,14 @@ $space %export kmem_init, kmem_alloc, kmem_free, kmem_calloc
 $space %export kmem_realloc, kmem_alloc_aligned, kmem_usable_size
 $space %export kmem_free_bytes, kmem_total_bytes, kmem_used_bytes
 $space %export kmem_is_initialized, kmem_dump
+$space %export kmem_set_growth_pool
 
 */
 
 #include <mlibc/stdio.h>
 #include <kernel/bootmem.h>
 #include <mm/kmem.h>
+#include <mm/vm/vm_page.h>
 #include <mlibc/mlibc.h>
 
 #define KMEM_HEAP_SIZE_VAL	(8 * 1024 * 1024)
@@ -100,6 +103,11 @@ static char		*kmem_heap_start = NULL;
 static char		*kmem_heap_end = NULL;
 static header_t		*kmem_heap_head = NULL;
 static int		kmem_heap_init = 0;
+
+static char		*growth_pool_ptr = NULL;
+static size_t		growth_pool_remaining = 0;
+static char		*growth_pool_start = NULL;
+static char		*growth_pool_end = NULL;
 
 static size_t
 align16(size_t size)
@@ -142,7 +150,9 @@ coalesce(header_t *block)
 
 	next = block->next;
 	if (next != NULL && next->is_free &&
-	    next->magic == KMEM_MAGIC) {
+	    next->magic == KMEM_MAGIC &&
+	    (char *)next == (char *)block +
+	    sizeof(header_t) + block->size) {
 		block->size += sizeof(header_t) + next->size;
 		block->payload_size = 0;
 		block->next = next->next;
@@ -153,7 +163,9 @@ coalesce(header_t *block)
 
 	prev = block->prev;
 	if (prev != NULL && prev->is_free &&
-	    prev->magic == KMEM_MAGIC) {
+	    prev->magic == KMEM_MAGIC &&
+	    (char *)block == (char *)prev +
+	    sizeof(header_t) + prev->size) {
 		prev->size += sizeof(header_t) + block->size;
 		prev->payload_size = 0;
 		prev->next = block->next;
@@ -164,6 +176,17 @@ coalesce(header_t *block)
 	}
 
 	return (block);
+}
+
+void
+kmem_set_growth_pool(void *addr, size_t size)
+{
+	growth_pool_ptr = (char *)addr;
+	growth_pool_remaining = size;
+	growth_pool_start = (char *)addr;
+	growth_pool_end = (char *)addr + size;
+	printk("[KMEM] growth pool set: %p size=%d\n",
+	    addr, (int)size);
 }
 
 static void
@@ -239,9 +262,91 @@ kmem_alloc_internal(size_t size)
 		current = current->next;
 	}
 
-	printk("KMALLOC FAILED! request size: %d\n",
-	    (int)size);
-	return (NULL);
+	{
+		size_t		grow_needed;
+		void		*new_area;
+		header_t	*hdr, *last;
+
+		grow_needed = total_size + sizeof(header_t);
+		grow_needed = (grow_needed + 4095) &
+		    ~(size_t)4095;
+
+		if (growth_pool_remaining >= grow_needed) {
+			new_area = growth_pool_ptr;
+			growth_pool_ptr += grow_needed;
+			growth_pool_remaining -= grow_needed;
+		} else {
+			new_area = bootmem_alloc(grow_needed,
+			    4096);
+			if (new_area) {
+				vm_page_reserve_range(
+				    (u64)new_area -
+				    KERNEL_VMA, grow_needed);
+			}
+		}
+		if (!new_area) {
+			printk("KMALLOC FAILED! request "
+			    "size: %d\n", (int)size);
+			return (NULL);
+		}
+
+		printk("[KMEM] grow: new_area=%p grow_needed=%d "
+		    "phys=%p\n", new_area, (int)grow_needed,
+		    (void *)((u64)new_area - KERNEL_VMA));
+
+		hdr = (header_t *)new_area;
+		hdr->magic = KMEM_MAGIC;
+		hdr->is_free = 1;
+		hdr->size = grow_needed -
+		    sizeof(header_t);
+		hdr->payload_size = 0;
+		hdr->next = NULL;
+
+		last = kmem_heap_head;
+		while (last->next) {
+			last = last->next;
+		}
+		hdr->prev = last;
+		last->next = hdr;
+
+		if ((char *)new_area < kmem_heap_start) {
+			kmem_heap_start = (char *)new_area;
+		}
+		if ((char *)new_area + grow_needed >
+		    kmem_heap_end) {
+			kmem_heap_end = (char *)new_area +
+			    grow_needed;
+		}
+
+		current = kmem_heap_head;
+		while (current != NULL) {
+			if (current->magic != KMEM_MAGIC) {
+				return (NULL);
+			}
+			if (current->is_free &&
+			    current->size >= total_size) {
+				split_block(current, total_size);
+				current->is_free = 0;
+				current->payload_size =
+				    payload_size;
+				base = (u8 *)current +
+				    sizeof(header_t);
+				memset(base, KMEM_REDZONE_PAT,
+				    KMEM_REDZONE_SZ);
+				memset(base + KMEM_REDZONE_SZ +
+				    payload_size,
+				    KMEM_REDZONE_PAT,
+				    KMEM_REDZONE_SZ);
+				return (void *)(base +
+				    KMEM_REDZONE_SZ);
+			}
+			current = current->next;
+		}
+
+		printk("KMALLOC FAILED! request "
+		    "size: %d\n", (int)size);
+		return (NULL);
+	}
 }
 
 static void
@@ -315,7 +420,10 @@ kmem_calloc_internal(size_t nmemb, size_t size)
 
 	ptr = kmem_alloc_internal(total);
 	if (ptr != NULL) {
-		memset(ptr, 0, total);
+		if ((char *)ptr < growth_pool_start ||
+		    (char *)ptr >= growth_pool_end) {
+			memset(ptr, 0, total);
+		}
 	}
 	return (ptr);
 }

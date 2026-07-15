@@ -1029,28 +1029,14 @@ vfs_read_file_full(const char *path, u8 *buf, u32 bufsize,
 	}
 
 	tbuf = buf;
-	total = 0;
-	while (total < file_size) {
-		u32	to_read;
-
-		to_read = file_size - total;
-		if (to_read > 4096) {
-			to_read = 4096;
-		}
-
-		n = vnode_read(vn, tbuf + total, to_read, total);
-		if (n < 0) {
-			vnode_release(vn);
-			return (-1);
-		}
-		if (n == 0) {
-			break;
-		}
-		total += (u32)n;
+	n = vnode_read(vn, tbuf, file_size, 0);
+	if (n < 0) {
+		vnode_release(vn);
+		return (-1);
 	}
 
 	vnode_release(vn);
-	*bytes_read = total;
+	*bytes_read = (u32)n;
 	return (0);
 }
 

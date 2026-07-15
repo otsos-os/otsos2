@@ -1,3 +1,7 @@
 [submodule "ports/lua/lua"]
 	path = ports/lua/lua
 	url = https://github.com/lua/lua.git
+
+[submodule "ports/cpython/cpython"]
+	path = ports/cpython/cpython
+	url = https://github.com/python/cpython.git

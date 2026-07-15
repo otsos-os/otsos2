@@ -80,5 +80,6 @@ size_t	kmem_used_bytes(void);
 int	kmem_is_initialized(void);
 void	kmem_init(void);
 void	kmem_dump(void);
+void	kmem_set_growth_pool(void *addr, size_t size);
 
 #endif

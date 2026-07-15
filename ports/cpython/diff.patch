@@ -1,0 +1,12 @@
+diff --git a/Makefile.pre.in b/Makefile.pre.in
+index f86d736..0b88ba1 100644
+--- a/Makefile.pre.in
++++ b/Makefile.pre.in
+@@ -768,6 +768,7 @@ LIBHACL_HMAC_HEADERS= \
+ 
+ # Default target
+ all:		@DEF_MAKE_ALL_RULE@
++otsos: all
+ 
+ # First target in Makefile is implicit default. So .PHONY needs to come after
+ # all.

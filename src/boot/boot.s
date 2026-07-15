@@ -143,6 +143,8 @@ p3_table_high:
 p2_table_high:
     .skip 4096
 
+stack_guard:
+    .skip 16384
 stack_bottom:
     .skip 65536
 stack_top:

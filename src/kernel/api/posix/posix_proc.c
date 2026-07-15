@@ -362,25 +362,14 @@ execve_read_file(const char *path, u8 **out_buf, u32 *out_size)
 		return (-POSIX_ENOMEM);
 	}
 
-	total = 0;
-	while (total < size) {
-		u32	to_read;
-		int	n;
-
-		to_read = size - total;
-		if (to_read > 4096) {
-			to_read = 4096;
-		}
-		n = vnode_read(vn, buf + total, to_read, total);
-		if (n < 0) {
+	{
+		int nr = vnode_read(vn, buf, size, 0);
+		if (nr < 0) {
 			vnode_release(vn);
 			kmem_free(buf);
 			return (-POSIX_EIO);
 		}
-		if (n == 0) {
-			break;
-		}
-		total += (u32)n;
+		total = (u32)nr;
 	}
 	vnode_release(vn);
 
@@ -983,32 +972,18 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 
 	{
 		u32	total;
+		int	nr;
 
-		total = 0;
-		while (total < elf_size) {
-			u32	to_read;
-
-			to_read = elf_size - total;
-			if (to_read > 4096) {
-				to_read = 4096;
-			}
-			int	n;
-
-			n = vnode_read(vn, elf_buf + total, to_read,
-			    total);
-			if (n < 0) {
-				vnode_release(vn);
-				kmem_free(elf_buf);
-				free_string_array(kargv);
-				free_string_array(kenvp);
-				kmem_free(kpath);
-				return (-POSIX_EIO);
-			}
-			if (n == 0) {
-				break;
-			}
-			total += (u32)n;
+		nr = vnode_read(vn, elf_buf, elf_size, 0);
+		if (nr < 0) {
+			vnode_release(vn);
+			kmem_free(elf_buf);
+			free_string_array(kargv);
+			free_string_array(kenvp);
+			kmem_free(kpath);
+			return (-POSIX_EIO);
 		}
+		total = (u32)nr;
 
 		vnode_release(vn);
 

@@ -48,66 +48,104 @@ $space %export ramdisk_init
 #include "../disk.h"
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
+#include <mm/kmem.h>
+#define BLOCK_SHIFT		12
+#define BLOCK_SIZE		(1 << BLOCK_SHIFT)
+#define SECTORS_PER_BLOCK	(BLOCK_SIZE / 512)
+
+typedef struct {
+	u8	*pool;
+	u32	pool_blocks;
+	u32	touched_blocks;
+} ramdisk_priv_t;
+
+static disk_t		ram_disk;
 
 static void
 ramdisk_read_sector(disk_t *self, u32 lba, u8 *buffer)
 {
-	u8	*ram_start;
-	u32	offset;
+	ramdisk_priv_t	*priv;
+	u32		bi, off;
 
-	if (!self->private_data) {
+	priv = (ramdisk_priv_t *)self->private_data;
+	if (!priv || !priv->pool) {
 		return;
 	}
-	ram_start = (u8 *)self->private_data;
-	offset = lba * self->sector_size;
+	bi = lba / SECTORS_PER_BLOCK;
 
-	if (offset + self->sector_size >
-	    self->total_sectors * self->sector_size) {
-		drivers_log("[RAMDISK] Read out of bounds: "
-		    "lba=%u\n", lba);
+	if (bi >= priv->pool_blocks) {
+		memset(buffer, 0, self->sector_size);
 		return;
 	}
 
-	memcpy(buffer, ram_start + offset, self->sector_size);
+	if (bi >= priv->touched_blocks) {
+		memset(buffer, 0, self->sector_size);
+		return;
+	}
+
+	off = (lba % SECTORS_PER_BLOCK) * self->sector_size;
+	memcpy(buffer, priv->pool + (bi << BLOCK_SHIFT) + off,
+	    self->sector_size);
 }
 
 static void
 ramdisk_write_sector(disk_t *self, u32 lba, u8 *buffer)
 {
-	u8	*ram_start;
-	u32	offset;
+	ramdisk_priv_t	*priv;
+	u32		bi, off;
 
-	if (!self->private_data) {
+	priv = (ramdisk_priv_t *)self->private_data;
+	if (!priv || !priv->pool) {
 		return;
 	}
-	ram_start = (u8 *)self->private_data;
-	offset = lba * self->sector_size;
+	bi = lba / SECTORS_PER_BLOCK;
 
-	if (offset + self->sector_size >
-	    self->total_sectors * self->sector_size) {
-		drivers_log("[RAMDISK] Write out of bounds: "
-		    "lba=%u\n", lba);
+	if (bi >= priv->pool_blocks) {
+		drivers_log("[RAMDISK] Write at lba=%u exceeds "
+		    "pool (%u blocks)\n", lba, priv->pool_blocks);
 		return;
 	}
 
-	memcpy(ram_start + offset, buffer, self->sector_size);
+	if (bi >= priv->touched_blocks) {
+		priv->touched_blocks = bi + 1;
+		self->total_sectors =
+		    priv->touched_blocks * SECTORS_PER_BLOCK;
+	}
+
+	off = (lba % SECTORS_PER_BLOCK) * self->sector_size;
+	memcpy(priv->pool + (bi << BLOCK_SHIFT) + off,
+	    buffer, self->sector_size);
 }
 
-static disk_t	ram_disk;
-
 void
-ramdisk_init(void *location, u32 size)
+ramdisk_init(void *pool, u32 pool_size)
 {
-	drivers_log("[RAMDISK] Initializing at %p, size %u "
-	    "bytes\n", location, size);
+	ramdisk_priv_t	*priv;
+
+	priv = kmem_alloc(sizeof(ramdisk_priv_t));
+	if (!priv) {
+		drivers_log("[RAMDISK] Failed to allocate "
+		    "private data\n");
+		return;
+	}
+
+	priv->pool = (u8 *)pool;
+	priv->pool_blocks = pool_size / BLOCK_SIZE;
+	priv->touched_blocks = 0;
 
 	strcpy(ram_disk.name, "ramdisk0");
 	ram_disk.type = DISK_TYPE_RAM;
 	ram_disk.sector_size = 512;
-	ram_disk.total_sectors = size / 512;
-	ram_disk.private_data = location;
+	ram_disk.total_sectors = priv->pool_blocks *
+	    SECTORS_PER_BLOCK;
+	ram_disk.private_data = priv;
 	ram_disk.read_sector = ramdisk_read_sector;
 	ram_disk.write_sector = ramdisk_write_sector;
 
 	disk_register(&ram_disk);
+
+	drivers_log("[RAMDISK] Initialized: pool %u bytes "
+	    "(%u blocks, %u sectors max)\n",
+	    pool_size, priv->pool_blocks,
+	    priv->pool_blocks * SECTORS_PER_BLOCK);
 }

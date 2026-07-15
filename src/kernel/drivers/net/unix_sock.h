@@ -33,6 +33,57 @@ struct sockaddr_un {
 	char	sun_path[108];
 } __attribute__((packed));
 
+enum unix_sock_state {
+	UNIX_SOCK_FREE = 0,
+	UNIX_SOCK_UNBOUND,
+	UNIX_SOCK_BOUND,
+	UNIX_SOCK_LISTENING,
+	UNIX_SOCK_CONNECTED,
+	UNIX_SOCK_CLOSED
+};
+
+#define	UNIX_SOCK_MAX		128
+#define	UNIX_SOCK_BUF_SIZE	4096
+#define	UNIX_SOCK_BACKLOG	8
+typedef struct dgram_msg dgram_msg_t;
+struct dgram_msg {
+	struct dgram_msg	*next;
+	int			len;
+	char			from_path[108];
+	char			data[];
+};
+
+struct unix_sock {
+	int			id;
+	int			state;
+	int			domain;
+	int			type;
+	int			protocol;
+	int			refcount;
+	struct unix_sock	*peer;
+	char			bound_path[108];
+	int			accept_queue[UNIX_SOCK_BACKLOG];
+	int			accept_head;
+	int			accept_tail;
+	int			accept_count;
+	char			stream_buf[UNIX_SOCK_BUF_SIZE];
+	int			stream_head;
+	int			stream_tail;
+	int			stream_count;
+	dgram_msg_t		*msg_head;
+	dgram_msg_t		*msg_tail;
+	int			msg_count;
+	int			read_wait;
+	int			write_wait;
+	int			accept_wait;
+	int			shut_rd;
+	int			shut_wr;
+	int			error;
+	u32			uid;
+	u32			gid;
+	u32			pid;
+};
+
 typedef struct unix_sock unix_sock_t;
 
 /* Lifecycle */

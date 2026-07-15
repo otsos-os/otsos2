@@ -43,10 +43,13 @@ MUSL_TEST_OBJS = musl_test.o
 LUA_BIN = lua/lua/lua
 LUA_DIR = lua/lua
 LUA_SETUP = lua/setup.sh
+CPYTHON_BIN = cpython/cpython/python
+CPYTHON_DIR = cpython/cpython
+CPYTHON_SETUP = cpython/setup.sh
 LIBC_ENABLED ?= true
 
 ifeq ($(LIBC_ENABLED),true)
-ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(MUSL_TEST_BIN) $(LUA_BIN)
+ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(MUSL_TEST_BIN) $(LUA_BIN) $(CPYTHON_BIN)
 else
 ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN)
 endif
@@ -122,6 +125,13 @@ $(LUA_BIN): $(MUSL_SCRT1) $(MUSL_LDSO)
 	@echo "  MAKE    ports/lua"
 	@$(MAKE) -C $(LUA_DIR)
 
+cpython: $(CPYTHON_BIN)
+$(CPYTHON_BIN): $(MUSL_SCRT1) $(MUSL_LDSO)
+	@echo "  SETUP   ports/cpython"
+	@$(SHELL) $(CPYTHON_SETUP)
+	@echo "  MAKE    ports/cpython"
+	@$(MAKE) -C $(CPYTHON_DIR)
+
 %.o: %.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
@@ -133,7 +143,8 @@ musl_test.o: musl_test.c
 	    -I$(MUSL_DIR)/obj/include -I$(MUSL_DIR)/include -c $< -o $@
 
 clean:
-	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN) $(OVEN_OBJS) $(OVEN_BIN) $(CURSORD_OBJS) $(CURSORD_BIN) $(SHMTEST_OBJS) $(SHMTEST_BIN) $(POSIX_HELLO_OBJS) $(POSIX_HELLO_BIN) $(KBDTEST_OBJS) $(KBDTEST_BIN) $(MUSL_TEST_OBJS) $(MUSL_TEST_BIN) $(LUA_BIN)
+	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN) $(OVEN_OBJS) $(OVEN_BIN) $(CURSORD_OBJS) $(CURSORD_BIN) $(SHMTEST_OBJS) $(SHMTEST_BIN) $(POSIX_HELLO_OBJS) $(POSIX_HELLO_BIN) $(KBDTEST_OBJS) $(KBDTEST_BIN) $(MUSL_TEST_OBJS) $(MUSL_TEST_BIN) $(LUA_BIN) $(CPYTHON_BIN)
 	$(MAKE) -C $(LUA_DIR) clean
+	-$(MAKE) -C $(CPYTHON_DIR) clean 2>/dev/null || true
 
 .PHONY: all clean lua

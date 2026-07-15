@@ -42,6 +42,7 @@ $define %type module_copy_ctx_t as struct with multiboot pointers, boot magic, i
 $define %func debug_multiboot_info as procedure with args multiboot_info_t *
 $define %func debug_multiboot2_tags as procedure with args multiboot2_info_t *
 $define %func mb2_find_module as function with args multiboot2_info_t *, const char *, void **, u32 *
+$define %func mb2_total_modules_size as function with args multiboot2_info_t *
 $define %func status_line as procedure with args const char *, int
 $define %func disk_has_type as function with args disk_type_t
 $define %func disk_find_type as function with args disk_type_t
@@ -59,7 +60,7 @@ $define %func kmain as start with args u64, u64, u64, u64
 /* !SPACE!
 
 $space %internal debug_multiboot_info, debug_multiboot2_tags
-$space %internal mb2_find_module, status_line
+$space %internal mb2_find_module, mb2_total_modules_size, status_line
 $space %internal disk_has_type, disk_find_type
 $space %internal timer_sanity_check, net_test, enable_sse
 $space %internal parse_ipv4, net_apply_config
@@ -236,6 +237,28 @@ mb2_find_module(multiboot2_info_t *mb_info, const char *name,
 		tag = (multiboot2_tag_t *)next_addr;
 	}
 	return (-1);
+}
+static u32
+mb2_total_modules_size(multiboot2_info_t *mb_info)
+{
+	multiboot2_tag_t		*tag;
+	multiboot2_tag_module_t		*mod;
+	u32				total;
+	u64				next_addr;
+
+	total = 0;
+	tag = (multiboot2_tag_t *)((u8 *)mb_info + 8);
+
+	while (tag->type != MULTIBOOT2_TAG_TYPE_END) {
+		if (tag->type == MULTIBOOT2_TAG_TYPE_MODULE) {
+			mod = (multiboot2_tag_module_t *)tag;
+			total += mod->mod_end - mod->mod_start;
+		}
+		next_addr = (u64)tag + tag->size;
+		next_addr = (next_addr + 7) & ~7;
+		tag = (multiboot2_tag_t *)next_addr;
+	}
+	return (total);
 }
 
 static void
@@ -596,7 +619,8 @@ void
 kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 {
 	int		safe_mode, debug_mode, disable_apic;
-	void		*ramdisk_mem;
+	void		*ramdisk_pool;
+	u32		ramdisk_pool_sz;
 	multiboot2_info_t	*mboot2_ptr;
 	multiboot_info_t	*mboot1_ptr;
 	char		cpu_buf[64];
@@ -628,7 +652,6 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	bootmem_init(magic, addr, 0x100000,
     (u64)&kernel_end - KERNEL_VMA);
 	kmem_init();
-	ramdisk_mem = bootmem_alloc(16 * 1024 * 1024, PAGE_SIZE);
 
 	if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
 		mboot2_ptr = (multiboot2_info_t *)addr;
@@ -647,6 +670,36 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	init_idt();
 	pit_init();
 	pmap_init();
+	ramdisk_pool_sz = 0;
+	if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
+		ramdisk_pool_sz = mb2_total_modules_size(
+		    (multiboot2_info_t *)addr);
+	}
+	if (ramdisk_pool_sz < 8 * 512) {
+		ramdisk_pool_sz = 8 * 512;
+	}
+	ramdisk_pool_sz += 1024 * 1024;
+	ramdisk_pool_sz = (ramdisk_pool_sz + PAGE_SIZE - 1) &
+	    ~(PAGE_SIZE - 1);
+	ramdisk_pool = bootmem_alloc(ramdisk_pool_sz, PAGE_SIZE);
+	if (ramdisk_pool) {
+		printk("[RAMDISK] pool allocated: %u bytes "
+		    "at %p\n", ramdisk_pool_sz, ramdisk_pool);
+	} else {
+		printk("[RAMDISK] pool allocation failed\n");
+	}
+#define KMEM_GROWTH_RESERVE_SIZE	(22 * 1024 * 1024)
+	{
+		void *gpool = bootmem_alloc(
+		    KMEM_GROWTH_RESERVE_SIZE, PAGE_SIZE);
+		if (gpool) {
+			kmem_set_growth_pool(gpool,
+			    KMEM_GROWTH_RESERVE_SIZE);
+		} else {
+			printk("[KMEM] no growth reserve, "
+			    "will use bootmem fallback\n");
+		}
+	}
 	vm_page_init_from_bootmem();
 	if (disable_apic) {
 		printk("[BOOT] APIC disabled by boot settings\n");
@@ -674,11 +727,8 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	pata_identify(NULL);
 #endif
 
-	if (ramdisk_mem) {
-		ramdisk_init(ramdisk_mem, 16 * 1024 * 1024);
-	} else {
-		printk("[RAMDISK] bootmem allocation "
-		    "failed\n");
+	if (ramdisk_pool) {
+		ramdisk_init(ramdisk_pool, ramdisk_pool_sz);
 	}
 
 	boot_magic = (u32)magic;

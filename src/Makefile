@@ -39,6 +39,7 @@ POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
 KBDTEST_BIN = $(PORTS_DIR)/kbdtest
 MUSL_TEST_BIN = $(PORTS_DIR)/musl_test
 LUA_BIN = $(PORTS_DIR)/lua/lua/lua
+CPYTHON_BIN = $(PORTS_DIR)/cpython/cpython/python
 MUSL_LDSO = $(MUSL_DIR)/lib/libc.so
 LDSO_BIN = $(PORTS_DIR)/ld-musl-x86_64.so.1
 LIBC_ENABLED := $(shell sh ../tools/toml_get.sh config.toml libc enabled true)
@@ -49,6 +50,7 @@ ISO_MUSL_TEST_DEP = $(MUSL_TEST_BIN)
 ISO_MUSL_TEST_COPY = @cp $(MUSL_TEST_BIN) $(ISODIR)/boot/musl_test
 GRUB_MUSL_TEST = @echo '    module2 /boot/musl_test musl_test' >> $(ISODIR)/boot/grub/grub.cfg
 ISO_LUA_DEP = $(LUA_BIN)
+ISO_CPYTHON_DEP = $(CPYTHON_BIN)
 ISO_LDSO_DEP = $(LDSO_BIN)
 ISO_LDSO_COPY = @cp $(LDSO_BIN) $(ISODIR)/boot/ld-musl
 GRUB_LDSO = @echo '    module2 /boot/ld-musl ld-musl' >> $(ISODIR)/boot/grub/grub.cfg
@@ -58,6 +60,7 @@ ISO_MUSL_TEST_DEP =
 ISO_MUSL_TEST_COPY =
 GRUB_MUSL_TEST =
 ISO_LUA_DEP =
+ISO_CPYTHON_DEP =
 ISO_LDSO_DEP =
 ISO_LDSO_COPY =
 GRUB_LDSO =
@@ -186,6 +189,7 @@ VIRTIO_NET_O = ../bin/virtio_net.o
 
 NETDEV_O = ../bin/netdev.o
 NET_O = ../bin/net.o
+UNIX_SOCK_O = ../bin/unix_sock.o
 NET_ETHERNET_O = ../bin/net_ethernet.o
 NET_ARP_O = ../bin/net_arp.o
 NET_IPV4_O = ../bin/net_ipv4.o
@@ -239,7 +243,7 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(TOML_O) $(KUSR_O) $(KUSR_AUTH_O) $(CONFIG_O) $(DRM_API_O) $(RESTRICT_O) \
       $(CRYPTO_UTIL_O) $(CRYPTO_SHA256_O) $(CRYPTO_HMAC_O) $(CRYPTO_PBKDF2_O) $(CRYPTO_RNG_O) $(CRYPTO_CHACHA20_O) \
        $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_PCI_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O) $(VIRTIO_NET_O) \
-       $(NETDEV_O) $(NET_O) $(NET_ETHERNET_O) $(NET_ARP_O) $(NET_IPV4_O) $(NET_ICMP_O) $(NET_UDP_O) \
+       $(NETDEV_O) $(NET_O) $(NET_ETHERNET_O) $(NET_ARP_O) $(NET_IPV4_O) $(NET_ICMP_O) $(NET_UDP_O) $(UNIX_SOCK_O) \
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
       $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
       $(EVENT_KBD_O) $(EVENT_MOUSE_O) \
@@ -373,6 +377,11 @@ $(LUA_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/lua"
 	@$(MAKE) -C $(PORTS_DIR) lua LIBC_ENABLED=$(LIBC_ENABLED)
 
+.PHONY: $(CPYTHON_BIN)
+$(CPYTHON_BIN): $(LIBC_DEPS)
+	@echo "  MAKE    ports/cpython"
+	@$(MAKE) -C $(PORTS_DIR) cpython LIBC_ENABLED=$(LIBC_ENABLED)
+
 $(MUSL_LIBC):
 	@echo "  MAKE    musl libc"
 	@$(MAKE) -C $(MUSL_DIR)
@@ -384,7 +393,7 @@ $(LDSO_BIN): $(MUSL_LDSO)
 	@echo "  CP      $@"
 	@cp $(MUSL_LDSO) $@
 
-$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_LDSO_DEP)
+$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP)
 	@mkdir -p $(ISODIR)/boot/grub
 	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
 	@for m in $(MULTIBOOT_MODULES); do \
@@ -401,6 +410,7 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 			kbdtest) src=$(KBDTEST_BIN);; \
 			musl_test) src=$(MUSL_TEST_BIN);; \
 			lua) src=$(LUA_BIN);; \
+			python) src=$(CPYTHON_BIN);; \
 			ld-musl) src=$(LDSO_BIN);; \
 		esac; \
 		if [ -n "$$src" ] && [ -f "$$src" ]; then \
@@ -885,6 +895,9 @@ $(NET_UDP_O): kernel/net/udp.c kernel/net/udp.h kernel/net/ipv4.h kernel/net/eth
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+$(UNIX_SOCK_O): kernel/drivers/net/unix_sock.c kernel/drivers/net/unix_sock.h kernel/drivers/fs/vfs/vfs.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 $(SYSCALL_ASM_O): kernel/syscall_asm.asm
 	@echo "  AS      $<"
 	@$(AS) -f $(NASM_FORMAT) -g -F dwarf $< -o $@

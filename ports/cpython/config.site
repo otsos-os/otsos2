@@ -1,0 +1,27 @@
+# CONFIG_SITE=config.site ./configure --host=x86_64-linux-musl --build=x86_64-linux-gnu
+ac_cv_file__dev_ptmx=yes
+ac_cv_file__dev_ptc=no
+ac_cv_func_epoll_create=no
+ac_cv_func_epoll_create1=no
+ac_cv_func_eventfd=no
+ac_cv_func_memfd_create=no
+ac_cv_header_netpacket_packet_h=no
+ac_cv_func_sem_clockwait=no
+ac_cv_func_close_range=no
+ac_cv_func_closefrom=no
+ac_cv_func_chflags=no
+ac_cv_func_lchflags=no
+ac_cv_func_posix_spawn_file_actions_addclosefrom_np=no
+ac_cv_func_fork1=no
+ac_cv_func_rtpSpawn=no
+ac_cv_func_pthread_cond_timedwait_relative_np=no
+ac_cv_func_pthread_get_name_np=no
+ac_cv_func_pthread_set_name_np=no
+ac_cv_func_pthread_init=no
+ac_cv_func_explicit_memset=no
+ac_cv_func_fdwalk=no
+ac_cv_func_backtrace=no
+ac_cv_func_dladdr1=no
+ac_cv_func___fpu_control=no
+ac_cv_func_plock=no
+ac_cv_func__getpty=no

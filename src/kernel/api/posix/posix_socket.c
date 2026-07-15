@@ -256,7 +256,7 @@ posix_accept4(u64 sockfd_u, u64 addr_u, u64 addrlen_u, u64 flags_u,
 {
 	(void)flags_u;
 	return (posix_accept(sockfd_u, addr_u, addrlen_u,
-	    a4, a5, a6, regs));
+	    flags_u, a5, a6, regs));
 }
 
 s64

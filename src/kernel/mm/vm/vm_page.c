@@ -69,11 +69,11 @@ $space %export vm_page_init, vm_page_init_from_bootmem
 $space %export vm_page_alloc, vm_page_free, vm_page_alloc_phys
 $space %export vm_page_free_phys, vm_page_ref, vm_page_unref
 $space %export vm_page_ref_phys, vm_page_ref_count
-$space %export vm_page_activate, vm_page_deactivate
-$space %export vm_page_cache_insert
+$space %export vm_page_activate, vm_page_deactivate, vm_page_cache_insert
 $space %export vm_page_count_free, vm_page_count_total
 $space %export vm_page_queue_count, vm_page_queue_counts
 $space %export vm_page_lookup, vm_page_dump
+$space %export vm_page_reserve_range
 
 */
 
@@ -264,6 +264,7 @@ vm_page_init_from_bootmem(void)
 	printk("[VM_PAGE] initialized: %u pages from "
 	    "bootmem (%u KB metadata)\n",
 	    (u32)page_count, (u32)(metadata_bytes / 1024));
+	bootmem_set_reserve_cb(vm_page_reserve_range);
 }
 
 vm_page_t *
@@ -406,6 +407,25 @@ vm_page_cache_insert(vm_page_t *page)
 	page->state = VM_PAGE_FREE;
 	page->ref_count = 0;
 	vm_page_queue_insert(page, PQ_CACHE);
+}
+void
+vm_page_reserve_range(u64 phys_start, u64 size)
+{
+	u64	addr;
+	u64	end;
+	vm_page_t	*vp;
+
+	end = phys_start + size;
+	for (addr = phys_start; addr < end; addr += PAGE_SIZE) {
+		vp = vm_page_lookup(addr);
+		if (vp == NULL) {
+			continue;
+		}
+		if (vp->state == VM_PAGE_FREE) {
+			vm_page_queue_remove(vp);
+			vp->state = VM_PAGE_RESERVED;
+		}
+	}
 }
 
 u64

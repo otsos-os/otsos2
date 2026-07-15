@@ -176,23 +176,19 @@ static int read_file_into_buffer(const char *path, u8 **out_buf,
   }
 
   bytes_read = 0;
-  u32 total = 0;
-  while (total < size) {
-    u32 to_read = size - total;
-    if (to_read > 4096) to_read = 4096;
-    int n = vnode_read(vn, buf + total, to_read, total);
+  {
+    int n = vnode_read(vn, buf, size, 0);
     if (n < 0) {
       vnode_release(vn);
       kmem_free(buf);
       return -API_ERR_IO;
     }
-    if (n == 0) break;
-    total += (u32)n;
+    bytes_read = (u32)n;
   }
 
   vnode_release(vn);
 
-  if (total != size) {
+  if (bytes_read != size) {
     kmem_free(buf);
     return -API_ERR_IO;
   }

@@ -24,6 +24,7 @@ static bootmem_range_t free_ranges[BOOTMEM_MAX_RANGES];
 static u32 free_count;
 static u64 highest_addr;
 static int initialized;
+static void (*reserve_cb)(u64 phys_start, u64 size);
 
 static u64 align_up(u64 val, u64 align) {
   if (align == 0)
@@ -203,6 +204,8 @@ void *bootmem_alloc(u64 size, u64 align) {
       free_ranges[i] = free_ranges[free_count - 1];
       free_count--;
     }
+    if (reserve_cb)
+      reserve_cb(addr, size);
     return (void *)(addr + KERNEL_VMA);
   }
 
@@ -221,6 +224,9 @@ u64 bootmem_highest_addr(void) { return highest_addr; }
 u32 bootmem_range_count(void) { return free_count; }
 
 const bootmem_range_t *bootmem_ranges(void) { return free_ranges; }
+void bootmem_set_reserve_cb(void (*cb)(u64 phys_start, u64 size)) {
+  reserve_cb = cb;
+}
 
 void bootmem_dump(void) {
   printk("--- bootmem ranges ---\n");
