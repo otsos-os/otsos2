@@ -83,6 +83,7 @@ $space %export vfs_is_initialized
 #define VCHR	3
 #define VPIPE	4
 #define VLNK	5
+#define VSOCK	6
 
 #define VFS_MAX_VNODES	256
 
@@ -92,6 +93,7 @@ $space %export vfs_is_initialized
 #define POSIX_S_IFCHR	0x2000
 #define POSIX_S_IFIFO	0x1000
 #define POSIX_S_IFLNK	0xA000
+#define POSIX_S_IFSOCK	0xC000
 #define POSIX_S_IRWXU	0x01C0
 #define POSIX_S_IRWXG	0x0038
 #define POSIX_S_IRWXO	0x0007

@@ -33,6 +33,15 @@ int strcmp(const char *str1, const char *str2) {
   return *(const unsigned char *)str1 - *(const unsigned char *)str2;
 }
 
+int strncmp(const char *str1, const char *str2, unsigned long n) {
+  if (n == 0) return 0;
+  while (--n && *str1 && (*str1 == *str2)) {
+    str1++;
+    str2++;
+  }
+  return *(const unsigned char *)str1 - *(const unsigned char *)str2;
+}
+
 int atoi(const char *str) {
   int result = 0;
   int sign = 1;
@@ -83,6 +92,15 @@ char* strcpy(char* dest, const char* src) {
   char* original_dest = dest;
   while ((*dest++ = *src++));
   return original_dest;
+}
+
+char* strncpy(char* dest, const char* src, unsigned long n) {
+  unsigned long i;
+  for (i = 0; i < n && src[i] != '\0'; i++)
+    dest[i] = src[i];
+  for (; i < n; i++)
+    dest[i] = '\0';
+  return dest;
 }
 
 char* strcat(char* dest, const char* src) {

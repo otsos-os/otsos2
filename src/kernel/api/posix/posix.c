@@ -25,6 +25,7 @@
  */
 
 #include <kernel/api/posix/posix.h>
+#include <kernel/api/posix/posix_socket.h>
 #include <kernel/api/signal.h>
 #include <kernel/console/terminal.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
@@ -170,6 +171,38 @@ s64	posix_exit_group(u64 code, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
     registers_t *regs);
 s64	posix_arch_prctl(u64 code, u64 addr, u64 a3, u64 a4, u64 a5,
     u64 a6, registers_t *regs);
+s64	posix_socket(u64 domain, u64 type, u64 protocol, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_bind(u64 sockfd, u64 addr, u64 addrlen, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_listen(u64 sockfd, u64 backlog, u64 a3, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_accept(u64 sockfd, u64 addr, u64 addrlen, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_accept4(u64 sockfd, u64 addr, u64 addrlen, u64 flags, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_connect(u64 sockfd, u64 addr, u64 addrlen, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_sendto(u64 sockfd, u64 buf, u64 len, u64 flags, u64 dest_addr,
+    u64 addrlen, registers_t *regs);
+s64	posix_recvfrom(u64 sockfd, u64 buf, u64 len, u64 flags, u64 src_addr,
+    u64 addrlen, registers_t *regs);
+s64	posix_sendmsg(u64 sockfd, u64 msg, u64 flags, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_recvmsg(u64 sockfd, u64 msg, u64 flags, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_shutdown(u64 sockfd, u64 how, u64 a3, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_getsockname(u64 sockfd, u64 addr, u64 addrlen, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_getpeername(u64 sockfd, u64 addr, u64 addrlen, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_socketpair(u64 domain, u64 type, u64 protocol, u64 sv, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_setsockopt(u64 sockfd, u64 level, u64 optname, u64 optval,
+    u64 optlen, u64 a6, registers_t *regs);
+s64	posix_getsockopt(u64 sockfd, u64 level, u64 optname, u64 optval,
+    u64 optlen, u64 a6, registers_t *regs);
 
 void
 posix_syscall_handler(registers_t *regs)
@@ -427,6 +460,54 @@ posix_syscall_handler(registers_t *regs)
 	case SYS_getrandom:
 		ret = posix_getrandom(a1, a2, a3, a4, a5, a6, regs);
 		break;
+	case SYS_socket:
+		ret = posix_socket(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_bind:
+		ret = posix_bind(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_listen:
+		ret = posix_listen(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_accept:
+		ret = posix_accept(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_accept4:
+		ret = posix_accept4(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_connect:
+		ret = posix_connect(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_sendto:
+		ret = posix_sendto(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_recvfrom:
+		ret = posix_recvfrom(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_sendmsg:
+		ret = posix_sendmsg(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_recvmsg:
+		ret = posix_recvmsg(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_shutdown:
+		ret = posix_shutdown(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_getsockname:
+		ret = posix_getsockname(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_getpeername:
+		ret = posix_getpeername(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_socketpair:
+		ret = posix_socketpair(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_setsockopt:
+		ret = posix_setsockopt(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_getsockopt:
+		ret = posix_getsockopt(a1, a2, a3, a4, a5, a6, regs);
+		break;
 	default:
 		printk("[POSIX] unknown syscall: %d\n", (int)num);
 		ret = -POSIX_ENOSYS;
@@ -487,6 +568,8 @@ posix_copy_fds(struct process *dst, const struct process *src)
 	for (i = 0; i < MAX_POSIX_FDS; i++) {
 		dst->posix_fds[i] = src->posix_fds[i];
 		if (src->posix_fds[i].used && src->posix_fds[i].vnode) {
+			if (src->posix_fds[i].vnode->type == VSOCK)
+				posix_socket_hold(src->posix_fds[i].vnode);
 			vnode_acquire(src->posix_fds[i].vnode);
 		}
 	}
@@ -512,6 +595,8 @@ posix_cleanup_process(struct process *proc)
 
 	for (i = 0; i < MAX_POSIX_FDS; i++) {
 		if (proc->posix_fds[i].used && proc->posix_fds[i].vnode) {
+			if (proc->posix_fds[i].vnode->type == VSOCK)
+				posix_socket_close(proc->posix_fds[i].vnode);
 			vnode_release(proc->posix_fds[i].vnode);
 		}
 		proc->posix_fds[i].used = 0;

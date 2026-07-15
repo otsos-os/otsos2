@@ -446,6 +446,9 @@ chainfs_vnode_readdir(vnode_t *vn, u32 index, char *name, int *type)
 		} else if (entries[index].type ==
 		    CHAINFS_TYPE_SYMLINK) {
 			*type = VLNK;
+		} else if (entries[index].type ==
+		    CHAINFS_TYPE_SOCK) {
+			*type = VSOCK;
 		} else {
 			*type = VREG;
 		}
@@ -488,6 +491,9 @@ vfs_root_readdir(vnode_t *vn, u32 index, char *name, int *type)
 			} else if (entries[index].type ==
 			    CHAINFS_TYPE_SYMLINK) {
 				*type = VLNK;
+			} else if (entries[index].type ==
+			    CHAINFS_TYPE_SOCK) {
+				*type = VSOCK;
 			} else {
 				*type = VREG;
 			}
@@ -527,6 +533,8 @@ vfs_lookup_chainfs(const char *path)
 		vtype = VDIR;
 	} else if (entry.type == CHAINFS_TYPE_SYMLINK) {
 		vtype = VLNK;
+	} else if (entry.type == CHAINFS_TYPE_SOCK) {
+		vtype = VSOCK;
 	} else {
 		vtype = VREG;
 	}
@@ -534,6 +542,11 @@ vfs_lookup_chainfs(const char *path)
 	vn = vnode_alloc(vtype, entry.name);
 	if (!vn) {
 		return (NULL);
+	}
+
+	if (vtype == VSOCK) {
+		vn->mode = POSIX_S_IFSOCK | 0600;
+		return (vn);
 	}
 
 	path_copy = (char *)kmem_calloc(256, 1);

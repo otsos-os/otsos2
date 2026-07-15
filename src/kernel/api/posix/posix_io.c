@@ -25,6 +25,7 @@
  */
 
 #include <kernel/api/posix/posix.h>
+#include <kernel/api/posix/posix_socket.h>
 #include <kernel/api/api.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
@@ -388,6 +389,8 @@ posix_close(u64 fd_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	}
 
 	if (pfd->vnode) {
+		if (pfd->vnode->type == VSOCK)
+			posix_socket_close(pfd->vnode);
 		vnode_release(pfd->vnode);
 	}
 
@@ -450,6 +453,12 @@ posix_read(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 		}
 	} else if (pfd->vnode->ioctl_fn == pty_slave_ioctl) {
 		n = pty_slave_read(pfd->vnode, buf, (u32)count,
+		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
+		if (n < 0) {
+			return ((s64)n);
+		}
+	} else if (pfd->vnode->type == VSOCK) {
+		n = posix_socket_read(pfd->vnode, buf, (u32)count,
 		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
 		if (n < 0) {
 			return ((s64)n);
@@ -522,6 +531,12 @@ posix_write(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 		if (n < 0) {
 			return ((s64)n);
 		}
+	} else if (pfd->vnode->type == VSOCK) {
+		n = posix_socket_write(pfd->vnode, buf, (u32)count,
+		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
+		if (n < 0) {
+			return ((s64)n);
+		}
 	} else {
 		n = vnode_write(pfd->vnode, buf, count, pfd->offset);
 		if (n < 0) {
@@ -532,11 +547,6 @@ posix_write(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 	pfd->offset += (u64)n;
 	return ((s64)n);
 }
-
-struct posix_iovec {
-	void	*iov_base;
-	size_t	iov_len;
-};
 
 s64
 posix_readv(u64 fd_u, u64 iov_u, u64 iovcnt_u, u64 a4, u64 a5,
@@ -1005,6 +1015,8 @@ posix_dup(u64 fd_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	proc->posix_fds[new_fd] = *pfd;
 	proc->posix_fds[new_fd].cloexec = 0;
 	if (pfd->vnode) {
+		if (pfd->vnode->type == VSOCK)
+			posix_socket_hold(pfd->vnode);
 		vnode_acquire(pfd->vnode);
 	}
 
@@ -1044,6 +1056,8 @@ posix_dup2(u64 oldfd_u, u64 newfd_u, u64 a3, u64 a4, u64 a5, u64 a6,
 	new_pfd = &proc->posix_fds[newfd];
 	if (new_pfd->used) {
 		if (new_pfd->vnode) {
+			if (new_pfd->vnode->type == VSOCK)
+				posix_socket_close(new_pfd->vnode);
 			vnode_release(new_pfd->vnode);
 		}
 	}
@@ -1051,10 +1065,24 @@ posix_dup2(u64 oldfd_u, u64 newfd_u, u64 a3, u64 a4, u64 a5, u64 a6,
 	*new_pfd = *old_pfd;
 	new_pfd->cloexec = 0;
 	if (old_pfd->vnode) {
+		if (old_pfd->vnode->type == VSOCK)
+			posix_socket_hold(old_pfd->vnode);
 		vnode_acquire(old_pfd->vnode);
 	}
 
 	return ((s64)newfd);
+}
+static void
+dup3_vsock_cleanup(vnode_t *vn)
+{
+	if (vn && vn->type == VSOCK)
+		posix_socket_close(vn);
+}
+static void
+dup3_vsock_hold(vnode_t *vn)
+{
+	if (vn && vn->type == VSOCK)
+		posix_socket_hold(vn);
 }
 
 s64
@@ -1091,6 +1119,7 @@ posix_dup3(u64 oldfd_u, u64 newfd_u, u64 flags_u, u64 a4, u64 a5,
 	new_pfd = &proc->posix_fds[newfd];
 	if (new_pfd->used) {
 		if (new_pfd->vnode) {
+			dup3_vsock_cleanup(new_pfd->vnode);
 			vnode_release(new_pfd->vnode);
 		}
 	}
@@ -1098,6 +1127,7 @@ posix_dup3(u64 oldfd_u, u64 newfd_u, u64 flags_u, u64 a4, u64 a5,
 	*new_pfd = *old_pfd;
 	new_pfd->cloexec = (flags & POSIX_O_CLOEXEC) ? 1 : 0;
 	if (old_pfd->vnode) {
+		dup3_vsock_hold(old_pfd->vnode);
 		vnode_acquire(old_pfd->vnode);
 	}
 
@@ -1136,6 +1166,8 @@ posix_fcntl(u64 fd_u, u64 cmd_u, u64 arg_u, u64 a4, u64 a5, u64 a6,
 		proc->posix_fds[new_fd] = *pfd;
 		proc->posix_fds[new_fd].cloexec = 0;
 		if (pfd->vnode) {
+			if (pfd->vnode->type == VSOCK)
+				posix_socket_hold(pfd->vnode);
 			vnode_acquire(pfd->vnode);
 		}
 		return ((s64)new_fd);

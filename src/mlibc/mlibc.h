@@ -45,9 +45,11 @@ typedef signed int s32;
 typedef signed long long s64;
 
 int strcmp(const char *str1, const char *str2);
+int strncmp(const char *str1, const char *str2, unsigned long n);
 int strlen(const char *str);
 int atoi(const char *str);
 char *strcpy(char *dest, const char *src);
+char *strncpy(char *dest, const char *src, unsigned long n);
 char *strcat(char *dest, const char *src);
 char *strchr(const char *str, int c);
 char *itoa(int value, char *str, int base);

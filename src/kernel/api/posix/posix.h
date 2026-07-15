@@ -104,6 +104,47 @@ $space %export posix_getrandom
 #define POSIX_EIO		5
 #define POSIX_EPERM		1
 #define POSIX_ENOENT		2
+#define POSIX_ENOTSOCK		88
+#define POSIX_EDESTADDRREQ	89
+#define POSIX_EMSGSIZE		90
+#define POSIX_EPROTOTYPE	91
+#define POSIX_EOPNOTSUPP	95
+#define POSIX_EAFNOSUPPORT	97
+#define POSIX_EADDRINUSE	98
+#define POSIX_ENOBUFS		105
+#define POSIX_EISCONN		106
+#define POSIX_ENOTCONN		107
+#define POSIX_ESHUTDOWN		108
+#define POSIX_ECONNREFUSED	111
+#define POSIX_ENOTSOCK		88
+#define POSIX_EDESTADDRREQ	89
+#define POSIX_EMSGSIZE		90
+#define POSIX_EPROTOTYPE	91
+#define POSIX_ENOPROTOOPT	92
+#define POSIX_EPROTONOSUPPORT	93
+#define POSIX_ESOCKTNOSUPPORT	94
+#define POSIX_EOPNOTSUPP	95
+#define POSIX_EPFNOSUPPORT	96
+#define POSIX_EAFNOSUPPORT	97
+#define POSIX_EADDRINUSE	98
+#define POSIX_EADDRNOTAVAIL	99
+#define POSIX_ENETDOWN		100
+#define POSIX_ENETUNREACH	101
+#define POSIX_ENETRESET		102
+#define POSIX_ECONNABORTED	103
+#define POSIX_ECONNRESET	104
+#define POSIX_ENOBUFS		105
+#define POSIX_EISCONN		106
+#define POSIX_ENOTCONN		107
+#define POSIX_ESHUTDOWN		108
+#define POSIX_ETOOMANYREFS	109
+#define POSIX_ETIMEDOUT		110
+#define POSIX_ECONNREFUSED	111
+#define POSIX_EHOSTDOWN		112
+#define POSIX_EHOSTUNREACH	113
+#define POSIX_EALREADY		114
+#define POSIX_EINPROGRESS	115
+#define POSIX_ESTALE		116
 
 #define POSIX_IPC_PRIVATE	0
 #define POSIX_IPC_RMID		0
@@ -212,6 +253,21 @@ $space %export posix_getrandom
 #define SYS_dup2		33
 #define SYS_nanosleep		35
 #define SYS_getpid		39
+#define SYS_socket		41
+#define SYS_connect		42
+#define SYS_accept		43
+#define SYS_sendto		44
+#define SYS_recvfrom		45
+#define SYS_sendmsg		46
+#define SYS_recvmsg		47
+#define SYS_shutdown		48
+#define SYS_bind		49
+#define SYS_listen		50
+#define SYS_getsockname		51
+#define SYS_getpeername		52
+#define SYS_socketpair		53
+#define SYS_setsockopt		54
+#define SYS_getsockopt		55
 #define SYS_fork		57
 #define SYS_execve		59
 #define SYS_exit		60
@@ -262,6 +318,24 @@ $space %export posix_getrandom
 #define SYS_futex		202
 #define SYS_arch_prctl		158
 #define SYS_getrandom		318
+
+#define SYS_socket		41
+#define SYS_connect		42
+#define SYS_accept		43
+#define SYS_sendto		44
+#define SYS_recvfrom		45
+#define SYS_sendmsg		46
+#define SYS_recvmsg		47
+#define SYS_shutdown		48
+#define SYS_bind		49
+#define SYS_listen		50
+#define SYS_getsockname		51
+#define SYS_getpeername		52
+#define SYS_socketpair		53
+#define SYS_setsockopt		54
+#define SYS_getsockopt		55
+#define SYS_accept4		288
+
 #define POSIX_CLOCK_REALTIME	0
 #define POSIX_CLOCK_MONOTONIC	1
 #define POSIX_CLOCK_TIMER_ABSTIME	1
@@ -290,6 +364,47 @@ $space %export posix_getrandom
 #define POSIX_CLONE_CHILD_SETTID	0x01000000
 #define POSIX_CLONE_SETTLS		0x08000000
 #define POSIX_CLONE_PARENT_SETTID2	0x10000000
+
+#define POSIX_AF_UNIX		1
+#define POSIX_AF_INET		2
+
+#define POSIX_SOCK_STREAM	1
+#define POSIX_SOCK_DGRAM	2
+#define POSIX_SOCK_SEQPACKET	5
+#define POSIX_SOCK_RAW		3
+#define POSIX_SOCK_RDM		4
+#define POSIX_SOCK_NONBLOCK	0x800
+#define POSIX_SOCK_CLOEXEC	0x20000
+
+#define POSIX_SOL_SOCKET	1
+
+#define POSIX_SO_TYPE		3
+#define POSIX_SO_ERROR		4
+#define POSIX_SO_NOSIGPIPE	0x8000
+
+#define POSIX_SHUT_RD		0
+#define POSIX_SHUT_WR		1
+#define POSIX_SHUT_RDWR		2
+
+#define POSIX_MSG_DONTWAIT	0x40
+#define POSIX_MSG_NOSIGNAL	0x4000
+#define POSIX_MSG_PEEK		0x2
+#define POSIX_MSG_WAITALL	0x100
+#define POSIX_MSG_OOB		0x1
+
+#define POSIX_SOMAXCONN		128
+
+#define POSIX_AF_UNIX_PATH_MAX	108
+
+struct posix_sockaddr_un {
+	u16	sun_family;
+	char	sun_path[POSIX_AF_UNIX_PATH_MAX];
+};
+
+struct posix_iovec {
+	void	*iov_base;
+	size_t	iov_len;
+};
 
 struct process;
 
@@ -373,5 +488,39 @@ s64	posix_setsid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5,
     u64 a6, registers_t *regs);
 s64	posix_getpgid(u64 pid_u, u64 a2, u64 a3, u64 a4, u64 a5,
     u64 a6, registers_t *regs);
+
+/* Socket syscall declarations */
+s64	posix_socket(u64 domain, u64 type, u64 protocol, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_connect(u64 sockfd, u64 addr, u64 addrlen, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_accept(u64 sockfd, u64 addr, u64 addrlen, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_accept4(u64 sockfd, u64 addr, u64 addrlen, u64 flags, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_sendto(u64 sockfd, u64 buf, u64 len, u64 flags, u64 dest_addr,
+    u64 addrlen, registers_t *regs);
+s64	posix_recvfrom(u64 sockfd, u64 buf, u64 len, u64 flags, u64 src_addr,
+    u64 addrlen, registers_t *regs);
+s64	posix_sendmsg(u64 sockfd, u64 msg, u64 flags, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_recvmsg(u64 sockfd, u64 msg, u64 flags, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_shutdown(u64 sockfd, u64 how, u64 a3, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_bind(u64 sockfd, u64 addr, u64 addrlen, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_listen(u64 sockfd, u64 backlog, u64 a3, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_getsockname(u64 sockfd, u64 addr, u64 addrlen, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_getpeername(u64 sockfd, u64 addr, u64 addrlen, u64 a4, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_socketpair(u64 domain, u64 type, u64 protocol, u64 sv, u64 a5,
+    u64 a6, registers_t *regs);
+s64	posix_setsockopt(u64 sockfd, u64 level, u64 optname, u64 optval,
+    u64 optlen, u64 a6, registers_t *regs);
+s64	posix_getsockopt(u64 sockfd, u64 level, u64 optname, u64 optval,
+    u64 optlen, u64 a6, registers_t *regs);
 
 #endif

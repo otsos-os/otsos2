@@ -96,6 +96,7 @@ $space %export g_chainfs, g_chainfs_phys
 #define	CHAINFS_TYPE_FILE	0
 #define	CHAINFS_TYPE_DIR	1
 #define	CHAINFS_TYPE_SYMLINK	2
+#define	CHAINFS_TYPE_SOCK	3
 
 typedef struct {
 	u32	magic;
@@ -147,6 +148,7 @@ int	chainfs_get_file_list(chainfs_file_entry_t *files,
 	    u32 max_files, u32 *file_count);
 
 int	chainfs_mkdir(const char *path);
+int	chainfs_create_socket(const char *path);
 int	chainfs_rmdir(const char *path);
 int	chainfs_chdir(const char *path);
 int	chainfs_list_dir(const char *path,

@@ -55,6 +55,7 @@ $define %func split_path as function with args const char *, char[][32], int
 $define %func chainfs_find_in_directory as function with args u32, const char *, chainfs_file_entry_t *, u32 *, u32 *
 $define %func chainfs_resolve_path as function with args const char *, chainfs_file_entry_t *, u32 *, u32 *
 $define %func chainfs_mkdir as function with args const char *
+$define %func chainfs_create_socket as function with args const char *
 $define %func chainfs_chdir as function with args const char *
 $define %func chainfs_list_dir as function with args const char *, chainfs_file_entry_t *, u32, u32 *
 $define %func chainfs_get_current_path as function with args char *, u32
@@ -72,8 +73,8 @@ $space %export chainfs_free_block_chain, chainfs_read_file
 $space %export chainfs_read_file_range, chainfs_write_file
 $space %export chainfs_link, chainfs_delete_file, chainfs_get_file_list
 $space %export chainfs_find_in_directory, chainfs_resolve_path
-$space %export chainfs_mkdir, chainfs_chdir, chainfs_list_dir
-$space %export chainfs_get_current_path, chainfs_rmdir
+$space %export chainfs_mkdir, chainfs_create_socket, chainfs_chdir
+$space %export chainfs_list_dir, chainfs_get_current_path, chainfs_rmdir
 $space %export g_chainfs, g_chainfs_phys
 
 */
@@ -1444,6 +1445,85 @@ chainfs_get_current_path(char *buffer, u32 buffer_size)
 		strcpy(buffer, temp_path);
 		return (buffer);
 	}
+
+	return (0);
+}
+
+int
+chainfs_create_socket(const char *path)
+{
+	char			parent_path[CHAINFS_MAX_PATH];
+	char			sock_name[32];
+	int			path_len, last_slash, i;
+	chainfs_file_entry_t	parent_entry, existing_entry;
+	u32			parent_block, parent_offset;
+	u32			existing_block, existing_offset;
+	u32			entry_block, entry_offset;
+	chainfs_file_entry_t	*entries;
+
+	if (g_chainfs.superblock.magic != CHAINFS_MAGIC) {
+		return (-1);
+	}
+
+	path_len = strlen(path);
+	last_slash = -1;
+
+	for (i = path_len - 1; i >= 0; i--) {
+		if (path[i] == '/') {
+			last_slash = i;
+			break;
+		}
+	}
+
+	if (last_slash == -1) {
+		parent_path[0] = 0;
+		strcpy(sock_name, path);
+	} else if (last_slash == 0) {
+		parent_path[0] = '/';
+		parent_path[1] = 0;
+		strcpy(sock_name, path + 1);
+	} else {
+		for (i = 0; i < last_slash; i++)
+			parent_path[i] = path[i];
+		parent_path[last_slash] = 0;
+		strcpy(sock_name, path + last_slash + 1);
+	}
+
+	if (parent_path[0] == 0) {
+		parent_block = g_chainfs.current_dir_block;
+	} else {
+		if (chainfs_resolve_path(parent_path, &parent_entry,
+		    &parent_block, &parent_offset) != 0)
+			return (-1);
+		if (parent_entry.type != CHAINFS_TYPE_DIR)
+			return (-1);
+		parent_block = (parent_block - 1) *
+		    ENTRIES_PER_BLOCK + parent_offset;
+	}
+
+	if (chainfs_find_in_directory(parent_block, sock_name,
+	    &existing_entry, &existing_block, &existing_offset) == 0)
+		return (-1);
+
+	if (chainfs_find_free_file_entry(&entry_block,
+	    &entry_offset) != 0)
+		return (-1);
+
+	disk_read(g_chainfs.disk, entry_block,
+	    g_chainfs.sector_buffer);
+	entries = (chainfs_file_entry_t *)
+	    g_chainfs.sector_buffer;
+
+	entries[entry_offset].status = 1;
+	entries[entry_offset].type = CHAINFS_TYPE_SOCK;
+	strcpy(entries[entry_offset].name, sock_name);
+	entries[entry_offset].size = 0;
+	entries[entry_offset].start_block = 0;
+	entries[entry_offset].parent_block = parent_block;
+	entries[entry_offset].nlink = 1;
+
+	disk_write(g_chainfs.disk, entry_block,
+	    g_chainfs.sector_buffer);
 
 	return (0);
 }
