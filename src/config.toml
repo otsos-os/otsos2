@@ -58,7 +58,7 @@ posix_hello = "/bin/posix_hello"
 # kbdtest = "/bin/kbdtest"
 musl_test = "/bin/musl_test"
 lua = "/bin/lua"
-python = "/bin/python"
+# python = "/bin/python"
 ld-musl = "/lib/ld-musl-x86_64.so.1"
 
 [kshell.commands.help]
