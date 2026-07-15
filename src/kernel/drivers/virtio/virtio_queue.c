@@ -272,6 +272,12 @@ virtio_vq_poll_used(virtio_vq_t *vq, u32 *len)
 		if (vq->used->idx != vq->used_idx) {
 			used_pos = vq->used_idx % vq->size;
 			head = (u16)vq->used->ring[used_pos].id;
+			if (head >= vq->size) {
+				drivers_log("[VIRTQ] invalid used descriptor %u\n",
+				    head);
+				vq->used_idx++;
+				return ((u16)-1);
+			}
 			if (len) {
 				*len = vq->used->ring[used_pos].len;
 			}
@@ -294,6 +300,11 @@ virtio_vq_pop_used(virtio_vq_t *vq, u32 *len)
 	__asm__ volatile("" ::: "memory");
 	used_pos = vq->used_idx % vq->size;
 	head = (u16)vq->used->ring[used_pos].id;
+	if (head >= vq->size) {
+		drivers_log("[VIRTQ] invalid used descriptor %u\n", head);
+		vq->used_idx++;
+		return ((u16)-1);
+	}
 	if (len) {
 		*len = vq->used->ring[used_pos].len;
 	}
@@ -304,13 +315,18 @@ virtio_vq_pop_used(virtio_vq_t *vq, u32 *len)
 void
 virtio_vq_free_chain(virtio_vq_t *vq, u16 head_idx)
 {
-	u16	idx, flags, next;
+	u16	idx, flags, next, count;
 
 	if (!vq || head_idx >= vq->size) {
 		return;
 	}
 	idx = head_idx;
+	count = 0;
 	while (1) {
+		if (idx >= vq->size || count++ >= vq->size) {
+			drivers_log("[VIRTQ] invalid descriptor chain\n");
+			return;
+		}
 		flags = vq->desc[idx].flags;
 		next = vq->desc[idx].next;
 
@@ -322,9 +338,6 @@ virtio_vq_free_chain(virtio_vq_t *vq, u16 head_idx)
 		vq->num_free++;
 
 		if (!(flags & VIRTQ_DESC_F_NEXT)) {
-			break;
-		}
-		if (next >= vq->size) {
 			break;
 		}
 		idx = next;
@@ -383,6 +396,12 @@ virtio_vq_send_recv(virtio_vq_t *vq, const void *cmd, u32 cmd_size,
 		    "avail_idx=%u used_idx=%u used->idx=%u\n",
 		    cmd_size, vq->avail_idx, vq->used_idx,
 		    vq->used->idx);
+		virtio_vq_free_chain(vq, head);
+		return (-1);
+	}
+	if (used_head != head) {
+		drivers_log("[VIRTQ] unexpected completion %u, expected %u\n",
+		    used_head, head);
 		virtio_vq_free_chain(vq, head);
 		return (-1);
 	}

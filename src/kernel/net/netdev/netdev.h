@@ -27,12 +27,14 @@
 
 $define %type u8 as 8 bit unsigned
 $define %type u16 as 16 bit unsigned
+$define %type u64 as 64 bit unsigned
 $define %type int as 32 bit signed
 $define %type netdev_t as struct with physical network device state
 $define %type netdev_ops_t as struct with hardware driver callbacks
 $define %type netdev_rx_handler_t as callback for raw frame receive
 
 $define %func netdev_register as function with args netdev_t *
+$define %func netdev_unregister as procedure with args netdev_t *
 $define %func netdev_count as function with args void
 $define %func netdev_get as function with args int
 $define %func netdev_by_name as function with args const char *
@@ -43,7 +45,7 @@ $define %func netdev_dump_all as procedure with args void
 
 /* !SPACE!
 
-$space %export netdev_register, netdev_count
+$space %export netdev_register, netdev_unregister, netdev_count
 $space %export netdev_get, netdev_by_name
 $space %export netdev_poll_all, netdev_dump_all
 
@@ -87,9 +89,16 @@ typedef struct netdev {
 	void			*priv;
 	netdev_ops_t		*ops;
 	netdev_rx_handler_t	rx_handler;
+	u64			tx_submitted;
+	u64			tx_completed;
+	u64			tx_dropped;
+	u64			rx_completed;
+	u64			rx_delivered;
+	u64			rx_dropped;
 } netdev_t;
 
 int	netdev_register(netdev_t *ndev);
+void	netdev_unregister(netdev_t *ndev);
 int	netdev_count(void);
 netdev_t *netdev_get(int index);
 netdev_t *netdev_by_name(const char *name);

@@ -55,7 +55,9 @@ ethernet_input(netdev_t *ndev, const u8 *frame, u16 len)
 {
 	const ethernet_header_t	*eth;
 	net_iface_t		*iface;
+	u8			bcast[ETHERNET_ADDR_LEN];
 	u16			ethertype;
+	int			is_bcast, is_ours;
 
 	if (!ndev || !frame || len < ETHERNET_HEADER_LEN) {
 		return;
@@ -67,6 +69,17 @@ ethernet_input(netdev_t *ndev, const u8 *frame, u16 len)
 	}
 
 	eth = (const ethernet_header_t *)frame;
+	memset(bcast, 0xFF, sizeof(bcast));
+	is_ours = (eth->dst[0] == ndev->mac[0] &&
+	    eth->dst[1] == ndev->mac[1] && eth->dst[2] == ndev->mac[2] &&
+	    eth->dst[3] == ndev->mac[3] && eth->dst[4] == ndev->mac[4] &&
+	    eth->dst[5] == ndev->mac[5]);
+	is_bcast = (eth->dst[0] == bcast[0] && eth->dst[1] == bcast[1] &&
+	    eth->dst[2] == bcast[2] && eth->dst[3] == bcast[3] &&
+	    eth->dst[4] == bcast[4] && eth->dst[5] == bcast[5]);
+	if (!(ndev->flags & NETDEV_F_PROMISC) && !is_ours && !is_bcast) {
+		return;
+	}
 	ethertype = __builtin_bswap16(eth->ethertype);
 
 	switch (ethertype) {
@@ -106,12 +119,16 @@ ethernet_output(net_iface_t *iface, const u8 *dst_mac,
 		return (-1);
 	}
 
+	memset(frame, 0, sizeof(frame));
 	eth = (ethernet_header_t *)frame;
 	memcpy(eth->dst, dst_mac, ETHERNET_ADDR_LEN);
 	memcpy(eth->src, ndev->mac, ETHERNET_ADDR_LEN);
 	eth->ethertype = __builtin_bswap16(ethertype);
 	memcpy(frame + ETHERNET_HEADER_LEN, payload, payload_len);
 
-	return (ndev->ops->transmit(ndev, frame,
-	    (u16)(ETHERNET_HEADER_LEN + payload_len)));
+	payload_len += ETHERNET_HEADER_LEN;
+	if (payload_len < ETHERNET_FRAME_MIN - 4) {
+		payload_len = ETHERNET_FRAME_MIN - 4;
+	}
+	return (ndev->ops->transmit(ndev, frame, payload_len));
 }

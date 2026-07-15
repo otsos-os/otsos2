@@ -37,7 +37,7 @@ $define %func arp_init as function with args void
 $define %func arp_cache_init as procedure with args void
 $define %func arp_input as function with args net_iface_t *, const u8 *, u16
 $define %func arp_resolve as function with args net_iface_t *, u32, u8 *
-$define %func arp_lookup as function with args u32
+$define %func arp_lookup as function with args net_iface_t *, u32
 $define %func arp_send_request as function with args net_iface_t *, u32
 
 */
@@ -79,6 +79,7 @@ typedef struct {
 } __attribute__((packed)) arp_header_t;
 
 typedef struct {
+	net_iface_t	*iface;
 	u32	ip;
 	u8	mac[ETHERNET_ADDR_LEN];
 	int	valid;
@@ -87,7 +88,7 @@ typedef struct {
 void	arp_cache_init(void);
 int	arp_input(net_iface_t *iface, const u8 *data, u16 len);
 int	arp_resolve(net_iface_t *iface, u32 ip, u8 *mac_out);
-arp_cache_entry_t *arp_lookup(u32 ip);
+arp_cache_entry_t *arp_lookup(net_iface_t *iface, u32 ip);
 int	arp_send_request(net_iface_t *iface, u32 target_ip);
 
 #endif

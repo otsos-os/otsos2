@@ -35,6 +35,7 @@ $define %type netdev_t as struct with physical network device state
 $define %func net_init as function with args void
 $define %func net_is_initialized as function with args void
 $define %func net_iface_register as function with args net_iface_t *, netdev_t *
+$define %func net_iface_unregister as procedure with args net_iface_t *
 $define %func net_iface_count as function with args void
 $define %func net_iface_get as function with args int
 $define %func net_iface_by_name as function with args const char *
@@ -47,7 +48,7 @@ $define %func net_dump_ifaces as procedure with args void
 /* !SPACE!
 
 $space %export net_init, net_is_initialized
-$space %export net_iface_register, net_iface_count
+$space %export net_iface_register, net_iface_unregister, net_iface_count
 $space %export net_iface_get, net_iface_by_name
 $space %export net_iface_find_by_ndev
 $space %export net_poll_all, net_dump_ifaces
@@ -63,6 +64,7 @@ $space %export net_poll_all, net_dump_ifaces
 static net_iface_t	*g_ifaces[NET_MAX_IFACES];
 static int		g_iface_count;
 static int		g_initialized;
+static int		g_polling;
 
 int
 net_init(void)
@@ -77,6 +79,7 @@ net_init(void)
 		g_ifaces[i] = NULL;
 	}
 	g_iface_count = 0;
+	g_polling = 0;
 
 	arp_cache_init();
 
@@ -97,8 +100,14 @@ net_iface_register(net_iface_t *iface, netdev_t *ndev)
 	if (!iface || !ndev) {
 		return (-1);
 	}
+	if (!g_initialized) {
+		return (-1);
+	}
 	if (g_iface_count >= NET_MAX_IFACES) {
 		drivers_log("[NET] too many interfaces\n");
+		return (-1);
+	}
+	if (net_iface_find_by_ndev(ndev) || net_iface_by_name(iface->name)) {
 		return (-1);
 	}
 
@@ -115,6 +124,33 @@ net_iface_register(net_iface_t *iface, netdev_t *ndev)
 	    ndev->mac[0], ndev->mac[1], ndev->mac[2],
 	    ndev->mac[3], ndev->mac[4], ndev->mac[5]);
 	return (0);
+}
+
+void
+net_iface_unregister(net_iface_t *iface)
+{
+	int	i, j;
+
+	if (!iface) {
+		return;
+	}
+	for (i = 0; i < g_iface_count; i++) {
+		if (g_ifaces[i] != iface) {
+			continue;
+		}
+		if (iface->ndev && iface->ndev->rx_handler == ethernet_input) {
+			iface->ndev->rx_handler = NULL;
+		}
+		for (j = i; j + 1 < g_iface_count; j++) {
+			g_ifaces[j] = g_ifaces[j + 1];
+			g_ifaces[j]->index = j;
+		}
+		g_iface_count--;
+		g_ifaces[g_iface_count] = NULL;
+		iface->ndev = NULL;
+		iface->index = -1;
+		return;
+	}
 }
 
 int
@@ -169,14 +205,20 @@ net_poll_all(void)
 {
 	int	i;
 
+	if (!g_initialized || g_polling) {
+		return;
+	}
+	g_polling = 1;
 	for (i = 0; i < g_iface_count; i++) {
 		netdev_t	*ndev;
 
 		ndev = g_ifaces[i]->ndev;
-		if (ndev && (ndev->flags & NETDEV_F_UP)) {
+		if (ndev && (ndev->flags & NETDEV_F_UP) &&
+		    ndev->ops && ndev->ops->poll) {
 			ndev->ops->poll(ndev);
 		}
 	}
+	g_polling = 0;
 }
 
 void

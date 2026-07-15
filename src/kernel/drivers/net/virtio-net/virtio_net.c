@@ -43,23 +43,27 @@ $define %type pci_driver_t as struct with PCI driver
 
 $define %func virtio_net_setup_queue as function with args virtio_vq_t *, virtio_hw_t *, u16
 $define %func virtio_net_read_mac as function with args virtio_net_state_t *
+$define %func virtio_net_read_link as procedure with args virtio_net_state_t *
 $define %func virtio_net_post_rx as function with args virtio_net_state_t *, u16
 $define %func virtio_net_reclaim_tx as procedure with args virtio_net_state_t *
+$define %func virtio_net_destroy as procedure with args virtio_net_state_t *
 $define %func virtio_net_ndev_transmit as function with args netdev_t *, const u8 *, u16
 $define %func virtio_net_ndev_poll as function with args netdev_t *
 $define %func virtio_net_ndev_is_link_up as function with args netdev_t *
 $define %func virtio_net_pci_probe as function with args pci_device_t *, const pci_match_t *
+$define %func virtio_net_pci_remove as procedure with args pci_device_t *
 $define %func virtio_net_pci_register as function with args void
 
 */
 
 /* !SPACE!
 
-$space %internal virtio_net_setup_queue, virtio_net_read_mac
+$space %internal virtio_net_setup_queue, virtio_net_read_mac, virtio_net_read_link
 $space %internal virtio_net_post_rx, virtio_net_reclaim_tx
+$space %internal virtio_net_destroy
 $space %internal virtio_net_ndev_transmit, virtio_net_ndev_poll
 $space %internal virtio_net_ndev_is_link_up
-$space %internal virtio_net_pci_probe
+$space %internal virtio_net_pci_probe, virtio_net_pci_remove
 $space %export virtio_net_pci_register
 
 */
@@ -80,6 +84,8 @@ $space %export virtio_net_pci_register
 #define	VIRTIO_NET_RX_QUEUE		0
 #define	VIRTIO_NET_TX_QUEUE		1
 #define	VIRTIO_NET_F_MAC		(1u << 5)
+#define	VIRTIO_NET_F_STATUS		(1u << 16)
+#define	VIRTIO_NET_S_LINK_UP		(1u << 0)
 #define	VIRTIO_NET_HDR_SIZE		12
 #define	VIRTIO_NET_RX_BUFFER_SIZE	(VIRTIO_NET_HDR_SIZE + \
 	VIRTIO_NET_ETH_FRAME_MAX)
@@ -104,6 +110,11 @@ typedef struct {
 	u8			*rx_buffers;
 	u8			*tx_buffers;
 	u16			rx_slot[VIRTIO_NET_QUEUE_SIZE];
+	u16			rx_posted;
+	u8			ndev_registered;
+	u8			iface_registered;
+	u8			link_up;
+	u8			rx_start_kick_pending;
 	int			ready;
 	netdev_t		ndev;
 	net_iface_t		iface;
@@ -118,15 +129,18 @@ virtio_net_setup_queue(virtio_vq_t *vq, virtio_hw_t *hw, u16 index)
 
 	virtio_hw_select_queue(hw, index);
 	qsize = virtio_hw_get_queue_size(hw);
-	if (qsize == 0 || qsize < VIRTIO_NET_QUEUE_SIZE) {
+	if (qsize == 0) {
 		return (-1);
 	}
 
-	if (virtio_vq_create(vq, VIRTIO_NET_QUEUE_SIZE) != 0) {
+	if (qsize > VIRTIO_NET_QUEUE_SIZE) {
+		qsize = VIRTIO_NET_QUEUE_SIZE;
+	}
+	if (virtio_vq_create(vq, qsize) != 0) {
 		return (-1);
 	}
 	virtio_vq_bind(vq, hw, index);
-	virtio_hw_set_queue_size(hw, VIRTIO_NET_QUEUE_SIZE);
+	virtio_hw_set_queue_size(hw, qsize);
 	virtio_hw_set_queue_desc(hw, vq->phys_desc);
 	virtio_hw_set_queue_driver(hw, vq->phys_avail);
 	virtio_hw_set_queue_device(hw, vq->phys_used);
@@ -154,6 +168,23 @@ virtio_net_read_mac(virtio_net_state_t *st)
 	return (0);
 }
 
+static void
+virtio_net_read_link(virtio_net_state_t *st)
+{
+	u16	status;
+
+	if ((st->hw.features & VIRTIO_NET_F_STATUS) == 0) {
+		st->link_up = 1;
+		return;
+	}
+	if (virtio_hw_read_device_config(&st->hw, 6, &status,
+	    sizeof(status)) != 0) {
+		st->link_up = 0;
+		return;
+	}
+	st->link_up = (status & VIRTIO_NET_S_LINK_UP) != 0;
+}
+
 static int
 virtio_net_post_rx(virtio_net_state_t *st, u16 slot)
 {
@@ -161,6 +192,9 @@ virtio_net_post_rx(virtio_net_state_t *st, u16 slot)
 	u16		head;
 
 	vq = &st->rx_vq;
+	if (slot >= vq->size) {
+		return (-1);
+	}
 	head = virtio_vq_alloc_chain(vq, 1);
 	if (head == (u16)-1) {
 		return (-1);
@@ -170,6 +204,7 @@ virtio_net_post_rx(virtio_net_state_t *st, u16 slot)
 	    VIRTIO_NET_RX_BUFFER_SIZE, VIRTQ_DESC_F_WRITE, 0);
 	st->rx_slot[head] = slot;
 	virtio_vq_kick(vq, head);
+	st->rx_posted++;
 	return (0);
 }
 
@@ -180,8 +215,40 @@ virtio_net_reclaim_tx(virtio_net_state_t *st)
 
 	while ((head = virtio_vq_pop_used(&st->tx_vq, NULL)) !=
 	    (u16)-1) {
+		if (head >= st->tx_vq.size) {
+			drivers_log("[VIRTIO_NET] invalid TX completion %u\n",
+			    head);
+			st->ndev.tx_dropped++;
+			continue;
+		}
 		virtio_vq_free_chain(&st->tx_vq, head);
+		st->ndev.tx_completed++;
 	}
+}
+
+static void
+virtio_net_destroy(virtio_net_state_t *st)
+{
+	if (!st) {
+		return;
+	}
+	st->ready = 0;
+	if (st->iface_registered) {
+		net_iface_unregister(&st->iface);
+	}
+	if (st->ndev_registered) {
+		netdev_unregister(&st->ndev);
+	}
+	virtio_pci_shutdown(&st->hw);
+	virtio_vq_destroy(&st->rx_vq);
+	virtio_vq_destroy(&st->tx_vq);
+	if (st->rx_buffers) {
+		kmem_free(st->rx_buffers);
+	}
+	if (st->tx_buffers) {
+		kmem_free(st->tx_buffers);
+	}
+	kmem_free(st);
 }
 
 static int
@@ -191,14 +258,19 @@ virtio_net_ndev_transmit(netdev_t *ndev, const u8 *frame, u16 len)
 	virtio_net_hdr_t	*hdr;
 	u16			head, slot;
 
+	if (!ndev) {
+		return (-1);
+	}
 	st = (virtio_net_state_t *)ndev->priv;
-	if (!st->ready || !frame || len < 14 ||
+	if (!st || !st->ready || !frame || len < 60 ||
 	    len > VIRTIO_NET_ETH_FRAME_MAX) {
+		ndev->tx_dropped++;
 		return (-1);
 	}
 	virtio_net_reclaim_tx(st);
 	head = virtio_vq_alloc_chain(&st->tx_vq, 1);
 	if (head == (u16)-1) {
+		ndev->tx_dropped++;
 		return (-1);
 	}
 	slot = head;
@@ -210,6 +282,7 @@ virtio_net_ndev_transmit(netdev_t *ndev, const u8 *frame, u16 len)
 	    VIRTIO_NET_HDR_SIZE + len, 0, 0);
 	virtio_vq_kick(&st->tx_vq, head);
 	virtio_hw_notify_queue(&st->hw, VIRTIO_NET_TX_QUEUE);
+	ndev->tx_submitted++;
 	return (0);
 }
 
@@ -222,26 +295,45 @@ virtio_net_ndev_poll(netdev_t *ndev)
 	u16			head, slot, frame_len;
 	int			count;
 
+	if (!ndev) {
+		return (-1);
+	}
 	st = (virtio_net_state_t *)ndev->priv;
-	if (!st->ready) {
+	if (!st || !st->ready) {
 		return (-1);
 	}
 
 	count = 0;
+	if (st->rx_start_kick_pending) {
+		virtio_hw_notify_queue(&st->hw, VIRTIO_NET_RX_QUEUE);
+		st->rx_start_kick_pending = 0;
+	}
 	while ((head = virtio_vq_pop_used(&st->rx_vq, &used_len)) !=
 	    (u16)-1) {
+		if (head >= st->rx_vq.size || st->rx_posted == 0) {
+			drivers_log("[VIRTIO_NET] invalid RX completion %u\n",
+			    head);
+			ndev->rx_dropped++;
+			return (-1);
+		}
+		ndev->rx_completed++;
+		st->rx_posted--;
 		slot = st->rx_slot[head];
 		if (used_len >= VIRTIO_NET_HDR_SIZE &&
 		    used_len <= VIRTIO_NET_RX_BUFFER_SIZE) {
 			hdr = (virtio_net_hdr_t *)(st->rx_buffers +
 			    (u64)slot * VIRTIO_NET_RX_BUFFER_SIZE);
 			frame_len = (u16)(used_len - VIRTIO_NET_HDR_SIZE);
-			if (ndev->rx_handler && hdr->num_buffers == 1 &&
-			    frame_len >= 14) {
+			if (ndev->rx_handler && frame_len >= 14) {
 				ndev->rx_handler(ndev,
 				    (u8 *)hdr + VIRTIO_NET_HDR_SIZE,
 				    frame_len);
+				ndev->rx_delivered++;
+			} else {
+				ndev->rx_dropped++;
 			}
+		} else {
+			ndev->rx_dropped++;
 		}
 		virtio_vq_free_chain(&st->rx_vq, head);
 		if (virtio_net_post_rx(st, slot) != 0) {
@@ -262,7 +354,8 @@ virtio_net_ndev_is_link_up(netdev_t *ndev)
 	virtio_net_state_t	*st;
 
 	st = (virtio_net_state_t *)ndev->priv;
-	return (st->ready);
+	virtio_net_read_link(st);
+	return (st->ready && st->link_up);
 }
 
 static int
@@ -280,14 +373,14 @@ virtio_net_pci_probe(pci_device_t *dev, const pci_match_t *match)
 	}
 	memset(st, 0, sizeof(*st));
 
-	if (virtio_pci_init(&st->hw, dev, VIRTIO_NET_F_MAC) != 0 ||
+	if (virtio_pci_init(&st->hw, dev, VIRTIO_NET_F_MAC |
+	    VIRTIO_NET_F_STATUS) != 0 ||
 	    virtio_net_setup_queue(&st->rx_vq, &st->hw,
 	    VIRTIO_NET_RX_QUEUE) != 0 ||
 	    virtio_net_setup_queue(&st->tx_vq, &st->hw,
 	    VIRTIO_NET_TX_QUEUE) != 0) {
 		drivers_log("[VIRTIO_NET] initialisation failed\n");
-		virtio_pci_shutdown(&st->hw);
-		kmem_free(st);
+		virtio_net_destroy(st);
 		return (-1);
 	}
 
@@ -298,33 +391,27 @@ virtio_net_pci_probe(pci_device_t *dev, const pci_match_t *match)
 	    VIRTIO_NET_TX_BUFFER_SIZE, PAGE_SIZE);
 	if (!st->rx_buffers || !st->tx_buffers) {
 		drivers_log("[VIRTIO_NET] buffer allocation failed\n");
-		virtio_pci_shutdown(&st->hw);
-		if (st->rx_buffers) {
-			kmem_free(st->rx_buffers);
-		}
-		kmem_free(st);
+		virtio_net_destroy(st);
 		return (-1);
 	}
 	memset(st->rx_buffers, 0, buffer_size);
 	memset(st->tx_buffers, 0, (u64)VIRTIO_NET_QUEUE_SIZE *
 	    VIRTIO_NET_TX_BUFFER_SIZE);
 
-	for (i = 0; i < VIRTIO_NET_QUEUE_SIZE; i++) {
+	for (i = 0; i < st->rx_vq.size; i++) {
 		if (virtio_net_post_rx(st, i) != 0) {
 			drivers_log("[VIRTIO_NET] RX queue fill "
 			    "failed\n");
-			virtio_pci_shutdown(&st->hw);
-			kmem_free(st->rx_buffers);
-			kmem_free(st->tx_buffers);
-			kmem_free(st);
+			virtio_net_destroy(st);
 			return (-1);
 		}
 	}
-	virtio_hw_notify_queue(&st->hw, VIRTIO_NET_RX_QUEUE);
 	virtio_hw_set_status(&st->hw, VIRTIO_STATUS_ACKNOWLEDGE |
 	    VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK |
 	    VIRTIO_STATUS_DRIVER_OK);
 	st->ready = 1;
+	virtio_hw_notify_queue(&st->hw, VIRTIO_NET_RX_QUEUE);
+	st->rx_start_kick_pending = 1;
 
 	memset(&st->ndev, 0, sizeof(st->ndev));
 	if (virtio_net_read_mac(st) == 0) {
@@ -335,23 +422,22 @@ virtio_net_pci_probe(pci_device_t *dev, const pci_match_t *match)
 		st->ndev.mac[2] = 0x00;
 		st->ndev.mac[3] = 0x00;
 		st->ndev.mac[4] = 0x00;
-		st->ndev.mac[5] = 0x01;
+		st->ndev.mac[5] = (u8)(dev->slot << 3 | dev->function);
 	}
 	strcpy(st->ndev.name, "eth0");
 	st->ndev.mtu = 1500;
 	st->ndev.flags = NETDEV_F_UP;
 	st->ndev.priv = st;
 	st->ndev.ops = &virtio_net_ndev_ops;
+	virtio_net_read_link(st);
 
 	if (netdev_register(&st->ndev) != 0) {
 		drivers_log("[VIRTIO_NET] netdev registration "
 		    "failed\n");
-		virtio_pci_shutdown(&st->hw);
-		kmem_free(st->rx_buffers);
-		kmem_free(st->tx_buffers);
-		kmem_free(st);
+		virtio_net_destroy(st);
 		return (-1);
 	}
+	st->ndev_registered = 1;
 
 	memset(&st->iface, 0, sizeof(st->iface));
 	strcpy(st->iface.name, "virtio0");
@@ -360,12 +446,11 @@ virtio_net_pci_probe(pci_device_t *dev, const pci_match_t *match)
 	if (net_iface_register(&st->iface, &st->ndev) != 0) {
 		drivers_log("[VIRTIO_NET] iface registration "
 		    "failed\n");
-		virtio_pci_shutdown(&st->hw);
-		kmem_free(st->rx_buffers);
-		kmem_free(st->tx_buffers);
-		kmem_free(st);
+		virtio_net_destroy(st);
 		return (-1);
 	}
+	st->iface_registered = 1;
+	dev->driver_data = st;
 
 	drivers_log("[VIRTIO_NET] ready: "
 	    "%02x:%02x:%02x:%02x:%02x:%02x on %s\n",
@@ -374,6 +459,19 @@ virtio_net_pci_probe(pci_device_t *dev, const pci_match_t *match)
 	    st->ndev.mac[4], st->ndev.mac[5],
 	    st->ndev.name);
 	return (0);
+}
+
+static void
+virtio_net_pci_remove(pci_device_t *dev)
+{
+	virtio_net_state_t	*st;
+
+	if (!dev) {
+		return;
+	}
+	st = dev->driver_data;
+	dev->driver_data = NULL;
+	virtio_net_destroy(st);
 }
 
 static pci_match_t virtio_net_matches[] = {
@@ -391,7 +489,7 @@ static pci_driver_t virtio_net_pci_driver = {
 	.matches	= virtio_net_matches,
 	.match_count	= 1,
 	.probe		= virtio_net_pci_probe,
-	.remove		= NULL,
+	.remove		= virtio_net_pci_remove,
 };
 
 static netdev_ops_t virtio_net_ndev_ops = {

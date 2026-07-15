@@ -231,7 +231,8 @@ parse_capability(virtio_hw_t *hw, u8 cfg_type, u8 bar,
 	u64		struct_phys, vaddr;
 
 	if (pci_read_bar(hw->pci_dev, bar, &bar_info) != 0 ||
-	    bar_info.base == 0) {
+	    bar_info.base == 0 || length == 0 || offset > bar_info.size ||
+	    length > bar_info.size - offset) {
 		drivers_log("[VIRTIO] cap type %u: BAR %u "
 		    "unreadable\n", cfg_type, bar);
 		return;
@@ -320,12 +321,15 @@ walk_capabilities(virtio_hw_t *hw)
 	u8	cap_ptr, cap_vndr, cap_next, cap_len;
 	u8	cfg_type, bar;
 	u32	offset, length, notify_mult;
+	int	count;
 
 	cap_ptr = pci_cfg_read8(hw->pci_dev->bus,
 	    hw->pci_dev->slot, hw->pci_dev->function,
 	    PCI_CFG_CAPABILITIES);
 
-	while (cap_ptr != 0) {
+	count = 0;
+	while (cap_ptr >= 0x40 && (cap_ptr & 3) == 0 &&
+	    count++ < 48) {
 		cap_vndr = pci_cfg_read8(hw->pci_dev->bus,
 		    hw->pci_dev->slot, hw->pci_dev->function,
 		    cap_ptr);
@@ -366,6 +370,9 @@ walk_capabilities(virtio_hw_t *hw)
 		}
 
 		cap_ptr = cap_next;
+	}
+	if (count >= 48) {
+		drivers_log("[VIRTIO] malformed capability list\n");
 	}
 }
 
@@ -506,7 +513,7 @@ virtio_hw_init(virtio_hw_t *hw, pci_device_t *dev)
 void
 virtio_hw_shutdown(virtio_hw_t *hw)
 {
-	if (!hw || !hw->ready) {
+	if (!hw || hw->common_base == 0) {
 		return;
 	}
 	virtio_hw_set_status(hw, VIRTIO_STATUS_RESET);

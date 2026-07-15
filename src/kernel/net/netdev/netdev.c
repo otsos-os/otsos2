@@ -31,6 +31,7 @@ $define %type int as 32 bit signed
 $define %type netdev_t as struct with physical network device state
 
 $define %func netdev_register as function with args netdev_t *
+$define %func netdev_unregister as procedure with args netdev_t *
 $define %func netdev_count as function with args void
 $define %func netdev_get as function with args int
 $define %func netdev_by_name as function with args const char *
@@ -41,7 +42,7 @@ $define %func netdev_dump_all as procedure with args void
 
 /* !SPACE!
 
-$space %export netdev_register, netdev_count
+$space %export netdev_register, netdev_unregister, netdev_count
 $space %export netdev_get, netdev_by_name
 $space %export netdev_poll_all, netdev_dump_all
 
@@ -57,6 +58,8 @@ static int		g_device_count;
 int
 netdev_register(netdev_t *ndev)
 {
+	int	i;
+
 	if (!ndev || !ndev->ops || !ndev->ops->transmit ||
 	    !ndev->ops->poll) {
 		return (-1);
@@ -64,6 +67,12 @@ netdev_register(netdev_t *ndev)
 	if (g_device_count >= NETDEV_MAX_DEVICES) {
 		drivers_log("[NETDEV] too many devices\n");
 		return (-1);
+	}
+	for (i = 0; i < g_device_count; i++) {
+		if (g_devices[i] == ndev ||
+		    strcmp(g_devices[i]->name, ndev->name) == 0) {
+			return (-1);
+		}
 	}
 
 	ndev->rx_handler = NULL;
@@ -77,6 +86,30 @@ netdev_register(netdev_t *ndev)
 	    ndev->mac[0], ndev->mac[1], ndev->mac[2],
 	    ndev->mac[3], ndev->mac[4], ndev->mac[5]);
 	return (0);
+}
+
+void
+netdev_unregister(netdev_t *ndev)
+{
+	int	i, j;
+
+	if (!ndev) {
+		return;
+	}
+	for (i = 0; i < g_device_count; i++) {
+		if (g_devices[i] != ndev) {
+			continue;
+		}
+		for (j = i; j + 1 < g_device_count; j++) {
+			g_devices[j] = g_devices[j + 1];
+			g_devices[j]->index = j;
+		}
+		g_device_count--;
+		g_devices[g_device_count] = NULL;
+		ndev->rx_handler = NULL;
+		ndev->index = -1;
+		return;
+	}
 }
 
 int
@@ -116,7 +149,8 @@ netdev_poll_all(void)
 	int	i;
 
 	for (i = 0; i < g_device_count; i++) {
-		if (g_devices[i]->flags & NETDEV_F_UP) {
+		if (g_devices[i]->flags & NETDEV_F_UP &&
+		    g_devices[i]->ops && g_devices[i]->ops->poll) {
 			g_devices[i]->ops->poll(g_devices[i]);
 		}
 	}

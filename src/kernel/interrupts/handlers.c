@@ -34,6 +34,7 @@
 #include <kernel/console/terminal.h>
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/event/event.h>
+#include <kernel/net/net.h>
 #include <kernel/interrupts/idt.h>
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_map.h>
@@ -101,6 +102,7 @@ void irq_handler(registers_t *regs) {
     power_button_poll();
     watchdog_tick();
     event_timer_tick();
+    net_poll_all();
     crypto_rng_tick();
     keyboard_poll();
     ps2_mouse_poll();
@@ -117,6 +119,7 @@ void irq_handler(registers_t *regs) {
     power_button_poll();
     watchdog_tick();
     event_timer_tick();
+    net_poll_all();
     crypto_rng_tick();
     keyboard_poll();
     ps2_mouse_poll();

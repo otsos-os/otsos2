@@ -140,6 +140,49 @@ format_uint(char *buf, size_t size, u64 value, int base, int upper)
 }
 
 static int
+format_padded_uint(char *buf, size_t size, u64 value, int base,
+    int upper, int width, int zero_pad)
+{
+	const char	*digits;
+	char		tmp[64];
+	int		i, n, padding, written;
+
+	digits = upper ? "0123456789ABCDEF" : "0123456789abcdef";
+	if (value == 0) {
+		tmp[0] = '0';
+		n = 1;
+	} else {
+		n = 0;
+		while (value > 0) {
+			tmp[n++] = digits[value % (u64)base];
+			value /= (u64)base;
+		}
+	}
+	padding = width > n ? width - n : 0;
+	written = 0;
+	for (i = 0; i < padding; i++) {
+		if (written < (int)size - 1 && size > 0) {
+			buf[written] = zero_pad ? '0' : ' ';
+		}
+		written++;
+	}
+	for (i = n - 1; i >= 0; i--) {
+		if (written < (int)size - 1 && size > 0) {
+			buf[written] = tmp[i];
+		}
+		written++;
+	}
+	if (size > 0) {
+		if (written < (int)size) {
+			buf[written] = '\0';
+		} else {
+			buf[size - 1] = '\0';
+		}
+	}
+	return (written);
+}
+
+static int
 format_int(char *buf, size_t size, s64 value, int base)
 {
 	int	written;
@@ -167,7 +210,7 @@ vsnprintf(char *str, size_t size, const char *fmt,
 	const char	*p;
 	int		written, total;
 	char		*out;
-	int		out_size;
+	int		out_size, width, zero_pad;
 
 	written = 0;
 	total = 0;
@@ -185,6 +228,16 @@ vsnprintf(char *str, size_t size, const char *fmt,
 		}
 
 		p++;
+		zero_pad = 0;
+		width = 0;
+		if (*p == '0') {
+			zero_pad = 1;
+			p++;
+		}
+		while (*p >= '0' && *p <= '9') {
+			width = width * 10 + (*p - '0');
+			p++;
+		}
 
 		out = str + written;
 		out_size = (int)size - written;
@@ -238,8 +291,9 @@ vsnprintf(char *str, size_t size, const char *fmt,
 		case 'u': {
 			int	len;
 
-			len = format_uint(out, (size_t)out_size,
-			    __builtin_va_arg(args, unsigned int), 10, 0);
+			len = format_padded_uint(out, (size_t)out_size,
+			    __builtin_va_arg(args, unsigned int), 10, 0,
+			    width, zero_pad);
 			written += len;
 			total += len;
 			break;
@@ -248,9 +302,9 @@ vsnprintf(char *str, size_t size, const char *fmt,
 		case 'X': {
 			int	len;
 
-			len = format_uint(out, (size_t)out_size,
+			len = format_padded_uint(out, (size_t)out_size,
 			    __builtin_va_arg(args, unsigned int), 16,
-			    *p == 'X');
+			    *p == 'X', width, zero_pad);
 			written += len;
 			total += len;
 			break;

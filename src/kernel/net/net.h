@@ -35,6 +35,7 @@ $define %type net_iface_t as struct with logical network interface state
 $define %func net_init as function with args void
 $define %func net_is_initialized as function with args void
 $define %func net_iface_register as function with args net_iface_t *, netdev_t *
+$define %func net_iface_unregister as procedure with args net_iface_t *
 $define %func net_iface_count as function with args void
 $define %func net_iface_get as function with args int
 $define %func net_iface_by_name as function with args const char *
@@ -47,7 +48,7 @@ $define %func net_dump_ifaces as procedure with args void
 /* !SPACE!
 
 $space %export net_init, net_is_initialized
-$space %export net_iface_register, net_iface_count
+$space %export net_iface_register, net_iface_unregister, net_iface_count
 $space %export net_iface_get, net_iface_by_name
 $space %export net_iface_find_by_ndev
 $space %export net_poll_all, net_dump_ifaces
@@ -80,6 +81,7 @@ typedef struct net_iface {
 int	net_init(void);
 int	net_is_initialized(void);
 int	net_iface_register(net_iface_t *iface, netdev_t *ndev);
+void	net_iface_unregister(net_iface_t *iface);
 int	net_iface_count(void);
 net_iface_t *net_iface_get(int index);
 net_iface_t *net_iface_by_name(const char *name);

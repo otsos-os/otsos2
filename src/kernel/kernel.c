@@ -46,6 +46,7 @@ $define %func status_line as procedure with args const char *, int
 $define %func disk_has_type as function with args disk_type_t
 $define %func disk_find_type as function with args disk_type_t
 $define %func timer_sanity_check as function with args void
+$define %func net_test as procedure with args void
 $define %func enable_sse as procedure with args void
 $define %func kernel_ensure_parent_dirs as function with args const char *
 $define %func kernel_install_module_cb as procedure with args const char *, const char *, void *
@@ -58,7 +59,7 @@ $define %func kmain as start with args u64, u64, u64, u64
 $space %internal debug_multiboot_info, debug_multiboot2_tags
 $space %internal mb2_find_module, status_line
 $space %internal disk_has_type, disk_find_type
-$space %internal timer_sanity_check, enable_sse
+$space %internal timer_sanity_check, net_test, enable_sse
 $space %internal kernel_ensure_parent_dirs, kernel_install_module_cb
 $space %export kmain
 
@@ -408,6 +409,8 @@ net_test(void)
 {
 	net_iface_t	*iface;
 	netdev_t	*ndev;
+	arp_cache_entry_t	*entry;
+	u64		start, timeout;
 	u32		test_ip;
 	int		i;
 
@@ -433,7 +436,7 @@ net_test(void)
 		    ndev->name,
 		    ndev->mac[0], ndev->mac[1], ndev->mac[2],
 		    ndev->mac[3], ndev->mac[4], ndev->mac[5],
-		    ndev->ops->is_link_up(ndev) ? "up" : "down");
+			ndev->ops->is_link_up(ndev) ? "up" : "down");
 
 		iface = net_iface_find_by_ndev(ndev);
 		if (!iface) {
@@ -452,18 +455,61 @@ net_test(void)
 			iface->netmask = (255u << 24) |
 			    (255u << 16) | (255u << 8) | 0u;
 			iface->gw_addr = (10u << 24) |
-			    (0u << 16) | (2u << 8) | 1u;
+			    (0u << 16) | (2u << 8) | 2u;
 		}
 
 		test_ip = iface->gw_addr ? iface->gw_addr :
 		    (iface->ip_addr & iface->netmask) | 1;
 		printk("[NET_TEST] sending ARP request for "
-		    "gw %d.%d.%d.%d...\n",
+		    "gateway %d.%d.%d.%d...\n",
 		    (test_ip >> 24) & 0xFF,
 		    (test_ip >> 16) & 0xFF,
 		    (test_ip >> 8) & 0xFF,
 		    test_ip & 0xFF);
-		arp_send_request(iface, test_ip);
+		if (arp_send_request(iface, test_ip) != 0) {
+			printk("[NET_TEST] %s: ARP request failed\n",
+			    ndev->name);
+			continue;
+		}
+
+		start = timer_get_ticks();
+		timeout = timer_get_frequency();
+		if (timeout == 0) {
+			timeout = 1000;
+		}
+		entry = NULL;
+		while (timer_get_ticks() - start < timeout) {
+			net_poll_all();
+			entry = arp_lookup(iface, test_ip);
+			if (entry) {
+				break;
+			}
+			__asm__ volatile("pause");
+		}
+		if (entry) {
+			printk("[NET_TEST] %s: reply received from "
+			    "%d.%d.%d.%d (%02x:%02x:%02x:%02x:%02x:%02x)\n",
+			    ndev->name,
+			    (test_ip >> 24) & 0xFF,
+			    (test_ip >> 16) & 0xFF,
+			    (test_ip >> 8) & 0xFF,
+			    test_ip & 0xFF,
+			    entry->mac[0], entry->mac[1], entry->mac[2],
+			    entry->mac[3], entry->mac[4], entry->mac[5]);
+		} else {
+			printk("[NET_TEST] %s: no ARP reply from "
+			    "%d.%d.%d.%d within 1 second\n",
+			    ndev->name,
+			    (test_ip >> 24) & 0xFF,
+			    (test_ip >> 16) & 0xFF,
+			    (test_ip >> 8) & 0xFF,
+			    test_ip & 0xFF);
+		}
+		printk("[NET_TEST] %s stats: tx=%llu done=%llu drop=%llu "
+		    "rx=%llu delivered=%llu drop=%llu\n",
+		    ndev->name, ndev->tx_submitted, ndev->tx_completed,
+		    ndev->tx_dropped, ndev->rx_completed, ndev->rx_delivered,
+		    ndev->rx_dropped);
 	}
 }
 

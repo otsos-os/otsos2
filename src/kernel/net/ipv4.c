@@ -80,6 +80,7 @@ ipv4_input(net_iface_t *iface, const u8 *src_mac,
 	const ipv4_header_t	*ip;
 	u16			header_len, total_len;
 	u16			expected_checksum;
+	u16			flags_frag;
 	int			ret;
 
 	(void)src_mac;
@@ -104,29 +105,33 @@ ipv4_input(net_iface_t *iface, const u8 *src_mac,
 	}
 
 	expected_checksum = ipv4_checksum(ip, header_len);
-	if (expected_checksum != 0xFFFF &&
-	    expected_checksum != 0) {
+	if (expected_checksum != 0) {
 		return (0);
 	}
 
-	if (iface->ip_addr != 0 && ip->dst != iface->ip_addr &&
-	    ip->dst != 0xFFFFFFFF) {
+	if (iface->ip_addr == 0 ||
+	    (__builtin_bswap32(ip->dst) != iface->ip_addr &&
+	    __builtin_bswap32(ip->dst) != 0xFFFFFFFF)) {
 		return (0);
 	}
 
 	if (ip->ttl == 0) {
 		return (0);
 	}
+	flags_frag = __builtin_bswap16(ip->flags_frag);
+	if ((flags_frag & 0x3FFF) != 0) {
+		return (0);
+	}
 
 	switch (ip->protocol) {
 	case IPV4_PROTO_ICMP:
-		ret = icmp_input(iface, ip->src,
+		ret = icmp_input(iface, __builtin_bswap32(ip->src),
 		    data + header_len,
 		    (u16)(total_len - header_len));
 		break;
 
 	case IPV4_PROTO_UDP:
-		ret = udp_input(iface, ip->src,
+		ret = udp_input(iface, __builtin_bswap32(ip->src),
 		    data + header_len,
 		    (u16)(total_len - header_len));
 		break;
@@ -146,9 +151,14 @@ ipv4_output(net_iface_t *iface, u32 dst_ip, u8 protocol,
 	u8			packet[ETHERNET_MTU];
 	ipv4_header_t		*ip;
 	u16			total_len;
+	static u16		packet_id;
 	u8			dst_mac[ETHERNET_ADDR_LEN];
 	int			resolved;
 
+	if (!iface || !iface->ndev || !data || iface->ip_addr == 0 ||
+	    dst_ip == 0) {
+		return (-1);
+	}
 	total_len = (u16)(sizeof(ipv4_header_t) + len);
 	if (total_len > ETHERNET_MTU) {
 		return (-1);
@@ -169,10 +179,11 @@ ipv4_output(net_iface_t *iface, u32 dst_ip, u8 protocol,
 	ip = (ipv4_header_t *)packet;
 	ip->ver_ihl = (IPV4_VERSION << 4) | IPV4_IHL_MIN;
 	ip->total_len = __builtin_bswap16(total_len);
+	ip->id = __builtin_bswap16(packet_id++);
 	ip->ttl = IPV4_TTL_DEFAULT;
 	ip->protocol = protocol;
-	ip->src = iface->ip_addr;
-	ip->dst = dst_ip;
+	ip->src = __builtin_bswap32(iface->ip_addr);
+	ip->dst = __builtin_bswap32(dst_ip);
 	ip->checksum = __builtin_bswap16(
 	    ipv4_checksum(ip, sizeof(ipv4_header_t)));
 

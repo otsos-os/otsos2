@@ -84,6 +84,9 @@ icmp_input(net_iface_t *iface, u32 src_ip,
 	}
 
 	icmp = (const icmp_header_t *)data;
+	if (icmp_checksum(data, len) != 0) {
+		return (0);
+	}
 
 	if (icmp->type == ICMP_TYPE_ECHO_REQUEST &&
 	    icmp->code == 0) {
