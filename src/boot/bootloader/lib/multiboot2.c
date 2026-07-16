@@ -29,6 +29,7 @@
 $define %type u8 as 8 bit unsigned
 $define %type u32 as 32 bit unsigned
 $define %type u64 as 64 bit unsigned
+$define %type int as 32 bit signed
 $define %type mb2_builder_t as mutable multiboot2 info builder
 $define %type mb2_framebuffer_t as framebuffer boot info
 $define %type mb2_tag_t as multiboot2 tag header
@@ -40,8 +41,10 @@ $define %func mb2_builder_init as procedure with args mb2_builder_t *, void *, u
 $define %func mb2_add_bootloader_name as function with args mb2_builder_t *, const char *
 $define %func mb2_add_basic_meminfo as function with args mb2_builder_t *, u32, u32
 $define %func mb2_add_simple_mmap as function with args mb2_builder_t *, u32, u32
+$define %func mb2_add_mmap_entries as function with args mb2_builder_t *, const mb2_mmap_entry_t *, u32
 $define %func mb2_add_framebuffer as function with args mb2_builder_t *, const mb2_framebuffer_t *
 $define %func mb2_add_module as function with args mb2_builder_t *, u32, u32, const char *
+$define %func mb2_add_acpi as function with args mb2_builder_t *, const void *, u32, int
 $define %func mb2_builder_finish as function with args mb2_builder_t *
 
 */
@@ -51,7 +54,9 @@ $define %func mb2_builder_finish as function with args mb2_builder_t *
 $space %internal align8, tag_alloc
 $space %export mb2_builder_init, mb2_add_bootloader_name
 $space %export mb2_add_basic_meminfo, mb2_add_simple_mmap
+$space %export mb2_add_mmap_entries
 $space %export mb2_add_framebuffer, mb2_add_module, mb2_builder_finish
+$space %export mb2_add_acpi
 
 */
 
@@ -64,6 +69,8 @@ $space %export mb2_add_framebuffer, mb2_add_module, mb2_builder_finish
 #define MB2_TAG_BASIC_MEMINFO	4
 #define MB2_TAG_MMAP		6
 #define MB2_TAG_FRAMEBUFFER	8
+#define MB2_TAG_ACPI_OLD	14
+#define MB2_TAG_ACPI_NEW	15
 #define MB2_MEMORY_AVAILABLE	1
 #define MB2_FB_RGB		1
 
@@ -71,13 +78,6 @@ typedef struct {
 	u32	type;
 	u32	size;
 } __attribute__((packed)) mb2_tag_t;
-
-typedef struct {
-	u64	base_addr;
-	u64	length;
-	u32	type;
-	u32	reserved;
-} __attribute__((packed)) mb2_mmap_entry_t;
 
 static u32
 align8(u32 value)
@@ -172,6 +172,29 @@ mb2_add_simple_mmap(mb2_builder_t *b, u32 lower, u32 upper)
 }
 
 int
+mb2_add_mmap_entries(mb2_builder_t *b, const mb2_mmap_entry_t *entries,
+    u32 count)
+{
+	mb2_tag_t	*tag;
+	u32		size;
+	u32		*p;
+
+	if (!entries || count == 0) {
+		return (-1);
+	}
+	size = 16 + count * sizeof(*entries);
+	tag = (mb2_tag_t *)tag_alloc(b, MB2_TAG_MMAP, size);
+	if (!tag) {
+		return (-1);
+	}
+	p = (u32 *)((u8 *)tag + 8);
+	p[0] = sizeof(*entries);
+	p[1] = 0;
+	bl_memcpy((u8 *)tag + 16, entries, count * sizeof(*entries));
+	return (0);
+}
+
+int
 mb2_add_framebuffer(mb2_builder_t *b, const mb2_framebuffer_t *fb)
 {
 	mb2_tag_t	*tag;
@@ -211,6 +234,24 @@ mb2_add_module(mb2_builder_t *b, u32 start, u32 end, const char *name)
 	p[0] = start;
 	p[1] = end;
 	bl_memcpy((u8 *)tag + 16, name, size - 16);
+	return (0);
+}
+
+int
+mb2_add_acpi(mb2_builder_t *b, const void *rsdp, u32 size, int is_new)
+{
+	mb2_tag_t	*tag;
+	u32		type;
+
+	if (!rsdp || size < 20) {
+		return (-1);
+	}
+	type = is_new ? MB2_TAG_ACPI_NEW : MB2_TAG_ACPI_OLD;
+	tag = (mb2_tag_t *)tag_alloc(b, type, 8 + size);
+	if (!tag) {
+		return (-1);
+	}
+	bl_memcpy((u8 *)tag + 8, rsdp, size);
 	return (0);
 }
 

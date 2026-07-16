@@ -24,8 +24,10 @@ CFLAGS += $(DISK_DEFINES)
 KERNEL_BIN = ../bin/kernel.bin
 ISO_IMAGE = ../otsos.iso
 BIOS_ISO_IMAGE = ../otsos-bios.iso
+UEFI_ISO_IMAGE = ../otsos-uefi.iso
 ISODIR = ../isodir
 BIOS_ISODIR = ../bios-isodir
+UEFI_ISODIR = ../uefi-isodir
 DISK_IMG = ../bin/disk.img
 PORTS_DIR = ../ports
 MUSL_DIR = ../libc/musl
@@ -52,6 +54,7 @@ CPYTHON_BIN =
 endif
 
 BIOS_BUILD_DIR = ../bin/bootloader/bios
+UEFI_BUILD_DIR = ../bin/bootloader/uefi
 BIOS_STAGE2_AREA_SECTORS = 256
 BIOS_STAGE1_MAX_SECTORS = 60
 BIOS_LAYOUT_LBA = 257
@@ -65,11 +68,19 @@ BIOS_BOOTPACK = $(BIOS_BUILD_DIR)/bootpack.tar
 BIOS_LAYOUT_BIN = $(BIOS_BUILD_DIR)/layout.bin
 BIOS_BOOT_IMAGE = $(BIOS_BUILD_DIR)/otsos-bios.img
 BIOS_PAYLOAD_DIR = $(BIOS_BUILD_DIR)/payload
+UEFI_BOOTX64 = $(UEFI_BUILD_DIR)/BOOTX64.EFI
+UEFI_ESP_IMAGE = $(UEFI_BUILD_DIR)/otsos-uefi-esp.img
+UEFI_PAYLOAD_DIR = $(UEFI_BUILD_DIR)/payload
+UEFI_TRAMPOLINE_OBJ = $(UEFI_BUILD_DIR)/trampoline.obj
 BIOS_OBJCOPY = llvm-objcopy
 BIOS_XORRISO = xorriso
+UEFI_XORRISO = xorriso
 BIOS_CFLAGS = --target=i386-elf -m32 -ffreestanding -fno-pic \
 	-fno-builtin -fno-stack-protector -fno-asynchronous-unwind-tables \
 	-nostdinc -O2 -g -I.
+UEFI_CFLAGS = --target=x86_64-windows -ffreestanding -fno-pic \
+	-fno-builtin -fno-stack-protector -fno-asynchronous-unwind-tables \
+	-mno-red-zone -nostdinc -O2 -g -I.
 BIOS_STAGE2_OBJS = \
 	$(BIOS_BUILD_DIR)/entry.o \
 	$(BIOS_BUILD_DIR)/main.o \
@@ -79,6 +90,11 @@ BIOS_STAGE2_OBJS = \
 	$(BIOS_BUILD_DIR)/lib_bootpack.o \
 	$(BIOS_BUILD_DIR)/lib_elf64.o \
 	$(BIOS_BUILD_DIR)/lib_multiboot2.o
+UEFI_LIB_OBJS = \
+	$(UEFI_BUILD_DIR)/lib_string.obj \
+	$(UEFI_BUILD_DIR)/lib_bootpack.obj \
+	$(UEFI_BUILD_DIR)/lib_elf64.obj \
+	$(UEFI_BUILD_DIR)/lib_multiboot2.obj
 
 ifeq ($(LIBC_ENABLED),true)
 ISO_MUSL_TEST_DEP = $(MUSL_TEST_BIN)
@@ -293,10 +309,12 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(API_TIME_O) $(TERM_POWER_O) $(TERM_INFO_O) $(INPUT_O) \
       $(TIME_O) $(CLOCKSOURCE_O) $(ET_CLOCKSOURCE_O) $(CMOS_RTC_O)
 
-.PHONY: all bios ask_version check_build_tools check_run_tools check_bios_tools check_bios_run_tools
+.PHONY: all bios uefi ask_version check_build_tools check_run_tools
+.PHONY: check_bios_tools check_bios_run_tools check_uefi_tools check_uefi_run_tools
 
 all: check_build_tools ask_version $(ISO_IMAGE)
 bios: check_bios_tools $(BIOS_ISO_IMAGE)
+uefi: check_uefi_tools $(UEFI_ISO_IMAGE)
 
 check_build_tools:
 	@set -e; \
@@ -338,6 +356,24 @@ check_bios_tools:
 	done
 
 check_bios_run_tools: check_bios_tools
+	@set -e; \
+	if ! command -v "$(QEMU)" >/dev/null 2>&1; then \
+		echo "  MISSING $(QEMU)"; \
+		echo "  install qemu to run"; \
+		exit 1; \
+	fi
+
+check_uefi_tools:
+	@set -e; \
+	for tool in "$(CC)" "$(ZIG)" "$(UEFI_XORRISO)" mformat mmd mcopy tar stat truncate; do \
+		if ! command -v "$$tool" >/dev/null 2>&1; then \
+			echo "  MISSING $$tool"; \
+			echo "  install missing tools to build UEFI loader"; \
+			exit 1; \
+		fi; \
+	done
+
+check_uefi_run_tools: check_uefi_tools
 	@set -e; \
 	if ! command -v "$(QEMU)" >/dev/null 2>&1; then \
 		echo "  MISSING $(QEMU)"; \
@@ -602,6 +638,41 @@ $(BIOS_ISO_IMAGE): check_bios_tools $(BIOS_BOOT_IMAGE)
 	@$(BIOS_XORRISO) -as mkisofs -quiet -o $(BIOS_ISO_IMAGE) \
 		-b boot/otsos-bios.img -c boot/boot.cat -hard-disk-boot \
 		$(BIOS_ISODIR)
+
+$(UEFI_BUILD_DIR):
+	@mkdir -p $(UEFI_BUILD_DIR)
+
+$(UEFI_BUILD_DIR)/trampoline.obj: boot/bootloader/uefi/trampoline.S | $(UEFI_BUILD_DIR)
+	@echo "  AS      $<"
+	@$(CC) $(UEFI_CFLAGS) -x assembler-with-cpp -c $< -o $@
+
+$(UEFI_BUILD_DIR)/lib_%.obj: boot/bootloader/lib/%.c | $(UEFI_BUILD_DIR)
+	@echo "  CC      $<"
+	@$(CC) $(UEFI_CFLAGS) -c $< -o $@
+
+$(UEFI_BOOTX64): boot/bootloader/uefi/main.zig $(UEFI_TRAMPOLINE_OBJ) $(UEFI_LIB_OBJS) | $(UEFI_BUILD_DIR)
+	@echo "  ZIG     $@"
+	@$(ZIG) build-exe boot/bootloader/uefi/main.zig \
+		-target x86_64-uefi -O ReleaseSmall \
+		-femit-bin=$@ $(UEFI_TRAMPOLINE_OBJ) $(UEFI_LIB_OBJS)
+
+$(UEFI_ESP_IMAGE): $(UEFI_BOOTX64) $(BIOS_BOOTPACK) | $(UEFI_BUILD_DIR)
+	@echo "  ESP     $(UEFI_ESP_IMAGE)"
+	@rm -f $@
+	@truncate -s 16M $@
+	@mformat -i $@ -v OTSOSUEFI ::
+	@mmd -i $@ ::/EFI ::/EFI/BOOT ::/boot
+	@mcopy -i $@ $(UEFI_BOOTX64) ::/EFI/BOOT/BOOTX64.EFI
+	@mcopy -i $@ $(BIOS_BOOTPACK) ::/boot/bootpack.tar
+
+$(UEFI_ISO_IMAGE): check_uefi_tools $(UEFI_ESP_IMAGE)
+	@rm -rf $(UEFI_ISODIR)
+	@mkdir -p $(UEFI_ISODIR)/EFI
+	@cp $(UEFI_ESP_IMAGE) $(UEFI_ISODIR)/EFI/efiboot.img
+	@echo "  ISO     $(UEFI_ISO_IMAGE)"
+	@$(UEFI_XORRISO) -as mkisofs -quiet -o $(UEFI_ISO_IMAGE) \
+		-e EFI/efiboot.img -no-emul-boot \
+		$(UEFI_ISODIR)
 
 $(KERNEL_BIN): $(OBJ)
 	@echo "  LLD      $@"
@@ -1257,6 +1328,10 @@ run_bios: check_bios_run_tools $(BIOS_ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (BIOS loader)"
 	@$(QEMU) -cdrom $(BIOS_ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -device i6300esb -watchdog-action reset
 
+run_uefi: check_uefi_run_tools $(UEFI_ISO_IMAGE) $(DISK_IMG)
+	@echo "  RUN     QEMU (UEFI loader)"
+	@$(QEMU) -cdrom $(UEFI_ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset
+
 virtio: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (virtio-gpu, virtio-net)"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device virtio-gpu-pci -netdev user,id=net0 -device virtio-net-pci,netdev=net0,disable-legacy=on -device i6300esb -watchdog-action reset
@@ -1271,5 +1346,5 @@ debug: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 
 clean:
 	@echo "  CLEAN"
-	@rm -f ../bin/*.o ../bin/kernel.bin ../bin/kernel.map $(ISO_IMAGE) $(BIOS_ISO_IMAGE) $(DISK_IMG)
-	@rm -rf $(ISODIR)/boot/kernel.bin $(ISODIR)/boot/config.toml $(BIOS_BUILD_DIR) $(BIOS_ISODIR)
+	@rm -f ../bin/*.o ../bin/kernel.bin ../bin/kernel.map $(ISO_IMAGE) $(BIOS_ISO_IMAGE) $(UEFI_ISO_IMAGE) $(DISK_IMG)
+	@rm -rf $(ISODIR)/boot/kernel.bin $(ISODIR)/boot/config.toml $(BIOS_BUILD_DIR) $(UEFI_BUILD_DIR) $(BIOS_ISODIR) $(UEFI_ISODIR)

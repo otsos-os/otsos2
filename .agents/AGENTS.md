@@ -83,6 +83,12 @@ Monolithic kernel with the following rough layers:
 - `boot.s` — Multiboot2 header, graphical menu, PIT-based countdown, long mode
   setup, calls `kmain`. Does not use GRUB directly; it is loaded by a
   Multiboot-compliant bootloader and then chain-loads the kernel.
+- `boot/bootloader/bios/` — custom legacy BIOS loader in C/ASM, builds
+  `make bios` / `make run_bios`.
+- `boot/bootloader/uefi/` — custom UEFI loader in Zig with a small ASM
+  trampoline, builds `make uefi` / `make run_uefi`.
+- `boot/bootloader/lib/` — loader-agnostic helpers shared by BIOS and UEFI
+  paths (bootpack, ELF64, Multiboot2, string).
 
 ### Minimal C library (`src/mlibc/`)
 
@@ -202,6 +208,8 @@ make          # interactive version prompt; builds kernel + init + ports + ISO
 make run      # QEMU with UEFI + GUI
 make run_nodis # QEMU with UEFI, no display
 make run_bios # QEMU BIOS mode
+make uefi     # build UEFI ISO with custom loader
+make run_uefi # QEMU with UEFI loader
 make virtio   # QEMU with virtio-gpu
 make debug    # QEMU with `-d int,cpu_reset`
 make clean

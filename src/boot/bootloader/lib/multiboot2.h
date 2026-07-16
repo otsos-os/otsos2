@@ -29,24 +29,30 @@
 $define %type u8 as 8 bit unsigned
 $define %type u32 as 32 bit unsigned
 $define %type u64 as 64 bit unsigned
+$define %type int as 32 bit signed
 $define %type mb2_builder_t as mutable multiboot2 info builder
 $define %type mb2_framebuffer_t as framebuffer boot info
+$define %type mb2_mmap_entry_t as multiboot2 memory map entry
 $define %func mb2_builder_init as procedure with args mb2_builder_t *, void *, u32
 $define %func mb2_add_bootloader_name as function with args mb2_builder_t *, const char *
 $define %func mb2_add_basic_meminfo as function with args mb2_builder_t *, u32, u32
 $define %func mb2_add_simple_mmap as function with args mb2_builder_t *, u32, u32
+$define %func mb2_add_mmap_entries as function with args mb2_builder_t *, const mb2_mmap_entry_t *, u32
 $define %func mb2_add_framebuffer as function with args mb2_builder_t *, const mb2_framebuffer_t *
 $define %func mb2_add_module as function with args mb2_builder_t *, u32, u32, const char *
+$define %func mb2_add_acpi as function with args mb2_builder_t *, const void *, u32, int
 $define %func mb2_builder_finish as function with args mb2_builder_t *
 
 */
 
 /* !SPACE!
 
-$space %export mb2_builder_t, mb2_framebuffer_t
+$space %export mb2_builder_t, mb2_framebuffer_t, mb2_mmap_entry_t
 $space %export mb2_builder_init, mb2_add_bootloader_name
 $space %export mb2_add_basic_meminfo, mb2_add_simple_mmap
+$space %export mb2_add_mmap_entries
 $space %export mb2_add_framebuffer, mb2_add_module, mb2_builder_finish
+$space %export mb2_add_acpi
 
 */
 
@@ -67,13 +73,23 @@ typedef struct {
 	u32	bpp;
 	u32	type;
 } mb2_framebuffer_t;
+typedef struct {
+	u64	base_addr;
+	u64	length;
+	u32	type;
+	u32	reserved;
+} mb2_mmap_entry_t;
 void	mb2_builder_init(mb2_builder_t *b, void *buf, u32 cap);
 int	mb2_add_bootloader_name(mb2_builder_t *b, const char *name);
 int	mb2_add_basic_meminfo(mb2_builder_t *b, u32 lower, u32 upper);
 int	mb2_add_simple_mmap(mb2_builder_t *b, u32 lower, u32 upper);
+int	mb2_add_mmap_entries(mb2_builder_t *b,
+	    const mb2_mmap_entry_t *entries, u32 count);
 int	mb2_add_framebuffer(mb2_builder_t *b, const mb2_framebuffer_t *fb);
 int	mb2_add_module(mb2_builder_t *b, u32 start, u32 end,
 	    const char *name);
+int	mb2_add_acpi(mb2_builder_t *b, const void *rsdp, u32 size,
+	    int is_new);
 u32	mb2_builder_finish(mb2_builder_t *b);
 
 #endif
