@@ -23,7 +23,9 @@ CFLAGS += $(DISK_DEFINES)
 
 KERNEL_BIN = ../bin/kernel.bin
 ISO_IMAGE = ../otsos.iso
+BIOS_ISO_IMAGE = ../otsos-bios.iso
 ISODIR = ../isodir
+BIOS_ISODIR = ../bios-isodir
 DISK_IMG = ../bin/disk.img
 PORTS_DIR = ../ports
 MUSL_DIR = ../libc/musl
@@ -48,6 +50,35 @@ CPYTHON_ENABLED := $(if $(filter python,$(MULTIBOOT_MODULES)),true,false)
 ifeq ($(CPYTHON_ENABLED),false)
 CPYTHON_BIN =
 endif
+
+BIOS_BUILD_DIR = ../bin/bootloader/bios
+BIOS_STAGE2_AREA_SECTORS = 256
+BIOS_STAGE1_MAX_SECTORS = 60
+BIOS_LAYOUT_LBA = 257
+BIOS_BOOTPACK_LBA = 258
+BIOS_STAGE1_OBJ = $(BIOS_BUILD_DIR)/stage1.o
+BIOS_STAGE1_ELF = $(BIOS_BUILD_DIR)/stage1.elf
+BIOS_STAGE1_BIN = $(BIOS_BUILD_DIR)/stage1.bin
+BIOS_STAGE2_ELF = $(BIOS_BUILD_DIR)/stage2.elf
+BIOS_STAGE2_BIN = $(BIOS_BUILD_DIR)/stage2.bin
+BIOS_BOOTPACK = $(BIOS_BUILD_DIR)/bootpack.tar
+BIOS_LAYOUT_BIN = $(BIOS_BUILD_DIR)/layout.bin
+BIOS_BOOT_IMAGE = $(BIOS_BUILD_DIR)/otsos-bios.img
+BIOS_PAYLOAD_DIR = $(BIOS_BUILD_DIR)/payload
+BIOS_OBJCOPY = llvm-objcopy
+BIOS_XORRISO = xorriso
+BIOS_CFLAGS = --target=i386-elf -m32 -ffreestanding -fno-pic \
+	-fno-builtin -fno-stack-protector -fno-asynchronous-unwind-tables \
+	-nostdinc -O2 -g -I.
+BIOS_STAGE2_OBJS = \
+	$(BIOS_BUILD_DIR)/entry.o \
+	$(BIOS_BUILD_DIR)/main.o \
+	$(BIOS_BUILD_DIR)/disk.o \
+	$(BIOS_BUILD_DIR)/console.o \
+	$(BIOS_BUILD_DIR)/lib_string.o \
+	$(BIOS_BUILD_DIR)/lib_bootpack.o \
+	$(BIOS_BUILD_DIR)/lib_elf64.o \
+	$(BIOS_BUILD_DIR)/lib_multiboot2.o
 
 ifeq ($(LIBC_ENABLED),true)
 ISO_MUSL_TEST_DEP = $(MUSL_TEST_BIN)
@@ -262,9 +293,10 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(API_TIME_O) $(TERM_POWER_O) $(TERM_INFO_O) $(INPUT_O) \
       $(TIME_O) $(CLOCKSOURCE_O) $(ET_CLOCKSOURCE_O) $(CMOS_RTC_O)
 
-.PHONY: all ask_version check_build_tools check_run_tools
+.PHONY: all bios ask_version check_build_tools check_run_tools check_bios_tools check_bios_run_tools
 
 all: check_build_tools ask_version $(ISO_IMAGE)
+bios: check_bios_tools $(BIOS_ISO_IMAGE)
 
 check_build_tools:
 	@set -e; \
@@ -294,6 +326,24 @@ check_run_tools: check_build_tools
 				fi ;; \
 		esac; \
 	done
+
+check_bios_tools:
+	@set -e; \
+	for tool in "$(CC)" "$(LD)" "$(AS)" "$(ZIG)" "$(BIOS_OBJCOPY)" "$(BIOS_XORRISO)" llvm-size perl tar stat truncate dd; do \
+		if ! command -v "$$tool" >/dev/null 2>&1; then \
+			echo "  MISSING $$tool"; \
+			echo "  install missing tools to build BIOS loader"; \
+			exit 1; \
+		fi; \
+	done
+
+check_bios_run_tools: check_bios_tools
+	@set -e; \
+	if ! command -v "$(QEMU)" >/dev/null 2>&1; then \
+		echo "  MISSING $(QEMU)"; \
+		echo "  install qemu to run"; \
+		exit 1; \
+	fi
 
 ask_version:
 	@set -e; \
@@ -444,6 +494,114 @@ $(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN
 	@echo '}' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo "  ISO     $(ISO_IMAGE)"
 	@grub-mkrescue -o $(ISO_IMAGE) $(ISODIR) >/dev/null 2>&1
+
+$(BIOS_BUILD_DIR):
+	@mkdir -p $(BIOS_BUILD_DIR)
+
+$(BIOS_BUILD_DIR)/entry.o: boot/bootloader/bios/entry.S boot/bootloader/bios/bios.h | $(BIOS_BUILD_DIR)
+	@echo "  AS      $<"
+	@$(CC) $(BIOS_CFLAGS) -x assembler-with-cpp -c $< -o $@
+
+$(BIOS_BUILD_DIR)/%.o: boot/bootloader/bios/%.c boot/bootloader/bios/bios.h | $(BIOS_BUILD_DIR)
+	@echo "  CC      $<"
+	@$(CC) $(BIOS_CFLAGS) -c $< -o $@
+
+$(BIOS_BUILD_DIR)/lib_%.o: boot/bootloader/lib/%.c | $(BIOS_BUILD_DIR)
+	@echo "  CC      $<"
+	@$(CC) $(BIOS_CFLAGS) -c $< -o $@
+
+$(BIOS_STAGE2_ELF): $(BIOS_STAGE2_OBJS) boot/bootloader/bios/linker.ld
+	@echo "  LLD     $@"
+	@$(LD) -m elf_i386 -T boot/bootloader/bios/linker.ld \
+		$(BIOS_STAGE2_OBJS) -o $@
+
+$(BIOS_STAGE2_BIN): $(BIOS_STAGE2_ELF)
+	@echo "  OBJCOPY $@"
+	@$(BIOS_OBJCOPY) -O binary $< $@
+
+$(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BUILD_DIR)
+	@set -e; \
+	size=$$(stat -c%s $(BIOS_STAGE2_BIN)); \
+	sectors=$$(((size + 511) / 512)); \
+	if [ $$sectors -gt $(BIOS_STAGE1_MAX_SECTORS) ]; then \
+		echo "  BIOS    stage2 too large: $$sectors sectors"; \
+		exit 1; \
+	fi; \
+	echo "  AS      boot/bootloader/bios/stage1.S"; \
+	$(CC) $(BIOS_CFLAGS) -DSTAGE2_SECTORS=$$sectors \
+		-x assembler-with-cpp -c boot/bootloader/bios/stage1.S \
+		-o $(BIOS_STAGE1_OBJ); \
+	$(LD) -m elf_i386 -Ttext 0x0 $(BIOS_STAGE1_OBJ) \
+		-o $(BIOS_STAGE1_ELF); \
+	$(BIOS_OBJCOPY) -O binary $(BIOS_STAGE1_ELF) $@; \
+	stage1_size=$$(stat -c%s $@); \
+	if [ $$stage1_size -ne 512 ]; then \
+		echo "  BIOS    stage1 bad size: $$stage1_size"; \
+		exit 1; \
+	fi
+
+$(BIOS_BOOTPACK): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) | $(BIOS_BUILD_DIR)
+	@rm -rf $(BIOS_PAYLOAD_DIR)
+	@mkdir -p $(BIOS_PAYLOAD_DIR)
+	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
+	@cp config.toml $(BIOS_PAYLOAD_DIR)/config.toml
+	@for m in $(MULTIBOOT_MODULES); do \
+		src=""; \
+		case $$m in \
+			init) src=$(INIT_BIN);; \
+			yes) src=$(YES_BIN);; \
+			fetch) src=$(FETCH_BIN);; \
+			sh) src=$(SHELL_BIN);; \
+			oven) src=$(OVEN_BIN);; \
+			cursord) src=$(CURSORD_BIN);; \
+			shmtest) src=$(SHMTEST_BIN);; \
+			posix_hello) src=$(POSIX_HELLO_BIN);; \
+			kbdtest) src=$(KBDTEST_BIN);; \
+			musl_test) src=$(MUSL_TEST_BIN);; \
+			lua) src=$(LUA_BIN);; \
+			python) src=$(CPYTHON_BIN);; \
+			ld-musl) src=$(LDSO_BIN);; \
+		esac; \
+		if [ -n "$$src" ] && [ -f "$$src" ]; then \
+			cp "$$src" "$(BIOS_PAYLOAD_DIR)/$$m"; \
+		fi; \
+	done
+	@echo "  TAR     $(BIOS_BOOTPACK)"
+	@tar -cf $(BIOS_BOOTPACK) -C $(BIOS_PAYLOAD_DIR) .
+
+$(BIOS_LAYOUT_BIN): $(BIOS_BOOTPACK) | $(BIOS_BUILD_DIR)
+	@set -e; \
+	bytes=$$(stat -c%s $(BIOS_BOOTPACK)); \
+	sectors=$$(((bytes + 511) / 512)); \
+	echo "  LAYOUT  $(BIOS_LAYOUT_BIN)"; \
+	perl -e 'print pack("V4", 0x3250424f, shift, shift, 0); print "\0" x (512 - 16)' \
+		$$sectors $$bytes > $@
+
+$(BIOS_BOOT_IMAGE): $(BIOS_STAGE1_BIN) $(BIOS_STAGE2_BIN) $(BIOS_LAYOUT_BIN) $(BIOS_BOOTPACK) | $(BIOS_BUILD_DIR)
+	@set -e; \
+	bytes=$$(stat -c%s $(BIOS_BOOTPACK)); \
+	sectors=$$(((bytes + 511) / 512)); \
+	final_size=$$((($(BIOS_BOOTPACK_LBA) + sectors) * 512)); \
+	echo "  IMG     $(BIOS_BOOT_IMAGE)"; \
+	rm -f $@; \
+	dd if=$(BIOS_STAGE1_BIN) of=$@ bs=512 seek=0 conv=notrunc 2>/dev/null; \
+	dd if=$(BIOS_STAGE2_BIN) of=$@ bs=512 seek=1 conv=notrunc 2>/dev/null; \
+	dd if=$(BIOS_LAYOUT_BIN) of=$@ bs=512 seek=$(BIOS_LAYOUT_LBA) conv=notrunc 2>/dev/null; \
+	dd if=$(BIOS_BOOTPACK) of=$@ bs=512 seek=$(BIOS_BOOTPACK_LBA) conv=notrunc 2>/dev/null; \
+	truncate -s $$final_size $@; \
+	total_sectors=$$((final_size / 512)); \
+	part_sectors=$$((total_sectors - 1)); \
+	perl -e 'open(my $$fh, "+<", shift) or die $$!; binmode $$fh; seek($$fh, 446, 0); print $$fh pack("C8VV", 0x80, 0x00, 0x01, 0x00, 0x83, 0xfe, 0xff, 0xff, 1, shift); close $$fh;' \
+		$@ $$part_sectors
+
+$(BIOS_ISO_IMAGE): check_bios_tools $(BIOS_BOOT_IMAGE)
+	@rm -rf $(BIOS_ISODIR)
+	@mkdir -p $(BIOS_ISODIR)/boot
+	@cp $(BIOS_BOOT_IMAGE) $(BIOS_ISODIR)/boot/otsos-bios.img
+	@echo "  ISO     $(BIOS_ISO_IMAGE)"
+	@$(BIOS_XORRISO) -as mkisofs -quiet -o $(BIOS_ISO_IMAGE) \
+		-b boot/otsos-bios.img -c boot/boot.cat -hard-disk-boot \
+		$(BIOS_ISODIR)
 
 $(KERNEL_BIN): $(OBJ)
 	@echo "  LLD      $@"
@@ -1095,9 +1253,9 @@ run_nodis: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (UEFI, terminal)"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_NODISPLAY_OPTS) -device i6300esb -watchdog-action reset
 
-run_bios: check_build_tools $(ISO_IMAGE) $(DISK_IMG)
-	@echo "  RUN     QEMU"
-	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -device i6300esb -watchdog-action reset
+run_bios: check_bios_run_tools $(BIOS_ISO_IMAGE) $(DISK_IMG)
+	@echo "  RUN     QEMU (BIOS loader)"
+	@$(QEMU) -cdrom $(BIOS_ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -device i6300esb -watchdog-action reset
 
 virtio: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (virtio-gpu, virtio-net)"
@@ -1113,5 +1271,5 @@ debug: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 
 clean:
 	@echo "  CLEAN"
-	@rm -f ../bin/*.o ../bin/kernel.bin ../bin/kernel.map $(ISO_IMAGE) $(DISK_IMG)
-	@rm -rf $(ISODIR)/boot/kernel.bin $(ISODIR)/boot/config.toml
+	@rm -f ../bin/*.o ../bin/kernel.bin ../bin/kernel.map $(ISO_IMAGE) $(BIOS_ISO_IMAGE) $(DISK_IMG)
+	@rm -rf $(ISODIR)/boot/kernel.bin $(ISODIR)/boot/config.toml $(BIOS_BUILD_DIR) $(BIOS_ISODIR)
