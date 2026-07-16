@@ -83,3 +83,17 @@ void pic_send_eoi(unsigned char irq) {
 
   outb(PIC1_COMMAND, 0x20);
 }
+
+void pic_unmask_irq(unsigned char irq) {
+  unsigned short port;
+  unsigned char value;
+
+  if (irq < 8) {
+    port = PIC1_DATA;
+  } else {
+    port = PIC2_DATA;
+    irq -= 8;
+  }
+  value = inb(port) & ~(1 << irq);
+  outb(port, value);
+}

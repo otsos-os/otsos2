@@ -35,12 +35,14 @@ $define %type icmp_unreachable_t as packed struct with ICMP unreachable header
 
 $define %func icmp_input as function with args net_iface_t *, u32, const u8 *, u16
 $define %func icmp_send_unreachable as function with args net_iface_t *, u32, u8, const u8 *, u16
+$define %func icmp_get_unreach_sent as function with args void
 
 */
 
 /* !SPACE!
 
 $space %export icmp_input, icmp_send_unreachable
+$space %export icmp_get_unreach_sent
 
 */
 
@@ -49,15 +51,16 @@ $space %export icmp_input, icmp_send_unreachable
 #include <kernel/net/ethernet.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
-#include <mm/kmem.h>
+
+static int	g_icmp_unreach_sent;
 
 int
 icmp_input(net_iface_t *iface, u32 src_ip,
     const u8 *data, u16 len)
 {
 	const icmp_header_t	*icmp;
-	u8			*reply;
 	icmp_header_t		*rep;
+	u8			reply[ETHERNET_MTU];
 	int			ret;
 
 	if (!iface || !data || len < sizeof(icmp_header_t) ||
@@ -72,11 +75,6 @@ icmp_input(net_iface_t *iface, u32 src_ip,
 
 	if (icmp->type == ICMP_TYPE_ECHO_REQUEST &&
 	    icmp->code == 0) {
-		reply = kmem_alloc(len);
-		if (!reply) {
-			return (-1);
-		}
-
 		memset(reply, 0, len);
 		rep = (icmp_header_t *)reply;
 		rep->type = ICMP_TYPE_ECHO_REPLY;
@@ -94,8 +92,6 @@ icmp_input(net_iface_t *iface, u32 src_ip,
 		ret = ipv4_output(iface, src_ip, IPV4_PROTO_ICMP,
 		    reply, len);
 
-		kmem_free(reply);
-
 		drivers_log("[ICMP] echo reply to "
 		    "%d.%d.%d.%d (seq=%u) len=%u\n",
 		    (src_ip >> 24) & 0xFF,
@@ -111,12 +107,20 @@ icmp_input(net_iface_t *iface, u32 src_ip,
 }
 
 int
+icmp_get_unreach_sent(void)
+{
+	return (g_icmp_unreach_sent);
+}
+
+int
 icmp_send_unreachable(net_iface_t *iface, u32 dst_ip,
     u8 code, const u8 *original_ip_packet, u16 original_len)
 {
-	u8			*pkt;
 	icmp_unreachable_t	*unr;
+	u8			pkt[sizeof(icmp_unreachable_t) +
+				    sizeof(ipv4_header_t) + 8];
 	u16			pkt_len, icmp_data_len;
+	int			ret;
 
 	if (!iface || !original_ip_packet || original_len == 0) {
 		return (-1);
@@ -129,11 +133,6 @@ icmp_send_unreachable(net_iface_t *iface, u32 dst_ip,
 
 	pkt_len = sizeof(icmp_unreachable_t) + icmp_data_len;
 	if (pkt_len > ETHERNET_MTU) {
-		return (-1);
-	}
-
-	pkt = kmem_alloc(pkt_len);
-	if (!pkt) {
 		return (-1);
 	}
 
@@ -150,9 +149,10 @@ icmp_send_unreachable(net_iface_t *iface, u32 dst_ip,
 	unr->checksum = __builtin_bswap16(
 	    ipv4_checksum(pkt, pkt_len));
 
-	ipv4_output(iface, dst_ip, IPV4_PROTO_ICMP, pkt, pkt_len);
-
-	kmem_free(pkt);
+	ret = ipv4_output(iface, dst_ip, IPV4_PROTO_ICMP, pkt, pkt_len);
+	if (ret == 0 || ret == NET_TX_PENDING) {
+		g_icmp_unreach_sent++;
+	}
 
 	drivers_log("[ICMP] unreachable type=%u code=%u to "
 	    "%d.%d.%d.%d\n",
@@ -162,5 +162,5 @@ icmp_send_unreachable(net_iface_t *iface, u32 dst_ip,
 	    (dst_ip >> 8) & 0xFF,
 	    dst_ip & 0xFF);
 
-	return (0);
+	return (ret);
 }

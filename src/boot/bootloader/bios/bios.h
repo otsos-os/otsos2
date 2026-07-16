@@ -30,6 +30,7 @@ $define %type u8 as 8 bit unsigned
 $define %type u16 as 16 bit unsigned
 $define %type u32 as 32 bit unsigned
 $define %type bios_boot_info_t as BIOS data collected before protected mode
+$define %type bios_mmap_entry_t as BIOS E820 memory map entry
 $define %type bios_layout_t as boot image payload layout sector
 
 $define %func bios_console_init as procedure with args void
@@ -44,7 +45,7 @@ $define %func bios_jump_kernel as procedure with args u32, u32, u32
 
 /* !SPACE!
 
-$space %export bios_boot_info_t, bios_layout_t
+$space %export bios_boot_info_t, bios_mmap_entry_t, bios_layout_t
 $space %export bios_console_init, bios_console_putc, bios_console_puts
 $space %export bios_console_puthex, bios_disk_read
 $space %export bios_halt, bios_jump_kernel
@@ -60,6 +61,7 @@ $space %export bios_halt, bios_jump_kernel
 #define BIOS_LAYOUT_MAGIC	0x3250424fU
 #define BIOS_LAYOUT_LBA		257U
 #define BIOS_BOOTPACK_LBA	258U
+#define BIOS_E820_MAX		64U
 
 typedef struct {
 	u32	boot_drive;
@@ -74,6 +76,13 @@ typedef struct {
 } bios_boot_info_t;
 
 typedef struct {
+	u64	base_addr;
+	u64	length;
+	u32	type;
+	u32	attr;
+} bios_mmap_entry_t;
+
+typedef struct {
 	u32	magic;
 	u32	bootpack_sectors;
 	u32	bootpack_bytes;
@@ -81,6 +90,8 @@ typedef struct {
 } bios_layout_t;
 
 extern bios_boot_info_t	bios_boot_info;
+extern u32		bios_mmap_count;
+extern bios_mmap_entry_t	bios_mmap_entries[BIOS_E820_MAX];
 
 void	bios_console_init(void);
 void	bios_console_putc(char c);

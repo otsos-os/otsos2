@@ -35,12 +35,15 @@ $define %type ipv4_header_t as packed struct with IPv4 fields
 $define %func ipv4_input as function with args net_iface_t *, const u8 *, const u8 *, u16
 $define %func ipv4_output as function with args net_iface_t *, u32, u8, const u8 *, u16
 $define %func ipv4_checksum as function with args const void *, int
+$define %func ipv4_get_icmp_unreach_sent as function with args void
+$define %func ipv4_get_frag_dropped as function with args void
 
 */
 
 /* !SPACE!
 
 $space %export ipv4_input, ipv4_output, ipv4_checksum
+$space %export ipv4_get_icmp_unreach_sent, ipv4_get_frag_dropped
 
 */
 
@@ -52,7 +55,7 @@ $space %export ipv4_input, ipv4_output, ipv4_checksum
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
-static int	g_icmp_unreach_sent;
+static int	g_ipv4_frag_dropped;
 
 u16
 ipv4_checksum(const void *buf, int len)
@@ -83,6 +86,7 @@ ipv4_input(net_iface_t *iface, const u8 *src_mac,
 	u16			header_len, total_len;
 	u16			expected_checksum;
 	u16			flags_frag;
+	u32			src_ip, dst_ip;
 	int			ret;
 
 	(void)src_mac;
@@ -111,9 +115,11 @@ ipv4_input(net_iface_t *iface, const u8 *src_mac,
 		return (0);
 	}
 
+	src_ip = __builtin_bswap32(ip->src);
+	dst_ip = __builtin_bswap32(ip->dst);
+
 	if (iface->ip_addr == 0 ||
-	    (__builtin_bswap32(ip->dst) != iface->ip_addr &&
-	    __builtin_bswap32(ip->dst) != 0xFFFFFFFF)) {
+	    (dst_ip != iface->ip_addr && dst_ip != 0xFFFFFFFF)) {
 		return (0);
 	}
 
@@ -122,35 +128,34 @@ ipv4_input(net_iface_t *iface, const u8 *src_mac,
 	}
 	flags_frag = __builtin_bswap16(ip->flags_frag);
 	if ((flags_frag & 0x3FFF) != 0) {
+		g_ipv4_frag_dropped++;
 		return (0);
 	}
 
 	switch (ip->protocol) {
 	case IPV4_PROTO_ICMP:
-		ret = icmp_input(iface, __builtin_bswap32(ip->src),
-		    data + header_len,
+		ret = icmp_input(iface, src_ip, data + header_len,
 		    (u16)(total_len - header_len));
 		break;
 
 	case IPV4_PROTO_UDP:
-		ret = udp_input(iface, __builtin_bswap32(ip->src),
-		    data + header_len,
-		    (u16)(total_len - header_len));
+		ret = udp_input(iface, src_ip, dst_ip, data + header_len,
+		    (u16)(total_len - header_len), data, total_len);
 		break;
 
 	case IPV4_PROTO_TCP:
-		icmp_send_unreachable(iface,
-		    __builtin_bswap32(ip->src),
-		    ICMP_CODE_PROT_UNREACH, data, total_len);
-		g_icmp_unreach_sent++;
+		if (dst_ip == iface->ip_addr) {
+			icmp_send_unreachable(iface, src_ip,
+			    ICMP_CODE_PROT_UNREACH, data, total_len);
+		}
 		ret = 0;
 		break;
 
 	default:
-		icmp_send_unreachable(iface,
-		    __builtin_bswap32(ip->src),
-		    ICMP_CODE_PROT_UNREACH, data, total_len);
-		g_icmp_unreach_sent++;
+		if (dst_ip == iface->ip_addr) {
+			icmp_send_unreachable(iface, src_ip,
+			    ICMP_CODE_PROT_UNREACH, data, total_len);
+		}
 		ret = 0;
 		break;
 	}
@@ -161,7 +166,13 @@ ipv4_input(net_iface_t *iface, const u8 *src_mac,
 int
 ipv4_get_icmp_unreach_sent(void)
 {
-	return (g_icmp_unreach_sent);
+	return (icmp_get_unreach_sent());
+}
+
+int
+ipv4_get_frag_dropped(void)
+{
+	return (g_ipv4_frag_dropped);
 }
 
 int
@@ -213,13 +224,13 @@ ipv4_output(net_iface_t *iface, u32 dst_ip, u8 protocol,
 		if (arp_resolve(iface, next_hop, dst_mac) != 0) {
 			/*
 			 * MAC unknown: park the frame in the ARP pending
-			 * queue and kick off resolution.  It is flushed
-			 * when the reply arrives instead of being dropped.
+			 * queue. ARP owns request retries and flush.
 			 */
-			arp_hold_packet(iface, next_hop, ETHERTYPE_IPV4,
-			    packet, total_len);
-			arp_send_request(iface, next_hop);
-			return (-1);
+			if (arp_hold_packet(iface, next_hop, ETHERTYPE_IPV4,
+			    packet, total_len) != 0) {
+				return (-1);
+			}
+			return (NET_TX_PENDING);
 		}
 	}
 

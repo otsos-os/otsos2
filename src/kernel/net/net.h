@@ -41,6 +41,8 @@ $define %func net_iface_get as function with args int
 $define %func net_iface_by_name as function with args const char *
 $define %func net_iface_find_by_ndev as function with args netdev_t *
 $define %func net_poll_all as procedure with args void
+$define %func net_tick as procedure with args void
+$define %func net_request_poll as procedure with args void
 $define %func net_dump_ifaces as procedure with args void
 $define %func net_iface_set_ip as procedure with args net_iface_t *, u32
 $define %func net_iface_set_netmask as procedure with args net_iface_t *, u32
@@ -54,7 +56,7 @@ $space %export net_init, net_is_initialized
 $space %export net_iface_register, net_iface_unregister, net_iface_count
 $space %export net_iface_get, net_iface_by_name
 $space %export net_iface_find_by_ndev
-$space %export net_poll_all, net_dump_ifaces
+$space %export net_poll_all, net_tick, net_request_poll, net_dump_ifaces
 $space %export net_iface_set_ip, net_iface_set_netmask, net_iface_set_gw
 
 */
@@ -67,6 +69,8 @@ $space %export net_iface_set_ip, net_iface_set_netmask, net_iface_set_gw
 
 #define	NET_MAX_IFACES		8
 #define	NET_IFACE_NAME_LEN	16
+#define	NET_POLL_HZ		100
+#define	NET_TX_PENDING		(-2)
 
 #define	NET_IFF_UP		(1 << 0)
 #define	NET_IFF_RUNNING		(1 << 1)
@@ -91,6 +95,8 @@ net_iface_t *net_iface_get(int index);
 net_iface_t *net_iface_by_name(const char *name);
 net_iface_t *net_iface_find_by_ndev(netdev_t *ndev);
 void	net_poll_all(void);
+void	net_tick(void);
+void	net_request_poll(void);
 void	net_dump_ifaces(void);
 void	net_iface_set_ip(net_iface_t *iface, u32 ip);
 void	net_iface_set_netmask(net_iface_t *iface, u32 mask);

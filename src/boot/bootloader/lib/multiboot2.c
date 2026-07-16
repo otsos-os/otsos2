@@ -91,8 +91,11 @@ tag_alloc(mb2_builder_t *b, u32 type, u32 size)
 	mb2_tag_t	*tag;
 	u32		next;
 
+	if (b->off > b->cap || size > b->cap - b->off) {
+		return (NULL);
+	}
 	next = align8(b->off + size);
-	if (next > b->cap) {
+	if (next < b->off || next > b->cap) {
 		return (NULL);
 	}
 	tag = (mb2_tag_t *)(b->buf + b->off);
@@ -180,6 +183,9 @@ mb2_add_mmap_entries(mb2_builder_t *b, const mb2_mmap_entry_t *entries,
 	u32		*p;
 
 	if (!entries || count == 0) {
+		return (-1);
+	}
+	if (count > (0xffffffffU - 16U) / sizeof(*entries)) {
 		return (-1);
 	}
 	size = 16 + count * sizeof(*entries);

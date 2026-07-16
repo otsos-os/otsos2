@@ -44,6 +44,7 @@ $define %func arp_hold_packet as function with args net_iface_t *, u32, u16, con
 $define %func arp_flush_pending as procedure with args net_iface_t *, u32
 $define %func arp_entry_expired as function with args const arp_cache_entry_t *
 $define %func arp_announce as function with args net_iface_t *
+$define %func arp_tick as procedure with args void
 
 */
 
@@ -52,7 +53,7 @@ $define %func arp_announce as function with args net_iface_t *
 $space %internal arp_send_reply, arp_cache_update
 $space %internal arp_flush_pending, arp_entry_expired
 $space %export arp_cache_init, arp_input, arp_resolve, arp_lookup
-$space %export arp_send_request, arp_hold_packet
+$space %export arp_send_request, arp_hold_packet, arp_tick
 
 */
 
@@ -163,15 +164,23 @@ arp_hold_packet(net_iface_t *iface, u32 ip, u16 ethertype,
     const u8 *data, u16 len)
 {
 	arp_pending_t	*slot;
-	int		i, free_idx;
+	u64		now, freq, retry_ticks;
+	int		i, free_idx, same_slot, need_request;
 
 	if (!iface || !data || len == 0 || len > ARP_PENDING_BUFSZ) {
 		return (-1);
 	}
+	now = 0;
+	freq = 0;
+	if (timer_is_initialized()) {
+		now = timer_get_ticks();
+		freq = timer_get_frequency();
+	}
 	free_idx = -1;
 	for (i = 0; i < ARP_PENDING_SLOTS; i++) {
 		slot = &g_arp_pending[i];
-		if (slot->valid && slot->iface == iface && slot->ip == ip) {
+		if (slot->valid && slot->iface == iface &&
+		    slot->ip == ip) {
 			free_idx = i;
 			break;
 		}
@@ -184,12 +193,40 @@ arp_hold_packet(net_iface_t *iface, u32 ip, u16 ethertype,
 	}
 
 	slot = &g_arp_pending[free_idx];
+	same_slot = slot->valid && slot->iface == iface &&
+	    slot->ip == ip;
+	if (!same_slot) {
+		memset(slot, 0, sizeof(*slot));
+		slot->created = now;
+	} else if (slot->created == 0) {
+		slot->created = now;
+	}
+
 	slot->iface = iface;
 	slot->ip = ip;
 	slot->ethertype = ethertype;
 	slot->len = len;
 	memcpy(slot->data, data, len);
 	slot->valid = 1;
+
+	retry_ticks = (u64)ARP_PENDING_RETRY_SECS * freq;
+	need_request = slot->last_sent == 0;
+	if (!need_request && retry_ticks != 0 &&
+	    now - slot->last_sent >= retry_ticks) {
+		need_request = 1;
+	}
+	if (need_request) {
+		if (slot->retries >= ARP_PENDING_MAX_RETRIES) {
+			slot->valid = 0;
+			return (-1);
+		}
+		if (arp_send_request(iface, ip) != 0) {
+			slot->valid = 0;
+			return (-1);
+		}
+		slot->last_sent = now ? now : 1;
+		slot->retries++;
+	}
 	return (0);
 }
 
@@ -247,6 +284,58 @@ arp_announce(net_iface_t *iface)
 	}
 
 	return (arp_send_request(iface, iface->ip_addr));
+}
+
+void
+arp_tick(void)
+{
+	arp_pending_t	*slot;
+	u64		now, freq, retry_ticks, ttl_ticks;
+	int		i;
+
+	if (!timer_is_initialized()) {
+		return;
+	}
+	freq = timer_get_frequency();
+	if (freq == 0) {
+		return;
+	}
+
+	now = timer_get_ticks();
+	retry_ticks = (u64)ARP_PENDING_RETRY_SECS * freq;
+	ttl_ticks = (u64)ARP_PENDING_TTL_SECS * freq;
+	if (retry_ticks == 0) {
+		retry_ticks = 1;
+	}
+	if (ttl_ticks == 0) {
+		ttl_ticks = 1;
+	}
+
+	for (i = 0; i < ARP_PENDING_SLOTS; i++) {
+		slot = &g_arp_pending[i];
+		if (!slot->valid) {
+			continue;
+		}
+		if (slot->created != 0 &&
+		    now - slot->created >= ttl_ticks) {
+			slot->valid = 0;
+			continue;
+		}
+		if (slot->retries >= ARP_PENDING_MAX_RETRIES) {
+			slot->valid = 0;
+			continue;
+		}
+		if (slot->last_sent != 0 &&
+		    now - slot->last_sent < retry_ticks) {
+			continue;
+		}
+		if (arp_send_request(slot->iface, slot->ip) != 0) {
+			slot->valid = 0;
+			continue;
+		}
+		slot->last_sent = now;
+		slot->retries++;
+	}
 }
 
 static int

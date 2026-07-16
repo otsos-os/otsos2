@@ -37,6 +37,7 @@
 #define BOOT_INFO_FB_HEIGHT	24
 #define BOOT_INFO_FB_BPP	28
 #define BOOT_INFO_FB_TYPE	32
+#define BIOS_E820_MAX		64
 
 stage2_entry:
 	cli
@@ -71,6 +72,8 @@ detect_memory:
 	movzwl	%ax, %eax
 	movl	%eax, bios_boot_info + BOOT_INFO_MEM_LOWER
 
+	call	detect_e820
+
 	movw	$0xe801, %ax
 	int	$0x15
 	jc	mem_fallback
@@ -86,6 +89,52 @@ detect_memory:
 	cmpl	$0, %eax
 	je	mem_fallback
 	movl	%eax, bios_boot_info + BOOT_INFO_MEM_UPPER
+	ret
+
+detect_e820:
+	pushw	%es
+	pushw	%di
+	xorw	%ax, %ax
+	movw	%ax, %es
+	movl	$0, bios_mmap_count
+	xorl	%ebx, %ebx
+	movw	$bios_mmap_entries, %di
+
+e820_loop:
+	cmpl	$BIOS_E820_MAX, bios_mmap_count
+	jae	e820_done
+	xorw	%ax, %ax
+	movw	%ax, %es
+	movl	$1, 20(%di)
+	movl	$0xe820, %eax
+	movl	$0x534d4150, %edx
+	movl	$24, %ecx
+	int	$0x15
+	jc	e820_done
+	cmpl	$0x534d4150, %eax
+	jne	e820_done
+	cmpl	$20, %ecx
+	jb	e820_done
+	movl	8(%di), %eax
+	orl	12(%di), %eax
+	jz	e820_next
+	cmpl	$24, %ecx
+	jb	1f
+	testl	$1, 20(%di)
+	jz	e820_next
+	jmp	2f
+1:
+	movl	$0, 20(%di)
+2:
+	addw	$24, %di
+	incl	bios_mmap_count
+e820_next:
+	testl	%ebx, %ebx
+	jnz	e820_loop
+
+e820_done:
+	popw	%di
+	popw	%es
 	ret
 
 mem_fallback:
@@ -397,8 +446,17 @@ bios_boot_info:
 	.long	0
 	.long	0
 
-.align 8
-gdt:
+	.align 8
+	.global bios_mmap_count
+bios_mmap_count:
+	.long	0
+	.align 8
+	.global bios_mmap_entries
+bios_mmap_entries:
+	.space	BIOS_E820_MAX * 24
+
+	.align 8
+	gdt:
 	.quad	0x0000000000000000
 	.quad	0x00cf9a000000ffff
 	.quad	0x00cf92000000ffff

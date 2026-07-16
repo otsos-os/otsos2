@@ -678,11 +678,12 @@ net_test(void)
 
 		printk("[NET_TEST] %s stats: tx=%llu done=%llu "
 		    "drop=%llu rx=%llu delivered=%llu drop=%llu "
-		    "icmp_unreach=%d\n",
+		    "icmp_unreach=%d frag_drop=%d\n",
 		    ndev->name, ndev->tx_submitted, ndev->tx_completed,
 		    ndev->tx_dropped, ndev->rx_completed,
 		    ndev->rx_delivered, ndev->rx_dropped,
-		    ipv4_get_icmp_unreach_sent());
+		    ipv4_get_icmp_unreach_sent(),
+		    ipv4_get_frag_dropped());
 	}
 }
 

@@ -35,6 +35,7 @@
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/event/event.h>
 #include <kernel/net/net.h>
+#include <kernel/drivers/net/virtio-net/virtio_net.h>
 #include <kernel/interrupts/idt.h>
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_map.h>
@@ -97,12 +98,19 @@ void isr_handler(registers_t *regs) {
 }
 
 void irq_handler(registers_t *regs) {
+  u8 irq;
+
+  if (regs->int_no >= 32 && regs->int_no < 48) {
+    irq = (u8)(regs->int_no - 32);
+    virtio_net_irq(irq);
+  }
+
   if (regs->int_no == 32) {
     eventtimer_dispatch();
     power_button_poll();
     watchdog_tick();
     event_timer_tick();
-    net_poll_all();
+    net_tick();
     crypto_rng_tick();
     keyboard_poll();
     ps2_mouse_poll();
@@ -119,7 +127,7 @@ void irq_handler(registers_t *regs) {
     power_button_poll();
     watchdog_tick();
     event_timer_tick();
-    net_poll_all();
+    net_tick();
     crypto_rng_tick();
     keyboard_poll();
     ps2_mouse_poll();

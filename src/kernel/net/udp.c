@@ -34,7 +34,7 @@ $define %type udp_header_t as packed struct with UDP src/dst port + length + che
 $define %type udp_binding_t as struct with bound port and receive handler
 
 $define %func udp_init as procedure with args void
-$define %func udp_input as function with args net_iface_t *, u32, const u8 *, u16
+$define %func udp_input as function with args net_iface_t *, u32, u32, const u8 *, u16, const u8 *, u16
 $define %func udp_output as function with args net_iface_t *, u32, u16, u16, const u8 *, u16
 $define %func udp_bind as function with args u16, udp_rx_handler_t, void *
 $define %func udp_unbind as procedure with args u16
@@ -52,6 +52,7 @@ $space %export udp_init, udp_input, udp_output, udp_bind, udp_unbind, udp_checks
 
 #include <kernel/net/udp.h>
 #include <kernel/net/ipv4.h>
+#include <kernel/net/icmp.h>
 #include <kernel/net/ethernet.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -154,8 +155,8 @@ udp_unbind(u16 port)
 }
 
 int
-udp_input(net_iface_t *iface, u32 src_ip,
-    const u8 *data, u16 len)
+udp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
+    const u8 *data, u16 len, const u8 *ip_packet, u16 ip_len)
 {
 	const udp_header_t	*udp;
 	udp_binding_t		*binding;
@@ -172,7 +173,7 @@ udp_input(net_iface_t *iface, u32 src_ip,
 	}
 
 	if (udp->checksum != 0) {
-		if (udp_checksum(src_ip, iface->ip_addr, data, udp_len) != 0) {
+		if (udp_checksum(src_ip, dst_ip, data, udp_len) != 0) {
 			return (0);
 		}
 	}
@@ -184,6 +185,10 @@ udp_input(net_iface_t *iface, u32 src_ip,
 	if (!binding) {
 		drivers_log("[UDP] port %d -> %d (%d bytes), no listener\n",
 		    src_port, dst_port, udp_len - UDP_HEADER_LEN);
+		if (dst_ip == iface->ip_addr && ip_packet && ip_len != 0) {
+			icmp_send_unreachable(iface, src_ip,
+			    ICMP_CODE_PORT_UNREACH, ip_packet, ip_len);
+		}
 		return (0);
 	}
 

@@ -41,13 +41,14 @@ $define %func arp_lookup as function with args net_iface_t *, u32
 $define %func arp_send_request as function with args net_iface_t *, u32
 $define %func arp_hold_packet as function with args net_iface_t *, u32, u16, const u8 *, u16
 $define %func arp_announce as function with args net_iface_t *
+$define %func arp_tick as procedure with args void
 
 */
 
 /* !SPACE!
 
 $space %export arp_cache_init, arp_input, arp_resolve, arp_lookup
-$space %export arp_send_request, arp_hold_packet
+$space %export arp_send_request, arp_hold_packet, arp_tick
 
 */
 
@@ -70,6 +71,9 @@ $space %export arp_send_request, arp_hold_packet
 #define	ARP_ENTRY_TTL_SECS	120
 #define	ARP_PENDING_SLOTS	4
 #define	ARP_PENDING_BUFSZ	ETHERNET_MTU
+#define	ARP_PENDING_TTL_SECS	8
+#define	ARP_PENDING_RETRY_SECS	1
+#define	ARP_PENDING_MAX_RETRIES	3
 
 typedef struct {
 	u16	htype;
@@ -93,7 +97,10 @@ typedef struct {
 
 typedef struct {
 	net_iface_t	*iface;
+	u64		created;
+	u64		last_sent;
 	u32	ip;
+	u16	retries;
 	u16	ethertype;
 	u16	len;
 	u8	data[ARP_PENDING_BUFSZ];
@@ -106,7 +113,8 @@ int	arp_resolve(net_iface_t *iface, u32 ip, u8 *mac_out);
 arp_cache_entry_t *arp_lookup(net_iface_t *iface, u32 ip);
 int	arp_send_request(net_iface_t *iface, u32 target_ip);
 int	arp_hold_packet(net_iface_t *iface, u32 ip, u16 ethertype,
-    const u8 *data, u16 len);
+	    const u8 *data, u16 len);
 int	arp_announce(net_iface_t *iface);
+void	arp_tick(void);
 
 #endif

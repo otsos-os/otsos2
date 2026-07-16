@@ -41,6 +41,8 @@ $define %func net_iface_get as function with args int
 $define %func net_iface_by_name as function with args const char *
 $define %func net_iface_find_by_ndev as function with args netdev_t *
 $define %func net_poll_all as procedure with args void
+$define %func net_tick as procedure with args void
+$define %func net_request_poll as procedure with args void
 $define %func net_dump_ifaces as procedure with args void
 $define %func net_iface_set_ip as procedure with args net_iface_t *, u32
 $define %func net_iface_set_netmask as procedure with args net_iface_t *, u32
@@ -54,7 +56,7 @@ $space %export net_init, net_is_initialized
 $space %export net_iface_register, net_iface_unregister, net_iface_count
 $space %export net_iface_get, net_iface_by_name
 $space %export net_iface_find_by_ndev
-$space %export net_poll_all, net_dump_ifaces
+$space %export net_poll_all, net_tick, net_request_poll, net_dump_ifaces
 $space %export net_iface_set_ip, net_iface_set_netmask, net_iface_set_gw
 
 */
@@ -64,6 +66,7 @@ $space %export net_iface_set_ip, net_iface_set_netmask, net_iface_set_gw
 #include <kernel/net/arp.h>
 #include <kernel/net/udp.h>
 #include <kernel/net/loopback.h>
+#include <kernel/drivers/timer.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -71,6 +74,8 @@ static net_iface_t	*g_ifaces[NET_MAX_IFACES];
 static int		g_iface_count;
 static int		g_initialized;
 static int		g_polling;
+static u64		g_last_poll_tick;
+static int		g_poll_requested;
 
 int
 net_init(void)
@@ -86,6 +91,8 @@ net_init(void)
 	}
 	g_iface_count = 0;
 	g_polling = 0;
+	g_last_poll_tick = 0;
+	g_poll_requested = 1;
 
 	arp_cache_init();
 	udp_init();
@@ -95,6 +102,12 @@ net_init(void)
 
 	drivers_log("[NET] network subsystem initialized\n");
 	return (0);
+}
+
+void
+net_request_poll(void)
+{
+	g_poll_requested = 1;
 }
 
 int
@@ -218,6 +231,7 @@ net_poll_all(void)
 		return;
 	}
 	g_polling = 1;
+	arp_tick();
 	for (i = 0; i < g_iface_count; i++) {
 		netdev_t	*ndev;
 
@@ -228,6 +242,37 @@ net_poll_all(void)
 		}
 	}
 	g_polling = 0;
+}
+
+void
+net_tick(void)
+{
+	u32	freq;
+	u64	now, interval;
+
+	if (!g_initialized) {
+		return;
+	}
+	if (!timer_is_initialized()) {
+		net_poll_all();
+		return;
+	}
+
+	freq = timer_get_frequency();
+	interval = freq / NET_POLL_HZ;
+	if (interval == 0) {
+		interval = 1;
+	}
+
+	now = timer_get_ticks();
+	if (!g_poll_requested && g_last_poll_tick != 0 &&
+	    now - g_last_poll_tick < interval) {
+		return;
+	}
+
+	g_poll_requested = 0;
+	g_last_poll_tick = now;
+	net_poll_all();
 }
 
 void

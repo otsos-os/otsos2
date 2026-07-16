@@ -52,7 +52,6 @@ $space %export loopback_init
 #include <kernel/net/netdev/netdev.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
-#include <mm/kmem.h>
 
 #define	LOOPBACK_MTU		65535
 #define	LOOPBACK_MAC		"\x02\x00\x00\x00\x00\x01"
@@ -64,28 +63,18 @@ static int	g_loopback_initialized;
 static int
 loopback_ndev_transmit(netdev_t *ndev, const u8 *frame, u16 len)
 {
-	u8	*buf;
-
 	if (!ndev || !frame || len == 0) {
 		return (-1);
 	}
 
-	buf = kmem_alloc(len);
-	if (!buf) {
-		ndev->tx_dropped++;
-		return (-1);
-	}
-
-	memcpy(buf, frame, len);
 	ndev->tx_submitted++;
 
 	if (ndev->rx_handler) {
-		ndev->rx_handler(ndev, buf, len);
+		ndev->rx_handler(ndev, frame, len);
 		ndev->rx_completed++;
 		ndev->rx_delivered++;
 	}
 
-	kmem_free(buf);
 	ndev->tx_completed++;
 	return (0);
 }

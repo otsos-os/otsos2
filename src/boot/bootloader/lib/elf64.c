@@ -30,6 +30,7 @@ $define %type u8 as 8 bit unsigned
 $define %type u16 as 16 bit unsigned
 $define %type u32 as 32 bit unsigned
 $define %type u64 as 64 bit unsigned
+$define %type int as 32 bit signed
 $define %type elf64_ehdr_t as ELF64 executable header
 $define %type elf64_phdr_t as ELF64 program header
 
@@ -91,8 +92,9 @@ elf64_load_kernel(const void *data, u32 size, u64 *entry, u64 *kernel_end)
 	const elf64_phdr_t	*ph;
 	const u8		*src;
 	u8			*dst;
-	u64			end;
+	u64			end, phdr_bytes, seg_end;
 	u16			i;
+	int			entry_ok, seen_load;
 
 	if (size < sizeof(*eh)) {
 		return (-1);
@@ -108,33 +110,56 @@ elf64_load_kernel(const void *data, u32 size, u64 *entry, u64 *kernel_end)
 	if (eh->e_type != ET_EXEC || eh->e_machine != EM_X86_64) {
 		return (-1);
 	}
-	if (eh->e_phoff + (u64)eh->e_phnum * eh->e_phentsize > size) {
+	if (eh->e_version != 1 || eh->e_ehsize != sizeof(*eh) ||
+	    eh->e_phentsize != sizeof(*ph) || eh->e_phnum == 0) {
+		return (-1);
+	}
+	if (eh->e_phoff > size || eh->e_entry > 0xffffffffULL) {
+		return (-1);
+	}
+	phdr_bytes = (u64)eh->e_phnum * eh->e_phentsize;
+	if (phdr_bytes > (u64)size - eh->e_phoff) {
 		return (-1);
 	}
 
 	end = 0;
+	entry_ok = 0;
+	seen_load = 0;
 	for (i = 0; i < eh->e_phnum; i++) {
 		ph = (const elf64_phdr_t *)((const u8 *)data + eh->e_phoff +
 		    (u64)i * eh->e_phentsize);
 		if (ph->p_type != PT_LOAD) {
 			continue;
 		}
-		if (ph->p_paddr > 0xffffffffULL) {
+		seen_load = 1;
+		if (ph->p_memsz < ph->p_filesz) {
 			return (-1);
 		}
-		if (ph->p_offset + ph->p_filesz > size) {
+		if (ph->p_paddr > 0xffffffffULL ||
+		    ph->p_memsz > 0xffffffffULL - ph->p_paddr) {
 			return (-1);
+		}
+		if (ph->p_offset > size ||
+		    ph->p_filesz > (u64)size - ph->p_offset) {
+			return (-1);
+		}
+		seg_end = ph->p_paddr + ph->p_memsz;
+		if (eh->e_entry >= ph->p_paddr && eh->e_entry < seg_end) {
+			entry_ok = 1;
 		}
 		src = (const u8 *)data + ph->p_offset;
 		dst = (u8 *)(u32)ph->p_paddr;
 		bl_memcpy(dst, src, (u32)ph->p_filesz);
 		if (ph->p_memsz > ph->p_filesz) {
-			bl_memset(dst + ph->p_filesz, 0,
+			bl_memset(dst + (u32)ph->p_filesz, 0,
 			    (u32)(ph->p_memsz - ph->p_filesz));
 		}
-		if (ph->p_paddr + ph->p_memsz > end) {
-			end = ph->p_paddr + ph->p_memsz;
+		if (seg_end > end) {
+			end = seg_end;
 		}
+	}
+	if (!seen_load || !entry_ok) {
+		return (-1);
 	}
 
 	*entry = eh->e_entry;

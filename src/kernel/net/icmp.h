@@ -33,12 +33,15 @@ $define %type net_iface_t as struct with network interface state
 $define %type icmp_header_t as packed struct with ICMP type/code/checksum
 
 $define %func icmp_input as function with args net_iface_t *, u32, const u8 *, u16
+$define %func icmp_send_unreachable as function with args net_iface_t *, u32, u8, const u8 *, u16
+$define %func icmp_get_unreach_sent as function with args void
 
 */
 
 /* !SPACE!
 
-$space %export icmp_input
+$space %export icmp_input, icmp_send_unreachable
+$space %export icmp_get_unreach_sent
 
 */
 
@@ -78,5 +81,6 @@ int	icmp_input(net_iface_t *iface, u32 src_ip,
     const u8 *data, u16 len);
 int	icmp_send_unreachable(net_iface_t *iface, u32 dst_ip,
     u8 code, const u8 *original_ip_packet, u16 original_len);
+int	icmp_get_unreach_sent(void);
 
 #endif

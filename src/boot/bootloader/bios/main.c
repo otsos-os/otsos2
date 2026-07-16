@@ -33,9 +33,11 @@ $define %type int as 32 bit signed
 $define %type bootpack_t as tar-backed boot payload
 $define %type bootpack_file_t as file entry inside boot payload
 $define %type mb2_builder_t as mutable multiboot2 info builder
+$define %type mb2_mmap_entry_t as multiboot2 memory map entry
 $define %type module_ctx_t as module loading context
 
 $define %func align_up as function with args u32, u32
+$define %func add_memory_map as function with args mb2_builder_t *
 $define %func load_module as function with args const bootpack_file_t *, const char *, module_ctx_t *
 $define %func module_cb as function with args const bootpack_file_t *, void *
 $define %func panic as procedure with args const char *
@@ -45,7 +47,7 @@ $define %func bios_main as start with args void
 
 /* !SPACE!
 
-$space %internal align_up, load_module, module_cb, panic
+$space %internal align_up, add_memory_map, load_module, module_cb, panic
 $space %export bios_main
 
 */
@@ -80,6 +82,40 @@ panic(const char *msg)
 	bios_console_puts(msg);
 	bios_console_puts("\n");
 	bios_halt();
+}
+
+static int
+add_memory_map(mb2_builder_t *mb)
+{
+	mb2_mmap_entry_t	entries[BIOS_E820_MAX];
+	const bios_mmap_entry_t	*src;
+	u32			count, i, out, type;
+
+	count = bios_mmap_count;
+	if (count > BIOS_E820_MAX) {
+		count = BIOS_E820_MAX;
+	}
+	out = 0;
+	for (i = 0; i < count; i++) {
+		src = &bios_mmap_entries[i];
+		if (src->length == 0) {
+			continue;
+		}
+		type = src->type;
+		if (type == 0 || type > 5) {
+			type = 2;
+		}
+		entries[out].base_addr = src->base_addr;
+		entries[out].length = src->length;
+		entries[out].type = type;
+		entries[out].reserved = 0;
+		out++;
+	}
+	if (out == 0) {
+		return (mb2_add_simple_mmap(mb, bios_boot_info.mem_lower_kb,
+		    bios_boot_info.mem_upper_kb));
+	}
+	return (mb2_add_mmap_entries(mb, entries, out));
 }
 
 static int
@@ -175,8 +211,7 @@ bios_main(void)
 	    bios_boot_info.mem_upper_kb) != 0) {
 		panic("mb2 meminfo tag failed");
 	}
-	if (mb2_add_simple_mmap(&mb, bios_boot_info.mem_lower_kb,
-	    bios_boot_info.mem_upper_kb) != 0) {
+	if (add_memory_map(&mb) != 0) {
 		panic("mb2 mmap tag failed");
 	}
 	fb.addr = bios_boot_info.fb_addr;
