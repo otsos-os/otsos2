@@ -43,15 +43,16 @@ $define %func arp_cache_update as procedure with args net_iface_t *, u32, const 
 $define %func arp_hold_packet as function with args net_iface_t *, u32, u16, const u8 *, u16
 $define %func arp_flush_pending as procedure with args net_iface_t *, u32
 $define %func arp_entry_expired as function with args const arp_cache_entry_t *
+$define %func arp_announce as function with args net_iface_t *
 
 */
 
 /* !SPACE!
 
-$space %internal arp_send_request, arp_send_reply, arp_cache_update
+$space %internal arp_send_reply, arp_cache_update
 $space %internal arp_flush_pending, arp_entry_expired
 $space %export arp_cache_init, arp_input, arp_resolve, arp_lookup
-$space %export arp_hold_packet
+$space %export arp_send_request, arp_hold_packet
 
 */
 
@@ -236,6 +237,16 @@ arp_send_request(net_iface_t *iface, u32 target_ip)
 
 	return (ethernet_output(iface, bcast, ETHERTYPE_ARP,
 	    (const u8 *)&arp, sizeof(arp)));
+}
+
+int
+arp_announce(net_iface_t *iface)
+{
+	if (!iface || iface->ip_addr == 0) {
+		return (-1);
+	}
+
+	return (arp_send_request(iface, iface->ip_addr));
 }
 
 static int

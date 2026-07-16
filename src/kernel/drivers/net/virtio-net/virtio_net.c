@@ -270,6 +270,10 @@ virtio_net_ndev_transmit(netdev_t *ndev, const u8 *frame, u16 len)
 	virtio_net_reclaim_tx(st);
 	head = virtio_vq_alloc_chain(&st->tx_vq, 1);
 	if (head == (u16)-1) {
+		virtio_net_reclaim_tx(st);
+		head = virtio_vq_alloc_chain(&st->tx_vq, 1);
+	}
+	if (head == (u16)-1) {
 		ndev->tx_dropped++;
 		return (-1);
 	}
@@ -426,7 +430,8 @@ virtio_net_pci_probe(pci_device_t *dev, const pci_match_t *match)
 	}
 	strcpy(st->ndev.name, "eth0");
 	st->ndev.mtu = 1500;
-	st->ndev.flags = NETDEV_F_UP;
+	st->ndev.flags = NETDEV_F_UP | NETDEV_F_BROADCAST |
+	    NETDEV_F_RUNNING;
 	st->ndev.priv = st;
 	st->ndev.ops = &virtio_net_ndev_ops;
 	virtio_net_read_link(st);

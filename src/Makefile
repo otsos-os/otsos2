@@ -202,6 +202,7 @@ NET_ARP_O = ../bin/net_arp.o
 NET_IPV4_O = ../bin/net_ipv4.o
 NET_ICMP_O = ../bin/net_icmp.o
 NET_UDP_O = ../bin/net_udp.o
+NET_LOOPBACK_O = ../bin/net_loopback.o
 
 EVENT_O = ../bin/event.o
 EVENT_READ_O = ../bin/event_read.o
@@ -250,7 +251,7 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(TOML_O) $(KUSR_O) $(KUSR_AUTH_O) $(CONFIG_O) $(DRM_API_O) $(RESTRICT_O) \
       $(CRYPTO_UTIL_O) $(CRYPTO_SHA256_O) $(CRYPTO_HMAC_O) $(CRYPTO_PBKDF2_O) $(CRYPTO_RNG_O) $(CRYPTO_CHACHA20_O) \
        $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_PCI_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O) $(VIRTIO_NET_O) \
-       $(NETDEV_O) $(NET_O) $(NET_ETHERNET_O) $(NET_ARP_O) $(NET_IPV4_O) $(NET_ICMP_O) $(NET_UDP_O) $(UNIX_SOCK_O) \
+       $(NETDEV_O) $(NET_O) $(NET_ETHERNET_O) $(NET_ARP_O) $(NET_IPV4_O) $(NET_ICMP_O) $(NET_UDP_O) $(NET_LOOPBACK_O) $(UNIX_SOCK_O) \
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
       $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
       $(EVENT_KBD_O) $(EVENT_MOUSE_O) \
@@ -901,6 +902,10 @@ $(NET_ICMP_O): kernel/net/icmp.c kernel/net/icmp.h kernel/net/ipv4.h
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(NET_UDP_O): kernel/net/udp.c kernel/net/udp.h kernel/net/ipv4.h kernel/net/ethernet.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(NET_LOOPBACK_O): kernel/net/loopback.c kernel/net/loopback.h kernel/net/net.h kernel/net/netdev/netdev.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

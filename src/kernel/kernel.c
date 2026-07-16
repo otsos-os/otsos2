@@ -95,6 +95,9 @@ $space %export kmain
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/net/net.h>
 #include <kernel/net/arp.h>
+#include <kernel/net/icmp.h>
+#include <kernel/net/ipv4.h>
+#include <kernel/net/udp.h>
 #include <kernel/event/event.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/console/console.h>
@@ -512,12 +515,15 @@ net_apply_config(net_iface_t *iface)
 static void
 net_test(void)
 {
-	net_iface_t	*iface;
-	netdev_t	*ndev;
+	net_iface_t		*iface;
+	netdev_t		*ndev;
 	arp_cache_entry_t	*entry;
-	u64		start, timeout;
-	u32		test_ip;
-	int		i;
+	u64			start, timeout, wait_us;
+	u32			test_ip, ping_ip;
+	int			i;
+	u8			ping_data[56];
+	u8			icmp_pkt[sizeof(icmp_header_t) + 56];
+	icmp_header_t		*req;
 
 	if (!net_is_initialized()) {
 		printk("[NET_TEST] network subsystem not initialized\n");
@@ -541,7 +547,7 @@ net_test(void)
 		    ndev->name,
 		    ndev->mac[0], ndev->mac[1], ndev->mac[2],
 		    ndev->mac[3], ndev->mac[4], ndev->mac[5],
-			ndev->ops->is_link_up(ndev) ? "up" : "down");
+		    ndev->ops->is_link_up(ndev) ? "up" : "down");
 
 		iface = net_iface_find_by_ndev(ndev);
 		if (!iface) {
@@ -555,19 +561,24 @@ net_test(void)
 			net_apply_config(iface);
 		}
 		if (iface->ip_addr == 0) {
-			printk("[NET_TEST] %s: no IP  "
+			printk("[NET_TEST] %s: no IP, "
 			    "skipping\n", ndev->name);
 			continue;
 		}
 
 		test_ip = iface->gw_addr ? iface->gw_addr :
 		    (iface->ip_addr & iface->netmask) | 1;
+
+		/* --- ARP resolution test --- */
+		printk("[NET_TEST] === ARP test ===\n");
+		arp_announce(iface);
 		printk("[NET_TEST] sending ARP request for "
 		    "gateway %d.%d.%d.%d...\n",
 		    (test_ip >> 24) & 0xFF,
 		    (test_ip >> 16) & 0xFF,
 		    (test_ip >> 8) & 0xFF,
 		    test_ip & 0xFF);
+		net_poll_all();
 		if (arp_send_request(iface, test_ip) != 0) {
 			printk("[NET_TEST] %s: ARP request failed\n",
 			    ndev->name);
@@ -589,8 +600,9 @@ net_test(void)
 			__asm__ volatile("pause");
 		}
 		if (entry) {
-			printk("[NET_TEST] %s: reply received from "
-			    "%d.%d.%d.%d (%02x:%02x:%02x:%02x:%02x:%02x)\n",
+			printk("[NET_TEST] %s: ARP reply from "
+			    "%d.%d.%d.%d "
+			    "(%02x:%02x:%02x:%02x:%02x:%02x)\n",
 			    ndev->name,
 			    (test_ip >> 24) & 0xFF,
 			    (test_ip >> 16) & 0xFF,
@@ -606,12 +618,71 @@ net_test(void)
 			    (test_ip >> 16) & 0xFF,
 			    (test_ip >> 8) & 0xFF,
 			    test_ip & 0xFF);
+			continue;
 		}
-		printk("[NET_TEST] %s stats: tx=%llu done=%llu drop=%llu "
-		    "rx=%llu delivered=%llu drop=%llu\n",
+
+		/* --- ICMP echo test --- */
+		printk("[NET_TEST] === ICMP echo test ===\n");
+		ping_ip = test_ip;
+		memset(ping_data, 0x42, sizeof(ping_data));
+		printk("[NET_TEST] sending ICMP echo request to "
+		    "%d.%d.%d.%d...\n",
+		    (ping_ip >> 24) & 0xFF,
+		    (ping_ip >> 16) & 0xFF,
+		    (ping_ip >> 8) & 0xFF,
+		    ping_ip & 0xFF);
+		memset(icmp_pkt, 0, sizeof(icmp_pkt));
+		req = (icmp_header_t *)icmp_pkt;
+		req->type = ICMP_TYPE_ECHO_REQUEST;
+		req->code = 0;
+		req->id = __builtin_bswap16(1);
+		req->seq = __builtin_bswap16(1);
+		memcpy(icmp_pkt + sizeof(icmp_header_t),
+		    ping_data, 56);
+		req->checksum = __builtin_bswap16(
+		    ipv4_checksum(icmp_pkt, sizeof(icmp_pkt)));
+
+		ipv4_output(iface, ping_ip, IPV4_PROTO_ICMP,
+		    icmp_pkt, sizeof(icmp_pkt));
+
+		start = timer_get_ticks();
+		wait_us = timer_get_frequency() / 100;
+		if (wait_us == 0) {
+			wait_us = 10000;
+		}
+		while (timer_get_ticks() - start < wait_us) {
+			net_poll_all();
+			__asm__ volatile("pause");
+		}
+
+		/* --- UDP test --- */
+		printk("[NET_TEST] === UDP test ===\n");
+		printk("[NET_TEST] sending UDP datagram to "
+		    "%d.%d.%d.%d:7...\n",
+		    (test_ip >> 24) & 0xFF,
+		    (test_ip >> 16) & 0xFF,
+		    (test_ip >> 8) & 0xFF,
+		    test_ip & 0xFF);
+		udp_output(iface, test_ip, 12345, 7,
+		    (const u8 *)"otsos2-udp-test", 15);
+
+		start = timer_get_ticks();
+		wait_us = timer_get_frequency() / 100;
+		if (wait_us == 0) {
+			wait_us = 10000;
+		}
+		while (timer_get_ticks() - start < wait_us) {
+			net_poll_all();
+			__asm__ volatile("pause");
+		}
+
+		printk("[NET_TEST] %s stats: tx=%llu done=%llu "
+		    "drop=%llu rx=%llu delivered=%llu drop=%llu "
+		    "icmp_unreach=%d\n",
 		    ndev->name, ndev->tx_submitted, ndev->tx_completed,
-		    ndev->tx_dropped, ndev->rx_completed, ndev->rx_delivered,
-		    ndev->rx_dropped);
+		    ndev->tx_dropped, ndev->rx_completed,
+		    ndev->rx_delivered, ndev->rx_dropped,
+		    ipv4_get_icmp_unreach_sent());
 	}
 }
 

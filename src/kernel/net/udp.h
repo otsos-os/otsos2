@@ -34,6 +34,7 @@ $define %type udp_header_t as packed struct with UDP src/dst port + length + che
 $define %type udp_rx_handler_t as callback for a delivered UDP datagram
 $define %type udp_binding_t as struct with bound port and receive handler
 
+$define %func udp_init as procedure with args void
 $define %func udp_input as function with args net_iface_t *, u32, const u8 *, u16
 $define %func udp_output as function with args net_iface_t *, u32, u16, u16, const u8 *, u16
 $define %func udp_bind as function with args u16, udp_rx_handler_t, void *
@@ -44,7 +45,7 @@ $define %func udp_checksum as function with args u32, u32, const u8 *, u16
 
 /* !SPACE!
 
-$space %export udp_input, udp_output, udp_bind, udp_unbind, udp_checksum
+$space %export udp_init, udp_input, udp_output, udp_bind, udp_unbind, udp_checksum
 
 */
 
@@ -73,6 +74,7 @@ typedef struct {
 	int			valid;
 } udp_binding_t;
 
+void	udp_init(void);
 int	udp_input(net_iface_t *iface, u32 src_ip,
     const u8 *data, u16 len);
 int	udp_output(net_iface_t *iface, u32 dst_ip, u16 src_port,

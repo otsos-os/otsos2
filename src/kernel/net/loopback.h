@@ -25,58 +25,21 @@
 
 /* !DEFINES!
 
-$define %type u8 as 8 bit unsigned
-$define %type u16 as 16 bit unsigned
-$define %type u32 as 32 bit unsigned
 $define %type int as 32 bit signed
-$define %type net_iface_t as struct with network interface state
-$define %type icmp_header_t as packed struct with ICMP type/code/checksum
 
-$define %func icmp_input as function with args net_iface_t *, u32, const u8 *, u16
+$define %func loopback_init as function with args void
 
 */
 
 /* !SPACE!
 
-$space %export icmp_input
+$space %export loopback_init
 
 */
 
-#ifndef NET_ICMP_H
-#define NET_ICMP_H
+#ifndef NET_LOOPBACK_H
+#define NET_LOOPBACK_H
 
-#include <kernel/net/net.h>
-#include <mlibc/mlibc.h>
-
-#define	ICMP_TYPE_ECHO_REPLY		0
-#define	ICMP_TYPE_ECHO_REQUEST		8
-#define	ICMP_TYPE_DEST_UNREACH		3
-#define	ICMP_TYPE_TIME_EXCEEDED		11
-
-#define	ICMP_CODE_NET_UNREACH		0
-#define	ICMP_CODE_HOST_UNREACH		1
-#define	ICMP_CODE_PROT_UNREACH		2
-#define	ICMP_CODE_PORT_UNREACH		3
-
-typedef struct {
-	u8	type;
-	u8	code;
-	u16	checksum;
-	u16	id;
-	u16	seq;
-} __attribute__((packed)) icmp_header_t;
-
-typedef struct {
-	u8	type;
-	u8	code;
-	u16	checksum;
-	u32	unused;
-	u8	original_iphdr_and_data[];
-} __attribute__((packed)) icmp_unreachable_t;
-
-int	icmp_input(net_iface_t *iface, u32 src_ip,
-    const u8 *data, u16 len);
-int	icmp_send_unreachable(net_iface_t *iface, u32 dst_ip,
-    u8 code, const u8 *original_ip_packet, u16 original_len);
+int	loopback_init(void);
 
 #endif

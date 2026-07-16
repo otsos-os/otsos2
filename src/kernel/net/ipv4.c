@@ -52,6 +52,8 @@ $space %export ipv4_input, ipv4_output, ipv4_checksum
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
+static int	g_icmp_unreach_sent;
+
 u16
 ipv4_checksum(const void *buf, int len)
 {
@@ -136,12 +138,30 @@ ipv4_input(net_iface_t *iface, const u8 *src_mac,
 		    (u16)(total_len - header_len));
 		break;
 
+	case IPV4_PROTO_TCP:
+		icmp_send_unreachable(iface,
+		    __builtin_bswap32(ip->src),
+		    ICMP_CODE_PROT_UNREACH, data, total_len);
+		g_icmp_unreach_sent++;
+		ret = 0;
+		break;
+
 	default:
+		icmp_send_unreachable(iface,
+		    __builtin_bswap32(ip->src),
+		    ICMP_CODE_PROT_UNREACH, data, total_len);
+		g_icmp_unreach_sent++;
 		ret = 0;
 		break;
 	}
 
 	return (ret);
+}
+
+int
+ipv4_get_icmp_unreach_sent(void)
+{
+	return (g_icmp_unreach_sent);
 }
 
 int

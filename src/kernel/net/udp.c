@@ -33,6 +33,7 @@ $define %type net_iface_t as struct with network interface state
 $define %type udp_header_t as packed struct with UDP src/dst port + length + checksum
 $define %type udp_binding_t as struct with bound port and receive handler
 
+$define %func udp_init as procedure with args void
 $define %func udp_input as function with args net_iface_t *, u32, const u8 *, u16
 $define %func udp_output as function with args net_iface_t *, u32, u16, u16, const u8 *, u16
 $define %func udp_bind as function with args u16, udp_rx_handler_t, void *
@@ -45,7 +46,7 @@ $define %func udp_find_binding as function with args u16
 /* !SPACE!
 
 $space %internal udp_find_binding
-$space %export udp_input, udp_output, udp_bind, udp_unbind, udp_checksum
+$space %export udp_init, udp_input, udp_output, udp_bind, udp_unbind, udp_checksum
 
 */
 
@@ -54,7 +55,23 @@ $space %export udp_input, udp_output, udp_bind, udp_unbind, udp_checksum
 #include <kernel/net/ethernet.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
+
 static udp_binding_t	g_udp_bindings[UDP_MAX_BINDINGS];
+static int		g_udp_initialized;
+
+void
+udp_init(void)
+{
+	int	i;
+
+	if (g_udp_initialized) {
+		return;
+	}
+	for (i = 0; i < UDP_MAX_BINDINGS; i++) {
+		memset(&g_udp_bindings[i], 0, sizeof(g_udp_bindings[i]));
+	}
+	g_udp_initialized = 1;
+}
 u16
 udp_checksum(u32 src_ip, u32 dst_ip, const u8 *segment, u16 len)
 {
@@ -97,9 +114,6 @@ udp_find_binding(u16 port)
 int
 udp_bind(u16 port, udp_rx_handler_t handler, void *ctx)
 {
-
-
-
 	udp_binding_t	*slot;
 	int		i, free_idx;
 
@@ -204,10 +218,6 @@ udp_output(net_iface_t *iface, u32 dst_ip, u16 src_port,
 	udp->checksum = 0;
 	memcpy(segment + UDP_HEADER_LEN, data, len);
 
-
-
-
-	
 	csum = udp_checksum(iface->ip_addr, dst_ip, segment, udp_len);
 	udp->checksum = __builtin_bswap16(csum == 0 ? 0xFFFF : csum);
 	return (ipv4_output(iface, dst_ip, IPV4_PROTO_UDP,

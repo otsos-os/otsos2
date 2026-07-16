@@ -35,12 +35,14 @@ $define %type ipv4_header_t as packed struct with IPv4 fields
 $define %func ipv4_input as function with args net_iface_t *, const u8 *, const u8 *, u16
 $define %func ipv4_output as function with args net_iface_t *, u32, u8, const u8 *, u16
 $define %func ipv4_checksum as function with args const void *, int
+$define %func ipv4_get_icmp_unreach_sent as function with args void
 
 */
 
 /* !SPACE!
 
 $space %export ipv4_input, ipv4_output, ipv4_checksum
+$space %export ipv4_get_icmp_unreach_sent
 
 */
 
@@ -81,5 +83,6 @@ int	ipv4_input(net_iface_t *iface, const u8 *src_mac,
 int	ipv4_output(net_iface_t *iface, u32 dst_ip, u8 protocol,
     const u8 *data, u16 len);
 u16	ipv4_checksum(const void *buf, int len);
+int	ipv4_get_icmp_unreach_sent(void);
 
 #endif

@@ -40,6 +40,7 @@ $define %func arp_resolve as function with args net_iface_t *, u32, u8 *
 $define %func arp_lookup as function with args net_iface_t *, u32
 $define %func arp_send_request as function with args net_iface_t *, u32
 $define %func arp_hold_packet as function with args net_iface_t *, u32, u16, const u8 *, u16
+$define %func arp_announce as function with args net_iface_t *
 
 */
 
@@ -106,5 +107,6 @@ arp_cache_entry_t *arp_lookup(net_iface_t *iface, u32 ip);
 int	arp_send_request(net_iface_t *iface, u32 target_ip);
 int	arp_hold_packet(net_iface_t *iface, u32 ip, u16 ethertype,
     const u8 *data, u16 len);
+int	arp_announce(net_iface_t *iface);
 
 #endif

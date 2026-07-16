@@ -42,6 +42,9 @@ $define %func net_iface_by_name as function with args const char *
 $define %func net_iface_find_by_ndev as function with args netdev_t *
 $define %func net_poll_all as procedure with args void
 $define %func net_dump_ifaces as procedure with args void
+$define %func net_iface_set_ip as procedure with args net_iface_t *, u32
+$define %func net_iface_set_netmask as procedure with args net_iface_t *, u32
+$define %func net_iface_set_gw as procedure with args net_iface_t *, u32
 
 */
 
@@ -52,12 +55,15 @@ $space %export net_iface_register, net_iface_unregister, net_iface_count
 $space %export net_iface_get, net_iface_by_name
 $space %export net_iface_find_by_ndev
 $space %export net_poll_all, net_dump_ifaces
+$space %export net_iface_set_ip, net_iface_set_netmask, net_iface_set_gw
 
 */
 
 #include <kernel/net/net.h>
 #include <kernel/net/ethernet.h>
 #include <kernel/net/arp.h>
+#include <kernel/net/udp.h>
+#include <kernel/net/loopback.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -82,8 +88,11 @@ net_init(void)
 	g_polling = 0;
 
 	arp_cache_init();
-
+	udp_init();
 	g_initialized = 1;
+
+	loopback_init();
+
 	drivers_log("[NET] network subsystem initialized\n");
 	return (0);
 }
@@ -259,4 +268,31 @@ net_dump_ifaces(void)
 			    iface->netmask & 0xFF);
 		}
 	}
+}
+
+void
+net_iface_set_ip(net_iface_t *iface, u32 ip)
+{
+	if (!iface) {
+		return;
+	}
+	iface->ip_addr = ip;
+}
+
+void
+net_iface_set_netmask(net_iface_t *iface, u32 mask)
+{
+	if (!iface) {
+		return;
+	}
+	iface->netmask = mask;
+}
+
+void
+net_iface_set_gw(net_iface_t *iface, u32 gw)
+{
+	if (!iface) {
+		return;
+	}
+	iface->gw_addr = gw;
 }
