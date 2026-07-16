@@ -7,6 +7,7 @@
 #include <kernel/bootmem.h>
 #include <kernel/multiboot.h>
 #include <kernel/multiboot2.h>
+#include <kernel/uefi.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -162,13 +163,61 @@ static void reserve_mb2(multiboot2_info_t *mb) {
   }
 }
 
+static void load_uefi_mmap(uefi_boot_info_t *uefi_info) {
+  efi_memory_descriptor_t *mem_map = (efi_memory_descriptor_t *)uefi_info->memory_map_addr;
+  u8 *mem_map_end = (u8 *)uefi_info->memory_map_addr + uefi_info->memory_map_size;
+  u64 descriptor_size = uefi_info->memory_map_descriptor_size;
+
+  while ((u8 *)mem_map < mem_map_end) {
+    if (mem_map->type == EFI_CONVENTIONAL_MEMORY) {
+      u64 start = mem_map->physical_start;
+      u64 end = start + (mem_map->number_of_pages * 4096);
+      add_free_range(start, end);
+    }
+    mem_map = (efi_memory_descriptor_t *)((u8 *)mem_map + descriptor_size);
+  }
+}
+
+static void reserve_uefi(uefi_boot_info_t *uefi_info) {
+  efi_memory_descriptor_t *mem_map = (efi_memory_descriptor_t *)uefi_info->memory_map_addr;
+  u8 *mem_map_end = (u8 *)uefi_info->memory_map_addr + uefi_info->memory_map_size;
+  u64 descriptor_size = uefi_info->memory_map_descriptor_size;
+
+  while ((u8 *)mem_map < mem_map_end) {
+    if (mem_map->type == EFI_BOOT_SERVICES_CODE ||
+        mem_map->type == EFI_BOOT_SERVICES_DATA ||
+        mem_map->type == EFI_RUNTIME_SERVICES_CODE ||
+        mem_map->type == EFI_RUNTIME_SERVICES_DATA) {
+      u64 start = mem_map->physical_start;
+      u64 end = start + (mem_map->number_of_pages * 4096);
+      reserve_range(start, end);
+    }
+    mem_map = (efi_memory_descriptor_t *)((u8 *)mem_map + descriptor_size);
+  }
+  
+  if (uefi_info->framebuffer_addr) {
+    u64 fb_start = uefi_info->framebuffer_addr;
+    u64 fb_size = uefi_info->framebuffer_height * uefi_info->framebuffer_pitch;
+    reserve_range(fb_start, fb_start + fb_size);
+  }
+  
+  if (uefi_info->kernel_physical_addr) {
+    reserve_range(uefi_info->kernel_physical_addr, 
+                 uefi_info->kernel_physical_addr + uefi_info->kernel_size);
+  }
+}
+
 void bootmem_init(u64 magic, u64 info_addr, u64 kernel_start, u64 kernel_end) {
   memset(free_ranges, 0, sizeof(free_ranges));
   free_count = 0;
   highest_addr = 0;
   initialized = 0;
 
-  if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
+  if (magic == UEFI_BOOTLOADER_MAGIC) {
+    uefi_boot_info_t *uefi_info = (uefi_boot_info_t *)info_addr;
+    load_uefi_mmap(uefi_info);
+    reserve_uefi(uefi_info);
+  } else if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
     multiboot2_info_t *mb = (multiboot2_info_t *)info_addr;
     load_mb2_mmap(mb);
     reserve_mb2(mb);
@@ -183,6 +232,23 @@ void bootmem_init(u64 magic, u64 info_addr, u64 kernel_start, u64 kernel_end) {
 
   initialized = 1;
   printk("[BOOTMEM] initialized: %u ranges, free=%u KB\n", free_count,
+              bootmem_free_bytes() / 1024);
+}
+
+void bootmem_init_uefi(uefi_boot_info_t *uefi_info) {
+  memset(free_ranges, 0, sizeof(free_ranges));
+  free_count = 0;
+  highest_addr = 0;
+  initialized = 0;
+
+  load_uefi_mmap(uefi_info);
+  reserve_uefi(uefi_info);
+
+  reserve_range(0, 0x100000);
+  reserve_range((u64)&start, (u64)&kernel_end);
+
+  initialized = 1;
+  printk("[BOOTMEM] initialized from UEFI: %u ranges, free=%u KB\n", free_count,
               bootmem_free_bytes() / 1024);
 }
 

@@ -95,9 +95,6 @@ $space %export kmain
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/net/net.h>
 #include <kernel/net/arp.h>
-#include <kernel/net/icmp.h>
-#include <kernel/net/ipv4.h>
-#include <kernel/net/udp.h>
 #include <kernel/event/event.h>
 #include <kernel/interrupts/idt.h>
 #include <kernel/console/console.h>
@@ -105,6 +102,7 @@ $space %export kmain
 #include <mm/mm.h>
 #include <kernel/multiboot.h>
 #include <kernel/multiboot2.h>
+#include <kernel/uefi.h>
 #include <kernel/panic.h>
 #include <kernel/pci/pci.h>
 #include <kernel/api/api.h>
@@ -515,15 +513,12 @@ net_apply_config(net_iface_t *iface)
 static void
 net_test(void)
 {
-	net_iface_t		*iface;
-	netdev_t		*ndev;
+	net_iface_t	*iface;
+	netdev_t	*ndev;
 	arp_cache_entry_t	*entry;
-	u64			start, timeout, wait_us;
-	u32			test_ip, ping_ip;
-	int			i;
-	u8			ping_data[56];
-	u8			icmp_pkt[sizeof(icmp_header_t) + 56];
-	icmp_header_t		*req;
+	u64		start, timeout;
+	u32		test_ip;
+	int		i;
 
 	if (!net_is_initialized()) {
 		printk("[NET_TEST] network subsystem not initialized\n");
@@ -547,7 +542,7 @@ net_test(void)
 		    ndev->name,
 		    ndev->mac[0], ndev->mac[1], ndev->mac[2],
 		    ndev->mac[3], ndev->mac[4], ndev->mac[5],
-		    ndev->ops->is_link_up(ndev) ? "up" : "down");
+			ndev->ops->is_link_up(ndev) ? "up" : "down");
 
 		iface = net_iface_find_by_ndev(ndev);
 		if (!iface) {
@@ -561,24 +556,19 @@ net_test(void)
 			net_apply_config(iface);
 		}
 		if (iface->ip_addr == 0) {
-			printk("[NET_TEST] %s: no IP, "
+			printk("[NET_TEST] %s: no IP  "
 			    "skipping\n", ndev->name);
 			continue;
 		}
 
 		test_ip = iface->gw_addr ? iface->gw_addr :
 		    (iface->ip_addr & iface->netmask) | 1;
-
-		/* --- ARP resolution test --- */
-		printk("[NET_TEST] === ARP test ===\n");
-		arp_announce(iface);
 		printk("[NET_TEST] sending ARP request for "
 		    "gateway %d.%d.%d.%d...\n",
 		    (test_ip >> 24) & 0xFF,
 		    (test_ip >> 16) & 0xFF,
 		    (test_ip >> 8) & 0xFF,
 		    test_ip & 0xFF);
-		net_poll_all();
 		if (arp_send_request(iface, test_ip) != 0) {
 			printk("[NET_TEST] %s: ARP request failed\n",
 			    ndev->name);
@@ -600,9 +590,8 @@ net_test(void)
 			__asm__ volatile("pause");
 		}
 		if (entry) {
-			printk("[NET_TEST] %s: ARP reply from "
-			    "%d.%d.%d.%d "
-			    "(%02x:%02x:%02x:%02x:%02x:%02x)\n",
+			printk("[NET_TEST] %s: reply received from "
+			    "%d.%d.%d.%d (%02x:%02x:%02x:%02x:%02x:%02x)\n",
 			    ndev->name,
 			    (test_ip >> 24) & 0xFF,
 			    (test_ip >> 16) & 0xFF,
@@ -618,71 +607,12 @@ net_test(void)
 			    (test_ip >> 16) & 0xFF,
 			    (test_ip >> 8) & 0xFF,
 			    test_ip & 0xFF);
-			continue;
 		}
-
-		/* --- ICMP echo test --- */
-		printk("[NET_TEST] === ICMP echo test ===\n");
-		ping_ip = test_ip;
-		memset(ping_data, 0x42, sizeof(ping_data));
-		printk("[NET_TEST] sending ICMP echo request to "
-		    "%d.%d.%d.%d...\n",
-		    (ping_ip >> 24) & 0xFF,
-		    (ping_ip >> 16) & 0xFF,
-		    (ping_ip >> 8) & 0xFF,
-		    ping_ip & 0xFF);
-		memset(icmp_pkt, 0, sizeof(icmp_pkt));
-		req = (icmp_header_t *)icmp_pkt;
-		req->type = ICMP_TYPE_ECHO_REQUEST;
-		req->code = 0;
-		req->id = __builtin_bswap16(1);
-		req->seq = __builtin_bswap16(1);
-		memcpy(icmp_pkt + sizeof(icmp_header_t),
-		    ping_data, 56);
-		req->checksum = __builtin_bswap16(
-		    ipv4_checksum(icmp_pkt, sizeof(icmp_pkt)));
-
-		ipv4_output(iface, ping_ip, IPV4_PROTO_ICMP,
-		    icmp_pkt, sizeof(icmp_pkt));
-
-		start = timer_get_ticks();
-		wait_us = timer_get_frequency() / 100;
-		if (wait_us == 0) {
-			wait_us = 10000;
-		}
-		while (timer_get_ticks() - start < wait_us) {
-			net_poll_all();
-			__asm__ volatile("pause");
-		}
-
-		/* --- UDP test --- */
-		printk("[NET_TEST] === UDP test ===\n");
-		printk("[NET_TEST] sending UDP datagram to "
-		    "%d.%d.%d.%d:7...\n",
-		    (test_ip >> 24) & 0xFF,
-		    (test_ip >> 16) & 0xFF,
-		    (test_ip >> 8) & 0xFF,
-		    test_ip & 0xFF);
-		udp_output(iface, test_ip, 12345, 7,
-		    (const u8 *)"otsos2-udp-test", 15);
-
-		start = timer_get_ticks();
-		wait_us = timer_get_frequency() / 100;
-		if (wait_us == 0) {
-			wait_us = 10000;
-		}
-		while (timer_get_ticks() - start < wait_us) {
-			net_poll_all();
-			__asm__ volatile("pause");
-		}
-
-		printk("[NET_TEST] %s stats: tx=%llu done=%llu "
-		    "drop=%llu rx=%llu delivered=%llu drop=%llu "
-		    "icmp_unreach=%d\n",
+		printk("[NET_TEST] %s stats: tx=%llu done=%llu drop=%llu "
+		    "rx=%llu delivered=%llu drop=%llu\n",
 		    ndev->name, ndev->tx_submitted, ndev->tx_completed,
-		    ndev->tx_dropped, ndev->rx_completed,
-		    ndev->rx_delivered, ndev->rx_dropped,
-		    ipv4_get_icmp_unreach_sent());
+		    ndev->tx_dropped, ndev->rx_completed, ndev->rx_delivered,
+		    ndev->rx_dropped);
 	}
 }
 
@@ -694,6 +624,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	u32		ramdisk_pool_sz;
 	multiboot2_info_t	*mboot2_ptr;
 	multiboot_info_t	*mboot1_ptr;
+	uefi_boot_info_t	*uefi_info;
 	char		cpu_buf[64];
 	char		*p;
 	u64		ram_kb;
@@ -720,27 +651,45 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	disable_apic = ((boot_flags & BOOT_FLAG_DISABLE_APIC) != 0);
 
 	uart_init();
-	bootmem_init(magic, addr, 0x100000,
-    (u64)&kernel_end - KERNEL_VMA);
-	kmem_init();
 
-	if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
-		mboot2_ptr = (multiboot2_info_t *)addr;
-		mb2_find_module(mboot2_ptr, "config",
-		    &config_mod, &config_sz);
-		if (config_mod && config_sz > 0) {
-			config_init_from_data(
-			    (const char *)config_mod,
-			    config_sz);
-			stdio_init();
-			printk("loaded config from "
-			    "(%u bytes)\n", config_sz);
+    if (magic == UEFI_BOOTLOADER_MAGIC) {
+		uefi_info = (uefi_boot_info_t *)addr;
+		bootmem_init_uefi(uefi_info);
+		kmem_init();
+		drm_boot_init_uefi(uefi_info);
+		acpi_init_from_uefi(uefi_info);
+		
+		// Check if network boot
+		if (uefi_info->boot_flags & BOOT_FLAG_NETWORK) {
+			printk("Booted via UEFI (Network)\n");
+		} else {
+			printk("Booted via UEFI (Local)\n");
+		}
+		is_multiboot2 = 0;
+	} else {
+		bootmem_init(magic, addr, 0x100000,
+		    (u64)&kernel_end - KERNEL_VMA);
+		kmem_init();
+
+		if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
+			mboot2_ptr = (multiboot2_info_t *)addr;
+			mb2_find_module(mboot2_ptr, "config",
+			    &config_mod, &config_sz);
+			if (config_mod && config_sz > 0) {
+				config_init_from_data(
+				    (const char *)config_mod,
+				    config_sz);
+				stdio_init();
+				printk("loaded config from "
+				    "(%u bytes)\n", config_sz);
+			}
 		}
 	}
 
 	init_idt();
 	pit_init();
 	pmap_init();
+	
 	ramdisk_pool_sz = 0;
 	if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
 		ramdisk_pool_sz = mb2_total_modules_size(
@@ -804,7 +753,42 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 
 	boot_magic = (u32)magic;
 
-	if (boot_magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
+	if (boot_magic == UEFI_BOOTLOADER_MAGIC) {
+		is_multiboot2 = 0;
+		printk("boot from uefi (magic: 0x%x)\n",
+		    boot_magic);
+		
+		mboot2_ptr = NULL;
+		mboot1_ptr = NULL;
+		
+		if (!disable_apic) {
+			ioapic_init();
+			smp_init();
+		} else {
+			smp_init_single_cpu();
+		}
+
+		clear_scr();
+		terminal_init();
+		stdio_set_terminal_mirror(terminal_log_mirror);
+
+		cinfo(cpu_buf);
+		p = cpu_buf;
+		while (*p == ' ') {
+			p++;
+		}
+
+		ram_kb = uefi_info->memory_map_size / 1024;
+
+		printk("CPU: %s\n", p);
+		printk("RAM: %u MB (%u KB)\n",
+		    ram_kb / 1024, ram_kb);
+		
+		if (drm_is_ready()) {
+			printf("CPU: %s\n", p);
+			printf("RAM: %u MB\n", ram_kb / 1024);
+		}
+	} else if (boot_magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
 		is_multiboot2 = 1;
 		printk("boot from mb2 (magic: 0x%x)\n",
 		    boot_magic);

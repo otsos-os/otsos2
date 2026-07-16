@@ -1,11 +1,9 @@
 TARGET ?= x86_64-elf
 CC = clang
 ZIG = zig
-PYTHON ?= python3
 LD = ld.lld
 AS = nasm
 QEMU = qemu-system-x86_64
-XORRISO = xorriso
 QEMU_GUI_OPTS ?= -display gtk
 QEMU_NODISPLAY_OPTS ?= -display none
 
@@ -25,7 +23,7 @@ CFLAGS += $(DISK_DEFINES)
 
 KERNEL_BIN = ../bin/kernel.bin
 ISO_IMAGE = ../otsos.iso
-MAKEISO = ../tools/makeiso.py
+ISODIR = ../isodir
 DISK_IMG = ../bin/disk.img
 PORTS_DIR = ../ports
 MUSL_DIR = ../libc/musl
@@ -51,56 +49,23 @@ ifeq ($(CPYTHON_ENABLED),false)
 CPYTHON_BIN =
 endif
 
-BIOS_BUILD_DIR = ../bin/bootloader/bios
-UEFI_BUILD_DIR = ../bin/bootloader/uefi
-BIOS_STAGE2_AREA_SECTORS = 256
-BIOS_STAGE1_MAX_SECTORS = 60
-BIOS_LAYOUT_LBA = 257
-BIOS_BOOTPACK_LBA = 258
-BIOS_STAGE1_OBJ = $(BIOS_BUILD_DIR)/stage1.o
-BIOS_STAGE1_ELF = $(BIOS_BUILD_DIR)/stage1.elf
-BIOS_STAGE1_BIN = $(BIOS_BUILD_DIR)/stage1.bin
-BIOS_STAGE2_ELF = $(BIOS_BUILD_DIR)/stage2.elf
-BIOS_STAGE2_BIN = $(BIOS_BUILD_DIR)/stage2.bin
-BIOS_BOOTPACK = $(BIOS_BUILD_DIR)/bootpack.tar
-BIOS_LAYOUT_BIN = $(BIOS_BUILD_DIR)/layout.bin
-BIOS_BOOT_IMAGE = $(BIOS_BUILD_DIR)/otsos-bios.img
-BIOS_PAYLOAD_DIR = $(BIOS_BUILD_DIR)/payload
-UEFI_BOOTX64 = $(UEFI_BUILD_DIR)/BOOTX64.EFI
-UEFI_ESP_IMAGE = $(UEFI_BUILD_DIR)/otsos-uefi-esp.img
-UEFI_PAYLOAD_DIR = $(UEFI_BUILD_DIR)/payload
-UEFI_TRAMPOLINE_OBJ = $(UEFI_BUILD_DIR)/trampoline.obj
-BIOS_OBJCOPY = llvm-objcopy
-BIOS_CFLAGS = --target=i386-elf -m32 -ffreestanding -fno-pic \
-	-fno-builtin -fno-stack-protector -fno-asynchronous-unwind-tables \
-	-nostdinc -O2 -g -I.
-UEFI_CFLAGS = --target=x86_64-windows -ffreestanding -fno-pic \
-	-fno-builtin -fno-stack-protector -fno-asynchronous-unwind-tables \
-	-mno-red-zone -nostdinc -O2 -g -I.
-BIOS_STAGE2_OBJS = \
-	$(BIOS_BUILD_DIR)/entry.o \
-	$(BIOS_BUILD_DIR)/main.o \
-	$(BIOS_BUILD_DIR)/disk.o \
-	$(BIOS_BUILD_DIR)/console.o \
-	$(BIOS_BUILD_DIR)/lib_string.o \
-	$(BIOS_BUILD_DIR)/lib_bootpack.o \
-	$(BIOS_BUILD_DIR)/lib_elf64.o \
-	$(BIOS_BUILD_DIR)/lib_multiboot2.o
-UEFI_LIB_OBJS = \
-	$(UEFI_BUILD_DIR)/lib_string.obj \
-	$(UEFI_BUILD_DIR)/lib_bootpack.obj \
-	$(UEFI_BUILD_DIR)/lib_elf64.obj \
-	$(UEFI_BUILD_DIR)/lib_multiboot2.obj
-
 ifeq ($(LIBC_ENABLED),true)
 ISO_MUSL_TEST_DEP = $(MUSL_TEST_BIN)
+ISO_MUSL_TEST_COPY = @cp $(MUSL_TEST_BIN) $(ISODIR)/boot/musl_test
+GRUB_MUSL_TEST = @echo '    module2 /boot/musl_test musl_test' >> $(ISODIR)/boot/grub/grub.cfg
 ISO_LUA_DEP = $(LUA_BIN)
 ISO_LDSO_DEP = $(LDSO_BIN)
+ISO_LDSO_COPY = @cp $(LDSO_BIN) $(ISODIR)/boot/ld-musl
+GRUB_LDSO = @echo '    module2 /boot/ld-musl ld-musl' >> $(ISODIR)/boot/grub/grub.cfg
 LIBC_DEPS = $(MUSL_LIBC) $(MUSL_CRT1)
 else
 ISO_MUSL_TEST_DEP =
+ISO_MUSL_TEST_COPY =
+GRUB_MUSL_TEST =
 ISO_LUA_DEP =
 ISO_LDSO_DEP =
+ISO_LDSO_COPY =
+GRUB_LDSO =
 LIBC_DEPS =
 endif
 ifeq ($(CPYTHON_ENABLED),true)
@@ -237,7 +202,6 @@ NET_ARP_O = ../bin/net_arp.o
 NET_IPV4_O = ../bin/net_ipv4.o
 NET_ICMP_O = ../bin/net_icmp.o
 NET_UDP_O = ../bin/net_udp.o
-NET_LOOPBACK_O = ../bin/net_loopback.o
 
 EVENT_O = ../bin/event.o
 EVENT_READ_O = ../bin/event_read.o
@@ -286,7 +250,7 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(TOML_O) $(KUSR_O) $(KUSR_AUTH_O) $(CONFIG_O) $(DRM_API_O) $(RESTRICT_O) \
       $(CRYPTO_UTIL_O) $(CRYPTO_SHA256_O) $(CRYPTO_HMAC_O) $(CRYPTO_PBKDF2_O) $(CRYPTO_RNG_O) $(CRYPTO_CHACHA20_O) \
        $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_PCI_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O) $(VIRTIO_NET_O) \
-       $(NETDEV_O) $(NET_O) $(NET_ETHERNET_O) $(NET_ARP_O) $(NET_IPV4_O) $(NET_ICMP_O) $(NET_UDP_O) $(NET_LOOPBACK_O) $(UNIX_SOCK_O) \
+       $(NETDEV_O) $(NET_O) $(NET_ETHERNET_O) $(NET_ARP_O) $(NET_IPV4_O) $(NET_ICMP_O) $(NET_UDP_O) $(UNIX_SOCK_O) \
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
       $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
       $(EVENT_KBD_O) $(EVENT_MOUSE_O) \
@@ -297,15 +261,13 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(API_TIME_O) $(TERM_POWER_O) $(TERM_INFO_O) $(INPUT_O) \
       $(TIME_O) $(CLOCKSOURCE_O) $(ET_CLOCKSOURCE_O) $(CMOS_RTC_O)
 
-.PHONY: all ask_version check_build_tools check_run_tools check_bios_run_tools
+.PHONY: all ask_version check_build_tools check_run_tools
 
 all: check_build_tools ask_version $(ISO_IMAGE)
 
 check_build_tools:
 	@set -e; \
-	for tool in "$(CC)" "$(LD)" "$(AS)" "$(ZIG)" "$(PYTHON)" \
-		"$(BIOS_OBJCOPY)" "$(XORRISO)" llvm-size perl tar stat \
-		truncate dd mformat mmd mcopy; do \
+	for tool in "$(CC)" "$(LD)" "$(AS)" "$(ZIG)" grub-mkrescue llvm-size; do \
 		if ! command -v "$$tool" >/dev/null 2>&1; then \
 			echo "  MISSING $$tool"; \
 			echo "  install missing tools to build"; \
@@ -331,14 +293,6 @@ check_run_tools: check_build_tools
 				fi ;; \
 		esac; \
 	done
-
-check_bios_run_tools: check_build_tools
-	@set -e; \
-	if ! command -v "$(QEMU)" >/dev/null 2>&1; then \
-		echo "  MISSING $(QEMU)"; \
-		echo "  install qemu to run"; \
-		exit 1; \
-	fi
 
 ask_version:
 	@set -e; \
@@ -448,63 +402,9 @@ $(LDSO_BIN): $(MUSL_LDSO)
 	@echo "  CP      $@"
 	@cp $(MUSL_LDSO) $@
 
-$(ISO_IMAGE): check_build_tools $(BIOS_BOOT_IMAGE) $(UEFI_ESP_IMAGE) $(MAKEISO)
-	@echo "  ISO     $(ISO_IMAGE)"
-	@$(PYTHON) $(MAKEISO) --output $(ISO_IMAGE) \
-		--bios-image $(BIOS_BOOT_IMAGE) \
-		--efi-image $(UEFI_ESP_IMAGE) \
-		--xorriso $(XORRISO)
-
-$(BIOS_BUILD_DIR):
-	@mkdir -p $(BIOS_BUILD_DIR)
-
-$(BIOS_BUILD_DIR)/entry.o: boot/bootloader/bios/entry.S boot/bootloader/bios/bios.h | $(BIOS_BUILD_DIR)
-	@echo "  AS      $<"
-	@$(CC) $(BIOS_CFLAGS) -x assembler-with-cpp -c $< -o $@
-
-$(BIOS_BUILD_DIR)/%.o: boot/bootloader/bios/%.c boot/bootloader/bios/bios.h | $(BIOS_BUILD_DIR)
-	@echo "  CC      $<"
-	@$(CC) $(BIOS_CFLAGS) -c $< -o $@
-
-$(BIOS_BUILD_DIR)/lib_%.o: boot/bootloader/lib/%.c | $(BIOS_BUILD_DIR)
-	@echo "  CC      $<"
-	@$(CC) $(BIOS_CFLAGS) -c $< -o $@
-
-$(BIOS_STAGE2_ELF): $(BIOS_STAGE2_OBJS) boot/bootloader/bios/linker.ld
-	@echo "  LLD     $@"
-	@$(LD) -m elf_i386 -T boot/bootloader/bios/linker.ld \
-		$(BIOS_STAGE2_OBJS) -o $@
-
-$(BIOS_STAGE2_BIN): $(BIOS_STAGE2_ELF)
-	@echo "  OBJCOPY $@"
-	@$(BIOS_OBJCOPY) -O binary $< $@
-
-$(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BUILD_DIR)
-	@set -e; \
-	size=$$(stat -c%s $(BIOS_STAGE2_BIN)); \
-	sectors=$$(((size + 511) / 512)); \
-	if [ $$sectors -gt $(BIOS_STAGE1_MAX_SECTORS) ]; then \
-		echo "  BIOS    stage2 too large: $$sectors sectors"; \
-		exit 1; \
-	fi; \
-	echo "  AS      boot/bootloader/bios/stage1.S"; \
-	$(CC) $(BIOS_CFLAGS) -DSTAGE2_SECTORS=$$sectors \
-		-x assembler-with-cpp -c boot/bootloader/bios/stage1.S \
-		-o $(BIOS_STAGE1_OBJ); \
-	$(LD) -m elf_i386 -Ttext 0x0 $(BIOS_STAGE1_OBJ) \
-		-o $(BIOS_STAGE1_ELF); \
-	$(BIOS_OBJCOPY) -O binary $(BIOS_STAGE1_ELF) $@; \
-	stage1_size=$$(stat -c%s $@); \
-	if [ $$stage1_size -ne 512 ]; then \
-		echo "  BIOS    stage1 bad size: $$stage1_size"; \
-		exit 1; \
-	fi
-
-$(BIOS_BOOTPACK): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) | $(BIOS_BUILD_DIR)
-	@rm -rf $(BIOS_PAYLOAD_DIR)
-	@mkdir -p $(BIOS_PAYLOAD_DIR)
-	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
-	@cp config.toml $(BIOS_PAYLOAD_DIR)/config.toml
+$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP)
+	@mkdir -p $(ISODIR)/boot/grub
+	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
 	@for m in $(MULTIBOOT_MODULES); do \
 		src=""; \
 		case $$m in \
@@ -523,62 +423,26 @@ $(BIOS_BOOTPACK): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN)
 			ld-musl) src=$(LDSO_BIN);; \
 		esac; \
 		if [ -n "$$src" ] && [ -f "$$src" ]; then \
-			cp "$$src" "$(BIOS_PAYLOAD_DIR)/$$m"; \
+			cp "$$src" "$(ISODIR)/boot/$$m"; \
 		fi; \
 	done
-	@echo "  TAR     $(BIOS_BOOTPACK)"
-	@tar -cf $(BIOS_BOOTPACK) -C $(BIOS_PAYLOAD_DIR) .
-
-$(BIOS_LAYOUT_BIN): $(BIOS_BOOTPACK) | $(BIOS_BUILD_DIR)
-	@set -e; \
-	bytes=$$(stat -c%s $(BIOS_BOOTPACK)); \
-	sectors=$$(((bytes + 511) / 512)); \
-	echo "  LAYOUT  $(BIOS_LAYOUT_BIN)"; \
-	perl -e 'print pack("V4", 0x3250424f, shift, shift, 0); print "\0" x (512 - 16)' \
-		$$sectors $$bytes > $@
-
-$(BIOS_BOOT_IMAGE): $(BIOS_STAGE1_BIN) $(BIOS_STAGE2_BIN) $(BIOS_LAYOUT_BIN) $(BIOS_BOOTPACK) | $(BIOS_BUILD_DIR)
-	@set -e; \
-	bytes=$$(stat -c%s $(BIOS_BOOTPACK)); \
-	sectors=$$(((bytes + 511) / 512)); \
-	final_size=$$((($(BIOS_BOOTPACK_LBA) + sectors) * 512)); \
-	echo "  IMG     $(BIOS_BOOT_IMAGE)"; \
-	rm -f $@; \
-	dd if=$(BIOS_STAGE1_BIN) of=$@ bs=512 seek=0 conv=notrunc 2>/dev/null; \
-	dd if=$(BIOS_STAGE2_BIN) of=$@ bs=512 seek=1 conv=notrunc 2>/dev/null; \
-	dd if=$(BIOS_LAYOUT_BIN) of=$@ bs=512 seek=$(BIOS_LAYOUT_LBA) conv=notrunc 2>/dev/null; \
-	dd if=$(BIOS_BOOTPACK) of=$@ bs=512 seek=$(BIOS_BOOTPACK_LBA) conv=notrunc 2>/dev/null; \
-	truncate -s $$final_size $@; \
-	total_sectors=$$((final_size / 512)); \
-	part_sectors=$$((total_sectors - 1)); \
-	perl -e 'open(my $$fh, "+<", shift) or die $$!; binmode $$fh; seek($$fh, 446, 0); print $$fh pack("C8VV", 0x80, 0x00, 0x01, 0x00, 0x83, 0xfe, 0xff, 0xff, 1, shift); close $$fh;' \
-		$@ $$part_sectors
-
-$(UEFI_BUILD_DIR):
-	@mkdir -p $(UEFI_BUILD_DIR)
-
-$(UEFI_BUILD_DIR)/trampoline.obj: boot/bootloader/uefi/trampoline.S | $(UEFI_BUILD_DIR)
-	@echo "  AS      $<"
-	@$(CC) $(UEFI_CFLAGS) -x assembler-with-cpp -c $< -o $@
-
-$(UEFI_BUILD_DIR)/lib_%.obj: boot/bootloader/lib/%.c | $(UEFI_BUILD_DIR)
-	@echo "  CC      $<"
-	@$(CC) $(UEFI_CFLAGS) -c $< -o $@
-
-$(UEFI_BOOTX64): boot/bootloader/uefi/main.zig $(UEFI_TRAMPOLINE_OBJ) $(UEFI_LIB_OBJS) | $(UEFI_BUILD_DIR)
-	@echo "  ZIG     $@"
-	@$(ZIG) build-exe boot/bootloader/uefi/main.zig \
-		-target x86_64-uefi -O ReleaseSmall \
-		-femit-bin=$@ $(UEFI_TRAMPOLINE_OBJ) $(UEFI_LIB_OBJS)
-
-$(UEFI_ESP_IMAGE): $(UEFI_BOOTX64) $(BIOS_BOOTPACK) | $(UEFI_BUILD_DIR)
-	@echo "  ESP     $(UEFI_ESP_IMAGE)"
-	@rm -f $@
-	@truncate -s 16M $@
-	@mformat -i $@ -v OTSOSUEFI ::
-	@mmd -i $@ ::/EFI ::/EFI/BOOT ::/boot
-	@mcopy -i $@ $(UEFI_BOOTX64) ::/EFI/BOOT/BOOTX64.EFI
-	@mcopy -i $@ $(BIOS_BOOTPACK) ::/boot/bootpack.tar
+	@cp config.toml $(ISODIR)/boot/config.toml
+	@echo 'set timeout=4' > $(ISODIR)/boot/grub/grub.cfg
+	@echo 'set default=0' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo 'insmod all_video' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo 'menuentry "OTSOS" {' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '    multiboot2 /boot/kernel.bin' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '    module2 /boot/config.toml config' >> $(ISODIR)/boot/grub/grub.cfg
+	@for m in $(MULTIBOOT_MODULES); do \
+		if [ -f "$(ISODIR)/boot/$$m" ]; then \
+			echo "    module2 /boot/$$m $$m" >> $(ISODIR)/boot/grub/grub.cfg; \
+		fi; \
+	done
+	@echo '    boot' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo '}' >> $(ISODIR)/boot/grub/grub.cfg
+	@echo "  ISO     $(ISO_IMAGE)"
+	@grub-mkrescue -o $(ISO_IMAGE) $(ISODIR) >/dev/null 2>&1
 
 $(KERNEL_BIN): $(OBJ)
 	@echo "  LLD      $@"
@@ -1040,10 +904,6 @@ $(NET_UDP_O): kernel/net/udp.c kernel/net/udp.h kernel/net/ipv4.h kernel/net/eth
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(NET_LOOPBACK_O): kernel/net/loopback.c kernel/net/loopback.h kernel/net/net.h kernel/net/netdev/netdev.h
-	@echo "  CC      $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-
 $(UNIX_SOCK_O): kernel/drivers/net/unix_sock.c kernel/drivers/net/unix_sock.h kernel/drivers/fs/vfs/vfs.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
@@ -1230,8 +1090,8 @@ run_nodis: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (UEFI, terminal)"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_NODISPLAY_OPTS) -device i6300esb -watchdog-action reset
 
-run_bios: check_bios_run_tools $(ISO_IMAGE) $(DISK_IMG)
-	@echo "  RUN     QEMU (BIOS loader)"
+run_bios: check_build_tools $(ISO_IMAGE) $(DISK_IMG)
+	@echo "  RUN     QEMU"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -device i6300esb -watchdog-action reset
 
 virtio: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
@@ -1249,4 +1109,4 @@ debug: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 clean:
 	@echo "  CLEAN"
 	@rm -f ../bin/*.o ../bin/kernel.bin ../bin/kernel.map $(ISO_IMAGE) $(DISK_IMG)
-	@rm -rf $(BIOS_BUILD_DIR) $(UEFI_BUILD_DIR)
+	@rm -rf $(ISODIR)/boot/kernel.bin $(ISODIR)/boot/config.toml
