@@ -18,7 +18,8 @@ treated as independent projects and not as part of otsos2.
 - Zig (ELF loader: `src/userland/elf.zig`, panic helper: `src/kernel/panic.zig`)
 - GAS/NASM assembly (boot, interrupts, GDT, context switch, syscalls)
 - Clang / LLVM toolchain (`clang`, `ld.lld`, `nasm`, `llvm-size`)
-- GRUB multiboot2 + `grub-mkrescue` for ISO creation
+- Custom Multiboot2-compatible BIOS/UEFI loaders + `tools/makeiso.py` and
+  `xorriso` for ISO creation
 - QEMU for testing (UEFI via OVMF, optional virtio-gpu)
 - TOML for kernel configuration (`src/config.toml`)
 - musl libc (vendored, pre-configured for x86_64-linux-musl)
@@ -27,7 +28,7 @@ treated as independent projects and not as part of otsos2.
 
 Monolithic kernel with the following rough layers:
 
-1. Boot (`src/boot/boot.s`) — 32-bit protected mode, Multiboot2 menu,
+1. Boot (`src/boot/boot.s`) — 32-bit protected mode, Multiboot2 entry point,
    identity/higher-half page tables, long mode switch, then `kmain()`.
 2. Kernel core (`src/kernel/kernel.c`) — initializes memory, interrupts, timer,
    disk, filesystem, DRM, PCI, ACPI, userspace, and finally loads `init`.
@@ -81,12 +82,11 @@ Monolithic kernel with the following rough layers:
 ### Bootloader (`src/boot/`)
 
 - `boot.s` — Multiboot2 header, graphical menu, PIT-based countdown, long mode
-  setup, calls `kmain`. Does not use GRUB directly; it is loaded by a
-  Multiboot-compliant bootloader and then chain-loads the kernel.
+  setup, calls `kmain`. It is loaded by the custom BIOS/UEFI bootloaders.
 - `boot/bootloader/bios/` — custom legacy BIOS loader in C/ASM, builds
-  `make bios` / `make run_bios`.
+  the BIOS El Torito image used by the hybrid ISO and `make run_bios`.
 - `boot/bootloader/uefi/` — custom UEFI loader in Zig with a small ASM
-  trampoline, builds `make uefi` / `make run_uefi`.
+  trampoline, builds the EFI image used by the hybrid ISO and `make run`.
 - `boot/bootloader/lib/` — loader-agnostic helpers shared by BIOS and UEFI
   paths (bootpack, ELF64, Multiboot2, string).
 
@@ -149,8 +149,8 @@ Monolithic kernel with the following rough layers:
 - `[modules]` section in `config.toml` — maps multiboot module names to
   filesystem destinations (e.g., `yes = "/bin/yes"`).  The kernel iterates this
   section at boot to copy modules into ChainFS; the module named `init` is also
-  used to start the first userspace process.  The Makefile and ISO generator use
-  the same list via `tools/modules.sh`.
+  used to start the first userspace process.  The Makefile uses the same list
+  via `tools/modules.pl` when building the bootpack for the custom loaders.
 - The `ld-musl` module in `[modules]` provides the musl dynamic linker at
   `/lib/ld-musl-x86_64.so.1` for dynamically linked programs.
 
@@ -160,9 +160,11 @@ Monolithic kernel with the following rough layers:
 - `add_copyright.sh` — prepends the BSD-2-Clause copyright header to `.c`,
   `.h`, `.s` files.
 - `tools/toml_get.sh` — helper used by Makefiles to read `config.toml` values.
-- `tools/modules.sh` — extracts module names from the `[modules]` section of
-  `config.toml`; used by the Makefile to stage ISO modules and generate GRUB
-  `module2` entries.
+- `tools/modules.pl` — extracts module names from the `[modules]` section of
+  `config.toml`; used by the Makefile to build the bootpack consumed by both
+  custom bootloaders.
+- `tools/makeiso.py` — small `xorriso` wrapper that creates the hybrid
+  BIOS+UEFI ISO from the BIOS disk image and EFI system partition image.
 
 ## Repository Structure
 
@@ -171,7 +173,6 @@ Monolithic kernel with the following rough layers:
 - `ports/` — additional userspace programs.
 - `libc/musl/` — vendored musl libc source + prebuilt objects.
 - `bin/` — build artifacts (objects, `kernel.bin`, `disk.img`, `.map`).
-- `isodir/` — ISO staging directory created by the Makefile.
 - `tools/` — helper scripts for the build.
 - `chainfs.py` — host-side ChainFS tool.
 - `add_copyright.sh` — license header script.
@@ -205,18 +206,17 @@ Build from `src/`:
 ```bash
 cd src
 make          # interactive version prompt; builds kernel + init + ports + ISO
-make run      # QEMU with UEFI + GUI
+make run      # QEMU with UEFI + GUI, using the custom loader
 make run_nodis # QEMU with UEFI, no display
-make run_bios # QEMU BIOS mode
-make uefi     # build UEFI ISO with custom loader
-make run_uefi # QEMU with UEFI loader
+make run_bios # QEMU BIOS mode, same hybrid ISO
 make virtio   # QEMU with virtio-gpu
 make debug    # QEMU with `-d int,cpu_reset`
 make clean
 ```
 
-The Makefile expects: `clang`, `ld.lld`, `nasm`, `zig`, `grub-mkrescue`,
-`llvm-size`, `qemu-system-x86_64`, and OVMF at `/usr/share/ovmf/OVMF.fd`.
+The Makefile expects: `clang`, `ld.lld`, `nasm`, `zig`, `xorriso`, `mtools`,
+`python3`, `llvm-size`, `qemu-system-x86_64`, and OVMF at
+`/usr/share/ovmf/OVMF.fd`.
 
 User need to test, dont run test manually, ask user. 
 

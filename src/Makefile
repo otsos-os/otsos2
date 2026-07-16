@@ -1,9 +1,11 @@
 TARGET ?= x86_64-elf
 CC = clang
 ZIG = zig
+PYTHON ?= python3
 LD = ld.lld
 AS = nasm
 QEMU = qemu-system-x86_64
+XORRISO = xorriso
 QEMU_GUI_OPTS ?= -display gtk
 QEMU_NODISPLAY_OPTS ?= -display none
 
@@ -23,11 +25,7 @@ CFLAGS += $(DISK_DEFINES)
 
 KERNEL_BIN = ../bin/kernel.bin
 ISO_IMAGE = ../otsos.iso
-BIOS_ISO_IMAGE = ../otsos-bios.iso
-UEFI_ISO_IMAGE = ../otsos-uefi.iso
-ISODIR = ../isodir
-BIOS_ISODIR = ../bios-isodir
-UEFI_ISODIR = ../uefi-isodir
+MAKEISO = ../tools/makeiso.py
 DISK_IMG = ../bin/disk.img
 PORTS_DIR = ../ports
 MUSL_DIR = ../libc/musl
@@ -73,8 +71,6 @@ UEFI_ESP_IMAGE = $(UEFI_BUILD_DIR)/otsos-uefi-esp.img
 UEFI_PAYLOAD_DIR = $(UEFI_BUILD_DIR)/payload
 UEFI_TRAMPOLINE_OBJ = $(UEFI_BUILD_DIR)/trampoline.obj
 BIOS_OBJCOPY = llvm-objcopy
-BIOS_XORRISO = xorriso
-UEFI_XORRISO = xorriso
 BIOS_CFLAGS = --target=i386-elf -m32 -ffreestanding -fno-pic \
 	-fno-builtin -fno-stack-protector -fno-asynchronous-unwind-tables \
 	-nostdinc -O2 -g -I.
@@ -98,21 +94,13 @@ UEFI_LIB_OBJS = \
 
 ifeq ($(LIBC_ENABLED),true)
 ISO_MUSL_TEST_DEP = $(MUSL_TEST_BIN)
-ISO_MUSL_TEST_COPY = @cp $(MUSL_TEST_BIN) $(ISODIR)/boot/musl_test
-GRUB_MUSL_TEST = @echo '    module2 /boot/musl_test musl_test' >> $(ISODIR)/boot/grub/grub.cfg
 ISO_LUA_DEP = $(LUA_BIN)
 ISO_LDSO_DEP = $(LDSO_BIN)
-ISO_LDSO_COPY = @cp $(LDSO_BIN) $(ISODIR)/boot/ld-musl
-GRUB_LDSO = @echo '    module2 /boot/ld-musl ld-musl' >> $(ISODIR)/boot/grub/grub.cfg
 LIBC_DEPS = $(MUSL_LIBC) $(MUSL_CRT1)
 else
 ISO_MUSL_TEST_DEP =
-ISO_MUSL_TEST_COPY =
-GRUB_MUSL_TEST =
 ISO_LUA_DEP =
 ISO_LDSO_DEP =
-ISO_LDSO_COPY =
-GRUB_LDSO =
 LIBC_DEPS =
 endif
 ifeq ($(CPYTHON_ENABLED),true)
@@ -309,16 +297,15 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(API_TIME_O) $(TERM_POWER_O) $(TERM_INFO_O) $(INPUT_O) \
       $(TIME_O) $(CLOCKSOURCE_O) $(ET_CLOCKSOURCE_O) $(CMOS_RTC_O)
 
-.PHONY: all bios uefi ask_version check_build_tools check_run_tools
-.PHONY: check_bios_tools check_bios_run_tools check_uefi_tools check_uefi_run_tools
+.PHONY: all ask_version check_build_tools check_run_tools check_bios_run_tools
 
 all: check_build_tools ask_version $(ISO_IMAGE)
-bios: check_bios_tools $(BIOS_ISO_IMAGE)
-uefi: check_uefi_tools $(UEFI_ISO_IMAGE)
 
 check_build_tools:
 	@set -e; \
-	for tool in "$(CC)" "$(LD)" "$(AS)" "$(ZIG)" grub-mkrescue llvm-size; do \
+	for tool in "$(CC)" "$(LD)" "$(AS)" "$(ZIG)" "$(PYTHON)" \
+		"$(BIOS_OBJCOPY)" "$(XORRISO)" llvm-size perl tar stat \
+		truncate dd mformat mmd mcopy; do \
 		if ! command -v "$$tool" >/dev/null 2>&1; then \
 			echo "  MISSING $$tool"; \
 			echo "  install missing tools to build"; \
@@ -345,35 +332,7 @@ check_run_tools: check_build_tools
 		esac; \
 	done
 
-check_bios_tools:
-	@set -e; \
-	for tool in "$(CC)" "$(LD)" "$(AS)" "$(ZIG)" "$(BIOS_OBJCOPY)" "$(BIOS_XORRISO)" llvm-size perl tar stat truncate dd; do \
-		if ! command -v "$$tool" >/dev/null 2>&1; then \
-			echo "  MISSING $$tool"; \
-			echo "  install missing tools to build BIOS loader"; \
-			exit 1; \
-		fi; \
-	done
-
-check_bios_run_tools: check_bios_tools
-	@set -e; \
-	if ! command -v "$(QEMU)" >/dev/null 2>&1; then \
-		echo "  MISSING $(QEMU)"; \
-		echo "  install qemu to run"; \
-		exit 1; \
-	fi
-
-check_uefi_tools:
-	@set -e; \
-	for tool in "$(CC)" "$(ZIG)" "$(UEFI_XORRISO)" mformat mmd mcopy tar stat truncate; do \
-		if ! command -v "$$tool" >/dev/null 2>&1; then \
-			echo "  MISSING $$tool"; \
-			echo "  install missing tools to build UEFI loader"; \
-			exit 1; \
-		fi; \
-	done
-
-check_uefi_run_tools: check_uefi_tools
+check_bios_run_tools: check_build_tools
 	@set -e; \
 	if ! command -v "$(QEMU)" >/dev/null 2>&1; then \
 		echo "  MISSING $(QEMU)"; \
@@ -489,47 +448,12 @@ $(LDSO_BIN): $(MUSL_LDSO)
 	@echo "  CP      $@"
 	@cp $(MUSL_LDSO) $@
 
-$(ISO_IMAGE): check_build_tools $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP)
-	@mkdir -p $(ISODIR)/boot/grub
-	@cp $(KERNEL_BIN) $(ISODIR)/boot/kernel.bin
-	@for m in $(MULTIBOOT_MODULES); do \
-		src=""; \
-		case $$m in \
-			init) src=$(INIT_BIN);; \
-			yes) src=$(YES_BIN);; \
-			fetch) src=$(FETCH_BIN);; \
-			sh) src=$(SHELL_BIN);; \
-			oven) src=$(OVEN_BIN);; \
-			cursord) src=$(CURSORD_BIN);; \
-			shmtest) src=$(SHMTEST_BIN);; \
-			posix_hello) src=$(POSIX_HELLO_BIN);; \
-			kbdtest) src=$(KBDTEST_BIN);; \
-			musl_test) src=$(MUSL_TEST_BIN);; \
-			lua) src=$(LUA_BIN);; \
-			python) src=$(CPYTHON_BIN);; \
-			ld-musl) src=$(LDSO_BIN);; \
-		esac; \
-		if [ -n "$$src" ] && [ -f "$$src" ]; then \
-			cp "$$src" "$(ISODIR)/boot/$$m"; \
-		fi; \
-	done
-	@cp config.toml $(ISODIR)/boot/config.toml
-	@echo 'set timeout=4' > $(ISODIR)/boot/grub/grub.cfg
-	@echo 'set default=0' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo 'insmod all_video' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo '' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo 'menuentry "OTSOS" {' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo '    multiboot2 /boot/kernel.bin' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo '    module2 /boot/config.toml config' >> $(ISODIR)/boot/grub/grub.cfg
-	@for m in $(MULTIBOOT_MODULES); do \
-		if [ -f "$(ISODIR)/boot/$$m" ]; then \
-			echo "    module2 /boot/$$m $$m" >> $(ISODIR)/boot/grub/grub.cfg; \
-		fi; \
-	done
-	@echo '    boot' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo '}' >> $(ISODIR)/boot/grub/grub.cfg
+$(ISO_IMAGE): check_build_tools $(BIOS_BOOT_IMAGE) $(UEFI_ESP_IMAGE) $(MAKEISO)
 	@echo "  ISO     $(ISO_IMAGE)"
-	@grub-mkrescue -o $(ISO_IMAGE) $(ISODIR) >/dev/null 2>&1
+	@$(PYTHON) $(MAKEISO) --output $(ISO_IMAGE) \
+		--bios-image $(BIOS_BOOT_IMAGE) \
+		--efi-image $(UEFI_ESP_IMAGE) \
+		--xorriso $(XORRISO)
 
 $(BIOS_BUILD_DIR):
 	@mkdir -p $(BIOS_BUILD_DIR)
@@ -630,15 +554,6 @@ $(BIOS_BOOT_IMAGE): $(BIOS_STAGE1_BIN) $(BIOS_STAGE2_BIN) $(BIOS_LAYOUT_BIN) $(B
 	perl -e 'open(my $$fh, "+<", shift) or die $$!; binmode $$fh; seek($$fh, 446, 0); print $$fh pack("C8VV", 0x80, 0x00, 0x01, 0x00, 0x83, 0xfe, 0xff, 0xff, 1, shift); close $$fh;' \
 		$@ $$part_sectors
 
-$(BIOS_ISO_IMAGE): check_bios_tools $(BIOS_BOOT_IMAGE)
-	@rm -rf $(BIOS_ISODIR)
-	@mkdir -p $(BIOS_ISODIR)/boot
-	@cp $(BIOS_BOOT_IMAGE) $(BIOS_ISODIR)/boot/otsos-bios.img
-	@echo "  ISO     $(BIOS_ISO_IMAGE)"
-	@$(BIOS_XORRISO) -as mkisofs -quiet -o $(BIOS_ISO_IMAGE) \
-		-b boot/otsos-bios.img -c boot/boot.cat -hard-disk-boot \
-		$(BIOS_ISODIR)
-
 $(UEFI_BUILD_DIR):
 	@mkdir -p $(UEFI_BUILD_DIR)
 
@@ -664,15 +579,6 @@ $(UEFI_ESP_IMAGE): $(UEFI_BOOTX64) $(BIOS_BOOTPACK) | $(UEFI_BUILD_DIR)
 	@mmd -i $@ ::/EFI ::/EFI/BOOT ::/boot
 	@mcopy -i $@ $(UEFI_BOOTX64) ::/EFI/BOOT/BOOTX64.EFI
 	@mcopy -i $@ $(BIOS_BOOTPACK) ::/boot/bootpack.tar
-
-$(UEFI_ISO_IMAGE): check_uefi_tools $(UEFI_ESP_IMAGE)
-	@rm -rf $(UEFI_ISODIR)
-	@mkdir -p $(UEFI_ISODIR)/EFI
-	@cp $(UEFI_ESP_IMAGE) $(UEFI_ISODIR)/EFI/efiboot.img
-	@echo "  ISO     $(UEFI_ISO_IMAGE)"
-	@$(UEFI_XORRISO) -as mkisofs -quiet -o $(UEFI_ISO_IMAGE) \
-		-e EFI/efiboot.img -no-emul-boot \
-		$(UEFI_ISODIR)
 
 $(KERNEL_BIN): $(OBJ)
 	@echo "  LLD      $@"
@@ -1324,13 +1230,9 @@ run_nodis: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (UEFI, terminal)"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_NODISPLAY_OPTS) -device i6300esb -watchdog-action reset
 
-run_bios: check_bios_run_tools $(BIOS_ISO_IMAGE) $(DISK_IMG)
+run_bios: check_bios_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (BIOS loader)"
-	@$(QEMU) -cdrom $(BIOS_ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -device i6300esb -watchdog-action reset
-
-run_uefi: check_uefi_run_tools $(UEFI_ISO_IMAGE) $(DISK_IMG)
-	@echo "  RUN     QEMU (UEFI loader)"
-	@$(QEMU) -cdrom $(UEFI_ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -device i6300esb -watchdog-action reset
 
 virtio: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (virtio-gpu, virtio-net)"
@@ -1346,5 +1248,5 @@ debug: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 
 clean:
 	@echo "  CLEAN"
-	@rm -f ../bin/*.o ../bin/kernel.bin ../bin/kernel.map $(ISO_IMAGE) $(BIOS_ISO_IMAGE) $(UEFI_ISO_IMAGE) $(DISK_IMG)
-	@rm -rf $(ISODIR)/boot/kernel.bin $(ISODIR)/boot/config.toml $(BIOS_BUILD_DIR) $(UEFI_BUILD_DIR) $(BIOS_ISODIR) $(UEFI_ISODIR)
+	@rm -f ../bin/*.o ../bin/kernel.bin ../bin/kernel.map $(ISO_IMAGE) $(DISK_IMG)
+	@rm -rf $(BIOS_BUILD_DIR) $(UEFI_BUILD_DIR)
