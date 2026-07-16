@@ -44,13 +44,16 @@ MUSL_LDSO = $(MUSL_DIR)/lib/libc.so
 LDSO_BIN = $(PORTS_DIR)/ld-musl-x86_64.so.1
 LIBC_ENABLED := $(shell sh ../tools/toml_get.sh config.toml libc enabled true)
 MULTIBOOT_MODULES := $(shell perl ../tools/modules.pl config.toml)
+CPYTHON_ENABLED := $(if $(filter python,$(MULTIBOOT_MODULES)),true,false)
+ifeq ($(CPYTHON_ENABLED),false)
+CPYTHON_BIN =
+endif
 
 ifeq ($(LIBC_ENABLED),true)
 ISO_MUSL_TEST_DEP = $(MUSL_TEST_BIN)
 ISO_MUSL_TEST_COPY = @cp $(MUSL_TEST_BIN) $(ISODIR)/boot/musl_test
 GRUB_MUSL_TEST = @echo '    module2 /boot/musl_test musl_test' >> $(ISODIR)/boot/grub/grub.cfg
 ISO_LUA_DEP = $(LUA_BIN)
-ISO_CPYTHON_DEP = $(CPYTHON_BIN)
 ISO_LDSO_DEP = $(LDSO_BIN)
 ISO_LDSO_COPY = @cp $(LDSO_BIN) $(ISODIR)/boot/ld-musl
 GRUB_LDSO = @echo '    module2 /boot/ld-musl ld-musl' >> $(ISODIR)/boot/grub/grub.cfg
@@ -60,11 +63,15 @@ ISO_MUSL_TEST_DEP =
 ISO_MUSL_TEST_COPY =
 GRUB_MUSL_TEST =
 ISO_LUA_DEP =
-ISO_CPYTHON_DEP =
 ISO_LDSO_DEP =
 ISO_LDSO_COPY =
 GRUB_LDSO =
 LIBC_DEPS =
+endif
+ifeq ($(CPYTHON_ENABLED),true)
+ISO_CPYTHON_DEP = $(CPYTHON_BIN)
+else
+ISO_CPYTHON_DEP =
 endif
 
 # object files
@@ -377,10 +384,12 @@ $(LUA_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/lua"
 	@$(MAKE) -C $(PORTS_DIR) lua LIBC_ENABLED=$(LIBC_ENABLED)
 
+ifneq ($(CPYTHON_BIN),)
 .PHONY: $(CPYTHON_BIN)
 $(CPYTHON_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/cpython"
-	@$(MAKE) -C $(PORTS_DIR) cpython LIBC_ENABLED=$(LIBC_ENABLED)
+	@$(MAKE) -C $(PORTS_DIR) cpython LIBC_ENABLED=$(LIBC_ENABLED) CPYTHON_ENABLED=$(CPYTHON_ENABLED)
+endif
 
 $(MUSL_LIBC):
 	@echo "  MAKE    musl libc"
