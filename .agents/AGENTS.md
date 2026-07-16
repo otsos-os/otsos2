@@ -126,6 +126,19 @@ Monolithic kernel with the following rough layers:
 - The kernel build optionally links `ports/musl_test` statically against it.
   Do not modify upstream musl unless you know what you are doing.
 
+### Native libc (`libc/native/`)
+
+- Native C runtime for the native userspace ABI, separate from musl and separate from
+  POSIX compatibility.
+- Public API uses kernel-native names: `term*`, `data*`, `fs*`, `proc*`,
+  `event*`, `sys*`, `drm*`.
+- Source files are split by subsystem (`data.c`, `fs.c`, `proc.c`,
+  `event.c`, `sys.c`, `drm.c`, etc.); do not collapse them into one wrapper
+  file.
+- `stdio` is buffered
+- Builds `lib/crt0.o` and `lib/libc.a` for freestanding userspace binaries.
+- Keep POSIX-only work on musl / personality layer; do not blur the two.
+
 ### Dynamic linking support
 
 - The kernel already handles `PT_INTERP` in both `spawn.c` (`api_proc_spawn`)
