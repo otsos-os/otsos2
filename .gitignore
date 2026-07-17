@@ -5,6 +5,8 @@ isodir/
 *.iso
 *.img
 *.map
+libc/native/lib/
+libc/native/obj/
 .DS_Store
 todo.md
 diff.txtx

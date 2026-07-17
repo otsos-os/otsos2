@@ -1,6 +1,7 @@
 /* !DEFINES!
 
 $define %type api_sysinfo as struct with kernel identity strings
+$define %type api_kmeminfo as struct with native kernel memory data
 $define %type api_fs_stat as struct with native file metadata
 $define %type kevent as struct with native event data
 $define %func termWrite as function with args const void *, size_t
@@ -35,6 +36,8 @@ $space %export drmDriverList, drmDriverSwitch
 #define CALL_TERM_WRITE		0x101
 #define CALL_TERM_INFO		0x102
 #define CALL_TERM_POWER		0x111
+#define TERM_READ_IGNORE_SIGINT	0x00000001
+#define TERM_READ_NO_ECHO	0x00000002
 #define CALL_INPUT_READ		0x120
 #define CALL_INPUT_POLL		0x121
 #define CALL_INPUT_FLUSH	0x122
@@ -186,6 +189,13 @@ struct api_meminfo {
 	uint64_t	user_heap_size_kb;
 	uint64_t	mmap_base;
 	uint64_t	mmap_limit;
+};
+struct api_kmeminfo {
+	uint64_t	kmem_heap_total_kb;
+	uint64_t	kmem_heap_used_kb;
+	uint64_t	kmem_heap_free_kb;
+	uint64_t	bootmem_free_kb;
+	uint64_t	kmem_heap_addr;
 };
 
 struct api_dirent {
@@ -466,6 +476,7 @@ int	kusrAuth(const char *password);
 
 int	sysInfo(struct api_sysinfo *buf);
 int	sysMemInfo(struct api_meminfo *buf);
+int	sysKmemInfo(struct api_kmeminfo *buf);
 int	sysCpuInfo(struct api_cpuinfo *buf);
 int	sysRandom(void *buf, size_t len);
 int	sysTimeInfo(struct api_timeinfo *buf);

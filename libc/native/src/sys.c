@@ -1,6 +1,7 @@
 /* !DEFINES!
 
 $define %type api_sysinfo as struct with kernel identity strings
+$define %type api_kmeminfo as struct with native kernel memory data
 $define %type api_timeinfo as struct with native time data
 $define %func sysInfo as function with args api_sysinfo *
 
@@ -8,7 +9,7 @@ $define %func sysInfo as function with args api_sysinfo *
 
 /* !SPACE!
 
-$space %export sysInfo, sysMemInfo, sysCpuInfo, sysRandom
+$space %export sysInfo, sysMemInfo, sysKmemInfo, sysCpuInfo, sysRandom
 $space %export sysTimeInfo, sysTime
 
 */
@@ -27,6 +28,11 @@ int
 sysMemInfo(struct api_meminfo *buf)
 {
 	return (__sysret_int(__syscall1(CALL_SYS_MEMINFO, (long)buf)));
+}
+int
+sysKmemInfo(struct api_kmeminfo *buf)
+{
+	return (__sysret_int(__syscall1(CALL_SYS_KMEMINFO, (long)buf)));
 }
 
 int
