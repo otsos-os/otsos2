@@ -94,6 +94,8 @@ Monolithic kernel with the following rough layers:
 
 - Kernel-only C library: string, stdio, stdlib, hardware I/O, `kprintf`, `itoa`,
   and a small TOML parser used by `config.c`.
+- Simple mlibc routines may be written in Kato and compiled through
+  `etc/kato/src/main.py` into generated C objects during the kernel build.
 
 ### ELF loader (`src/userland/`)
 

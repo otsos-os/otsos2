@@ -1,0 +1,25 @@
+!META!
+    $mode speed
+    $c_include stdio.h
+
+    $c_func printf as c_function
+        header: stdio.h
+        returns: int
+        args: { const char*, ... }
+
+    $define %type float32 as float
+        bits: 32
+        encoding: ieee754
+        precision: single
+
+    $define %func vec2_dot as function
+        args: { ax: float32, ay: float32, bx: float32, by: float32 }
+        returns: float32
+        pure: true
+
+    $space %export vec2_dot
+!END!
+
+func vec2_dot(ax: float, ay: float, bx: float, by: float) -> float {
+    ax * bx + ay * by
+}

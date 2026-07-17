@@ -1,0 +1,212 @@
+!META!
+    $mode safety
+    $layout soa
+    $bounds static
+    $overflow checked
+    $init zero
+    $null_check always
+    $div_check always
+    $alloc static
+    $thread single
+    $complexity max(10)
+    $panic abort
+    $range_check always
+
+    $c_include stdio.h
+    $c_include stdlib.h
+
+    $c_func printf as c_function
+        header: stdio.h
+        returns: int
+        args: { const char*, ... }
+
+    $c_func abort as c_function
+        header: stdlib.h
+        returns: void
+        args: { void }
+
+    $let CAPACITY = 8
+
+    $assert { CAPACITY > 0 }
+    $assert { CAPACITY <= 256 }
+
+    $define %type int32 as integer
+        bits: 32
+        signed: true
+        from: {-100}
+        to: {100}
+
+    $define %type bool as boolean
+        bits: 8
+        true_value: {1}
+        false_value: {0}
+
+    $define %type Buffer as struct
+        layout: soa
+        fields: {
+            data: int32[ CAPACITY ],
+            count: int32
+        }
+        max_count_field: count
+        capacity: { CAPACITY }
+
+    $define %const CAPACITY = { 8 }
+
+    $define %func main as start
+        args: { void }
+        returns: int32
+
+    $define %func buf_init as function
+        args: { buf: Buffer* }
+        returns: void
+        pure: false
+        mutates: { buf }
+        complexity: max(5)
+        allocates: false
+        recurses: false
+
+    $define %func buf_push as function
+        args: { buf: Buffer*, val: int32 }
+        returns: bool
+        pure: false
+        mutates: { buf }
+        complexity: max(8)
+        allocates: false
+        recurses: false
+
+    $define %func buf_sum as function
+        args: { buf: Buffer* }
+        returns: int32
+        pure: true
+        complexity: max(8)
+
+    $define %func buf_get as function
+        args: { buf: Buffer*, index: int32 }
+        returns: int32
+        pure: true
+        complexity: max(5)
+
+    $define %func check_pointer as function
+        args: { ptr: int32* }
+        returns: int32
+        pure: false
+        complexity: max(5)
+        allocates: false
+        recurses: false
+
+    $transform custom_add_check
+        match: binary_op("+")
+        condition: { $overflow == "checked" }
+        before: {
+            if ({left} > 0 && {right} > {type_max} - {left}) {
+                abort();
+            }
+            if ({left} < 0 && {right} < {type_min} - {left}) {
+                abort();
+            }
+        }
+
+    $transform custom_sub_check
+        match: binary_op("-")
+        condition: { $overflow == "checked" }
+        before: {
+            if ({left} > 0 && {right} < {type_min} + {left}) {
+                abort();
+            }
+        }
+
+    $transform log_array_access
+        match: array_access
+        condition: { $bounds == "static" }
+        before: {
+            if ({index} < 0 || {index} >= {capacity}) {
+                abort();
+            }
+        }
+
+    $transform trace_assignment
+        match: assignment
+        condition: { $mode == "safety" }
+        after: {
+            /* traced assign {target} */
+        }
+
+    $transform safe_deref
+        match: pointer_deref
+        condition: { $null_check == "always" }
+        before: {
+            if ({pointer} == NULL) {
+                abort();
+            }
+        }
+
+    $transform_disable safety_array_access
+    $transform_disable safety_binary_op
+    $transform_disable safety_pointer_deref
+
+    $space %export main, Buffer, buf_init, buf_push, buf_sum, buf_get, check_pointer
+!END!
+
+const CAPACITY: int = 8;
+
+struct Buffer {
+    int data[CAPACITY];
+    int count;
+}
+
+func buf_init(buf: mut Buffer) -> void {
+    buf.count = 0;
+}
+
+func buf_push(buf: mut Buffer, val: int) -> bool {
+    if buf.count >= CAPACITY {
+        return false;
+    }
+    let idx = buf.count;
+    buf.data[idx] = val;
+    buf.count = idx + 1;
+    true
+}
+
+func buf_sum(buf: Buffer*) -> int {
+    fold (0, i in 0..buf.count) {
+        acc + buf.data[i]
+    }
+}
+
+func buf_get(buf: Buffer*, index: int) -> int {
+    if index < 0 || index >= buf.count {
+        return 0;
+    }
+    buf.data[index]
+}
+
+func check_pointer(ptr: int*) -> int {
+    *ptr
+}
+
+func main() -> int {
+    let mut buf: Buffer = {0};
+    buf_init(&buf);
+
+    buf_push(&buf, 10);
+    buf_push(&buf, 20);
+    buf_push(&buf, 30);
+
+    let total = buf_sum(&buf);
+    c.printf("sum = %d\n", total);
+
+    let val = buf_get(&buf, 1);
+    c.printf("buf[1] = %d\n", val);
+
+    let mut x: int = 0;
+    x = x + 5;
+    x = x - 3;
+    c.printf("x = %d\n", x);
+
+    let ptr = &x;
+    let result = check_pointer(ptr);
+    c.printf("deref = %d\n", result);
+
+    return 0;
+}

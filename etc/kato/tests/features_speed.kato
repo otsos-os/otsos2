@@ -1,0 +1,94 @@
+!META!
+    $mode speed
+    $c_include stdio.h
+
+    $c_func printf as c_function
+        header: stdio.h
+        returns: int
+        args: { const char*, ... }
+
+    $define %type int32 as integer
+        bits: 32
+        signed: true
+        from: {-2147483648}
+        to: {2147483647}
+
+    $define %type bool as boolean
+        bits: 8
+        true_value: {1}
+        false_value: {0}
+
+    $define %type char as character
+        bits: 8
+        signed: true
+        encoding: ascii
+
+    $define %func main as start
+        args: { void }
+        returns: int32
+
+    $define %func factorial as function
+        args: { n: int32 }
+        returns: int32
+        pure: true
+
+    $define %func describe as function
+        args: { n: int32 }
+        returns: void
+        pure: true
+
+    $define %func classify as function
+        args: { n: int32 }
+        returns: int32
+        pure: true
+
+    $space %export main, factorial, describe, classify
+!END!
+
+func factorial(n: int) -> int {
+    let mut result = 1;
+    let mut i = 1;
+    while i <= n {
+        result = result * i;
+        i = i + 1;
+    }
+    result
+}
+
+func describe(n: int) -> void {
+    let label: int = match n {
+        0 => 100,
+        1 => 200,
+        _ => 300,
+    };
+    c.printf("describe(%d) = %d\n", n, label);
+}
+
+func classify(n: int) -> int {
+    let result: int = if n > 0 { 1 } else { -1 };
+    result
+}
+
+func main() -> int {
+    let f5 = factorial(5);
+    c.printf("factorial(5) = %d\n", f5);
+
+    describe(0);
+    describe(1);
+    describe(42);
+
+    let c1 = classify(10);
+    let c2 = classify(-5);
+    c.printf("classify(10) = %d\n", c1);
+    c.printf("classify(-5) = %d\n", c2);
+
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 10 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    c.printf("sum(0..10) = %d\n", sum);
+
+    return 0;
+}

@@ -1,0 +1,29 @@
+!META!
+    $mode speed
+    $import vector_math
+    $c_include stdio.h
+
+    $c_func printf as c_function
+        header: stdio.h
+        returns: int
+        args: { const char*, ... }
+
+    $define %type float32 as float
+        bits: 32
+        encoding: ieee754
+        precision: single
+
+    $define %func main as start
+        args: { void }
+        returns: int
+
+    $space %export main
+!END!
+
+import vector_math;
+
+func main() -> int {
+    let result = vec2_dot(1.0, 2.0, 3.0, 4.0);
+    c.printf("dot product = %f\n", result);
+    return 0;
+}

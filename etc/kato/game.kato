@@ -1,0 +1,54 @@
+!META!
+    $mode speed
+    $asm allowed
+
+    $define %type int32 as integer
+        bits: 32
+        signed: true
+        from: {-2147483648}
+        to: {2147483647}
+
+    $define %type char as character
+        bits: 8
+        signed: true
+        encoding: ascii
+
+    $define %func putchar as function
+        args: { c: char }
+        returns: void
+        pure: false
+        allocates: false
+        recurses: false
+
+    $define %func main as start
+        args: { void }
+        returns: int
+        pure: false
+        allocates: false
+        recurses: false
+
+    $space %export main, putchar
+!END!
+
+func putchar(c: char) {
+    asm {
+        inputs { c: "m" }
+        clobbers { "rax", "rdi", "rsi", "rdx", "rcx", "r11", "memory" }
+
+        mov $1, %%rax
+        mov $1, %%rdi
+        leaq %0, %%rsi
+        mov $1, %%rdx
+        syscall
+    }
+}
+
+func main() {
+    putchar('h');
+    putchar('e');
+    putchar('l');
+    putchar('l');
+    putchar('o');
+    putchar('\n');
+    return 0;
+}
