@@ -40,7 +40,11 @@ MUSL_CRT1 = $(MUSL_DIR)/lib/crt1.o
 MUSL_SCRT1 = $(MUSL_DIR)/lib/Scrt1.o
 NATIVE_DIR = ../libc/native
 NATIVE_LIBC = $(NATIVE_DIR)/lib/libc.a
+NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
+NATIVE_DYN_LDFLAGS = -m elf_x86_64 -pie --oformat=elf64-x86-64 \
+                     -nostdlib -dynamic-linker /lib/drld \
+                     --export-dynamic
 MUSL_TEST_BIN = musl_test
 MUSL_TEST_OBJS = musl_test.o
 LUA_BIN = lua/lua/lua
@@ -71,13 +75,14 @@ $(FETCH_BIN): $(FETCH_OBJS)
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
-$(NATIVE_LIBC) $(NATIVE_CRT0):
+$(NATIVE_LIBC) $(NATIVE_SO) $(NATIVE_CRT0):
 	@echo "  MAKE    native libc"
 	@$(MAKE) -C $(NATIVE_DIR)
 
-$(SHELL_BIN): $(NATIVE_CRT0) $(SHELL_OBJS) $(NATIVE_LIBC)
+$(SHELL_BIN): $(NATIVE_CRT0) $(SHELL_OBJS) $(NATIVE_SO)
 	@echo "  LLD      $@"
-	@$(LD) $(LDFLAGS) $(NATIVE_CRT0) $(SHELL_OBJS) $(NATIVE_LIBC) -o $@
+	@$(LD) $(NATIVE_DYN_LDFLAGS) $(NATIVE_CRT0) $(SHELL_OBJS) \
+	    $(NATIVE_SO) -o $@
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
@@ -145,7 +150,7 @@ $(CPYTHON_BIN): $(MUSL_SCRT1) $(MUSL_LDSO)
 
 shell.o: shell.c
 	@echo "  CC      $< (native libc)"
-	@$(CC) $(CFLAGS) -I$(NATIVE_DIR)/include -c $< -o $@
+	@$(CC) $(CFLAGS) -fPIE -I$(NATIVE_DIR)/include -c $< -o $@
 
 musl_test.o: musl_test.c
 	@echo "  CC      $< (musl)"

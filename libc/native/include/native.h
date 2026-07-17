@@ -7,6 +7,7 @@ $define %type kevent as struct with native event data
 $define %func termWrite as function with args const void *, size_t
 $define %func dataOpen as function with args const char *, int
 $define %func procSpawn as function with args const char *, char *const *, char *const *
+$define %func procSpawnAbi as function with args const char *, char *const *, char *const *, uint32_t
 
 */
 
@@ -16,7 +17,8 @@ $space %export termRead, termReadFlags, termWrite, termPrint
 $space %export dataOpen, dataClose, dataRead, dataWrite, dataReadFull
 $space %export dataWriteFull, dataSeek, dataPipe
 $space %export fsChdir, fsGetcwd, fsListdir, fsStat, fsRename, fsUnlink
-$space %export procSpawn, procWait, procRun, procExit, procKill
+$space %export procSpawn, procSpawnAbi, procSpawnNative, procWait
+$space %export procRun, procExit, procKill
 $space %export memMap, memUnmap, eventKqueue, eventWait, eventClose
 $space %export drmCall, drmInfo, drmGemCreate, drmGemClose, drmGemMapInfo
 $space %export drmGemMmap, drmFbCreate, drmFbDestroy, drmGetObjects
@@ -246,6 +248,19 @@ struct api_proc_info {
 	uint32_t	state;
 };
 
+#define API_PROC_SPAWN_ABI_POSIX	0
+#define API_PROC_SPAWN_ABI_NATIVE	1
+
+struct api_proc_spawn_args {
+	uint32_t		size;
+	uint32_t		flags;
+	uint32_t		abi;
+	uint32_t		pad;
+	const char		*path;
+	const char *const	*argv;
+	const char *const	*envp;
+};
+
 struct api_timeinfo {
 	uint64_t	wall_sec;
 	uint64_t	wall_nsec;
@@ -454,6 +469,9 @@ int	memUnmap(void *addr, size_t length);
 long	procClone(uint64_t flags, void *child_stack, uint64_t ptid);
 int	procCopy(void);
 int	procSpawn(const char *path, char *const argv[], char *const envp[]);
+int	procSpawnAbi(const char *path, char *const argv[], char *const envp[],
+	    uint32_t abi);
+int	procSpawnNative(const char *path, char *const argv[], char *const envp[]);
 int	procWait(int *status);
 int	procRun(const char *path, char *const argv[], char *const envp[],
 	    int *status);

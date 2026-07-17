@@ -7,6 +7,8 @@ isodir/
 *.map
 libc/native/lib/
 libc/native/obj/
+libc/native/obj-pic/
+libc/LibExec/dld/drld
 .DS_Store
 todo.md
 diff.txtx

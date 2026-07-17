@@ -362,21 +362,45 @@ static void free_spawn_cr3(u64 cr3) {
   pmap_destroy(cr3);
 }
 
-int api_proc_spawn(const char *path, const char *const *argv,
-                   const char *const *envp) {
+int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
+  struct api_proc_spawn_args args;
+  int child_personality;
+
   process_t *parent = process_current();
   if (!parent) {
     printk("[SPAWN] Error: no current process\n");
     return -API_ERR_BAD_VALUE;
   }
 
-  if (!is_user_address(path, 1)) {
-    printk("[SPAWN] Error: invalid user path pointer %p\n",
-                (void *)path);
+  if (!uargs || !is_user_address(uargs, sizeof(args))) {
+    printk("[SPAWN] Error: invalid user spawn args %p\n",
+                (void *)uargs);
     return -API_ERR_BAD_ADDR;
   }
 
-  char *kpath = copy_user_string(path, SPAWN_MAX_STR);
+  memcpy(&args, uargs, sizeof(args));
+  if (args.size < sizeof(args) || args.flags != 0) {
+    return -API_ERR_BAD_VALUE;
+  }
+
+  switch (args.abi) {
+  case API_PROC_SPAWN_ABI_POSIX:
+    child_personality = PERSONALITY_POSIX;
+    break;
+  case API_PROC_SPAWN_ABI_NATIVE:
+    child_personality = PERSONALITY_OTSOS;
+    break;
+  default:
+    return -API_ERR_BAD_VALUE;
+  }
+
+  if (!is_user_address(args.path, 1)) {
+    printk("[SPAWN] Error: invalid user path pointer %p\n",
+                (void *)args.path);
+    return -API_ERR_BAD_ADDR;
+  }
+
+  char *kpath = copy_user_string(args.path, SPAWN_MAX_STR);
   if (!kpath) {
     printk("[SPAWN] Error: failed to copy user path\n");
     return -API_ERR_BAD_ADDR;
@@ -384,13 +408,13 @@ int api_proc_spawn(const char *path, const char *const *argv,
 
   char **kargv = NULL;
   char **kenvp = NULL;
-  int argc = copy_user_string_array(argv, &kargv, SPAWN_MAX_ARGS);
+  int argc = copy_user_string_array(args.argv, &kargv, SPAWN_MAX_ARGS);
   if (argc < 0) {
     printk("[SPAWN] Error: failed to copy argv\n");
     kmem_free(kpath);
     return argc;
   }
-  int envc = copy_user_string_array(envp, &kenvp, SPAWN_MAX_ENVP);
+  int envc = copy_user_string_array(args.envp, &kenvp, SPAWN_MAX_ENVP);
   if (envc < 0) {
     printk("[SPAWN] Error: failed to copy envp\n");
     free_string_array(kargv);
@@ -563,7 +587,7 @@ int api_proc_spawn(const char *path, const char *const *argv,
   api_copy_handles(child, parent);
   posix_init_process(child);
   posix_copy_fds(child, parent);
-  child->personality = PERSONALITY_POSIX;
+  child->personality = child_personality;
   api_session_fork(parent, child);
   if (parent->controlling_tty >= 0) {
     terminal_set_session(parent->controlling_tty, child->sid);

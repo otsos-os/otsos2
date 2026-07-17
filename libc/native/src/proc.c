@@ -2,13 +2,15 @@
 
 $define %type api_proc_info as struct with process table entry
 $define %func procSpawn as function with args const char *, char *const *, char *const *
+$define %func procSpawnAbi as function with args const char *, char *const *, char *const *, uint32_t
 $define %func procExit as procedure with args int
 
 */
 
 /* !SPACE!
 
-$space %export procClone, procCopy, procSpawn, procWait, procRun, procExit
+$space %export procClone, procCopy, procSpawn, procSpawnAbi, procSpawnNative
+$space %export procWait, procRun, procExit
 $space %export procKill, procList, procGetpid, procGetppid, procGettid
 $space %export threadExit, threadJoin, procExitGroup, procSetTidAddress
 $space %export procSetsid, procGetsid, kusrAuth, personality
@@ -33,10 +35,31 @@ procCopy(void)
 }
 
 int
+procSpawnAbi(const char *path, char *const argv[], char *const envp[],
+    uint32_t abi)
+{
+	struct api_proc_spawn_args	args;
+
+	args.size = sizeof(args);
+	args.flags = 0;
+	args.abi = abi;
+	args.pad = 0;
+	args.path = path;
+	args.argv = (const char *const *)argv;
+	args.envp = (const char *const *)envp;
+	return (__sysret_int(__syscall1(CALL_PROC_SPAWN, (long)&args)));
+}
+
+int
 procSpawn(const char *path, char *const argv[], char *const envp[])
 {
-	return (__sysret_int(__syscall3(CALL_PROC_SPAWN, (long)path,
-	    (long)argv, (long)envp)));
+	return (procSpawnAbi(path, argv, envp, API_PROC_SPAWN_ABI_POSIX));
+}
+
+int
+procSpawnNative(const char *path, char *const argv[], char *const envp[])
+{
+	return (procSpawnAbi(path, argv, envp, API_PROC_SPAWN_ABI_NATIVE));
 }
 
 int

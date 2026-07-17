@@ -60,6 +60,8 @@ musl_test = "/bin/musl_test"
 lua = "/bin/lua"
 # python = "/bin/python"
 ld-musl = "/lib/ld-musl-x86_64.so.1"
+drld = "/lib/drld"
+native-so = "/lib/native.so"
 
 [kshell.commands.help]
 enabled = true

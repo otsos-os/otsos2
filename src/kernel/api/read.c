@@ -86,6 +86,11 @@ api_data_read(int handle, void *buf, u32 count)
 		}
 		return (-API_ERR_BAD_ADDR);
 	}
+	if (!user_range_fault_in(buf, count, 1)) {
+		printk("[DEBUG] api_data_read: cannot fault user buffer %p (%d)\n",
+		    buf, (int)count);
+		return (-API_ERR_BAD_ADDR);
+	}
 
 	if (!(handles[handle].flags & API_OPEN_READ)) {
 		return (-API_ERR_BAD_HANDLE);

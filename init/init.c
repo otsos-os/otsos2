@@ -43,7 +43,7 @@ $define %func syscall1 as function with args long, long
 $define %func syscall3 as function with args long, long, long, long
 $define %func termWrite as function with args const void *, unsigned long
 $define %func termRead as function with args void *, unsigned long
-$define %func procSpawn as function with args const char *, char *const *, char *const *
+$define %func procSpawnAbi as function with args const char *, char *const *, char *const *, unsigned int
 $define %func procWait as function with args int *
 $define %func kqueue_create as function with args void
 $define %func kqueue_close as function with args int
@@ -58,7 +58,8 @@ $define %func strcmp as function with args const char *, const char *
 /* !SPACE!
 
 $space %export _start
-$space %internal syscall1, syscall3, termWrite, termRead, procSpawn
+$space %internal syscall1, syscall3, termWrite, termRead
+$space %internal procSpawnAbi, spawnAbiForPath
 $space %internal procWait, kqueue_create, kqueue_close, kevent
 $space %internal strlen, print, trim_newline, strcmp
 
@@ -89,6 +90,8 @@ $space %internal strlen, print, trim_newline, strcmp
 #define	EV_EOF		0x8000
 
 #define	NOTE_EXIT	0x80000000U
+#define	API_PROC_SPAWN_ABI_POSIX	0
+#define	API_PROC_SPAWN_ABI_NATIVE	1
 
 struct kevent {
 	unsigned long long	ident;
@@ -113,6 +116,15 @@ struct term_power_args {
 	int			tty;
 	int			state;
 	int			flags;
+};
+struct proc_spawn_args {
+	unsigned int		size;
+	unsigned int		flags;
+	unsigned int		abi;
+	unsigned int		pad;
+	const char		*path;
+	char *const		*argv;
+	char *const		*envp;
 };
 
 static long
@@ -164,10 +176,18 @@ termPower(int op, int tty, int state)
 }
 
 static long
-procSpawn(const char *path, char *const argv[], char *const envp[])
+procSpawnAbi(const char *path, char *const argv[], char *const envp[],
+    unsigned int abi)
 {
-	return (syscall3(CALL_PROC_SPAWN, (long)path,
-	    (long)argv, (long)envp));
+	struct proc_spawn_args	args;
+	args.size = sizeof(args);
+	args.flags = 0;
+	args.abi = abi;
+	args.pad = 0;
+	args.path = path;
+	args.argv = argv;
+	args.envp = envp;
+	return (syscall1(CALL_PROC_SPAWN, (long)&args));
 }
 
 static long
@@ -245,6 +265,14 @@ strcmp(const char *a, const char *b)
 	}
 	return (*a - *b);
 }
+static unsigned int
+spawnAbiForPath(const char *path)
+{
+	if (strcmp(path, "/bin/sh") == 0 || strcmp(path, "sh") == 0) {
+		return (API_PROC_SPAWN_ABI_NATIVE);
+	}
+	return (API_PROC_SPAWN_ABI_POSIX);
+}
 
 void
 _start(void)
@@ -302,7 +330,7 @@ _start(void)
 		argv[0] = path;
 		argv[1] = 0;
 
-		pid = procSpawn(path, argv, 0);
+		pid = procSpawnAbi(path, argv, 0, spawnAbiForPath(path));
 		if (pid < 0) {
 			print("procSpawn failed\n");
 			continue;

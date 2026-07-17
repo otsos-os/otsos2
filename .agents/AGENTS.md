@@ -153,6 +153,10 @@ Monolithic kernel with the following rough layers:
   `/lib/ld-musl-x86_64.so.1` (copied from `libc.so`).
 - Programs using dynamic linking must be built as PIE (`-pie`), linked against
   musl's `Scrt1.o` and `-lc` (shared), with `-dynamic-linker /lib/ld-musl-x86_64.so.1`.
+- `libc/LibExec/dld` contains experimental native `drld`, a small C runtime
+  loader built against `libc/native` and installed as `drld` →
+  `/lib/drld`.  It is intended for simple ELF64 `.so` linking via native
+  syscalls, not as a full musl `ld.so` replacement yet.
 
 ### Configuration
 

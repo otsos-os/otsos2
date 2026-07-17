@@ -239,6 +239,17 @@ struct api_proc_info {
   char name[32];
   u32 state;
 };
+#define API_PROC_SPAWN_ABI_POSIX	0
+#define API_PROC_SPAWN_ABI_NATIVE	1
+struct api_proc_spawn_args {
+	u32			size;
+	u32			flags;
+	u32			abi;
+	u32			pad;
+	const char		*path;
+	const char *const	*argv;
+	const char *const	*envp;
+};
 
 /* DRM sub-operations for CALL_DRM_CALL (passed as `op`).
  *
@@ -437,8 +448,7 @@ int api_proc_copy(registers_t *regs);
 
 int pipe_read(pipe_t *p, void *buf, u32 count);
 int pipe_write(pipe_t *p, const void *buf, u32 count);
-int api_proc_spawn(const char *path, const char *const *argv,
-                   const char *const *envp);
+int api_proc_spawn(const struct api_proc_spawn_args *uargs);
 int api_fs_chdir(const char *path);
 int api_fs_getcwd(char *buf, u32 size);
 int api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries);

@@ -29,6 +29,7 @@ MAKEISO = ../tools/makeiso.py
 DISK_IMG = ../bin/disk.img
 PORTS_DIR = ../ports
 MUSL_DIR = ../libc/musl
+NATIVE_DIR = ../libc/native
 MUSL_LIBC = $(MUSL_DIR)/lib/libc.a
 MUSL_CRT1 = $(MUSL_DIR)/lib/crt1.o
 YES_BIN = $(PORTS_DIR)/yes
@@ -44,9 +45,13 @@ LUA_BIN = $(PORTS_DIR)/lua/lua/lua
 CPYTHON_BIN = $(PORTS_DIR)/cpython/cpython/python
 MUSL_LDSO = $(MUSL_DIR)/lib/libc.so
 LDSO_BIN = $(PORTS_DIR)/ld-musl-x86_64.so.1
+NATIVE_SO = $(NATIVE_DIR)/lib/native.so
+DLD_BIN = ../libc/LibExec/dld/drld
 LIBC_ENABLED := $(shell sh ../tools/toml_get.sh config.toml libc enabled true)
 MULTIBOOT_MODULES := $(shell perl ../tools/modules.pl config.toml)
 CPYTHON_ENABLED := $(if $(filter python,$(MULTIBOOT_MODULES)),true,false)
+DRLD_ENABLED := $(if $(filter drld,$(MULTIBOOT_MODULES)),true,false)
+NATIVE_SO_ENABLED := $(if $(filter native-so,$(MULTIBOOT_MODULES)),true,false)
 ifeq ($(CPYTHON_ENABLED),false)
 CPYTHON_BIN =
 endif
@@ -107,6 +112,16 @@ ifeq ($(CPYTHON_ENABLED),true)
 ISO_CPYTHON_DEP = $(CPYTHON_BIN)
 else
 ISO_CPYTHON_DEP =
+endif
+ifeq ($(DRLD_ENABLED),true)
+ISO_DRLD_DEP = $(DLD_BIN)
+else
+ISO_DRLD_DEP =
+endif
+ifeq ($(NATIVE_SO_ENABLED),true)
+ISO_NATIVE_SO_DEP = $(NATIVE_SO)
+else
+ISO_NATIVE_SO_DEP =
 endif
 
 # object files
@@ -437,6 +452,16 @@ $(CPYTHON_BIN): $(LIBC_DEPS)
 	@$(MAKE) -C $(PORTS_DIR) cpython LIBC_ENABLED=$(LIBC_ENABLED) CPYTHON_ENABLED=$(CPYTHON_ENABLED)
 endif
 
+.PHONY: $(DLD_BIN)
+$(DLD_BIN):
+	@echo "  MAKE    libc/LibExec/dld"
+	@$(MAKE) -C ../libc/LibExec/dld
+
+.PHONY: $(NATIVE_SO)
+$(NATIVE_SO):
+	@echo "  MAKE    native libc shared"
+	@$(MAKE) -C $(NATIVE_DIR) lib/native.so
+
 $(MUSL_LIBC):
 	@echo "  MAKE    musl libc"
 	@$(MAKE) -C $(MUSL_DIR)
@@ -500,7 +525,7 @@ $(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BU
 		exit 1; \
 	fi
 
-$(BIOS_BOOTPACK): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) | $(BIOS_BUILD_DIR)
+$(BIOS_BOOTPACK): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
 	@rm -rf $(BIOS_PAYLOAD_DIR)
 	@mkdir -p $(BIOS_PAYLOAD_DIR)
 	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
@@ -521,6 +546,8 @@ $(BIOS_BOOTPACK): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN)
 			lua) src=$(LUA_BIN);; \
 			python) src=$(CPYTHON_BIN);; \
 			ld-musl) src=$(LDSO_BIN);; \
+			drld) src=$(DLD_BIN);; \
+			native-so) src=$(NATIVE_SO);; \
 		esac; \
 		if [ -n "$$src" ] && [ -f "$$src" ]; then \
 			cp "$$src" "$(BIOS_PAYLOAD_DIR)/$$m"; \

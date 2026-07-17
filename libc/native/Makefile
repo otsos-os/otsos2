@@ -12,6 +12,7 @@ LDFLAGS ?= -m elf_x86_64 -T ../../init/linker.ld --oformat=elf64-x86-64 \
            -nostdlib
 
 LIB = lib/libc.a
+SHARED = lib/native.so
 CRT0 = lib/crt0.o
 
 SRC = src/ctype.c src/data.c src/drm.c src/errno.c src/event.c src/fs.c \
@@ -19,8 +20,9 @@ SRC = src/ctype.c src/data.c src/drm.c src/errno.c src/event.c src/fs.c \
       src/start.c src/stdio.c src/stdlib.c src/string.c src/sys.c \
       src/syscall.c src/term.c
 OBJ = $(SRC:src/%.c=obj/%.o)
+PICOBJ = $(SRC:src/%.c=obj-pic/%.o)
 
-all: $(CRT0) $(LIB)
+all: $(CRT0) $(LIB) $(SHARED)
 
 $(LIB): $(OBJ)
 	@mkdir -p lib
@@ -28,6 +30,12 @@ $(LIB): $(OBJ)
 	@rm -f $@
 	@$(AR) rcs $@ $(OBJ)
 
+$(SHARED): $(PICOBJ)
+	@mkdir -p lib
+	@echo "  LLD     $@"
+	@$(LD) -m elf_x86_64 --oformat=elf64-x86-64 -nostdlib \
+	    -shared -soname native.so $(PICOBJ) -o $@
+	@$(SIZE) $@
 $(CRT0): crt/crt0.S
 	@mkdir -p lib
 	@echo "  CC      $<"
@@ -38,6 +46,10 @@ obj/%.o: src/%.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+obj-pic/%.o: src/%.c
+	@mkdir -p obj-pic
+	@echo "  CC      $< (pic)"
+	@$(CC) $(CFLAGS) -fPIC -c $< -o $@
 examples/hello: examples/hello.c $(CRT0) $(LIB)
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o obj/hello.o
@@ -46,6 +58,7 @@ examples/hello: examples/hello.c $(CRT0) $(LIB)
 	@$(SIZE) $@
 
 clean:
-	rm -f $(OBJ) obj/hello.o $(CRT0) $(LIB) examples/hello
+	rm -f $(OBJ) $(PICOBJ) obj/hello.o $(CRT0) $(LIB) $(SHARED) \
+	    examples/hello
 
 .PHONY: all clean

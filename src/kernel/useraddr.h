@@ -30,5 +30,6 @@
 #include <mlibc/mlibc.h>
 
 int is_user_address(const void *addr, size_t size);
+int user_range_fault_in(const void *addr, size_t size, int write);
 
 #endif

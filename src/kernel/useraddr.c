@@ -25,9 +25,11 @@
  */
 
 #include <kernel/useraddr.h>
+#include <kernel/process.h>
+#include <mm/vm/pmap.h>
+#include <mm/vm/vm_map.h>
 
 #define USER_CANONICAL_MAX 0x00007FFFFFFFFFFFULL
-
 int is_user_address(const void *addr, size_t size) {
   if (!addr) {
     return 0;
@@ -47,6 +49,67 @@ int is_user_address(const void *addr, size_t size) {
   }
   if (end > USER_CANONICAL_MAX) {
     return 0;
+  }
+
+  return 1;
+}
+
+int
+user_range_fault_in(const void *addr, size_t size, int write)
+{
+  process_t *proc;
+  u64 start;
+  u64 end;
+  u64 page;
+
+  if (!is_user_address(addr, size)) {
+    return 0;
+  }
+  if (size == 0) {
+    return 1;
+  }
+
+  proc = process_current();
+  if (!proc) {
+    return 0;
+  }
+
+  start = (u64)addr & ~(PAGE_SIZE - 1);
+  end = ((u64)addr + (u64)size - 1) & ~(PAGE_SIZE - 1);
+  page = start;
+  for (;;) {
+    u64 flags;
+    u64 err;
+
+    flags = pmap_extract_flags(page);
+    if ((flags & PTE_PRESENT) && (!write || (flags & PTE_RW))) {
+      if (page == end) {
+        break;
+      }
+      page += PAGE_SIZE;
+      continue;
+    }
+
+    err = 0;
+    if (flags & PTE_PRESENT) {
+      err |= 0x1;
+    }
+    if (write) {
+      err |= 0x2;
+    }
+    if (vm_map_fault(proc, page, err) != 0) {
+      return 0;
+    }
+
+    flags = pmap_extract_flags(page);
+    if (!(flags & PTE_PRESENT) || (write && !(flags & PTE_RW))) {
+      return 0;
+    }
+
+    if (page == end) {
+      break;
+    }
+    page += PAGE_SIZE;
   }
 
   return 1;

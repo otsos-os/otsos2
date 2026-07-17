@@ -226,8 +226,8 @@ void syscall_handler(registers_t *regs) {
     regs->rax = (u64)api_proc_copy(regs);
     break;
   case CALL_PROC_SPAWN:
-    regs->rax = (u64)api_proc_spawn((const char *)arg1, (const char *const *)arg2,
-                                (const char *const *)arg3);
+    regs->rax = (u64)api_proc_spawn(
+        (const struct api_proc_spawn_args *)arg1);
     break;
   case CALL_PROC_EXIT: {
     process_t *proc = process_current();
