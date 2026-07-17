@@ -1097,6 +1097,7 @@ dld_run(int argc, char **argv, char **envp)
 	Elf64_auxv_t	*auxv;
 	uintptr_t	sp;
 
+	personality(API_PERSONALITY_NATIVE);
 	auxv = find_auxv(envp);
 	if (setup_main_object(auxv) != 0) {
 		printf("drld: missing ELF auxv, run as PT_INTERP\n");

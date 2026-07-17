@@ -51,7 +51,6 @@ $define %func kevent as function with args int, struct kevent *, int, struct kev
 $define %func strlen as function with args const char *
 $define %func print as procedure with args const char *
 $define %func trim_newline as procedure with args char *
-$define %func strcmp as function with args const char *, const char *
 
 */
 
@@ -59,9 +58,9 @@ $define %func strcmp as function with args const char *, const char *
 
 $space %export _start
 $space %internal syscall1, syscall3, termWrite, termRead
-$space %internal procSpawnAbi, spawnAbiForPath
+$space %internal procSpawnAbi
 $space %internal procWait, kqueue_create, kqueue_close, kevent
-$space %internal strlen, print, trim_newline, strcmp
+$space %internal strlen, print, trim_newline
 
 */
 
@@ -91,7 +90,6 @@ $space %internal strlen, print, trim_newline, strcmp
 
 #define	NOTE_EXIT	0x80000000U
 #define	API_PROC_SPAWN_ABI_POSIX	0
-#define	API_PROC_SPAWN_ABI_NATIVE	1
 
 struct kevent {
 	unsigned long long	ident;
@@ -256,28 +254,6 @@ trim_newline(char *s)
 	}
 }
 
-static int
-strcmp(const char *a, const char *b)
-{
-	while (*a && *b && *a == *b) {
-		a++;
-		b++;
-	}
-	return (*a - *b);
-}
-static unsigned int
-spawnAbiForPath(const char *path)
-{
-	if (strcmp(path, "/bin/sh") == 0 || strcmp(path, "sh") == 0) {
-		return (API_PROC_SPAWN_ABI_NATIVE);
-	}
-	if (strcmp(path, "/bin/udp_echo") == 0 ||
-	    strcmp(path, "udp_echo") == 0) {
-		return (API_PROC_SPAWN_ABI_NATIVE);
-	}
-	return (API_PROC_SPAWN_ABI_POSIX);
-}
-
 void
 _start(void)
 {
@@ -334,7 +310,7 @@ _start(void)
 		argv[0] = path;
 		argv[1] = 0;
 
-		pid = procSpawnAbi(path, argv, 0, spawnAbiForPath(path));
+		pid = procSpawnAbi(path, argv, 0, API_PROC_SPAWN_ABI_POSIX);
 		if (pid < 0) {
 			print("procSpawn failed\n");
 			continue;

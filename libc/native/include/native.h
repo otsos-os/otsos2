@@ -268,6 +268,8 @@ struct api_proc_info {
 
 #define API_PROC_SPAWN_ABI_POSIX	0
 #define API_PROC_SPAWN_ABI_NATIVE	1
+#define API_PERSONALITY_NATIVE		0
+#define API_PERSONALITY_POSIX		1
 
 struct api_proc_spawn_args {
 	uint32_t		size;
