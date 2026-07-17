@@ -10,7 +10,8 @@ TYPE_SIZE_ORDER = {
     "char": 1, "bool": 1, "int8": 1, "uint8": 1,
     "int16": 2, "uint16": 2, "short": 2,
     "int": 4, "int32": 4, "uint": 4, "uint32": 4, "float": 4, "float32": 4,
-    "int64": 8, "uint64": 8, "long": 8, "long long": 8, "double": 8, "float64": 8,
+    "int64": 8, "uint64": 8, "ulong": 8, "long": 8, "long long": 8,
+    "double": 8, "float64": 8,
 }
 
 
@@ -270,7 +271,8 @@ class CodeGenerator:
         self.lines.append("")
 
         self.lines.append("/* runtime functions — user must provide implementations */")
-        self.lines.append("extern void *memset(void *, int, unsigned long);")
+        if not any(func.name == "memset" for func in self.program.functions):
+            self.lines.append("extern void *memset(void *, int, unsigned long);")
 
         panic = self.meta.directives.get("panic", "abort")
         if panic == "abort":
@@ -394,7 +396,7 @@ class CodeGenerator:
         if isinstance(self.meta.get_type_def(type_ref.name), IntegerTypeDef):
             return True
         return type_ref.name in {
-            "int", "int32", "int64", "uint", "uint32", "uint64",
+            "int", "int32", "int64", "uint", "uint32", "uint64", "ulong",
             "uint8", "int8", "uint16", "int16", "char", "char8",
         }
 
@@ -744,16 +746,25 @@ class CodeGenerator:
     def emit_var_decls(self):
         groups = {}
         array_decls = []
+        pointer_decls = []
         for vd in self.var_decls:
             if vd.is_loop_var or vd.is_acc:
                 continue
             if vd.is_array:
                 array_decls.append(vd)
                 continue
+            if vd.type_ref and vd.type_ref.is_pointer:
+                pointer_decls.append(vd)
+                continue
             vtype = self.c_type(vd.type_ref)
             if vtype not in groups:
                 groups[vtype] = []
             groups[vtype].append(vd.name)
+
+        for vd in pointer_decls:
+            vtype = self.c_type(vd.type_ref)
+            pad = " " * max(1, 16 - len(vtype))
+            self.lines.append(f"\t{vtype}{pad}{vd.name};")
 
         for vtype, names in groups.items():
             line = f"\t{vtype}"
@@ -935,6 +946,8 @@ class CodeGenerator:
 
             self.apply_transform_before("pointer_deref", template_vars)
             return original
+        elif isinstance(expr, CastExpr):
+            return f"(({self.c_type(expr.type_ref)})({self.gen_expr(expr.expr)}))"
         elif isinstance(expr, IfExpr):
             cond = self.gen_expr(expr.cond)
             then_val = self.gen_expr(expr.then_expr)
@@ -1207,7 +1220,11 @@ class CodeGenerator:
                     return self.array_element_type(array_type)
                 if array_type.is_array:
                     return TypeRef(name=array_type.name, is_pointer=array_type.is_pointer)
+                if array_type.is_pointer:
+                    return TypeRef(name=array_type.name)
             return TypeRef(name="int")
+        if isinstance(expr, CastExpr):
+            return expr.type_ref
         return TypeRef(name="int")
 
     def get_struct_field_type(self, obj_type, field_name):
@@ -1491,6 +1508,8 @@ class CodeGenerator:
             td = self.meta.get_type_def("uint32")
         if not td and type_name in ("uint64", "uint64_t"):
             td = self.meta.get_type_def("uint64")
+        if not td and type_name in ("ulong", "unsigned long"):
+            td = self.meta.get_type_def("ulong")
         if td and isinstance(td, IntegerTypeDef):
             from_val = td.from_val
             to_val = td.to_val
@@ -1515,6 +1534,8 @@ class CodeGenerator:
         if type_name in ("uint32", "uint", "uint32_t"):
             return 0, 4294967295
         if type_name in ("uint64", "uint64_t"):
+            return 0, 18446744073709551615
+        if type_name in ("ulong", "unsigned long"):
             return 0, 18446744073709551615
         if type_name in ("uint8", "uint8_t"):
             return 0, 255

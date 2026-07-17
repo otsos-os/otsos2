@@ -40,7 +40,7 @@ class TypeRef:
             type_map = {
                 "int": "int32_t", "int32": "int32_t", "int64": "int64_t",
                 "uint": "uint32_t", "uint32": "uint32_t", "uint64": "uint64_t",
-                "uint8": "uint8_t", "int8": "int8_t",
+                "ulong": "unsigned long", "uint8": "uint8_t", "int8": "int8_t",
                 "uint16": "uint16_t", "int16": "int16_t",
                 "float": "float", "float32": "float",
                 "double": "double", "float64": "double",
@@ -52,7 +52,8 @@ class TypeRef:
                 "int32": "int", "int": "int", "int64": "long long",
                 "uint": "unsigned int", "uint32": "unsigned int",
                 "uint64": "unsigned long long", "uint8": "unsigned char",
-                "int8": "char", "uint16": "unsigned short", "int16": "short",
+                "ulong": "unsigned long", "int8": "char",
+                "uint16": "unsigned short", "int16": "short",
                 "float32": "float", "float": "float",
                 "float64": "double", "double": "double",
                 "char": "char", "char8": "char", "bool": "bool", "void": "void",
@@ -318,6 +319,13 @@ class AddrOf:
 @dataclass
 class Deref:
     operand: Any
+    line: int = 0
+
+
+@dataclass
+class CastExpr:
+    expr: Any
+    type_ref: TypeRef
     line: int = 0
 
 

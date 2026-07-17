@@ -165,7 +165,11 @@ class Parser:
         tok = self.peek()
         if tok.type == TokenType.VOID:
             self.advance()
-            return TypeRef(name="void")
+            is_pointer = False
+            if self.check(TokenType.STAR):
+                self.advance()
+                is_pointer = True
+            return TypeRef(name="void", is_pointer=is_pointer)
 
         if tok.type == TokenType.MUT:
             self.advance()
@@ -722,15 +726,23 @@ class Parser:
         return MatchExpr(subject=subject, arms=arms, line=kw.line)
 
     def parse_ternary(self):
-        cond = self.parse_or()
+        cond = self.parse_as()
         if self.check(TokenType.IF):
             self.advance()
-            then_expr = self.parse_or()
+            then_expr = self.parse_as()
             if self.check(TokenType.ELSE):
                 self.advance()
             else_expr = self.parse_ternary()
             return IfExpr(cond=cond, then_expr=then_expr, else_expr=else_expr, line=cond.line if hasattr(cond, 'line') else 0)
         return cond
+
+    def parse_as(self):
+        expr = self.parse_or()
+        while self.check(TokenType.IDENT) and self.peek().value == "as":
+            tok = self.advance()
+            type_ref = self.parse_type_ref()
+            expr = CastExpr(expr=expr, type_ref=type_ref, line=tok.line)
+        return expr
 
     def parse_or(self):
         left = self.parse_and()

@@ -4,7 +4,8 @@ from util.errors import ErrorReporter
 
 
 BUILTIN_TYPES = frozenset([
-    "int", "int32", "int64", "uint", "uint32", "uint64", "uint8", "int8",
+    "int", "int32", "int64", "uint", "uint32", "uint64", "ulong",
+    "uint8", "int8",
     "uint16", "int16", "float", "float32", "double", "float64",
     "char", "char8", "bool", "void", "rawptr",
     "Array",
@@ -45,6 +46,7 @@ class TypeChecker:
             "int32_t": "int32", "int": "int32",
             "uint32_t": "uint32", "uint": "uint32",
             "int64_t": "int64", "uint64_t": "uint64",
+            "unsigned long": "ulong",
             "int8_t": "int8", "uint8_t": "uint8",
             "int16_t": "int16", "uint16_t": "uint16",
             "float": "float32", "double": "float64",
@@ -95,7 +97,7 @@ class TypeChecker:
         td = self.meta.get_type_def(name)
         return isinstance(td, IntegerTypeDef) or name in {
             "int8", "uint8", "int16", "uint16", "int32", "uint32",
-            "int64", "uint64", "char",
+            "int64", "uint64", "ulong", "char",
         }
 
     def array_element_type(self, type_ref):
@@ -157,6 +159,7 @@ class TypeChecker:
             "uint32": (0, 4294967295),
             "int64": (-9223372036854775808, 9223372036854775807),
             "uint64": (0, 18446744073709551615),
+            "ulong": (0, 18446744073709551615),
             "char": (-128, 127),
         }
         return ranges.get(name, (None, None))
@@ -582,7 +585,9 @@ class TypeChecker:
             if self.meta.directives.get("unsafe") != "rawptr":
                 self.reporter.error("unsafe", stmt.line, 1,
                                     f"rawptr type requires $unsafe rawptr directive in metadata")
-            if inferred_type and inferred_type.name in ("int", "int32", "int64", "uint", "uint32", "uint64", "uint8", "int8", "uint16", "int16"):
+            if inferred_type and inferred_type.name in ("int", "int32", "int64",
+                    "uint", "uint32", "uint64", "ulong", "uint8", "int8",
+                    "uint16", "int16"):
                 pass
         self.declare(stmt.name, stmt.type_ref or TypeRef(name="int"), is_mut=stmt.is_mut)
 
@@ -752,6 +757,8 @@ class TypeChecker:
                 return self.array_element_type(arr_type)
             if arr_type and arr_type.is_array:
                 return TypeRef(name=arr_type.name)
+            if arr_type and arr_type.is_pointer:
+                return TypeRef(name=arr_type.name)
             if arr_type and arr_type.name == "rawptr":
                 return TypeRef(name="char")
             return None
@@ -763,6 +770,10 @@ class TypeChecker:
         elif isinstance(expr, Deref):
             t = self.check_expr(expr.operand)
             return t
+        elif isinstance(expr, CastExpr):
+            self.check_expr(expr.expr)
+            self.check_type_ref(expr.type_ref, expr.line, "cast target")
+            return expr.type_ref
         elif isinstance(expr, IfExpr):
             self.check_expr(expr.cond)
             t1 = self.check_expr(expr.then_expr)

@@ -1,0 +1,310 @@
+!META!
+    $mode speed
+    $opt no_restrict
+
+    $define %func strcmp as function
+        args: { str1: char*, str2: char* }
+        returns: int
+        pure: true
+        allocates: false
+        recurses: false
+
+    $define %func strncmp as function
+        args: { str1: char*, str2: char*, n: ulong }
+        returns: int
+        pure: true
+        allocates: false
+        recurses: false
+
+    $define %func atoi as function
+        args: { str: char* }
+        returns: int
+        pure: true
+        allocates: false
+        recurses: false
+
+    $define %func strlen as function
+        args: { str: char* }
+        returns: int
+        pure: true
+        allocates: false
+        recurses: false
+
+    $define %func strcpy as function
+        args: { dest: char*, src: char* }
+        returns: char*
+        pure: false
+        mutates: { dest }
+        allocates: false
+        recurses: false
+
+    $define %func strncpy as function
+        args: { dest: char*, src: char*, n: ulong }
+        returns: char*
+        pure: false
+        mutates: { dest }
+        allocates: false
+        recurses: false
+
+    $define %func strcat as function
+        args: { dest: char*, src: char* }
+        returns: char*
+        pure: false
+        mutates: { dest }
+        allocates: false
+        recurses: false
+
+    $define %func strchr as function
+        args: { str: char*, c: int }
+        returns: char*
+        pure: true
+        allocates: false
+        recurses: false
+
+    $define %func memset as function
+        args: { s: void*, c: int, n: ulong }
+        returns: void*
+        pure: false
+        mutates: { s }
+        allocates: false
+        recurses: false
+        restrict: false
+
+    $define %func memcpy as function
+        args: { dest: void*, src: void*, n: ulong }
+        returns: void*
+        pure: false
+        mutates: { dest }
+        allocates: false
+        recurses: false
+        restrict: false
+
+    $space %export strcmp, strncmp, atoi, strlen, strcpy, strncpy, strcat,
+        strchr, memset, memcpy
+!END!
+
+func strcmp(str1: char*, str2: char*) -> int {
+    let a: uint8* = str1 as uint8*;
+    let b: uint8* = str2 as uint8*;
+    let mut i: int = 0;
+
+    while a[i] != 0 && a[i] == b[i] {
+        i = i + 1;
+    }
+
+    return a[i] - b[i];
+}
+
+func strncmp(str1: char*, str2: char*, n: ulong) -> int {
+    let a: uint8* = str1 as uint8*;
+    let b: uint8* = str2 as uint8*;
+    let mut i: ulong = 0;
+    let mut left: ulong = 0;
+
+    if n == 0 {
+        return 0;
+    }
+
+    left = n - 1;
+    while left > 0 && a[i] != 0 && a[i] == b[i] {
+        i = i + 1;
+        left = left - 1;
+    }
+
+    return a[i] - b[i];
+}
+
+func atoi(str: char*) -> int {
+    let mut result: int = 0;
+    let mut sign: int = 1;
+    let mut i: int = 0;
+
+    if str[i] == '-' {
+        sign = -1;
+        i = i + 1;
+    }
+
+    while str[i] >= '0' && str[i] <= '9' {
+        result = result * 10 + (str[i] - '0');
+        i = i + 1;
+    }
+
+    return sign * result;
+}
+
+func strlen(str: char*) -> int {
+    let mut len: int = 0;
+
+    while str[len] != 0 {
+        len = len + 1;
+    }
+
+    return len;
+}
+
+func strcpy(dest: mut char, src: char*) -> char* {
+    let mut i: int = 0;
+
+    while src[i] != 0 {
+        dest[i] = src[i];
+        i = i + 1;
+    }
+    dest[i] = 0;
+
+    return dest;
+}
+
+func strncpy(dest: mut char, src: char*, n: ulong) -> char* {
+    let mut i: ulong = 0;
+
+    while i < n && src[i] != 0 {
+        dest[i] = src[i];
+        i = i + 1;
+    }
+    while i < n {
+        dest[i] = 0;
+        i = i + 1;
+    }
+
+    return dest;
+}
+
+func strcat(dest: mut char, src: char*) -> char* {
+    let mut i: int = 0;
+    let mut j: int = 0;
+
+    while dest[i] != 0 {
+        i = i + 1;
+    }
+    while src[j] != 0 {
+        dest[i + j] = src[j];
+        j = j + 1;
+    }
+    dest[i + j] = 0;
+
+    return dest;
+}
+
+func strchr(str: char*, c: int) -> char* {
+    let mut i: int = 0;
+
+    while str[i] != 0 {
+        if str[i] == c {
+            return str + i;
+        }
+        i = i + 1;
+    }
+
+    if c == 0 {
+        return str + i;
+    }
+
+    return 0 as char*;
+}
+
+func memset(s: void*, c: int, n: ulong) -> void* {
+    let mut p: uint8* = s as uint8*;
+    let val: uint8 = c as uint8;
+    let mut v: ulong = val as ulong;
+    let mut left: ulong = n;
+    let mut wp: ulong* = 0 as ulong*;
+
+    v = v | (v << 8);
+    v = v | (v << 16);
+    v = v | (v << 32);
+
+    while left > 0 && ((p as ulong) & 7) != 0 {
+        p[0] = val;
+        p = p + 1;
+        left = left - 1;
+    }
+
+    wp = p as ulong*;
+    while left >= 8 {
+        wp[0] = v;
+        wp = wp + 1;
+        left = left - 8;
+    }
+
+    p = wp as uint8*;
+    while left > 0 {
+        p[0] = val;
+        p = p + 1;
+        left = left - 1;
+    }
+
+    return s;
+}
+
+func memcpy(dest: void*, src: void*, n: ulong) -> void* {
+    let mut d: uint8* = dest as uint8*;
+    let mut s: uint8* = src as uint8*;
+    let mut dw: ulong* = 0 as ulong*;
+    let mut sw: ulong* = 0 as ulong*;
+    let mut de: uint8* = 0 as uint8*;
+    let mut se: uint8* = 0 as uint8*;
+    let mut dwe: ulong* = 0 as ulong*;
+    let mut swe: ulong* = 0 as ulong*;
+    let mut left: ulong = n;
+
+    if d == s || left == 0 {
+        return dest;
+    }
+
+    if d < s || d >= s + left {
+        while left > 0 && ((d as ulong) & 7) != 0 {
+            d[0] = s[0];
+            d = d + 1;
+            s = s + 1;
+            left = left - 1;
+        }
+
+        dw = d as ulong*;
+        sw = s as ulong*;
+        while left >= 8 {
+            dw[0] = sw[0];
+            dw = dw + 1;
+            sw = sw + 1;
+            left = left - 8;
+        }
+
+        d = dw as uint8*;
+        s = sw as uint8*;
+        while left > 0 {
+            d[0] = s[0];
+            d = d + 1;
+            s = s + 1;
+            left = left - 1;
+        }
+    } else {
+        de = d + left;
+        se = s + left;
+
+        while left > 0 && ((de as ulong) & 7) != 0 {
+            de = de - 1;
+            se = se - 1;
+            de[0] = se[0];
+            left = left - 1;
+        }
+
+        dwe = de as ulong*;
+        swe = se as ulong*;
+        while left >= 8 {
+            dwe = dwe - 1;
+            swe = swe - 1;
+            dwe[0] = swe[0];
+            left = left - 8;
+        }
+
+        d = dwe as uint8*;
+        s = swe as uint8*;
+        while left > 0 {
+            d = d - 1;
+            s = s - 1;
+            d[0] = s[0];
+            left = left - 1;
+        }
+    }
+
+    return dest;
+}

@@ -704,7 +704,7 @@ class MetadataParser:
                         fc.args = self._parse_func_args(args_text)
                 elif prop == "returns":
                     val_tok = self.peek()
-                    if val_tok and val_tok.type == TokenType.IDENT:
+                    if val_tok and val_tok.type in (TokenType.IDENT, TokenType.VOID):
                         ret = self.advance().value
                         ptr = self.peek()
                         if ptr and ptr.type == TokenType.STAR:
@@ -1011,7 +1011,7 @@ class MetadataParser:
                         cf.header = self.advance().value
                 elif prop == "returns":
                     val_tok = self.peek()
-                    if val_tok and val_tok.type == TokenType.IDENT:
+                    if val_tok and val_tok.type in (TokenType.IDENT, TokenType.VOID):
                         ret = self.advance().value
                         star = self.peek()
                         if star and star.type == TokenType.STAR:
