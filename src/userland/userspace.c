@@ -91,7 +91,7 @@ static u64 allocate_user_stack(void) {
       }
       return 0;
     }
-    memset((void *)page, 0, PAGE_SIZE);
+    memset((void *)(page + KERNEL_VMA), 0, PAGE_SIZE);
 
     u64 vaddr = stack_bottom + (i * PAGE_SIZE);
     pmap_enter(vaddr, page, PTE_PRESENT | PTE_RW | PTE_USER | PTE_NX);
@@ -126,7 +126,7 @@ register_data_bss(process_t *proc, u64 data_start, u64 data_end)
         printk("[USERSPACE] Error: failed to allocate data/BSS page at %p\n", (void *)va);
         break;
       }
-      memset((void *)phys, 0, PAGE_SIZE);
+      memset((void *)(phys + KERNEL_VMA), 0, PAGE_SIZE);
       pmap_enter(va, phys, PTE_PRESENT | PTE_RW | PTE_USER);
     }
     vm_object_set_page(obj, idx, phys);

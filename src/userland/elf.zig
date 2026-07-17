@@ -28,6 +28,7 @@ const panic_mod = @import("panic");
 pub const panic = panic_mod.panic;
 
 const PAGE_SIZE: u64 = 4096;
+const KERNEL_VMA: u64 = 0xFFFFFFFF80000000;
 
 const PTE_PRESENT: u64 = 0x1;
 const PTE_RW: u64 = 0x2;
@@ -136,6 +137,9 @@ inline fn u64_to_usize(value: u64) usize {
 
 inline fn u64_to_ptr(value: u64) *anyopaque {
     return @ptrFromInt(u64_to_usize(value));
+}
+inline fn phys_to_ptr(value: u64) *anyopaque {
+    return u64_to_ptr(value + KERNEL_VMA);
 }
 
 inline fn u64_to_ptr_dbg(value: u64) ?*anyopaque {
@@ -289,7 +293,7 @@ fn load_segments(data: *anyopaque, info: *const elf_info_t, load_base: u64) bool
                 printk("[ELF] Error: Failed to allocate page at %p\n", u64_to_ptr(page));
                 return false;
             }
-            _ = memset(u64_to_ptr(phys_page), 0, u64_to_usize(PAGE_SIZE));
+            _ = memset(phys_to_ptr(phys_page), 0, u64_to_usize(PAGE_SIZE));
 
             pmap_enter(page, phys_page, page_flags);
         }
@@ -386,7 +390,7 @@ fn map_elf_headers(data: *anyopaque, info: *const elf_info_t, load_base: u64) bo
             printk("[ELF] Failed to allocate header page at %p\n", u64_to_ptr(page));
             return false;
         }
-        _ = memset(u64_to_ptr(phys), 0, u64_to_usize(PAGE_SIZE));
+        _ = memset(phys_to_ptr(phys), 0, u64_to_usize(PAGE_SIZE));
         pmap_enter(page, phys, PTE_PRESENT | PTE_USER | PTE_RW);
     }
 

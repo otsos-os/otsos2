@@ -182,7 +182,7 @@ allocate_execve_stack(void)
 			}
 			return (0);
 		}
-		memset((void *)page, 0, PAGE_SIZE);
+		memset((void *)(page + KERNEL_VMA), 0, PAGE_SIZE);
 		pmap_enter(stack_bottom + (i * PAGE_SIZE), page,
 		    PTE_PRESENT | PTE_RW | PTE_USER | PTE_NX);
 	}

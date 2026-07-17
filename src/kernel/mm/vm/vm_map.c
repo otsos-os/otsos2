@@ -374,8 +374,9 @@ vm_map_fault(process_t *proc, u64 addr, u64 err_code)
 			if (new_phys == 0) {
 				return (-1);
 			}
-			memcpy((void *)new_phys,
-			    (void *)(old_phys & ~0xFFF), PAGE_SIZE);
+			memcpy((void *)(new_phys + KERNEL_VMA),
+			    (void *)((old_phys & ~0xFFF) + KERNEL_VMA),
+			    PAGE_SIZE);
 			vm_page_free_phys(old_phys);
 			vm_object_set_page(v->object, index,
 			    new_phys);
@@ -431,8 +432,8 @@ vm_cow_fault(u64 addr, u64 err_code)
 		if (new_phys == 0) {
 			return (-1);
 		}
-		memcpy((void *)new_phys,
-		    (void *)(phys & ~0xFFF), PAGE_SIZE);
+		memcpy((void *)(new_phys + KERNEL_VMA),
+		    (void *)((phys & ~0xFFF) + KERNEL_VMA), PAGE_SIZE);
 		vm_page_free_phys(phys);
 		pmap_enter(page_va, new_phys, new_flags);
 	} else {
