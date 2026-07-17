@@ -290,7 +290,7 @@ static int build_user_stack(char **argv, int argc, char **envp, int envc,
     kmem_free(envp_ptrs);
     return -API_ERR_TOO_BIG;
   }
-  if (((sp - total) & 0xFULL) != 0) {
+  if (((sp - total) & 0xFULL) != 8) {
     sp -= 8;
   }
 

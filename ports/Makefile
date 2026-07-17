@@ -78,7 +78,7 @@ $(FETCH_BIN): $(FETCH_OBJS)
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
-$(NATIVE_LIBC) $(NATIVE_SO) $(NATIVE_CRT0):
+$(NATIVE_LIBC) $(NATIVE_SO) $(NATIVE_CRT0): FORCE
 	@echo "  MAKE    native libc"
 	@$(MAKE) -C $(NATIVE_DIR)
 
@@ -177,4 +177,4 @@ clean:
 	$(MAKE) -C $(LUA_DIR) clean
 	-$(MAKE) -C $(CPYTHON_DIR) clean 2>/dev/null || true
 
-.PHONY: all clean lua
+.PHONY: all clean lua FORCE

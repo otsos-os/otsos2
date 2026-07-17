@@ -18,7 +18,7 @@ OBJ = dld.o
 
 all: $(BIN)
 
-$(NATIVE_LIBC) $(NATIVE_CRT0):
+$(NATIVE_LIBC) $(NATIVE_CRT0): FORCE
 	@echo "  MAKE    native libc"
 	@$(MAKE) -C $(NATIVE_DIR)
 
@@ -34,4 +34,4 @@ dld.o: dld.c elf.h
 clean:
 	rm -f $(OBJ) $(BIN)
 
-.PHONY: all clean
+.PHONY: all clean FORCE
