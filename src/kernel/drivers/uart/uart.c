@@ -33,8 +33,52 @@
 #define COM1_LINE_CTRL		(COM1_PORT + 3)
 #define COM1_MODEM_CTRL		(COM1_PORT + 4)
 #define COM1_LINE_STATUS	(COM1_PORT + 5)
+#define COM1_SCRATCH		(COM1_PORT + 7)
+
+#define UART_LSR_DATA_READY	0x01
+#define UART_LSR_THR_EMPTY	0x20
+#define UART_TIMEOUT		100000
 
 static int	uart_available = 0;
+
+static int
+uart_wait_status(u8 mask)
+{
+	int	timeout;
+
+	timeout = UART_TIMEOUT;
+	while (timeout-- > 0) {
+		if (inb(COM1_LINE_STATUS) & mask) {
+			return (1);
+		}
+	}
+	return (0);
+}
+
+static int
+uart_probe(void)
+{
+	u8	saved, value;
+
+	value = inb(COM1_LINE_STATUS);
+	if (value == 0xFF) {
+		return (0);
+	}
+
+	saved = inb(COM1_SCRATCH);
+	outb(COM1_SCRATCH, 0x55);
+	if (inb(COM1_SCRATCH) != 0x55) {
+		outb(COM1_SCRATCH, saved);
+		return (0);
+	}
+	outb(COM1_SCRATCH, 0xAA);
+	if (inb(COM1_SCRATCH) != 0xAA) {
+		outb(COM1_SCRATCH, saved);
+		return (0);
+	}
+	outb(COM1_SCRATCH, saved);
+	return (1);
+}
 
 int
 uart_is_available(void)
@@ -45,7 +89,7 @@ uart_is_available(void)
 void
 uart_init(void)
 {
-	if (inb(COM1_LINE_STATUS) == 0xFF) {
+	if (!uart_probe()) {
 		uart_available = 0;
 		return;
 	}
@@ -56,15 +100,6 @@ uart_init(void)
 	outb(COM1_INT_ENABLE, 0x00);
 	outb(COM1_LINE_CTRL, 0x03);
 	outb(COM1_FIFO_CTRL, 0xC7);
-
-	outb(COM1_MODEM_CTRL, 0x1E);
-	outb(COM1_DATA, 0xAE);
-	if (inb(COM1_DATA) != 0xAE) {
-		uart_available = 0;
-		outb(COM1_MODEM_CTRL, 0x00);
-		return;
-	}
-
 	outb(COM1_MODEM_CTRL, 0x0B);
 	uart_available = 1;
 }
@@ -75,8 +110,9 @@ uart_write_byte(u8 byte)
 	if (!uart_available) {
 		return;
 	}
-	while ((inb(COM1_LINE_STATUS) & 0x20) == 0)
-		;
+	if (!uart_wait_status(UART_LSR_THR_EMPTY)) {
+		return;
+	}
 	outb(COM1_DATA, byte);
 }
 
@@ -94,8 +130,9 @@ uart_read_byte(void)
 	if (!uart_available) {
 		return (0);
 	}
-	while ((inb(COM1_LINE_STATUS) & 0x01) == 0)
-		;
+	if (!uart_wait_status(UART_LSR_DATA_READY)) {
+		return (0);
+	}
 	return (inb(COM1_DATA));
 }
 
@@ -105,5 +142,5 @@ uart_has_data(void)
 	if (!uart_available) {
 		return (0);
 	}
-	return (inb(COM1_LINE_STATUS) & 0x01);
+	return (inb(COM1_LINE_STATUS) & UART_LSR_DATA_READY);
 }

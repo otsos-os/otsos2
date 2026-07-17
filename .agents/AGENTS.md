@@ -57,7 +57,8 @@ Monolithic kernel with the following rough layers:
 - `mm/` — `bootmem.c`, `kmem.c`, `uma.c`, `vm/pmap.c`, `vm/vm_page.c`,
   `vm/vm_object.c`, `vm/vm_map.c`, `vm/vm_pager.c`.
 - `drivers/` — storage, filesystem, video, keyboard, timer, ACPI, power, PCI,
-  watchdog.
+  watchdog. UART init uses a scratch-register probe; do not bring back the old
+  loopback-only availability check.
 - `drivers/fs/chainFS/` — custom filesystem used for root disk (512-byte blocks,
   superblock + file table + block map + chained data). Tooling in `chainfs.py`.
 - `drivers/fs/vfs/` — tiny vnode-based VFS; used by POSIX personality and devfs.
