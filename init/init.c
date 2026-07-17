@@ -271,6 +271,10 @@ spawnAbiForPath(const char *path)
 	if (strcmp(path, "/bin/sh") == 0 || strcmp(path, "sh") == 0) {
 		return (API_PROC_SPAWN_ABI_NATIVE);
 	}
+	if (strcmp(path, "/bin/udp_echo") == 0 ||
+	    strcmp(path, "udp_echo") == 0) {
+		return (API_PROC_SPAWN_ABI_NATIVE);
+	}
 	return (API_PROC_SPAWN_ABI_POSIX);
 }
 

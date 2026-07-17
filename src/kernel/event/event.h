@@ -39,6 +39,7 @@ $define %type knote_t as struct with registered event state
 $define %type kqueue_t as struct with event queue, knote pool, ready list
 $define %type process as struct with process control block
 $define %type pipe as struct with pipe ring buffer
+$define %type net_endpoint_t as native network endpoint state
 
 $define %func event_init as procedure with args void
 $define %func kqueue_create as function with args void
@@ -57,6 +58,7 @@ $define %func event_notify_proc_exit as procedure with args u32, int
 $define %func event_notify_proc_fork as procedure with args u32, u32
 $define %func event_notify_signal as procedure with args u32, int
 $define %func event_notify_pipe_change as procedure with args struct pipe *
+$define %func event_notify_net_change as procedure with args net_endpoint_t *
 
 */
 
@@ -70,6 +72,7 @@ $space %export event_timer_tick, event_cleanup_process
 $space %export event_fork_process
 $space %export event_notify_proc_exit, event_notify_proc_fork
 $space %export event_notify_signal, event_notify_pipe_change
+$space %export event_notify_net_change
 
 */
 
@@ -152,6 +155,7 @@ struct knote;
 struct process;
 struct thread;
 struct pipe;
+struct net_endpoint;
 
 typedef int	(*filter_attach_fn)(struct knote *kn);
 typedef void	(*filter_detach_fn)(struct knote *kn);
@@ -215,6 +219,7 @@ void	event_notify_proc_exit(u32 pid, int exit_code);
 void	event_notify_proc_fork(u32 parent_pid, u32 child_pid);
 void	event_notify_signal(u32 pid, int sig);
 void	event_notify_pipe_change(struct pipe *p);
+void	event_notify_net_change(struct net_endpoint *ep);
 
 void	proc_sleep(void *channel);
 void	proc_wakeup(void *channel);

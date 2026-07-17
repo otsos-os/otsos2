@@ -91,6 +91,13 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_EVENT_KEVENT	0x701
 #define	CALL_EVENT_CLOSE	0x702
 
+#define	CALL_NET_OPEN		0x800
+#define	CALL_NET_BIND		0x801
+#define	CALL_NET_CONNECT	0x802
+#define	CALL_NET_SEND		0x803
+#define	CALL_NET_RECV		0x804
+#define	CALL_NET_CTL		0x805
+
 #define	CALL_PROC_GETPID	0x408
 #define	CALL_PROC_GETPPID	0x409
 #define	CALL_PROC_THREAD_EXIT	0x40A

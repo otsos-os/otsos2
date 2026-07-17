@@ -35,6 +35,7 @@
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/syscall.h>
+#include <kernel/other/config.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <mlibc/stdio.h>
@@ -128,10 +129,13 @@ void syscall_handler(registers_t *regs) {
   process_t *cur_proc = process_current();
   if (cur_proc) {
     signal_deliver(cur_proc, regs);
+    config_poll();
     if (cur_proc->personality == PERSONALITY_POSIX) {
       posix_syscall_handler(regs);
       return;
     }
+  } else {
+    config_poll();
   }
 
   switch (syscall_number) {
@@ -288,6 +292,29 @@ void syscall_handler(registers_t *regs) {
   }
   case CALL_EVENT_CLOSE:
     regs->rax = (u64)kqueue_destroy((int)arg1);
+    break;
+  case CALL_NET_OPEN:
+    regs->rax = (u64)api_net_open((int)arg1, (int)arg2, (u32)arg3);
+    break;
+  case CALL_NET_BIND:
+    regs->rax = (u64)api_net_bind((int)arg1,
+        (const struct api_net_addr *)arg2);
+    break;
+  case CALL_NET_CONNECT:
+    regs->rax = (u64)api_net_connect((int)arg1,
+        (const struct api_net_addr *)arg2);
+    break;
+  case CALL_NET_SEND:
+    regs->rax = (u64)api_net_send((int)arg1,
+        (const struct api_net_msg *)arg2);
+    break;
+  case CALL_NET_RECV:
+    regs->rax = (u64)api_net_recv((int)arg1,
+        (struct api_net_msg *)arg2);
+    break;
+  case CALL_NET_CTL:
+    regs->rax = (u64)api_net_ctl((int)arg1, (int)arg2,
+        (void *)arg3);
     break;
   case CALL_PROC_GETPID:
     regs->rax = (u64)api_proc_getpid();

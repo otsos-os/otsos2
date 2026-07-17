@@ -3,6 +3,8 @@
 $define %type api_sysinfo as struct with kernel identity strings
 $define %type api_kmeminfo as struct with native kernel memory data
 $define %type api_fs_stat as struct with native file metadata
+$define %type api_net_addr as native IPv4 endpoint address
+$define %type api_net_msg as native datagram descriptor
 $define %type kevent as struct with native event data
 $define %func termWrite as function with args const void *, size_t
 $define %func dataOpen as function with args const char *, int
@@ -20,6 +22,7 @@ $space %export fsChdir, fsGetcwd, fsListdir, fsStat, fsRename, fsUnlink
 $space %export procSpawn, procSpawnAbi, procSpawnNative, procWait
 $space %export procRun, procExit, procKill
 $space %export memMap, memUnmap, eventKqueue, eventWait, eventClose
+$space %export netOpen, netBind, netConnect, netSend, netRecv, netCtl
 $space %export drmCall, drmInfo, drmGemCreate, drmGemClose, drmGemMapInfo
 $space %export drmGemMmap, drmFbCreate, drmFbDestroy, drmGetObjects
 $space %export drmAtomicCommit, drmRapiClear, drmRapiPutPixel
@@ -89,6 +92,12 @@ $space %export drmDriverList, drmDriverSwitch
 #define CALL_EVENT_KQUEUE	0x700
 #define CALL_EVENT_KEVENT	0x701
 #define CALL_EVENT_CLOSE	0x702
+#define CALL_NET_OPEN		0x800
+#define CALL_NET_BIND		0x801
+#define CALL_NET_CONNECT	0x802
+#define CALL_NET_SEND		0x803
+#define CALL_NET_RECV		0x804
+#define CALL_NET_CTL		0x805
 #define CALL_PERSONALITY	0xFFFF
 
 #define API_OPEN_READ		0x0001
@@ -115,6 +124,15 @@ $space %export drmDriverList, drmDriverSwitch
 #define API_CLONE_THREAD	0x00010000
 
 #define API_INPUT_NONBLOCK	0x00000001
+
+#define API_NET_ADDR_IP4	1
+#define API_NET_PROTO_UDP	1
+#define API_NET_MODE_DGRAM	1
+#define API_NET_OPEN_NONBLOCK	0x00000001
+#define API_NET_MSG_NONBLOCK	0x00000001
+#define API_NET_MSG_TRUNC	0x00000002
+#define API_NET_CTL_GET_LOCAL	1
+#define API_NET_CTL_GET_PEER	2
 
 #define API_FS_TYPE_REG		1
 #define API_FS_TYPE_DIR		2
@@ -272,6 +290,20 @@ struct api_timeinfo {
 	uint64_t	frequency;
 	int64_t		timezone_offset;
 	char		clocksource[32];
+};
+
+struct api_net_addr {
+	uint32_t	family;
+	uint32_t	port;
+	uint32_t	ip;
+	uint32_t	ifindex;
+};
+
+struct api_net_msg {
+	void			*data;
+	struct api_net_addr	*addr;
+	uint32_t		length;
+	uint32_t		flags;
 };
 
 struct api_key_event {
@@ -532,6 +564,13 @@ int	eventKqueue(void);
 int	eventClose(int kq);
 int	eventWait(int kq, struct kevent *changes, int nchanges,
 	    struct kevent *events, int nevents, int64_t timeout_ms);
+
+int	netOpen(int proto, int mode, uint32_t flags);
+int	netBind(int handle, const struct api_net_addr *addr);
+int	netConnect(int handle, const struct api_net_addr *addr);
+ssize_t	netSend(int handle, const struct api_net_msg *msg);
+ssize_t	netRecv(int handle, struct api_net_msg *msg);
+int	netCtl(int handle, int op, void *arg);
 
 long	personality(long mode);
 

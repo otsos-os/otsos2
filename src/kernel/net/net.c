@@ -65,6 +65,7 @@ $space %export net_iface_set_ip, net_iface_set_netmask, net_iface_set_gw
 #include <kernel/net/ethernet.h>
 #include <kernel/net/arp.h>
 #include <kernel/net/udp.h>
+#include <kernel/net/endpoint.h>
 #include <kernel/net/loopback.h>
 #include <kernel/drivers/timer.h>
 #include <mlibc/stdio.h>
@@ -96,6 +97,7 @@ net_init(void)
 
 	arp_cache_init();
 	udp_init();
+	net_endpoint_init();
 	g_initialized = 1;
 
 	loopback_init();

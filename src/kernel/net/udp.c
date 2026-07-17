@@ -54,6 +54,7 @@ $space %export udp_init, udp_input, udp_output, udp_bind, udp_unbind, udp_checks
 #include <kernel/net/ipv4.h>
 #include <kernel/net/icmp.h>
 #include <kernel/net/ethernet.h>
+#include <kernel/net/endpoint.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -180,6 +181,12 @@ udp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
 
 	src_port = __builtin_bswap16(udp->src_port);
 	dst_port = __builtin_bswap16(udp->dst_port);
+
+	if (net_endpoint_udp_input(iface, src_ip, dst_ip,
+	    src_port, dst_port, data + UDP_HEADER_LEN,
+	    (u16)(udp_len - UDP_HEADER_LEN))) {
+		return (0);
+	}
 
 	binding = udp_find_binding(dst_port);
 	if (!binding) {

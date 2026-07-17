@@ -38,6 +38,7 @@ $define %type filter_ops_t as struct with filter callbacks vtable
 $define %type process_t as struct with process control block
 $define %type pipe_t as struct with pipe ring buffer
 $define %type api_object_t as struct with object table entry
+$define %type net_endpoint_t as native network endpoint state
 
 $define %func filter_index as function with args s16
 $define %func filter_register as procedure with args const filter_ops_t *
@@ -63,6 +64,7 @@ $define %func event_timer_tick as procedure with args void
 $define %func event_cleanup_process as procedure with args struct process *
 $define %func event_fork_process as procedure with args struct process *, struct process *
 $define %func event_notify_pipe_change as procedure with args pipe_t *
+$define %func event_notify_net_change as procedure with args net_endpoint_t *
 
 */
 
@@ -78,6 +80,7 @@ $space %export kqueue_get, knote_ready, kqueue_wakeup
 $space %export knote_notify_all, kevent_process
 $space %export event_timer_tick, event_cleanup_process
 $space %export event_fork_process, event_notify_pipe_change
+$space %export event_notify_net_change
 
 */
 
@@ -811,6 +814,60 @@ event_notify_pipe_change(pipe_t *p)
 			continue;
 		}
 		if (objects[obj_idx].pipe != p) {
+			continue;
+		}
+
+		for (pid_slot = 0; pid_slot < MAX_PROCESSES;
+		    pid_slot++) {
+			process_t	*proc;
+			thread_t	*td;
+
+			proc = &process_table[pid_slot];
+			if (proc->pid == 0) {
+				continue;
+			}
+
+			td = proc->main_thread;
+			if (!td || td->state == PROC_STATE_UNUSED) {
+				continue;
+			}
+
+			for (fd = 0; fd < MAX_HANDLES; fd++) {
+				if (!proc->handles[fd].used ||
+				    proc->handles[fd].object_index
+				    != obj_idx) {
+					continue;
+				}
+				knote_notify_all(EVFILT_READ,
+				    (u64)fd, 0, 0);
+				knote_notify_all(EVFILT_WRITE,
+				    (u64)fd, 0, 0);
+			}
+		}
+	}
+}
+
+void
+event_notify_net_change(struct net_endpoint *ep)
+{
+	api_object_t	*objects;
+	int		obj_idx, pid_slot, fd;
+
+	if (!event_initialized || !ep) {
+		return;
+	}
+
+	objects = api_get_object_table();
+	if (!objects) {
+		return;
+	}
+
+	for (obj_idx = 0; obj_idx < MAX_DATA_OBJECTS; obj_idx++) {
+		if (!objects[obj_idx].used ||
+		    objects[obj_idx].type != API_OBJECT_NET) {
+			continue;
+		}
+		if (objects[obj_idx].net != ep) {
 			continue;
 		}
 

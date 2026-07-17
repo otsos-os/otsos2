@@ -26,6 +26,7 @@
 
 #include <kernel/console/terminal.h>
 #include <kernel/api/api.h>
+#include <kernel/net/endpoint.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
@@ -66,6 +67,7 @@ api_alloc_object(void)
 			api_objects[i].flags = 0;
 			api_objects[i].type = API_OBJECT_FILE;
 			api_objects[i].pipe = NULL;
+			api_objects[i].net = NULL;
 			api_objects[i].vn = NULL;
 			memset(api_objects[i].path, 0,
 			    sizeof(api_objects[i].path));
@@ -104,6 +106,13 @@ api_release_object(int index)
 			if (p->readers == 0 && p->writers == 0) {
 				kmem_free(p);
 			}
+		}
+
+		if (api_objects[index].type == API_OBJECT_NET &&
+		    api_objects[index].net) {
+			net_endpoint_close(
+			    (net_endpoint_t *)api_objects[index].net);
+			api_objects[index].net = NULL;
 		}
 
 		if (api_objects[index].vn) {

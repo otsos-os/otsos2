@@ -34,6 +34,7 @@ $define %type filter_ops_t as struct with filter callbacks vtable
 $define %type api_handle_t as struct with handle table entry
 $define %type api_object_t as struct with object table entry
 $define %type pipe_t as struct with pipe ring buffer
+$define %type net_endpoint_t as native network endpoint state
 
 $define %func filt_write_attach as function with args knote_t *
 $define %func filt_write_detach as procedure with args knote_t *
@@ -52,6 +53,7 @@ $space %export filter_write_ops
 
 #include <kernel/event/event.h>
 #include <kernel/api/api.h>
+#include <kernel/net/endpoint.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -132,6 +134,16 @@ filt_write_event(knote_t *kn, u32 nevents)
 		}
 		if (p->readers == 0) {
 			kn->flags |= EV_EOF;
+			return (1);
+		}
+		return (0);
+	}
+
+	if (obj->type == API_OBJECT_NET) {
+		if (net_endpoint_writable(
+		    (net_endpoint_t *)obj->net)) {
+			kn->data = net_endpoint_write_space(
+			    (net_endpoint_t *)obj->net);
 			return (1);
 		}
 		return (0);

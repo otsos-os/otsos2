@@ -1026,14 +1026,13 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 		    config_is_initialized()) {
 			vfs_mkdir("/conf");
 			vfs_mkdir("/conf/boot");
-			if (config_save_to_file(
-			    CONFIG_PATH_BOOT) == 0) {
-				printk("saved config to "
-				    "to %s\n",
+			if (config_attach_file(CONFIG_PATH_BOOT) == 0) {
+				printk("loaded runtime config "
+				    "from %s\n",
 				    CONFIG_PATH_BOOT);
 			} else {
-				printk("fail save config "
-				    "to %s\n",
+				printk("fail attach config "
+				    "at %s\n",
 				    CONFIG_PATH_BOOT);
 			}
 		}

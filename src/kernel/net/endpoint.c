@@ -1,0 +1,713 @@
+/*
+ * Copyright (c) 2026, otsos team
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice, this
+ *    list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/* !DEFINES!
+
+$define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type int as 32 bit signed
+$define %type net_endpoint_t as native network endpoint state
+$define %type net_endpoint_rx_t as queued UDP datagram
+$define %type net_endpoint_addr_t as endpoint IPv4 address tuple
+$define %type net_iface_t as struct with logical network interface state
+
+$define %func net_endpoint_iface_up as function with args net_iface_t *
+$define %func net_endpoint_ip_local as function with args u32
+$define %func net_endpoint_find_iface_by_ip as function with args u32
+$define %func net_endpoint_find_loopback as function with args void
+$define %func net_endpoint_route as function with args u32, u32, int
+$define %func net_endpoint_bind_conflict as function with args net_endpoint_t *, u32, u16
+$define %func net_endpoint_alloc_port as function with args net_endpoint_t *, u32
+$define %func net_endpoint_valid_addr as function with args const net_endpoint_addr_t *, int
+$define %func net_endpoint_match as function with args net_endpoint_t *, net_iface_t *, u32, u32, u16, u16
+$define %func net_endpoint_enqueue as function with args net_endpoint_t *, net_iface_t *, u32, u32, u16, u16, const u8 *, u16
+$define %func net_endpoint_init as procedure with args void
+$define %func net_endpoint_open as function with args int, int, u32
+$define %func net_endpoint_close as procedure with args net_endpoint_t *
+$define %func net_endpoint_bind as function with args net_endpoint_t *, const net_endpoint_addr_t *
+$define %func net_endpoint_connect as function with args net_endpoint_t *, const net_endpoint_addr_t *
+$define %func net_endpoint_send as function with args net_endpoint_t *, const u8 *, u32, const net_endpoint_addr_t *, u32
+$define %func net_endpoint_recv as function with args net_endpoint_t *, u8 *, u32, net_endpoint_addr_t *, u32, u32 *
+$define %func net_endpoint_get_local as procedure with args net_endpoint_t *, net_endpoint_addr_t *
+$define %func net_endpoint_get_peer as function with args net_endpoint_t *, net_endpoint_addr_t *
+$define %func net_endpoint_readable as function with args net_endpoint_t *
+$define %func net_endpoint_writable as function with args net_endpoint_t *
+$define %func net_endpoint_pending_bytes as function with args net_endpoint_t *
+$define %func net_endpoint_write_space as function with args net_endpoint_t *
+$define %func net_endpoint_udp_input as function with args net_iface_t *, u32, u32, u16, u16, const u8 *, u16
+
+*/
+
+/* !SPACE!
+
+$space %internal net_endpoint_iface_up, net_endpoint_ip_local
+$space %internal net_endpoint_find_iface_by_ip
+$space %internal net_endpoint_find_loopback, net_endpoint_route
+$space %internal net_endpoint_bind_conflict, net_endpoint_alloc_port
+$space %internal net_endpoint_valid_addr, net_endpoint_match
+$space %internal net_endpoint_enqueue
+$space %export net_endpoint_init, net_endpoint_open, net_endpoint_close
+$space %export net_endpoint_bind, net_endpoint_connect
+$space %export net_endpoint_send, net_endpoint_recv
+$space %export net_endpoint_get_local, net_endpoint_get_peer
+$space %export net_endpoint_readable, net_endpoint_writable
+$space %export net_endpoint_pending_bytes, net_endpoint_write_space
+$space %export net_endpoint_udp_input
+
+*/
+
+#include <kernel/api/errno.h>
+#include <kernel/event/event.h>
+#include <kernel/net/endpoint.h>
+#include <kernel/net/ethernet.h>
+#include <kernel/net/ipv4.h>
+#include <kernel/net/udp.h>
+#include <mlibc/mlibc.h>
+#include <mlibc/stdio.h>
+
+#define	NET_ENDPOINT_MAX		32
+#define	NET_ENDPOINT_RX_QUEUE		8
+#define	NET_ENDPOINT_DGRAM_MAX		\
+	(ETHERNET_MTU - sizeof(ipv4_header_t) - UDP_HEADER_LEN)
+#define	NET_ENDPOINT_EPHEMERAL_FIRST	49152
+#define	NET_ENDPOINT_EPHEMERAL_LAST	65535
+
+typedef struct {
+	u8	data[NET_ENDPOINT_DGRAM_MAX];
+	u32	src_ip;
+	u32	dst_ip;
+	u16	src_port;
+	u16	dst_port;
+	u16	len;
+	int	ifindex;
+} net_endpoint_rx_t;
+
+struct net_endpoint {
+	net_endpoint_rx_t	rx[NET_ENDPOINT_RX_QUEUE];
+	u32			flags;
+	u32			local_ip;
+	u32			peer_ip;
+	u32			rx_head;
+	u32			rx_tail;
+	u32			rx_count;
+	u32			rx_bytes;
+	u32			rx_drops;
+	u16			local_port;
+	u16			peer_port;
+	int			used;
+	int			proto;
+	int			mode;
+	int			ifindex;
+	int			peer_ifindex;
+};
+
+static net_endpoint_t	g_endpoints[NET_ENDPOINT_MAX];
+static u16		g_next_ephemeral;
+
+static int
+net_endpoint_iface_up(net_iface_t *iface)
+{
+	if (!iface || !iface->ndev) {
+		return (0);
+	}
+	if (!(iface->flags & NET_IFF_UP)) {
+		return (0);
+	}
+	if (!(iface->ndev->flags & NETDEV_F_UP)) {
+		return (0);
+	}
+	return (1);
+}
+
+static int
+net_endpoint_ip_local(u32 ip)
+{
+	net_iface_t	*iface;
+	int		i, count;
+
+	if (ip == 0) {
+		return (1);
+	}
+
+	count = net_iface_count();
+	for (i = 0; i < count; i++) {
+		iface = net_iface_get(i);
+		if (net_endpoint_iface_up(iface) &&
+		    iface->ip_addr == ip) {
+			return (1);
+		}
+	}
+	return (0);
+}
+
+static net_iface_t *
+net_endpoint_find_iface_by_ip(u32 ip)
+{
+	net_iface_t	*iface;
+	int		i, count;
+
+	count = net_iface_count();
+	for (i = 0; i < count; i++) {
+		iface = net_iface_get(i);
+		if (net_endpoint_iface_up(iface) &&
+		    iface->ip_addr == ip) {
+			return (iface);
+		}
+	}
+	return (NULL);
+}
+
+static net_iface_t *
+net_endpoint_find_loopback(void)
+{
+	net_iface_t	*iface;
+	int		i, count;
+
+	count = net_iface_count();
+	for (i = 0; i < count; i++) {
+		iface = net_iface_get(i);
+		if (net_endpoint_iface_up(iface) &&
+		    (iface->flags & NET_IFF_LOOPBACK)) {
+			return (iface);
+		}
+	}
+	return (NULL);
+}
+
+static net_iface_t *
+net_endpoint_route(u32 dst_ip, u32 local_ip, int ifindex)
+{
+	net_iface_t	*iface;
+	int		i, count;
+
+	if (ifindex != NET_ENDPOINT_IF_AUTO) {
+		iface = net_iface_get(ifindex);
+		if (!net_endpoint_iface_up(iface)) {
+			return (NULL);
+		}
+		if (local_ip != 0 && iface->ip_addr != local_ip) {
+			return (NULL);
+		}
+		return (iface);
+	}
+
+	if (local_ip != 0) {
+		return (net_endpoint_find_iface_by_ip(local_ip));
+	}
+
+	if ((dst_ip & 0xFF000000u) == 0x7F000000u) {
+		return (net_endpoint_find_loopback());
+	}
+
+	count = net_iface_count();
+	for (i = 0; i < count; i++) {
+		iface = net_iface_get(i);
+		if (!net_endpoint_iface_up(iface) ||
+		    (iface->flags & NET_IFF_LOOPBACK)) {
+			continue;
+		}
+		if (iface->ip_addr != 0 && iface->netmask != 0 &&
+		    (dst_ip & iface->netmask) ==
+		    (iface->ip_addr & iface->netmask)) {
+			return (iface);
+		}
+	}
+
+	for (i = 0; i < count; i++) {
+		iface = net_iface_get(i);
+		if (net_endpoint_iface_up(iface) &&
+		    !(iface->flags & NET_IFF_LOOPBACK) &&
+		    iface->ip_addr != 0 && iface->gw_addr != 0) {
+			return (iface);
+		}
+	}
+
+	for (i = 0; i < count; i++) {
+		iface = net_iface_get(i);
+		if (net_endpoint_iface_up(iface) &&
+		    !(iface->flags & NET_IFF_LOOPBACK) &&
+		    iface->ip_addr != 0) {
+			return (iface);
+		}
+	}
+
+	return (NULL);
+}
+
+static int
+net_endpoint_bind_conflict(net_endpoint_t *self, u32 ip, u16 port)
+{
+	net_endpoint_t	*ep;
+	int		i;
+
+	for (i = 0; i < NET_ENDPOINT_MAX; i++) {
+		ep = &g_endpoints[i];
+		if (!ep->used || ep == self) {
+			continue;
+		}
+		if (ep->proto != NET_ENDPOINT_PROTO_UDP ||
+		    ep->mode != NET_ENDPOINT_MODE_DGRAM) {
+			continue;
+		}
+		if (ep->local_port != port) {
+			continue;
+		}
+		if (ep->local_ip == 0 || ip == 0 ||
+		    ep->local_ip == ip) {
+			return (1);
+		}
+	}
+	return (0);
+}
+
+static int
+net_endpoint_alloc_port(net_endpoint_t *self, u32 ip)
+{
+	u16	port;
+	int	tries;
+
+	for (tries = 0; tries <= NET_ENDPOINT_EPHEMERAL_LAST -
+	    NET_ENDPOINT_EPHEMERAL_FIRST; tries++) {
+		port = g_next_ephemeral;
+		g_next_ephemeral++;
+		if (g_next_ephemeral > NET_ENDPOINT_EPHEMERAL_LAST) {
+			g_next_ephemeral = NET_ENDPOINT_EPHEMERAL_FIRST;
+		}
+		if (!net_endpoint_bind_conflict(self, ip, port)) {
+			return ((int)port);
+		}
+	}
+	return (-API_ERR_BUSY);
+}
+
+static int
+net_endpoint_valid_addr(const net_endpoint_addr_t *addr, int peer)
+{
+	if (!addr) {
+		return (-API_ERR_BAD_ADDR);
+	}
+	if (addr->family != NET_ENDPOINT_ADDR_IP4) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
+	if (addr->ifindex != NET_ENDPOINT_IF_AUTO &&
+	    !net_iface_get(addr->ifindex)) {
+		return (-API_ERR_NO_DEVICE);
+	}
+	if (peer && (addr->ip == 0 || addr->port == 0)) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (!peer && !net_endpoint_ip_local(addr->ip)) {
+		return (-API_ERR_NO_DEVICE_ADDR);
+	}
+	return (0);
+}
+
+static int
+net_endpoint_match(net_endpoint_t *ep, net_iface_t *iface, u32 src_ip,
+    u32 dst_ip, u16 src_port, u16 dst_port)
+{
+	if (!ep->used || ep->proto != NET_ENDPOINT_PROTO_UDP ||
+	    ep->mode != NET_ENDPOINT_MODE_DGRAM) {
+		return (0);
+	}
+	if (ep->local_port == 0 || ep->local_port != dst_port) {
+		return (0);
+	}
+	if (ep->local_ip != 0 && ep->local_ip != dst_ip) {
+		return (0);
+	}
+	if (ep->ifindex != NET_ENDPOINT_IF_AUTO &&
+	    (!iface || ep->ifindex != iface->index)) {
+		return (0);
+	}
+	if (ep->peer_ip != 0 && ep->peer_ip != src_ip) {
+		return (0);
+	}
+	if (ep->peer_port != 0 && ep->peer_port != src_port) {
+		return (0);
+	}
+	return (1);
+}
+
+static int
+net_endpoint_enqueue(net_endpoint_t *ep, net_iface_t *iface, u32 src_ip,
+    u32 dst_ip, u16 src_port, u16 dst_port, const u8 *data, u16 len)
+{
+	net_endpoint_rx_t	*rx;
+
+	if (ep->rx_count >= NET_ENDPOINT_RX_QUEUE) {
+		ep->rx_drops++;
+		return (0);
+	}
+	if (len > NET_ENDPOINT_DGRAM_MAX) {
+		ep->rx_drops++;
+		return (0);
+	}
+
+	rx = &ep->rx[ep->rx_tail];
+	memset(rx, 0, sizeof(*rx));
+	if (len != 0) {
+		memcpy(rx->data, data, len);
+	}
+	rx->src_ip = src_ip;
+	rx->dst_ip = dst_ip;
+	rx->src_port = src_port;
+	rx->dst_port = dst_port;
+	rx->len = len;
+	rx->ifindex = iface ? iface->index : NET_ENDPOINT_IF_AUTO;
+
+	ep->rx_tail = (ep->rx_tail + 1) % NET_ENDPOINT_RX_QUEUE;
+	ep->rx_count++;
+	ep->rx_bytes += len;
+
+	proc_wakeup((void *)ep);
+	event_notify_net_change(ep);
+	return (0);
+}
+
+void
+net_endpoint_init(void)
+{
+	memset(g_endpoints, 0, sizeof(g_endpoints));
+	g_next_ephemeral = NET_ENDPOINT_EPHEMERAL_FIRST;
+}
+
+net_endpoint_t *
+net_endpoint_open(int proto, int mode, u32 flags)
+{
+	net_endpoint_t	*ep;
+	int		i;
+
+	if (proto != NET_ENDPOINT_PROTO_UDP ||
+	    mode != NET_ENDPOINT_MODE_DGRAM) {
+		return (NULL);
+	}
+	if (flags & ~NET_ENDPOINT_FLAG_NONBLOCK) {
+		return (NULL);
+	}
+
+	for (i = 0; i < NET_ENDPOINT_MAX; i++) {
+		ep = &g_endpoints[i];
+		if (ep->used) {
+			continue;
+		}
+		memset(ep, 0, sizeof(*ep));
+		ep->used = 1;
+		ep->proto = proto;
+		ep->mode = mode;
+		ep->flags = flags;
+		ep->ifindex = NET_ENDPOINT_IF_AUTO;
+		ep->peer_ifindex = NET_ENDPOINT_IF_AUTO;
+		return (ep);
+	}
+	return (NULL);
+}
+
+void
+net_endpoint_close(net_endpoint_t *ep)
+{
+	if (!ep || !ep->used) {
+		return;
+	}
+	proc_wakeup((void *)ep);
+	event_notify_net_change(ep);
+	memset(ep, 0, sizeof(*ep));
+}
+
+int
+net_endpoint_bind(net_endpoint_t *ep, const net_endpoint_addr_t *addr)
+{
+	int	ret, port;
+
+	if (!ep || !ep->used) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	ret = net_endpoint_valid_addr(addr, 0);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (ep->local_port != 0) {
+		return (-API_ERR_BUSY);
+	}
+
+	port = (int)addr->port;
+	if (port == 0) {
+		port = net_endpoint_alloc_port(ep, addr->ip);
+		if (port < 0) {
+			return (port);
+		}
+	}
+	if (net_endpoint_bind_conflict(ep, addr->ip, (u16)port)) {
+		return (-API_ERR_BUSY);
+	}
+
+	ep->local_ip = addr->ip;
+	ep->local_port = (u16)port;
+	ep->ifindex = addr->ifindex;
+	return (0);
+}
+
+int
+net_endpoint_connect(net_endpoint_t *ep, const net_endpoint_addr_t *addr)
+{
+	int	ret, port;
+
+	if (!ep || !ep->used) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	ret = net_endpoint_valid_addr(addr, 1);
+	if (ret != 0) {
+		return (ret);
+	}
+
+	if (ep->local_port == 0) {
+		port = net_endpoint_alloc_port(ep, ep->local_ip);
+		if (port < 0) {
+			return (port);
+		}
+		ep->local_port = (u16)port;
+	}
+
+	ep->peer_ip = addr->ip;
+	ep->peer_port = addr->port;
+	ep->peer_ifindex = addr->ifindex;
+	return (0);
+}
+
+int
+net_endpoint_send(net_endpoint_t *ep, const u8 *data, u32 len,
+    const net_endpoint_addr_t *addr, u32 flags)
+{
+	net_endpoint_addr_t	dst;
+	net_iface_t		*iface;
+	const u8		*payload;
+	u8			empty;
+	int			ifindex;
+	int			ret, port;
+
+	if (!ep || !ep->used) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	if (flags & ~NET_ENDPOINT_MSG_NONBLOCK) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (len > NET_ENDPOINT_DGRAM_MAX) {
+		return (-API_ERR_TOO_BIG);
+	}
+	if (!data && len != 0) {
+		return (-API_ERR_BAD_ADDR);
+	}
+
+	if (addr) {
+		ret = net_endpoint_valid_addr(addr, 1);
+		if (ret != 0) {
+			return (ret);
+		}
+		dst = *addr;
+	} else {
+		if (ep->peer_ip == 0 || ep->peer_port == 0) {
+			return (-API_ERR_BAD_VALUE);
+		}
+		dst.ip = ep->peer_ip;
+		dst.port = ep->peer_port;
+		dst.family = NET_ENDPOINT_ADDR_IP4;
+		dst.ifindex = ep->peer_ifindex;
+	}
+
+	if (ep->local_port == 0) {
+		port = net_endpoint_alloc_port(ep, ep->local_ip);
+		if (port < 0) {
+			return (port);
+		}
+		ep->local_port = (u16)port;
+	}
+
+	ifindex = dst.ifindex;
+	if (ifindex == NET_ENDPOINT_IF_AUTO) {
+		ifindex = ep->ifindex;
+	}
+	iface = net_endpoint_route(dst.ip, ep->local_ip, ifindex);
+	if (!iface) {
+		return (-API_ERR_NO_DEVICE);
+	}
+
+	empty = 0;
+	payload = len == 0 ? &empty : data;
+	ret = udp_output(iface, dst.ip, ep->local_port, dst.port,
+	    payload, (u16)len);
+	if (ret == 0 || ret == NET_TX_PENDING) {
+		return ((int)len);
+	}
+	return (-API_ERR_IO);
+}
+
+int
+net_endpoint_recv(net_endpoint_t *ep, u8 *buf, u32 len,
+    net_endpoint_addr_t *addr, u32 flags, u32 *out_flags)
+{
+	net_endpoint_rx_t	*rx;
+	u32			to_copy;
+
+	if (!ep || !ep->used) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	if (flags & ~(NET_ENDPOINT_MSG_NONBLOCK |
+	    NET_ENDPOINT_MSG_TRUNC)) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (!buf && len != 0) {
+		return (-API_ERR_BAD_ADDR);
+	}
+	if (out_flags) {
+		*out_flags = 0;
+	}
+
+	while (ep->rx_count == 0) {
+		if ((ep->flags & NET_ENDPOINT_FLAG_NONBLOCK) ||
+		    (flags & NET_ENDPOINT_MSG_NONBLOCK)) {
+			return (-API_ERR_RETRY);
+		}
+		proc_sleep((void *)ep);
+		if (!ep->used) {
+			return (-API_ERR_BAD_HANDLE);
+		}
+	}
+
+	rx = &ep->rx[ep->rx_head];
+	to_copy = rx->len;
+	if (to_copy > len) {
+		to_copy = len;
+		if (out_flags) {
+			*out_flags |= NET_ENDPOINT_MSG_TRUNC;
+		}
+	}
+	if (to_copy != 0) {
+		memcpy(buf, rx->data, to_copy);
+	}
+	if (addr) {
+		addr->ip = rx->src_ip;
+		addr->port = rx->src_port;
+		addr->family = NET_ENDPOINT_ADDR_IP4;
+		addr->ifindex = rx->ifindex;
+	}
+
+	ep->rx_head = (ep->rx_head + 1) % NET_ENDPOINT_RX_QUEUE;
+	ep->rx_count--;
+	ep->rx_bytes -= rx->len;
+	memset(rx, 0, sizeof(*rx));
+	event_notify_net_change(ep);
+	return ((int)to_copy);
+}
+
+void
+net_endpoint_get_local(net_endpoint_t *ep, net_endpoint_addr_t *addr)
+{
+	if (!addr) {
+		return;
+	}
+	memset(addr, 0, sizeof(*addr));
+	addr->family = NET_ENDPOINT_ADDR_IP4;
+	addr->ifindex = NET_ENDPOINT_IF_AUTO;
+	if (!ep || !ep->used) {
+		return;
+	}
+	addr->ip = ep->local_ip;
+	addr->port = ep->local_port;
+	addr->ifindex = ep->ifindex;
+}
+
+int
+net_endpoint_get_peer(net_endpoint_t *ep, net_endpoint_addr_t *addr)
+{
+	if (!ep || !ep->used || !addr) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	if (ep->peer_ip == 0 || ep->peer_port == 0) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	addr->ip = ep->peer_ip;
+	addr->port = ep->peer_port;
+	addr->family = NET_ENDPOINT_ADDR_IP4;
+	addr->ifindex = ep->peer_ifindex;
+	return (0);
+}
+
+int
+net_endpoint_readable(net_endpoint_t *ep)
+{
+	if (!ep || !ep->used) {
+		return (0);
+	}
+	return (ep->rx_count > 0);
+}
+
+int
+net_endpoint_writable(net_endpoint_t *ep)
+{
+	if (!ep || !ep->used) {
+		return (0);
+	}
+	return (1);
+}
+
+u32
+net_endpoint_pending_bytes(net_endpoint_t *ep)
+{
+	if (!ep || !ep->used || ep->rx_count == 0) {
+		return (0);
+	}
+	if (ep->rx_bytes == 0) {
+		return (ep->rx_count);
+	}
+	return (ep->rx_bytes);
+}
+
+u32
+net_endpoint_write_space(net_endpoint_t *ep)
+{
+	(void)ep;
+	return (NET_ENDPOINT_DGRAM_MAX);
+}
+
+int
+net_endpoint_udp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
+    u16 src_port, u16 dst_port, const u8 *data, u16 len)
+{
+	net_endpoint_t	*ep;
+	int		i;
+
+	for (i = 0; i < NET_ENDPOINT_MAX; i++) {
+		ep = &g_endpoints[i];
+		if (!net_endpoint_match(ep, iface, src_ip, dst_ip,
+		    src_port, dst_port)) {
+			continue;
+		}
+		net_endpoint_enqueue(ep, iface, src_ip, dst_ip,
+		    src_port, dst_port, data, len);
+		return (1);
+	}
+	return (0);
+}

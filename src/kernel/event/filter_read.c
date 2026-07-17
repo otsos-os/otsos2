@@ -36,6 +36,7 @@ $define %type filter_ops_t as struct with filter callbacks vtable
 $define %type api_handle_t as struct with handle table entry
 $define %type api_object_t as struct with object table entry
 $define %type pipe_t as struct with pipe ring buffer
+$define %type net_endpoint_t as native network endpoint state
 
 $define %func filt_read_attach as function with args knote_t *
 $define %func filt_read_detach as procedure with args knote_t *
@@ -58,6 +59,7 @@ $space %export filter_read_ops
 #include <kernel/console/terminal.h>
 #include <kernel/console/pty.h>
 #include <kernel/drivers/keyboard/keyboard.h>
+#include <kernel/net/endpoint.h>
 #include <kernel/process.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -175,6 +177,16 @@ filt_read_event(knote_t *kn, u32 nevents)
 		if (p->writers == 0) {
 			kn->flags |= EV_EOF;
 			kn->data = 0;
+			return (1);
+		}
+		return (0);
+	}
+
+	if (obj->type == API_OBJECT_NET) {
+		if (net_endpoint_readable(
+		    (net_endpoint_t *)obj->net)) {
+			kn->data = net_endpoint_pending_bytes(
+			    (net_endpoint_t *)obj->net);
 			return (1);
 		}
 		return (0);

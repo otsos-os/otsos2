@@ -35,6 +35,10 @@ $define %type config_kv_cb as function pointer with args const char *, const cha
 
 $define %func config_init_from_data as procedure with args const char *, u32
 $define %func config_init_from_file as procedure with args const char *
+$define %func config_attach_file as function with args const char *
+$define %func config_reload_from_file as function with args void
+$define %func config_flush_to_file as function with args void
+$define %func config_poll as procedure with args void
 $define %func config_save_to_file as function with args const char *
 $define %func config_get as function with args const char *, const char *
 $define %func config_get_bool as function with args const char *, const char *, int
@@ -51,6 +55,8 @@ $define %func config_free as procedure with args void
 /* !SPACE!
 
 $space %export config_init_from_data, config_init_from_file
+$space %export config_attach_file, config_reload_from_file
+$space %export config_flush_to_file, config_poll
 $space %export config_save_to_file, config_get, config_get_bool
 $space %export config_get_int, config_get_string, config_set
 $space %export config_foreach_section, config_foreach_in_section
@@ -64,13 +70,17 @@ $space %export config_free
 
 #include <mlibc/mlibc.h>
 
-#define CONFIG_PATH_BOOT "/conf/boot/modules.toml"
+#define CONFIG_PATH_BOOT "/conf/boot/config.toml"
 
 typedef int (*config_section_cb)(const char *section, void *ctx);
 typedef void (*config_kv_cb)(const char *key, const char *value, void *ctx);
 
 void		config_init_from_data(const char *data, u32 len);
 void		config_init_from_file(const char *path);
+int		config_attach_file(const char *path);
+int		config_reload_from_file(void);
+int		config_flush_to_file(void);
+void		config_poll(void);
 int		config_save_to_file(const char *path);
 const char	*config_get(const char *section, const char *key);
 int		config_get_bool(const char *section, const char *key,

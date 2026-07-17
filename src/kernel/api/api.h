@@ -54,6 +54,7 @@ typedef struct {
   u32 offset;
   int flags;
   void *pipe;
+  void *net;
   vnode_t *vn;
 } api_object_t;
 
@@ -84,6 +85,7 @@ typedef struct {
 #define API_OBJECT_FILE 0
 #define API_OBJECT_PIPE 1
 #define API_OBJECT_VNODE 2
+#define API_OBJECT_NET 3
 #define MMAP_BASE 0x0000001000000000ULL
 #define MMAP_LIMIT 0x00007FFF00000000ULL
 
@@ -207,6 +209,30 @@ struct api_kmeminfo {
   u64 bootmem_free_kb;
   u64 kmem_heap_addr;
 };
+
+#define	API_NET_ADDR_IP4		1
+#define	API_NET_PROTO_UDP		1
+#define	API_NET_MODE_DGRAM		1
+#define	API_NET_OPEN_NONBLOCK		0x00000001
+#define	API_NET_MSG_NONBLOCK		0x00000001
+#define	API_NET_MSG_TRUNC		0x00000002
+#define	API_NET_CTL_GET_LOCAL		1
+#define	API_NET_CTL_GET_PEER		2
+
+struct api_net_addr {
+	u32	family;
+	u32	port;
+	u32	ip;
+	u32	ifindex;
+};
+
+struct api_net_msg {
+	void			*data;
+	struct api_net_addr	*addr;
+	u32			length;
+	u32			flags;
+};
+
 #define API_CPUINFO_MAX_CPUS 32
 #define API_CPUINFO_MAX_PIDS 64
 struct api_cpu_entry {
@@ -492,5 +518,11 @@ int api_term_info(struct api_term_info *info);
 int api_input_read(struct api_key_event *buf, u32 count, u32 flags);
 int api_input_poll(void);
 int api_input_flush(void);
+int api_net_open(int proto, int mode, u32 flags);
+int api_net_bind(int handle, const struct api_net_addr *uaddr);
+int api_net_connect(int handle, const struct api_net_addr *uaddr);
+int api_net_send(int handle, const struct api_net_msg *umsg);
+int api_net_recv(int handle, struct api_net_msg *umsg);
+int api_net_ctl(int handle, int op, void *arg);
 
 #endif

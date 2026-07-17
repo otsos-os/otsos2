@@ -37,6 +37,12 @@ enabled = false
 [log]
 enabled = true
 drivers = true
+
+[autoupdate]
+enabled = false
+seconds = 5
+autosave = false
+
 [net]
 enabled = true
 ip = "10.0.2.15"
@@ -54,6 +60,7 @@ sh = "/bin/sh"
 oven = "/bin/oven"
 cursord = "/bin/cursord"
 # shmtest = "/bin/shmtest"
+udp_echo = "/bin/udp_echo"
 posix_hello = "/bin/posix_hello"
 # kbdtest = "/bin/kbdtest"
 musl_test = "/bin/musl_test"

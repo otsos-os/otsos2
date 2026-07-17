@@ -2,7 +2,6 @@ TARGET ?= x86_64-elf
 CC = clang
 ZIG = zig
 PYTHON ?= python3
-KATO = ../etc/kato/src/main.py
 LD = ld.lld
 AS = nasm
 QEMU = qemu-system-x86_64
@@ -39,6 +38,7 @@ SHELL_BIN = $(PORTS_DIR)/sh
 OVEN_BIN = $(PORTS_DIR)/oven
 CURSORD_BIN = $(PORTS_DIR)/demons/cursord
 SHMTEST_BIN = $(PORTS_DIR)/shmtest
+UDP_ECHO_BIN = $(PORTS_DIR)/udp_echo
 POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
 KBDTEST_BIN = $(PORTS_DIR)/kbdtest
 MUSL_TEST_BIN = $(PORTS_DIR)/musl_test
@@ -46,6 +46,8 @@ LUA_BIN = $(PORTS_DIR)/lua/lua/lua
 CPYTHON_BIN = $(PORTS_DIR)/cpython/cpython/python
 MUSL_LDSO = $(MUSL_DIR)/lib/libc.so
 LDSO_BIN = $(PORTS_DIR)/ld-musl-x86_64.so.1
+NATIVE_LIBC = $(NATIVE_DIR)/lib/libc.a
+NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
 NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 DLD_BIN = ../libc/LibExec/dld/drld
 LIBC_ENABLED := $(shell sh ../tools/toml_get.sh config.toml libc enabled true)
@@ -128,8 +130,6 @@ endif
 # object files
 BOOT_O = ../bin/boot.o
 KERNEL_O = ../bin/kernel.o
-STRING_SRC = mlibc/string.kato
-STRING_C = ../bin/string.c
 STRING_O = ../bin/string.o
 ITOA_O = ../bin/itoa.o
 HARDWARE_O = ../bin/hardware.o
@@ -187,6 +187,7 @@ LSEEK_O = ../bin/lseek.o
 WAIT_O = ../bin/wait.o
 MMAP_O = ../bin/mmap.o
 SHM_O = ../bin/shm.o
+API_NET_O = ../bin/api_net.o
 
 PIPE_O = ../bin/pipe.o
 CLONE_O = ../bin/clone.o
@@ -255,6 +256,7 @@ NET_ARP_O = ../bin/net_arp.o
 NET_IPV4_O = ../bin/net_ipv4.o
 NET_ICMP_O = ../bin/net_icmp.o
 NET_UDP_O = ../bin/net_udp.o
+NET_ENDPOINT_O = ../bin/net_endpoint.o
 NET_LOOPBACK_O = ../bin/net_loopback.o
 
 EVENT_O = ../bin/event.o
@@ -294,7 +296,7 @@ ET_CLOCKSOURCE_O = ../bin/et_clocksource.o
 CMOS_RTC_O = ../bin/cmos_rtc.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDIO_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
+      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(API_NET_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(SESSION_O) $(THREAD_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(FS_META_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
@@ -304,7 +306,7 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(TOML_O) $(KUSR_O) $(KUSR_AUTH_O) $(CONFIG_O) $(DRM_API_O) $(RESTRICT_O) \
       $(CRYPTO_UTIL_O) $(CRYPTO_SHA256_O) $(CRYPTO_HMAC_O) $(CRYPTO_PBKDF2_O) $(CRYPTO_RNG_O) $(CRYPTO_CHACHA20_O) \
        $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_PCI_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O) $(VIRTIO_NET_O) \
-       $(NETDEV_O) $(NET_O) $(NET_ETHERNET_O) $(NET_ARP_O) $(NET_IPV4_O) $(NET_ICMP_O) $(NET_UDP_O) $(NET_LOOPBACK_O) $(UNIX_SOCK_O) \
+       $(NETDEV_O) $(NET_O) $(NET_ETHERNET_O) $(NET_ARP_O) $(NET_IPV4_O) $(NET_ICMP_O) $(NET_UDP_O) $(NET_ENDPOINT_O) $(NET_LOOPBACK_O) $(UNIX_SOCK_O) \
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
       $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
       $(EVENT_KBD_O) $(EVENT_MOUSE_O) \
@@ -428,6 +430,11 @@ $(SHMTEST_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/shmtest"
 	@$(MAKE) -C $(PORTS_DIR) shmtest LIBC_ENABLED=$(LIBC_ENABLED)
 
+.PHONY: $(UDP_ECHO_BIN)
+$(UDP_ECHO_BIN): $(NATIVE_CRT0) $(NATIVE_LIBC)
+	@echo "  MAKE    ports/udp_echo"
+	@$(MAKE) -C $(PORTS_DIR) udp_echo LIBC_ENABLED=$(LIBC_ENABLED)
+
 .PHONY: $(POSIX_HELLO_BIN)
 $(POSIX_HELLO_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/posix_hello"
@@ -528,7 +535,7 @@ $(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BU
 		exit 1; \
 	fi
 
-$(BIOS_BOOTPACK): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
+$(BIOS_BOOTPACK): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
 	@rm -rf $(BIOS_PAYLOAD_DIR)
 	@mkdir -p $(BIOS_PAYLOAD_DIR)
 	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
@@ -543,6 +550,7 @@ $(BIOS_BOOTPACK): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN)
 			oven) src=$(OVEN_BIN);; \
 			cursord) src=$(CURSORD_BIN);; \
 			shmtest) src=$(SHMTEST_BIN);; \
+			udp_echo) src=$(UDP_ECHO_BIN);; \
 			posix_hello) src=$(POSIX_HELLO_BIN);; \
 			kbdtest) src=$(KBDTEST_BIN);; \
 			musl_test) src=$(MUSL_TEST_BIN);; \
@@ -794,7 +802,7 @@ $(OPEN_O): kernel/api/open.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(SYSCALL_O): kernel/syscall.c kernel/api/shm.h
+$(SYSCALL_O): kernel/syscall.c kernel/api/shm.h kernel/other/config.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -819,6 +827,10 @@ $(MMAP_O): kernel/api/mmap.c kernel/api/api.h kernel/mm/vm/vm_map.h kernel/mm/vm
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(SHM_O): kernel/api/shm.c kernel/api/shm.h kernel/api/api.h kernel/mm/vm/vm_map.h kernel/mm/vm/vm_object.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(API_NET_O): kernel/api/net.c kernel/api/api.h kernel/net/endpoint.h kernel/useraddr.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -990,7 +1002,7 @@ $(RESTRICT_O): kernel/other/restrict.c kernel/other/restrict.h kernel/process.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(CONFIG_O): kernel/other/config.c kernel/other/config.h mlibc/toml.h
+$(CONFIG_O): kernel/other/config.c kernel/other/config.h mlibc/toml.h kernel/drivers/fs/vfs/vfs.h kernel/drivers/timer.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1046,7 +1058,7 @@ $(VIRTIO_NET_O): kernel/drivers/net/virtio-net/virtio_net.c kernel/drivers/net/v
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(NET_O): kernel/net/net.c kernel/net/net.h kernel/net/netdev/netdev.h kernel/net/ethernet.h
+$(NET_O): kernel/net/net.c kernel/net/net.h kernel/net/netdev/netdev.h kernel/net/ethernet.h kernel/net/endpoint.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1066,7 +1078,11 @@ $(NET_ICMP_O): kernel/net/icmp.c kernel/net/icmp.h kernel/net/ipv4.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(NET_UDP_O): kernel/net/udp.c kernel/net/udp.h kernel/net/ipv4.h kernel/net/ethernet.h
+$(NET_UDP_O): kernel/net/udp.c kernel/net/udp.h kernel/net/ipv4.h kernel/net/ethernet.h kernel/net/endpoint.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(NET_ENDPOINT_O): kernel/net/endpoint.c kernel/net/endpoint.h kernel/net/udp.h kernel/net/ipv4.h kernel/event/event.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1081,15 +1097,15 @@ $(SYSCALL_ASM_O): kernel/syscall_asm.asm
 	@echo "  AS      $<"
 	@$(AS) -f $(NASM_FORMAT) -g -F dwarf $< -o $@
 
-$(EVENT_O): kernel/event/event.c kernel/event/event.h
+$(EVENT_O): kernel/event/event.c kernel/event/event.h kernel/api/api.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(EVENT_READ_O): kernel/event/filter_read.c kernel/event/event.h
+$(EVENT_READ_O): kernel/event/filter_read.c kernel/event/event.h kernel/net/endpoint.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(EVENT_WRITE_O): kernel/event/filter_write.c kernel/event/event.h
+$(EVENT_WRITE_O): kernel/event/filter_write.c kernel/event/event.h kernel/net/endpoint.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1189,11 +1205,7 @@ $(SYS_O): kernel/api/sys.c kernel/api/api.h kernel/crypto/rng/rng.h
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 
-$(STRING_C): $(STRING_SRC) $(KATO)
-	@echo "  KATO    $<"
-	@$(PYTHON) $(KATO) $< -freestand -o $@
-
-$(STRING_O): $(STRING_C)
+$(STRING_O): mlibc/string.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1276,11 +1288,19 @@ virtio_nodis: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (virtio-gpu, virtio-net, terminal)"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_NODISPLAY_OPTS) -device virtio-gpu-pci -netdev user,id=net0 -device virtio-net-pci,netdev=net0,disable-legacy=on -device i6300esb -watchdog-action reset
 
+virtio_udp: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
+	@echo "  RUN     QEMU (virtio-net, UDP echo hostfwd :10007 -> :7)"
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device virtio-gpu-pci -netdev user,id=net0,hostfwd=udp::10007-:7 -device virtio-net-pci,netdev=net0,disable-legacy=on -device i6300esb -watchdog-action reset
+
+virtio_udp_nodis: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
+	@echo "  RUN     QEMU (virtio-net, terminal, UDP echo hostfwd :10007 -> :7)"
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_NODISPLAY_OPTS) -device virtio-gpu-pci -netdev user,id=net0,hostfwd=udp::10007-:7 -device virtio-net-pci,netdev=net0,disable-legacy=on -device i6300esb -watchdog-action reset
+
 debug: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  DEBUG   QEMU"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) -d int,cpu_reset > debug.txt 2>&1 -no-reboot $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset
 
 clean:
 	@echo "  CLEAN"
-	@rm -f ../bin/*.o $(STRING_C) ../bin/kernel.bin ../bin/kernel.map $(ISO_IMAGE) $(DISK_IMG)
+	@rm -f ../bin/*.o ../bin/kernel.bin ../bin/kernel.map $(ISO_IMAGE) $(DISK_IMG)
 	@rm -rf $(BIOS_BUILD_DIR) $(UEFI_BUILD_DIR)
