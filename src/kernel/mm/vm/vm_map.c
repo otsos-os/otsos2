@@ -29,15 +29,24 @@
 $define %type u32 as 32 bit unsigned
 $define %type u64 as 64 bit unsigned
 $define %type int as 32 bit signed
-$define %type vma_t as struct with start, end, prot, flags, gem_handle, object_offset, object, next
+$define %type vma_t as struct with start, end, prot, flags, gem_handle, object_base, object_offset, object, next
 $define %type vm_object_t as struct with type, ref_count, size, pages, page_count, shadow, pager, next
 $define %type process_t as struct with pid, ppid, state, name, cr3, vma_list
 
 $define %func align_up as function with args u64, u64
 $define %func page_flags_for_prot as function with args u32
+$define %func vm_map_shm_attach_vma as procedure with args vma_t *
+$define %func vm_map_shm_detach_vma as procedure with args vma_t *
+$define %func vm_map_unlink as function with args process_t *, vma_t *
+$define %func vm_map_insert_vma as procedure with args process_t *, vma_t *
+$define %func vm_map_clip as function with args process_t *, u64
 $define %func vm_map_find_free as function with args process_t *, u64
+$define %func vm_map_range_free as function with args process_t *, u64, u64, vma_t *
+$define %func vm_map_clip_range as function with args process_t *, u64, u64
 $define %func vm_map_insert as function with args process_t *, u64, u64, u32, u32, u32, vm_object_t *, u64
 $define %func vm_map_remove as function with args process_t *, u64
+$define %func vm_map_remove_range as function with args process_t *, u64, u64
+$define %func vm_map_relocate as function with args process_t *, vma_t *, u64, u64
 $define %func vm_map_lookup as function with args process_t *, u64
 $define %func vm_map_free_all as procedure with args process_t *
 $define %func vm_map_fork as function with args process_t *, process_t *
@@ -49,9 +58,12 @@ $define %func vm_cow_fault as function with args u64, u64
 /* !SPACE!
 
 $space %internal align_up, page_flags_for_prot
-$space %export vm_map_find_free, vm_map_insert, vm_map_remove
-$space %export vm_map_lookup, vm_map_free_all, vm_map_fork
-$space %export vm_map_fault, vm_cow_fault
+$space %internal vm_map_shm_attach_vma, vm_map_shm_detach_vma
+$space %internal vm_map_unlink, vm_map_insert_vma, vm_map_clip
+$space %export vm_map_find_free, vm_map_range_free, vm_map_clip_range
+$space %export vm_map_insert, vm_map_remove, vm_map_remove_range
+$space %export vm_map_relocate, vm_map_lookup, vm_map_free_all
+$space %export vm_map_fork, vm_map_fault, vm_cow_fault
 
 */
 
@@ -85,6 +97,131 @@ page_flags_for_prot(u32 prot)
 		flags |= PTE_NX;
 	}
 	return (flags);
+}
+
+static void
+vm_map_shm_attach_vma(vma_t *vma)
+{
+	if (vma != NULL && vma->object != NULL &&
+	    vma->object->type == VM_OBJ_SHM && vma->gem_handle != 0) {
+		shm_attach((int)vma->gem_handle);
+	}
+}
+
+static void
+vm_map_shm_detach_vma(vma_t *vma)
+{
+	if (vma != NULL && vma->object != NULL &&
+	    vma->object->type == VM_OBJ_SHM && vma->gem_handle != 0) {
+		shm_detach((int)vma->gem_handle);
+	}
+}
+
+static int
+vm_map_unlink(process_t *proc, vma_t *target)
+{
+	vma_t	**pp;
+
+	if (proc == NULL || target == NULL) {
+		return (-1);
+	}
+
+	pp = &proc->vma_list;
+	while (*pp != NULL) {
+		if (*pp == target) {
+			*pp = target->next;
+			target->next = NULL;
+			return (0);
+		}
+		pp = &(*pp)->next;
+	}
+	return (-1);
+}
+
+static void
+vm_map_insert_vma(process_t *proc, vma_t *vma)
+{
+	vma_t	**pp;
+
+	pp = &proc->vma_list;
+	while (*pp != NULL && (*pp)->start < vma->start) {
+		pp = &(*pp)->next;
+	}
+	vma->next = *pp;
+	*pp = vma;
+}
+
+static int
+vm_map_clip(process_t *proc, u64 addr)
+{
+	vma_t	*v;
+	vma_t	*right;
+	u64	delta;
+
+	v = vm_map_lookup(proc, addr);
+	if (v == NULL || addr == v->start) {
+		return (0);
+	}
+	if (addr >= v->end) {
+		return (0);
+	}
+
+	right = (vma_t *)kmem_calloc(sizeof(vma_t), 1);
+	if (right == NULL) {
+		return (-1);
+	}
+
+	delta = addr - v->start;
+	right->start = addr;
+	right->end = v->end;
+	right->prot = v->prot;
+	right->flags = v->flags;
+	right->gem_handle = v->gem_handle;
+	right->object_base = v->object_base + delta;
+	right->object_offset = v->object_offset + delta;
+	right->object = v->object;
+	vm_object_ref(right->object);
+	vm_map_shm_attach_vma(right);
+
+	right->next = v->next;
+	v->next = right;
+	v->end = addr;
+	return (0);
+}
+
+int
+vm_map_range_free(process_t *proc, u64 start, u64 end, vma_t *ignore)
+{
+	vma_t	*v;
+
+	if (proc == NULL || end <= start) {
+		return (0);
+	}
+
+	for (v = proc->vma_list; v != NULL; v = v->next) {
+		if (v == ignore) {
+			continue;
+		}
+		if (start < v->end && end > v->start) {
+			return (0);
+		}
+	}
+	return (1);
+}
+
+int
+vm_map_clip_range(process_t *proc, u64 start, u64 end)
+{
+	if (proc == NULL || end <= start) {
+		return (-1);
+	}
+	if (vm_map_clip(proc, start) != 0) {
+		return (-1);
+	}
+	if (vm_map_clip(proc, end) != 0) {
+		return (-1);
+	}
+	return (0);
 }
 
 u64
@@ -162,7 +299,13 @@ vm_map_insert(process_t *proc, u64 start, u64 end, u32 prot,
     u64 object_offset)
 {
 	vma_t	*vma;
-	vma_t	**pp;
+
+	if (proc == NULL || object == NULL || end <= start) {
+		return (-1);
+	}
+	if (!vm_map_range_free(proc, start, end, NULL)) {
+		return (-1);
+	}
 
 	vma = (vma_t *)kmem_calloc(sizeof(vma_t), 1);
 	if (vma == NULL) {
@@ -174,16 +317,12 @@ vm_map_insert(process_t *proc, u64 start, u64 end, u32 prot,
 	vma->prot = prot;
 	vma->flags = flags;
 	vma->gem_handle = gem_handle;
+	vma->object_base = 0;
 	vma->object_offset = object_offset;
 	vma->object = object;
 	vm_object_ref(object);
 
-	pp = &proc->vma_list;
-	while (*pp != NULL && (*pp)->start < start) {
-		pp = &(*pp)->next;
-	}
-	vma->next = *pp;
-	*pp = vma;
+	vm_map_insert_vma(proc, vma);
 
 	return (0);
 }
@@ -199,10 +338,7 @@ vm_map_remove(process_t *proc, u64 addr)
 		if (addr >= (*pp)->start && addr < (*pp)->end) {
 			v = *pp;
 			*pp = v->next;
-			if (v->object != NULL && v->object->type == VM_OBJ_SHM &&
-			    v->gem_handle != 0) {
-				shm_detach((int)v->gem_handle);
-			}
+			vm_map_shm_detach_vma(v);
 			vm_object_unref(v->object);
 			kmem_free(v);
 			return (0);
@@ -212,18 +348,68 @@ vm_map_remove(process_t *proc, u64 addr)
 	return (-1);
 }
 
-	vma_t *
-	vm_map_lookup(process_t *proc, u64 addr)
-	{
-		vma_t	*v;
+int
+vm_map_remove_range(process_t *proc, u64 start, u64 end)
+{
+	vma_t	*v;
+	vma_t	*next;
+	int	removed;
 
-		for (v = proc->vma_list; v != NULL; v = v->next) {
-			if (addr >= v->start && addr < v->end) {
-				return (v);
+	if (proc == NULL || end <= start) {
+		return (-1);
+	}
+
+	if (vm_map_clip_range(proc, start, end) != 0) {
+		return (-1);
+	}
+
+	removed = 0;
+	v = proc->vma_list;
+	while (v != NULL) {
+		next = v->next;
+		if (v->start >= start && v->end <= end) {
+			if (vm_map_unlink(proc, v) == 0) {
+				vm_map_shm_detach_vma(v);
+				vm_object_unref(v->object);
+				kmem_free(v);
+				removed = 1;
 			}
 		}
-		return (NULL);
+		v = next;
 	}
+	return (removed ? 0 : -1);
+}
+
+int
+vm_map_relocate(process_t *proc, vma_t *vma, u64 new_start, u64 new_end)
+{
+	if (proc == NULL || vma == NULL || new_end <= new_start) {
+		return (-1);
+	}
+	if (!vm_map_range_free(proc, new_start, new_end, vma)) {
+		return (-1);
+	}
+	if (vm_map_unlink(proc, vma) != 0) {
+		return (-1);
+	}
+	vma->start = new_start;
+	vma->end = new_end;
+	vm_map_insert_vma(proc, vma);
+	return (0);
+}
+
+vma_t *
+vm_map_lookup(process_t *proc, u64 addr)
+{
+	vma_t	*v;
+
+	for (v = proc->vma_list; v != NULL; v = v->next) {
+		if (addr >= v->start && addr < v->end) {
+			return (v);
+		}
+	}
+	return (NULL);
+}
 
 void
 vm_map_free_all(process_t *proc)
@@ -246,10 +432,7 @@ vm_map_free_all(process_t *proc)
 			}
 			pmap_remove(va);
 		}
-		if (v->object != NULL && v->object->type == VM_OBJ_SHM &&
-		    v->gem_handle != 0) {
-			shm_detach((int)v->gem_handle);
-		}
+		vm_map_shm_detach_vma(v);
 		vm_object_unref(v->object);
 		kmem_free(v);
 		v = next;
@@ -281,6 +464,7 @@ vm_map_fork(process_t *parent, process_t *child)
 		child_vma->prot = v->prot;
 		child_vma->flags = v->flags;
 		child_vma->gem_handle = v->gem_handle;
+		child_vma->object_base = v->object_base;
 		child_vma->object_offset = v->object_offset;
 
 		if (v->object != NULL) {
@@ -334,6 +518,7 @@ vm_map_fault(process_t *proc, u64 addr, u64 err_code)
 	vma_t	*v;
 	u64	page_va;
 	u64	map_off;
+	u64	object_off;
 	u64	file_off;
 	u64	index;
 	u64	old_phys;
@@ -355,8 +540,9 @@ vm_map_fault(process_t *proc, u64 addr, u64 err_code)
 
 	page_va = addr & ~(PAGE_SIZE - 1);
 	map_off = page_va - v->start;
+	object_off = v->object_base + map_off;
 	file_off = v->object_offset + map_off;
-	index = map_off / PAGE_SIZE;
+	index = object_off / PAGE_SIZE;
 
 	if ((err_code & 0x1) && (err_code & 0x2) &&
 	    (v->prot & API_MAP_WRITE)) {

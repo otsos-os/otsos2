@@ -49,6 +49,7 @@ typedef struct vma {
   u32 prot;            /* API_MAP_READ / WRITE / EXEC */
   u32 flags;           /* API_MAP_ANON / MAP_GEM / MAP_PRIVATE etc */
   u32 gem_handle;      /* GEM handle if MAP_GEM, else 0 */
+  u64 object_base;     /* byte offset to vm_object page array */
   u64 object_offset;   /* offset into vm_object */
   struct vm_object *object;
   struct vma *next;    /* singly-linked list, sorted by start */

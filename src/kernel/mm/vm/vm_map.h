@@ -29,13 +29,17 @@
 $define %type u32 as 32 bit unsigned
 $define %type u64 as 64 bit unsigned
 $define %type int as 32 bit signed
-$define %type vma_t as struct with start, end, prot, flags, gem_handle, object_offset, object, next
+$define %type vma_t as struct with start, end, prot, flags, gem_handle, object_base, object_offset, object, next
 $define %type vm_object_t as struct with type, ref_count, size, pages, page_count, shadow, pager, next
 $define %type process_t as struct with pid, ppid, state, name, cr3, entry_point, stacks, context, vma_list
 
 $define %func vm_map_find_free as function with args process_t *, u64
+$define %func vm_map_range_free as function with args process_t *, u64, u64, vma_t *
+$define %func vm_map_clip_range as function with args process_t *, u64, u64
 $define %func vm_map_insert as function with args process_t *, u64, u64, u32, u32, u32, vm_object_t *, u64
 $define %func vm_map_remove as function with args process_t *, u64
+$define %func vm_map_remove_range as function with args process_t *, u64, u64
+$define %func vm_map_relocate as function with args process_t *, vma_t *, u64, u64
 $define %func vm_map_lookup as function with args process_t *, u64
 $define %func vm_map_free_all as procedure with args process_t *
 $define %func vm_map_fork as function with args process_t *, process_t *
@@ -46,9 +50,10 @@ $define %func vm_cow_fault as function with args u64, u64
 
 /* !SPACE!
 
-$space %export vm_map_find_free, vm_map_insert, vm_map_remove
-$space %export vm_map_lookup, vm_map_free_all, vm_map_fork
-$space %export vm_map_fault, vm_cow_fault
+$space %export vm_map_find_free, vm_map_range_free, vm_map_clip_range
+$space %export vm_map_insert, vm_map_remove, vm_map_remove_range
+$space %export vm_map_relocate, vm_map_lookup, vm_map_free_all
+$space %export vm_map_fork, vm_map_fault, vm_cow_fault
 
 */
 
@@ -69,10 +74,16 @@ $space %export vm_map_fault, vm_cow_fault
 #define VM_MAP_GEM		0x40
 
 u64		vm_map_find_free(process_t *proc, u64 length);
+int		vm_map_range_free(process_t *proc, u64 start, u64 end,
+		    vma_t *ignore);
+int		vm_map_clip_range(process_t *proc, u64 start, u64 end);
 int		vm_map_insert(process_t *proc, u64 start, u64 end,
 		    u32 prot, u32 flags, u32 gem_handle,
 		    vm_object_t *object, u64 object_offset);
 int		vm_map_remove(process_t *proc, u64 addr);
+int		vm_map_remove_range(process_t *proc, u64 start, u64 end);
+int		vm_map_relocate(process_t *proc, vma_t *vma, u64 new_start,
+		    u64 new_end);
 vma_t		*vm_map_lookup(process_t *proc, u64 addr);
 void		vm_map_free_all(process_t *proc);
 int		vm_map_fork(process_t *parent, process_t *child);

@@ -53,7 +53,7 @@ Monolithic kernel with the following rough layers:
 - `api/` — native syscall implementations (`term_*`, `data_*`, `proc_*`,
   `fs_*`, `mem_*`, `sys_*`, `drm_*`, `event_*`, `kusr_*`, `posix/*`).
 - `api/posix/` — Linux-compatible syscall personality when process
-  `personality == PERSONALITY_POSIX`.
+  `personality == PERSONALITY_POSIX`.  Syscall numbers track Linux x86-64
 - `mm/` — `bootmem.c`, `kmem.c`, `uma.c`, `vm/pmap.c`, `vm/vm_page.c`,
   `vm/vm_object.c`, `vm/vm_map.c`, `vm/vm_pager.c`.
 - `drivers/` — storage, filesystem, video, keyboard, timer, ACPI, power, PCI,
@@ -279,6 +279,10 @@ User need to test, dont run test manually, ask user.
   links or large files. POSIX personality uses the VFS and devfs on top of it.
 - POSIX personality is opt-in per process via `CALL_PERSONALITY` (`0xFFFF`);
   default is native `PERSONALITY_OTSOS`.
+- POSIX `mremap(2)` is implemented in `api/posix/posix_mem.c` on top of
+  VMA clipping/relocation helpers in `mm/vm/vm_map.c`; `MREMAP_DONTUNMAP`
+  deliberately returns `EINVAL` because its Linux userfaultfd semantics are not
+  modeled yet.
 - `src/config.toml` is parsed into a global TOML document; many compile-time
   feature flags (`kshell`, `libc`, `pata`) are also read from it by the Makefile
   via `tools/toml_get.sh`.

@@ -41,11 +41,32 @@
 #include <mm/vm/vm_map.h>
 
 #define PAGE_SIZE	4096
+#define POSIX_MREMAP_MAYMOVE	1
+#define POSIX_MREMAP_FIXED	2
+#define POSIX_MREMAP_DONTUNMAP	4
+#define POSIX_MREMAP_KNOWN	(POSIX_MREMAP_MAYMOVE | \
+    POSIX_MREMAP_FIXED | POSIX_MREMAP_DONTUNMAP)
 
 static u64
 align_up(u64 val, u64 align)
 {
 	return ((val + align - 1) & ~(align - 1));
+}
+
+static int
+align_length(u64 length, u64 *aligned)
+{
+	if (length == 0 || aligned == NULL) {
+		return (-1);
+	}
+	if (length > (~(u64)0 - (PAGE_SIZE - 1))) {
+		return (-1);
+	}
+	*aligned = align_up(length, PAGE_SIZE);
+	if (*aligned == 0) {
+		return (-1);
+	}
+	return (0);
 }
 
 static u64
@@ -62,6 +83,8 @@ page_flags_for_prot(u64 prot)
 	}
 	return (flags);
 }
+
+static void	posix_unmap_pages(struct process *proc, u64 start, u64 end);
 
 static s64
 posix_mmap_fbdev(struct process *proc, vnode_t *vn, u64 addr, u64 length,
@@ -106,6 +129,10 @@ posix_mmap_fbdev(struct process *proc, vnode_t *vn, u64 addr, u64 length,
 	    (void *)(info.hw_address + offset));
 	if (!obj) {
 		return (-POSIX_ENOMEM);
+	}
+	if (flags & POSIX_MAP_FIXED) {
+		posix_unmap_pages(proc, addr, addr + map_size);
+		vm_map_remove_range(proc, addr, addr + map_size);
 	}
 	if (vm_map_insert(proc, addr, addr + map_size, api_prot,
 	    api_flags, 0, obj, 0) != 0) {
@@ -169,6 +196,94 @@ posix_errno_from_api(int error)
 	}
 }
 
+static void
+posix_unmap_pages(struct process *proc, u64 start, u64 end)
+{
+	vma_t	*vma;
+	u64	va;
+	u64	phys;
+
+	if (proc == NULL || end <= start) {
+		return;
+	}
+
+	for (va = start; va < end; va += PAGE_SIZE) {
+		vma = vm_map_lookup(proc, va);
+		if (vma != NULL && vma->object == NULL) {
+			phys = pmap_extract(va);
+			if (phys != 0) {
+				vm_page_free_phys(phys);
+			}
+		}
+		pmap_remove(va);
+	}
+}
+
+static int
+posix_resize_mremap_object(vma_t *vma, u64 new_length)
+{
+	u64	required;
+
+	if (vma == NULL || vma->object == NULL) {
+		return (0);
+	}
+	if (new_length > (~(u64)0 - vma->object_base)) {
+		return (-1);
+	}
+
+	required = vma->object_base + new_length;
+	if (required > vma->object->size) {
+		if (vma->object->type == VM_OBJ_GEM ||
+		    vma->object->type == VM_OBJ_DEVICE) {
+			return (-1);
+		}
+		return (vm_object_resize(vma->object, required));
+	}
+
+	if (vma->object->ref_count == 1 && vma->object_base == 0) {
+		return (vm_object_resize(vma->object, required));
+	}
+	return (0);
+}
+
+static s64
+posix_mremap_move(struct process *proc, vma_t *vma, u64 old_addr,
+    u64 old_length, u64 new_addr, u64 new_length)
+{
+	u64	va;
+	u64	phys;
+	u64	pflags;
+
+	if (new_length > old_length) {
+		if (posix_resize_mremap_object(vma, new_length) != 0) {
+			return (-POSIX_ENOMEM);
+		}
+	}
+
+	for (va = new_addr; va < new_addr + new_length; va += PAGE_SIZE) {
+		pmap_remove(va);
+	}
+
+	for (va = 0; va < old_length && va < new_length; va += PAGE_SIZE) {
+		phys = pmap_extract(old_addr + va);
+		pflags = pmap_extract_flags(old_addr + va);
+		if (phys != 0 && pflags != 0) {
+			pmap_enter(new_addr + va, phys, pflags);
+		}
+		pmap_remove(old_addr + va);
+	}
+	if (old_length > new_length) {
+		posix_unmap_pages(proc, old_addr + new_length,
+		    old_addr + old_length);
+	}
+
+	if (vm_map_relocate(proc, vma, new_addr, new_addr + new_length)
+	    != 0) {
+		return (-POSIX_ENOMEM);
+	}
+	return ((s64)new_addr);
+}
+
 s64
 posix_mmap(u64 addr_u, u64 length, u64 prot, u64 flags, u64 fd_u,
     u64 offset, registers_t *regs)
@@ -188,12 +303,17 @@ posix_mmap(u64 addr_u, u64 length, u64 prot, u64 flags, u64 fd_u,
 		return (-POSIX_EINVAL);
 	}
 
-	aligned = align_up(length, PAGE_SIZE);
+	if (align_length(length, &aligned) != 0) {
+		return (-POSIX_EINVAL);
+	}
 	addr = addr_u;
 
 	if (flags & POSIX_MAP_FIXED) {
 		if (addr == 0 || (addr & (PAGE_SIZE - 1)) != 0) {
 			return (-POSIX_EINVAL);
+		}
+		if (!is_user_address((void *)addr, aligned)) {
+			return (-POSIX_EFAULT);
 		}
 	} else {
 		addr = vm_map_find_free(proc, aligned);
@@ -203,9 +323,9 @@ posix_mmap(u64 addr_u, u64 length, u64 prot, u64 flags, u64 fd_u,
 	}
 
 	if (flags & POSIX_MAP_ANON) {
+		vm_object_t	*obj;
 		u32		api_prot;
 		u32		api_flags;
-		vm_object_t	*obj;
 
 		api_prot = 0;
 		if (prot & POSIX_PROT_READ) api_prot |= API_MAP_READ;
@@ -220,6 +340,10 @@ posix_mmap(u64 addr_u, u64 length, u64 prot, u64 flags, u64 fd_u,
 			return (-POSIX_ENOMEM);
 		}
 
+		if (flags & POSIX_MAP_FIXED) {
+			posix_unmap_pages(proc, addr, addr + aligned);
+			vm_map_remove_range(proc, addr, addr + aligned);
+		}
 		if (vm_map_insert(proc, addr, addr + aligned, api_prot,
 		    api_flags, 0, obj, 0) != 0) {
 			vm_object_unref(obj);
@@ -230,9 +354,13 @@ posix_mmap(u64 addr_u, u64 length, u64 prot, u64 flags, u64 fd_u,
 	}
 
 	{
+		posix_stat_t	st;
 		posix_fd_t	*pfd;
 		vnode_t		*vn;
-		posix_stat_t	st;
+		vm_object_t	*obj;
+		char		*path;
+		u32		api_prot;
+		u32		api_flags;
 
 		pfd = posix_get_fd(proc, (int)fd_u);
 		if (!pfd || !pfd->vnode) {
@@ -252,15 +380,10 @@ posix_mmap(u64 addr_u, u64 length, u64 prot, u64 flags, u64 fd_u,
 			return (-POSIX_EIO);
 		}
 
-		char	*path;
 		path = (char *)vn->data;
 		if (!path) {
 			return (-POSIX_EINVAL);
 		}
-
-		u32		api_prot;
-		u32		api_flags;
-		vm_object_t	*obj;
 
 		api_prot = 0;
 		if (prot & POSIX_PROT_READ) api_prot |= API_MAP_READ;
@@ -276,6 +399,10 @@ posix_mmap(u64 addr_u, u64 length, u64 prot, u64 flags, u64 fd_u,
 			return (-POSIX_ENOMEM);
 		}
 
+		if (flags & POSIX_MAP_FIXED) {
+			posix_unmap_pages(proc, addr, addr + aligned);
+			vm_map_remove_range(proc, addr, addr + aligned);
+		}
 		if (vm_map_insert(proc, addr, addr + aligned, api_prot,
 		    api_flags, 0, obj, offset) != 0) {
 			vm_object_unref(obj);
@@ -317,27 +444,130 @@ posix_munmap(u64 addr_u, u64 length, u64 a3, u64 a4, u64 a5, u64 a6,
 		return (-POSIX_EINVAL);
 	}
 
-	aligned = align_up(length, PAGE_SIZE);
+	if (align_length(length, &aligned) != 0) {
+		return (-POSIX_EINVAL);
+	}
 
-	{
-		u64	off;
-		for (off = 0; off < aligned && vaddr + off < vma->end;
-		    off += PAGE_SIZE) {
-			u64	va;
-			va = vaddr + off;
-			if (vma->object == NULL) {
-				u64	phys;
-				phys = pmap_extract(va);
-				if (phys) {
-					vm_page_free_phys(phys);
-				}
-			}
-			pmap_remove(va);
+	posix_unmap_pages(proc, vaddr, vaddr + aligned);
+	vm_map_remove_range(proc, vaddr, vaddr + aligned);
+	return (0);
+}
+
+s64
+posix_mremap(u64 old_addr_u, u64 old_size_u, u64 new_size_u, u64 flags,
+    u64 new_addr_u, u64 a6, registers_t *regs)
+{
+	struct process	*proc;
+	vma_t		*vma;
+	u64		old_addr;
+	u64		new_addr;
+	u64		old_length;
+	u64		new_length;
+	u64		old_end;
+	u64		new_end;
+
+	(void)a6; (void)regs;
+
+	proc = process_current();
+	if (proc == NULL) {
+		return (-POSIX_EFAULT);
+	}
+
+	if ((flags & ~POSIX_MREMAP_KNOWN) != 0) {
+		return (-POSIX_EINVAL);
+	}
+	if ((flags & POSIX_MREMAP_DONTUNMAP) != 0) {
+		return (-POSIX_EINVAL);
+	}
+	if ((flags & POSIX_MREMAP_FIXED) != 0 &&
+	    (flags & POSIX_MREMAP_MAYMOVE) == 0) {
+		return (-POSIX_EINVAL);
+	}
+
+	old_addr = old_addr_u;
+	new_addr = new_addr_u;
+	if ((old_addr & (PAGE_SIZE - 1)) != 0) {
+		return (-POSIX_EINVAL);
+	}
+	if (align_length(old_size_u, &old_length) != 0 ||
+	    align_length(new_size_u, &new_length) != 0) {
+		return (-POSIX_EINVAL);
+	}
+	if (old_addr > (~(u64)0 - old_length)) {
+		return (-POSIX_EINVAL);
+	}
+	old_end = old_addr + old_length;
+	if (!is_user_address((void *)old_addr, old_length)) {
+		return (-POSIX_EFAULT);
+	}
+
+	vma = vm_map_lookup(proc, old_addr);
+	if (vma == NULL || old_end > vma->end) {
+		return (-POSIX_EFAULT);
+	}
+	if (vm_map_clip_range(proc, old_addr, old_end) != 0) {
+		return (-POSIX_EINVAL);
+	}
+	vma = vm_map_lookup(proc, old_addr);
+	if (vma == NULL || vma->start != old_addr || vma->end != old_end) {
+		return (-POSIX_EFAULT);
+	}
+
+	if (new_length == old_length &&
+	    (flags & POSIX_MREMAP_FIXED) == 0) {
+		return ((s64)old_addr);
+	}
+
+	if ((flags & POSIX_MREMAP_FIXED) == 0 && new_length < old_length) {
+		posix_unmap_pages(proc, old_addr + new_length, old_end);
+		vm_map_remove_range(proc, old_addr + new_length, old_end);
+		vma->end = old_addr + new_length;
+		if (posix_resize_mremap_object(vma, new_length) != 0) {
+			return (-POSIX_ENOMEM);
+		}
+		return ((s64)old_addr);
+	}
+
+	new_end = old_addr + new_length;
+	if ((flags & POSIX_MREMAP_FIXED) == 0 && new_end >= old_addr &&
+	    is_user_address((void *)old_addr, new_length) &&
+	    vm_map_range_free(proc, old_end, new_end, vma)) {
+		if (posix_resize_mremap_object(vma, new_length) != 0) {
+			return (-POSIX_ENOMEM);
+		}
+		vma->end = new_end;
+		return ((s64)old_addr);
+	}
+
+	if ((flags & POSIX_MREMAP_MAYMOVE) == 0) {
+		return (-POSIX_ENOMEM);
+	}
+
+	if ((flags & POSIX_MREMAP_FIXED) != 0) {
+		if (new_addr == 0 || (new_addr & (PAGE_SIZE - 1)) != 0) {
+			return (-POSIX_EINVAL);
+		}
+		if (new_addr > (~(u64)0 - new_length)) {
+			return (-POSIX_EINVAL);
+		}
+		new_end = new_addr + new_length;
+		if (!is_user_address((void *)new_addr, new_length)) {
+			return (-POSIX_EFAULT);
+		}
+		if (new_addr < old_end && new_end > old_addr) {
+			return (-POSIX_EINVAL);
+		}
+		posix_unmap_pages(proc, new_addr, new_end);
+		vm_map_remove_range(proc, new_addr, new_end);
+	} else {
+		new_addr = vm_map_find_free(proc, new_length);
+		if (new_addr == 0) {
+			return (-POSIX_ENOMEM);
 		}
 	}
 
-	vm_map_remove(proc, vaddr);
-	return (0);
+	return (posix_mremap_move(proc, vma, old_addr, old_length,
+	    new_addr, new_length));
 }
 
 s64
@@ -364,7 +594,9 @@ posix_mprotect(u64 addr_u, u64 length, u64 prot, u64 a4, u64 a5,
 		return (-POSIX_EINVAL);
 	}
 
-	aligned = align_up(length, PAGE_SIZE);
+	if (align_length(length, &aligned) != 0) {
+		return (-POSIX_EINVAL);
+	}
 	pflags = page_flags_for_prot(prot);
 
 	any_mapped = 0;

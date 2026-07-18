@@ -37,11 +37,11 @@
 #define	SYS_ioctl		16
 #define	SYS_getpid		39
 #define	SYS_getppid		110
-#define	SYS_setpgid		124
-#define	SYS_getpgrp		125
-#define	SYS_getsid		126
-#define	SYS_setsid		127
-#define	SYS_getpgid		128
+#define	SYS_setpgid		109
+#define	SYS_getpgrp		111
+#define	SYS_setsid		112
+#define	SYS_getpgid		121
+#define	SYS_getsid		124
 #define	SYS_exit		60
 
 /* open(2) flags. */

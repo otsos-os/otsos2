@@ -61,6 +61,8 @@ s64	posix_lseek(u64 fd, u64 offset, u64 whence, u64 a4, u64 a5,
 	    u64 a6, registers_t *regs);
 s64	posix_mmap(u64 addr, u64 length, u64 prot, u64 flags, u64 fd,
 	    u64 offset, registers_t *regs);
+s64	posix_mremap(u64 old_addr, u64 old_size, u64 new_size, u64 flags,
+	    u64 new_addr, u64 a6, registers_t *regs);
 s64	posix_mprotect(u64 addr, u64 length, u64 prot, u64 a4, u64 a5,
 	    u64 a6, registers_t *regs);
 s64	posix_munmap(u64 addr, u64 length, u64 a3, u64 a4, u64 a5,
@@ -265,6 +267,9 @@ posix_syscall_handler(registers_t *regs)
 		break;
 	case SYS_mmap:
 		ret = posix_mmap(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_mremap:
+		ret = posix_mremap(a1, a2, a3, a4, a5, a6, regs);
 		break;
 	case SYS_mprotect:
 		ret = posix_mprotect(a1, a2, a3, a4, a5, a6, regs);
