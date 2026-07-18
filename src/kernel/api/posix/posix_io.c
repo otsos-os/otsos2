@@ -49,90 +49,6 @@ posix_poll_notify(void)
 	proc_wakeup(&posix_poll_wait_channel);
 }
 
-static int
-posix_debug_python(void)
-{
-	struct process	*proc;
-
-	proc = process_current();
-	if (!proc) {
-		return (0);
-	}
-	return (strcmp(proc->name, "python") == 0);
-}
-
-static const char *
-posix_debug_ioctl_name(u64 cmd)
-{
-	switch (cmd) {
-	case POSIX_TIOCGWINSZ:
-		return ("TIOCGWINSZ");
-	case POSIX_TIOCSWINSZ:
-		return ("TIOCSWINSZ");
-	case POSIX_TCGETS:
-		return ("TCGETS");
-	case POSIX_TCSETS:
-		return ("TCSETS");
-	case POSIX_TCSETSW:
-		return ("TCSETSW");
-	case POSIX_TCSETSF:
-		return ("TCSETSF");
-	case POSIX_TCFLSH:
-		return ("TCFLSH");
-	case POSIX_FIONREAD:
-		return ("FIONREAD");
-	case POSIX_TIOCGPGRP:
-		return ("TIOCGPGRP");
-	case POSIX_TIOCSPGRP:
-		return ("TIOCSPGRP");
-	case POSIX_TIOCGSID:
-		return ("TIOCGSID");
-	case POSIX_TIOCSCTTY:
-		return ("TIOCSCTTY");
-	case POSIX_TIOCGPTN:
-		return ("TIOCGPTN");
-	default:
-		return ("unknown");
-	}
-}
-
-static const char *
-posix_debug_vnode_name(vnode_t *vn)
-{
-	if (!vn) {
-		return ("null");
-	}
-	if (!vn->name) {
-		return ("noname");
-	}
-	return (vn->name);
-}
-
-static void
-posix_debug_fd_line(const char *op, int fd, posix_fd_t *pfd, s64 ret,
-    u64 extra)
-{
-	vnode_t	*vn;
-
-	if (!posix_debug_python()) {
-		return;
-	}
-	vn = pfd ? pfd->vnode : NULL;
-	printk("[PYDBG] %s fd=%d vnode=%s type=%d flags=%d extra=%u -> %d\n",
-	    op, fd, posix_debug_vnode_name(vn), vn ? vn->type : -1,
-	    pfd ? pfd->flags : 0, (u32)extra, (int)ret);
-}
-
-static void
-posix_debug_path_line(const char *op, const char *path, s64 ret)
-{
-	if (!posix_debug_python()) {
-		return;
-	}
-	printk("[PYPATH] %s path=%s -> %d\n", op,
-	    path ? path : "(null)", (int)ret);
-}
-
 static char *
 copy_user_string(const char *user, int max_len)
 {
@@ -482,7 +398,6 @@ posix_open(u64 path_u, u64 flags, u64 mode, u64 a4, u64 a5, u64 a6,
 	}
 
 	ret = posix_do_open(path, (int)flags, mode);
-	posix_debug_path_line("open", path, ret);
 	kmem_free(path);
 
 	return (ret);
@@ -537,13 +452,11 @@ posix_openat(u64 dirfd_u, u64 path_u, u64 flags, u64 mode, u64 a5,
 		}
 
 		ret = posix_do_open(resolved, (int)flags, mode);
-		posix_debug_path_line("openat", resolved, ret);
 		kmem_free(resolved);
 		return (ret);
 	}
 
 	ret = posix_do_open(path, (int)flags, mode);
-	posix_debug_path_line("openat", path, ret);
 	kmem_free(path);
 	return (ret);
 }
@@ -619,8 +532,6 @@ posix_read(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 
 	pfd = posix_get_fd(proc, fd);
 	if (!pfd) {
-		posix_debug_fd_line("read.badfd", fd, NULL, -POSIX_EBADF,
-		    count);
 		return (-POSIX_EBADF);
 	}
 
@@ -644,24 +555,18 @@ posix_read(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 		n = terminal_read_vnode(pfd->vnode, buf, (u32)count,
 		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0, 0);
 		if (n < 0) {
-			posix_debug_fd_line("read.tty", fd, pfd, (s64)n,
-			    count);
 			return ((s64)n);
 		}
 	} else if (pfd->vnode->ioctl_fn == pty_master_ioctl) {
 		n = pty_master_read(pfd->vnode, buf, (u32)count,
 		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
 		if (n < 0) {
-			posix_debug_fd_line("read.ptyM", fd, pfd, (s64)n,
-			    count);
 			return ((s64)n);
 		}
 	} else if (pfd->vnode->ioctl_fn == pty_slave_ioctl) {
 		n = pty_slave_read(pfd->vnode, buf, (u32)count,
 		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
 		if (n < 0) {
-			posix_debug_fd_line("read.ptyS", fd, pfd, (s64)n,
-			    count);
 			return ((s64)n);
 		}
 	} else if (pfd->vnode->type == VPIPE) {
@@ -676,32 +581,23 @@ posix_read(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 		n = pipe_read(pipe, buf, (u32)count);
 		if (n < 0) {
 			ret = posix_vfs_ret(n);
-			posix_debug_fd_line("read.pipe", fd, pfd, ret,
-			    count);
 			return (ret);
 		}
 	} else if (pfd->vnode->type == VSOCK) {
 		n = posix_socket_read(pfd->vnode, buf, (u32)count,
 		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
 		if (n < 0) {
-			posix_debug_fd_line("read.sock", fd, pfd, (s64)n,
-			    count);
 			return ((s64)n);
 		}
 	} else {
 		n = vnode_read(pfd->vnode, buf, count, pfd->offset);
 		if (n < 0) {
 			ret = posix_vfs_ret(n);
-			posix_debug_fd_line("read.vfs", fd, pfd, ret,
-			    count);
 			return (ret);
 		}
 	}
 
 	pfd->offset += (u64)n;
-	if (fd <= 2) {
-		posix_debug_fd_line("read", fd, pfd, (s64)n, count);
-	}
 	return ((s64)n);
 }
 
@@ -727,8 +623,6 @@ posix_write(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 
 	pfd = posix_get_fd(proc, fd);
 	if (!pfd) {
-		posix_debug_fd_line("write.badfd", fd, NULL, -POSIX_EBADF,
-		    count);
 		return (-POSIX_EBADF);
 	}
 
@@ -755,24 +649,18 @@ posix_write(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 	if (pfd->vnode->ioctl_fn == terminal_ioctl_vnode) {
 		n = terminal_write_vnode(pfd->vnode, buf, (u32)count);
 		if (n < 0) {
-			posix_debug_fd_line("write.tty", fd, pfd,
-			    -POSIX_EIO, count);
 			return (-POSIX_EIO);
 		}
 	} else if (pfd->vnode->ioctl_fn == pty_master_ioctl) {
 		n = pty_master_write(pfd->vnode, buf, (u32)count,
 		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
 		if (n < 0) {
-			posix_debug_fd_line("write.ptyM", fd, pfd, (s64)n,
-			    count);
 			return ((s64)n);
 		}
 	} else if (pfd->vnode->ioctl_fn == pty_slave_ioctl) {
 		n = pty_slave_write(pfd->vnode, buf, (u32)count,
 		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
 		if (n < 0) {
-			posix_debug_fd_line("write.ptyS", fd, pfd, (s64)n,
-			    count);
 			return ((s64)n);
 		}
 	} else if (pfd->vnode->type == VPIPE) {
@@ -790,32 +678,23 @@ posix_write(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 		n = pipe_write(pipe, buf, (u32)count);
 		if (n < 0) {
 			ret = posix_vfs_ret(n);
-			posix_debug_fd_line("write.pipe", fd, pfd, ret,
-			    count);
 			return (ret);
 		}
 	} else if (pfd->vnode->type == VSOCK) {
 		n = posix_socket_write(pfd->vnode, buf, (u32)count,
 		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
 		if (n < 0) {
-			posix_debug_fd_line("write.sock", fd, pfd, (s64)n,
-			    count);
 			return ((s64)n);
 		}
 	} else {
 		n = vnode_write(pfd->vnode, buf, count, pfd->offset);
 		if (n < 0) {
 			ret = posix_vfs_ret(n);
-			posix_debug_fd_line("write.vfs", fd, pfd, ret,
-			    count);
 			return (ret);
 		}
 	}
 
 	pfd->offset += (u64)n;
-	if (fd <= 2) {
-		posix_debug_fd_line("write", fd, pfd, (s64)n, count);
-	}
 	return ((s64)n);
 }
 
@@ -1175,7 +1054,6 @@ posix_poll(u64 fds_u, u64 nfds_u, u64 timeout_u, u64 a4, u64 a5,
 	int			 timeout;
 	int			 nfds;
 	int			 ready;
-	int			 debug_sleep;
 	int			 i;
 
 	(void)a4; (void)a5; (void)a6; (void)regs;
@@ -1210,11 +1088,6 @@ posix_poll(u64 fds_u, u64 nfds_u, u64 timeout_u, u64 a4, u64 a5,
 	timeout_ticks = posix_poll_timeout_ticks(timeout);
 	start_ticks = timer_get_ticks();
 	td = thread_current();
-	debug_sleep = 0;
-	if (posix_debug_python()) {
-		printk("[PYDBG] poll enter nfds=%d timeout=%d\n",
-		    nfds, timeout);
-	}
 
 	while (1) {
 		ready = 0;
@@ -1226,15 +1099,6 @@ posix_poll(u64 fds_u, u64 nfds_u, u64 timeout_u, u64 a4, u64 a5,
 		}
 
 		if (ready > 0) {
-			if (posix_debug_python()) {
-				printk("[PYDBG] poll ready=%d\n", ready);
-				for (i = 0; i < nfds && i < 4; i++) {
-					printk("[PYDBG]   pollfd[%d] fd=%d "
-					    "events=%d revents=%d\n", i,
-					    fds[i].fd, fds[i].events,
-					    fds[i].revents);
-				}
-			}
 			if (td) {
 				td->sleep_target_ticks = 0;
 			}
@@ -1242,16 +1106,10 @@ posix_poll(u64 fds_u, u64 nfds_u, u64 timeout_u, u64 a4, u64 a5,
 		}
 
 		if (timeout == 0) {
-			if (posix_debug_python()) {
-				printk("[PYDBG] poll timeout=0 -> 0\n");
-			}
 			return (0);
 		}
 
 		if (proc->sigpending & ~proc->sigmask) {
-			if (posix_debug_python()) {
-				printk("[PYDBG] poll interrupted\n");
-			}
 			if (td) {
 				td->sleep_target_ticks = 0;
 			}
@@ -1262,10 +1120,6 @@ posix_poll(u64 fds_u, u64 nfds_u, u64 timeout_u, u64 a4, u64 a5,
 			now_ticks = timer_get_ticks();
 			elapsed = now_ticks - start_ticks;
 			if (elapsed >= timeout_ticks) {
-				if (posix_debug_python()) {
-					printk("[PYDBG] poll timeout elapsed "
-					    "ticks=%u\n", (u32)elapsed);
-				}
 				if (td) {
 					td->sleep_target_ticks = 0;
 				}
@@ -1277,11 +1131,6 @@ posix_poll(u64 fds_u, u64 nfds_u, u64 timeout_u, u64 a4, u64 a5,
 			}
 		}
 
-		if (!debug_sleep && posix_debug_python()) {
-			printk("[PYDBG] poll sleep nfds=%d timeout=%d\n",
-			    nfds, timeout);
-			debug_sleep = 1;
-		}
 		proc_sleep(&posix_poll_wait_channel);
 		if (td) {
 			td->sleep_target_ticks = 0;
@@ -1906,12 +1755,10 @@ posix_stat(u64 path_u, u64 buf_u, u64 a3, u64 a4, u64 a5, u64 a6,
 
 	ret = vfs_resolve(path, &vn);
 	if (ret != 0) {
-		posix_debug_path_line("stat", path, posix_vfs_ret(ret));
 		kmem_free(path);
 		return (posix_vfs_ret(ret));
 	}
 	if (vn == NULL) {
-		posix_debug_path_line("stat", path, -POSIX_ENOENT);
 		kmem_free(path);
 		return (-POSIX_ENOENT);
 	}
@@ -1919,13 +1766,11 @@ posix_stat(u64 path_u, u64 buf_u, u64 a3, u64 a4, u64 a5, u64 a6,
 	st = (posix_stat_t *)buf_u;
 	ret = vnode_stat(vn, st);
 	if (ret != 0) {
-		posix_debug_path_line("stat", path, posix_vfs_ret(ret));
 		vnode_release(vn);
 		kmem_free(path);
 		return (posix_vfs_ret(ret));
 	}
 
-	posix_debug_path_line("stat", path, 0);
 	vnode_release(vn);
 	kmem_free(path);
 	return (0);
@@ -1988,12 +1833,10 @@ posix_lstat(u64 path_u, u64 buf_u, u64 a3, u64 a4, u64 a5, u64 a6,
 
 	ret = vfs_resolve_nofollow(path, &vn);
 	if (ret != 0) {
-		posix_debug_path_line("lstat", path, posix_vfs_ret(ret));
 		kmem_free(path);
 		return (posix_vfs_ret(ret));
 	}
 	if (vn == NULL) {
-		posix_debug_path_line("lstat", path, -POSIX_ENOENT);
 		kmem_free(path);
 		return (-POSIX_ENOENT);
 	}
@@ -2001,13 +1844,11 @@ posix_lstat(u64 path_u, u64 buf_u, u64 a3, u64 a4, u64 a5, u64 a6,
 	st = (posix_stat_t *)buf_u;
 	ret = vnode_stat(vn, st);
 	if (ret != 0) {
-		posix_debug_path_line("lstat", path, posix_vfs_ret(ret));
 		vnode_release(vn);
 		kmem_free(path);
 		return (posix_vfs_ret(ret));
 	}
 
-	posix_debug_path_line("lstat", path, 0);
 	vnode_release(vn);
 	kmem_free(path);
 	return (0);
@@ -2335,22 +2176,12 @@ posix_ioctl(u64 fd_u, u64 cmd_u, u64 arg_u, u64 a4, u64 a5, u64 a6,
 	fd = (int)fd_u;
 	pfd = posix_get_fd(proc, fd);
 	if (!pfd) {
-		posix_debug_fd_line("ioctl.badfd", fd, NULL, -POSIX_EBADF,
-		    cmd_u);
 		return (-POSIX_EBADF);
 	}
 
 	if (pfd->vnode && pfd->vnode->type == VCHR &&
 	    strcmp(pfd->vnode->name, "fb0") == 0) {
-		ret = vnode_ioctl(pfd->vnode, cmd_u, (void *)arg_u);
-		if (posix_debug_python()) {
-			printk("[PYDBG] ioctl fd=%d cmd=%s raw=%x vnode=%s "
-			    "type=%d arg=%x -> %d\n", fd,
-			    posix_debug_ioctl_name(cmd_u), (u32)cmd_u,
-			    posix_debug_vnode_name(pfd->vnode),
-			    pfd->vnode->type, (u32)arg_u, (int)ret);
-		}
-		return (ret);
+		return (vnode_ioctl(pfd->vnode, cmd_u, (void *)arg_u));
 	}
 
 	switch ((int)cmd_u) {
@@ -2374,14 +2205,6 @@ posix_ioctl(u64 fd_u, u64 cmd_u, u64 arg_u, u64 a4, u64 a5, u64 a6,
 		break;
 	}
 
-	if (posix_debug_python()) {
-		printk("[PYDBG] ioctl fd=%d cmd=%s raw=%x vnode=%s "
-		    "type=%d arg=%x -> %d\n", fd,
-		    posix_debug_ioctl_name(cmd_u), (u32)cmd_u,
-		    posix_debug_vnode_name(pfd->vnode),
-		    pfd->vnode ? pfd->vnode->type : -1,
-		    (u32)arg_u, (int)ret);
-	}
 	return (ret);
 }
 
@@ -2403,26 +2226,22 @@ posix_access(u64 path_u, u64 mode, u64 a3, u64 a4, u64 a5, u64 a6,
   }
 
   if (restrict_kusr_check(path)) {
-    posix_debug_path_line("access", path, -POSIX_EACCES);
     kmem_free(path);
     return (-POSIX_EACCES);
   }
 
   ret = vfs_resolve(path, &vn);
   if (ret != 0) {
-    posix_debug_path_line("access", path, posix_vfs_ret(ret));
     kmem_free(path);
     return (posix_vfs_ret(ret));
   }
   if (vn == NULL) {
-    posix_debug_path_line("access", path, -POSIX_ENOENT);
     kmem_free(path);
     return (-POSIX_ENOENT);
   }
 
   want = (int)mode & 7;
   perm = posix_check_perm(vn, want);
-  posix_debug_path_line("access", path, (s64)perm);
   vnode_release(vn);
   kmem_free(path);
   return ((s64)perm);
@@ -2512,8 +2331,6 @@ posix_getdents64(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5,
 	}
 
 	pfd->offset = (u64)idx;
-	posix_debug_fd_line("getdents64", (int)fd_u, pfd, (s64)pos,
-	    pfd->offset);
 	return ((s64)pos);
 }
 

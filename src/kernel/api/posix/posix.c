@@ -37,9 +37,6 @@
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
 
-static u32	posix_debug_last_pid;
-static int	posix_debug_syscalls_left;
-
 #define POSIX_REG_R8		0
 #define POSIX_REG_R9		1
 #define POSIX_REG_R10		2
@@ -62,107 +59,6 @@ static int	posix_debug_syscalls_left;
 #define POSIX_REG_ERR		19
 #define POSIX_REG_TRAPNO	20
 #define POSIX_REG_OLDMASK	21
-
-static int
-posix_debug_python_proc(struct process *proc)
-{
-	if (!proc) {
-		return (0);
-	}
-	return (strcmp(proc->name, "python") == 0);
-}
-
-static const char *
-posix_debug_syscall_name(u64 num)
-{
-	switch (num) {
-	case SYS_read:
-		return ("read");
-	case SYS_write:
-		return ("write");
-	case SYS_open:
-		return ("open");
-	case SYS_openat:
-		return ("openat");
-	case SYS_close:
-		return ("close");
-	case SYS_stat:
-		return ("stat");
-	case SYS_fstat:
-		return ("fstat");
-	case SYS_lstat:
-		return ("lstat");
-	case SYS_poll:
-		return ("poll");
-	case SYS_select:
-		return ("select");
-	case SYS_lseek:
-		return ("lseek");
-	case SYS_mmap:
-		return ("mmap");
-	case SYS_mremap:
-		return ("mremap");
-	case SYS_mprotect:
-		return ("mprotect");
-	case SYS_munmap:
-		return ("munmap");
-	case SYS_brk:
-		return ("brk");
-	case SYS_rt_sigaction:
-		return ("rt_sigaction");
-	case SYS_rt_sigprocmask:
-		return ("rt_sigprocmask");
-	case SYS_ioctl:
-		return ("ioctl");
-	case SYS_access:
-		return ("access");
-	case SYS_fcntl:
-		return ("fcntl");
-	case SYS_getcwd:
-		return ("getcwd");
-	case SYS_getuid:
-		return ("getuid");
-	case SYS_geteuid:
-		return ("geteuid");
-	case SYS_getgid:
-		return ("getgid");
-	case SYS_getegid:
-		return ("getegid");
-	case SYS_getdents64:
-		return ("getdents64");
-	case SYS_futex:
-		return ("futex");
-	case SYS_getrandom:
-		return ("getrandom");
-	case SYS_clock_gettime:
-		return ("clock_gettime");
-	case SYS_pselect6:
-		return ("pselect6");
-	default:
-		return ("?");
-	}
-}
-
-static void
-posix_debug_syscall_trace(struct process *proc, u64 num, s64 ret,
-    u64 a1, u64 a2, u64 a3)
-{
-	if (!posix_debug_python_proc(proc)) {
-		return;
-	}
-	if (posix_debug_last_pid != proc->pid) {
-		posix_debug_last_pid = proc->pid;
-		posix_debug_syscalls_left = 512;
-		printk("[PYSYS] trace start pid=%d\n", (int)proc->pid);
-	}
-	if (posix_debug_syscalls_left <= 0) {
-		return;
-	}
-	posix_debug_syscalls_left--;
-	printk("[PYSYS] %s(%d) ret=%d a1=%x a2=%x a3=%x left=%d\n",
-	    posix_debug_syscall_name(num), (int)num, (int)ret,
-	    (u32)a1, (u32)a2, (u32)a3, posix_debug_syscalls_left);
-}
 
 s64	posix_read(u64 fd, u64 buf, u64 count, u64 a4, u64 a5, u64 a6,
     registers_t *regs);
@@ -671,7 +567,6 @@ posix_syscall_handler(registers_t *regs)
 		break;
 	}
 
-	posix_debug_syscall_trace(process_current(), num, ret, a1, a2, a3);
 	regs->rax = (u64)ret;
 }
 
@@ -1010,13 +905,6 @@ posix_signal_deliver(struct process *proc, registers_t *regs)
 				act->flags = 0;
 				act->restorer = 0;
 				act->mask = 0;
-			}
-
-			if (posix_debug_python_proc(proc)) {
-				printk("[PYDBG] signal deliver sig=%d "
-				    "handler=%p restorer=%p rsp=%p\n", sig,
-				    (void *)handler, (void *)restorer,
-				    (void *)ret_sp);
 			}
 
 			regs->rip = handler;

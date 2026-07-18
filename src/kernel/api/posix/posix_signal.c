@@ -68,15 +68,6 @@ posix_signal_mask_fixup(struct process *proc)
 	proc->sigmask &= ~(1ULL << (SIGSTOP - 1));
 }
 
-static int
-posix_signal_debug_python(struct process *proc)
-{
-	if (!proc) {
-		return (0);
-	}
-	return (strcmp(proc->name, "python") == 0);
-}
-
 static void
 posix_sigreturn_badframe(struct process *proc)
 {
@@ -253,11 +244,6 @@ posix_rt_sigreturn(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 
 	proc->sigmask = frame.uc.sigmask[0];
 	posix_signal_mask_fixup(proc);
-
-	if (posix_signal_debug_python(proc)) {
-		printk("[PYDBG] sigreturn rip=%p rsp=%p rax=%p\n",
-		    (void *)regs->rip, (void *)regs->rsp, (void *)regs->rax);
-	}
 
 	return ((s64)regs->rax);
 }
