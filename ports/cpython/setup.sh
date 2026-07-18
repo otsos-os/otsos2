@@ -5,9 +5,15 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 echo "  SETUP    ports/cpython"
 MUSL_DIR="../../../libc/musl"
 SRC_DIR="$SCRIPT_DIR/cpython"
+SUBMODULE_PATH="ports/cpython/cpython"
+SUBMODULE_URL="https://github.com/python/cpython.git"
 if [ ! -f "$SRC_DIR/configure" ]; then
 	cd "$REPO_ROOT"
-	git submodule update --init --depth 1 ports/cpython/cpython
+	if git ls-files --error-unmatch "$SUBMODULE_PATH" >/dev/null 2>&1; then
+		git submodule update --init --depth 1 "$SUBMODULE_PATH"
+	else
+		git submodule add --depth 1 "$SUBMODULE_URL" "$SUBMODULE_PATH"
+	fi
 fi
 if grep -q 'otsos: all' "$SRC_DIR/Makefile.pre.in" 2>/dev/null; then
 	echo "  PATCH    already"
