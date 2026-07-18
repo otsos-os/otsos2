@@ -515,6 +515,9 @@ posix_read(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 	if (!is_user_address(buf, count)) {
 		return (-POSIX_EFAULT);
 	}
+	if (!user_range_fault_in(buf, count, 1)) {
+		return (-POSIX_EFAULT);
+	}
 
 	if (pfd->vnode == NULL) {
 		return (-POSIX_EBADF);
@@ -586,6 +589,9 @@ posix_write(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 	if (!is_user_address(buf, count)) {
 		return (-POSIX_EFAULT);
 	}
+	if (!user_range_fault_in(buf, count, 0)) {
+		return (-POSIX_EFAULT);
+	}
 
 	if (pfd->vnode == NULL) {
 		return (-POSIX_EBADF);
@@ -651,6 +657,10 @@ posix_readv(u64 fd_u, u64 iov_u, u64 iovcnt_u, u64 a4, u64 a5,
 	if (!is_user_address(iov, iovcnt_u * sizeof(struct posix_iovec))) {
 		return (-POSIX_EFAULT);
 	}
+	if (!user_range_fault_in(iov,
+	    iovcnt_u * sizeof(struct posix_iovec), 0)) {
+		return (-POSIX_EFAULT);
+	}
 
 	total = 0;
 	for (i = 0; i < iovcnt_u; i++) {
@@ -693,6 +703,10 @@ posix_writev(u64 fd_u, u64 iov_u, u64 iovcnt_u, u64 a4, u64 a5,
 
 	iov = (struct posix_iovec *)iov_u;
 	if (!is_user_address(iov, iovcnt_u * sizeof(struct posix_iovec))) {
+		return (-POSIX_EFAULT);
+	}
+	if (!user_range_fault_in(iov,
+	    iovcnt_u * sizeof(struct posix_iovec), 0)) {
 		return (-POSIX_EFAULT);
 	}
 
@@ -807,6 +821,9 @@ posix_pread64(u64 fd_u, u64 buf_u, u64 count, u64 pos_u, u64 a5,
 	if (!is_user_address(buf, count)) {
 		return (-POSIX_EFAULT);
 	}
+	if (!user_range_fault_in(buf, count, 1)) {
+		return (-POSIX_EFAULT);
+	}
 
 	if (pfd->vnode == NULL || pfd->vnode->type == VPIPE ||
 	    (pfd->vnode->type == VCHR &&
@@ -851,6 +868,9 @@ posix_pwrite64(u64 fd_u, u64 buf_u, u64 count, u64 pos_u, u64 a5,
 
 	buf = (const void *)buf_u;
 	if (!is_user_address(buf, count)) {
+		return (-POSIX_EFAULT);
+	}
+	if (!user_range_fault_in(buf, count, 0)) {
 		return (-POSIX_EFAULT);
 	}
 

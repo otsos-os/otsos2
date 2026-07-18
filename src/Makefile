@@ -43,7 +43,9 @@ POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
 KBDTEST_BIN = $(PORTS_DIR)/kbdtest
 MUSL_TEST_BIN = $(PORTS_DIR)/musl_test
 LUA_BIN = $(PORTS_DIR)/lua/lua/lua
+CPYTHON_DIR = $(PORTS_DIR)/cpython/cpython
 CPYTHON_BIN = $(PORTS_DIR)/cpython/cpython/python
+CPYTHON_STDLIB_ZIP = ../bin/python314.zip
 MUSL_LDSO = $(MUSL_DIR)/lib/libc.so
 LDSO_BIN = $(PORTS_DIR)/ld-musl-x86_64.so.1
 NATIVE_LIBC = $(NATIVE_DIR)/lib/libc.a
@@ -116,7 +118,7 @@ ISO_LDSO_DEP =
 LIBC_DEPS =
 endif
 ifeq ($(CPYTHON_ENABLED),true)
-ISO_CPYTHON_DEP = $(CPYTHON_BIN)
+ISO_CPYTHON_DEP = $(CPYTHON_BIN) $(CPYTHON_STDLIB_ZIP)
 else
 ISO_CPYTHON_DEP =
 endif
@@ -333,7 +335,7 @@ check_build_tools:
 	@set -e; \
 	for tool in "$(CC)" "$(LD)" "$(AS)" "$(ZIG)" "$(PYTHON)" \
 		"$(BIOS_OBJCOPY)" "$(XORRISO)" llvm-size perl tar stat \
-		truncate dd mformat mmd mcopy; do \
+		truncate dd mformat mmd mcopy zip; do \
 		if ! command -v "$$tool" >/dev/null 2>&1; then \
 			echo "  MISSING $$tool"; \
 			echo "  install missing tools to build"; \
@@ -475,6 +477,23 @@ $(CPYTHON_BIN): $(LIBC_DEPS)
 	@$(MAKE) -C $(PORTS_DIR) cpython LIBC_ENABLED=$(LIBC_ENABLED) CPYTHON_ENABLED=$(CPYTHON_ENABLED)
 endif
 
+$(CPYTHON_STDLIB_ZIP): $(CPYTHON_BIN)
+	@echo "  ZIP     python stdlib"
+	@mkdir -p $(dir $@)
+	@set -e; \
+	zip_path=$$(cd "$$(dirname "$@")" && pwd)/$$(basename "$@"); \
+	rm -f "$$zip_path"; \
+	cd $(CPYTHON_DIR)/Lib; \
+	test -f encodings/__init__.py; \
+	zip -0 -q -r "$$zip_path" * \
+		-x '*/__pycache__/*' \
+		-x 'test/*' 'test/**' \
+		-x 'idlelib/*' 'idlelib/**' \
+		-x 'tkinter/*' 'tkinter/**' \
+		-x 'turtledemo/*' 'turtledemo/**' \
+		-x 'ensurepip/*' 'ensurepip/**' \
+		-x 'venv/*' 'venv/**'
+
 .PHONY: $(DLD_BIN)
 $(DLD_BIN):
 	@echo "  MAKE    libc/LibExec/dld"
@@ -570,6 +589,7 @@ $(BIOS_BOOTPACK): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN)
 			musl_test) src=$(MUSL_TEST_BIN);; \
 			lua) src=$(LUA_BIN);; \
 			python) src=$(CPYTHON_BIN);; \
+			python-stdlib) src=$(CPYTHON_STDLIB_ZIP);; \
 			ld-musl) src=$(LDSO_BIN);; \
 			drld) src=$(DLD_BIN);; \
 			native-so) src=$(NATIVE_SO);; \
@@ -626,7 +646,10 @@ $(UEFI_BOOTX64): boot/bootloader/uefi/main.zig $(UEFI_TRAMPOLINE_OBJ) $(UEFI_LIB
 $(UEFI_ESP_IMAGE): $(UEFI_BOOTX64) $(BIOS_BOOTPACK) | $(UEFI_BUILD_DIR)
 	@echo "  ESP     $(UEFI_ESP_IMAGE)"
 	@rm -f $@
-	@truncate -s 16M $@
+	@bytes=$$(( $$(stat -c%s $(UEFI_BOOTX64)) + $$(stat -c%s $(BIOS_BOOTPACK)) )); \
+	image_size=$$(( ((bytes + 4 * 1024 * 1024 + 1048575) / 1048576) * 1048576 )); \
+	if [ $$image_size -lt 16777216 ]; then image_size=16777216; fi; \
+	truncate -s $$image_size $@
 	@mformat -i $@ -v OTSOSUEFI ::
 	@mmd -i $@ ::/EFI ::/EFI/BOOT ::/boot
 	@mcopy -i $@ $(UEFI_BOOTX64) ::/EFI/BOOT/BOOTX64.EFI
@@ -1303,7 +1326,7 @@ OVMF ?= /usr/share/ovmf/OVMF.fd
 
 run: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (UEFI)"
-	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset -smp 2
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset -smp 2 -m 512
 
 run_nodis: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (UEFI, terminal)"

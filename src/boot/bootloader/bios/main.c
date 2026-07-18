@@ -47,7 +47,7 @@ $define %func bios_main as start with args void
 
 /* !SPACE!
 
-$space %internal align_up, add_memory_map, load_module, module_cb, panic
+$space %internal add_memory_map, load_module, module_cb, panic
 $space %export bios_main
 
 */
@@ -59,21 +59,13 @@ $space %export bios_main
 #include <boot/bootloader/lib/string.h>
 
 #define BOOTPACK_LOAD_ADDR	0x02000000U
-#define MODULE_LOAD_ADDR	0x01000000U
 #define MB2_INFO_ADDR		0x00800000U
 #define MB2_INFO_CAP		0x00010000U
 
 typedef struct {
 	mb2_builder_t	*mb;
-	u32		next;
 	int		failed;
 } module_ctx_t;
-
-static u32
-align_up(u32 value, u32 align)
-{
-	return ((value + align - 1U) & ~(align - 1U));
-}
 
 static void
 panic(const char *msg)
@@ -126,14 +118,12 @@ load_module(const bootpack_file_t *file, const char *name, module_ctx_t *ctx)
 	if (file->size == 0) {
 		return (0);
 	}
-	start = align_up(ctx->next, 4096);
+	start = (u32)file->data;
 	end = start + file->size;
-	bl_memcpy((void *)start, file->data, file->size);
 	if (mb2_add_module(ctx->mb, start, end, name) != 0) {
 		ctx->failed = 1;
 		return (-1);
 	}
-	ctx->next = end;
 	bios_console_puts("[BIOS] module ");
 	bios_console_puts(name);
 	bios_console_puts(" ");
@@ -225,7 +215,6 @@ bios_main(void)
 	}
 
 	mod_ctx.mb = &mb;
-	mod_ctx.next = MODULE_LOAD_ADDR;
 	mod_ctx.failed = 0;
 	if (bootpack_find(&pack, "config.toml", &config) == 0) {
 		if (load_module(&config, "config", &mod_ctx) != 0) {

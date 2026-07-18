@@ -14,8 +14,7 @@ const Page = uefi.Page;
 
 const KERNEL_LOAD_ADDR: usize = 0x00100000;
 const MB2_INFO_CAP: usize = 0x00010000;
-const MODULE_LOAD_SIZE: usize = 0x01000000;
-const BOOTPACK_MAX_SIZE: usize = 0x02000000;
+const BOOTPACK_MAX_SIZE: usize = 0x04000000;
 const MMAP_BUF_SIZE: usize = 0x00010000;
 const LOW_MAX_ADDR: usize = 0xeffff000;
 
@@ -32,7 +31,6 @@ const BootError = error{
 	KernelLoadFailed,
 	KernelNotFound,
 	ModuleLoadFailed,
-	ModulePoolFull,
 	MemoryMapTooBig,
 	NoBootServices,
 	NoDeviceHandle,
@@ -75,8 +73,6 @@ const Mb2MmapEntry = extern struct {
 
 const ModuleCtx = struct {
 	mb: *Mb2Builder,
-	next: u32,
-	limit: u32,
 	failed: bool,
 };
 
@@ -138,8 +134,6 @@ fn boot() !void {
 	const mmap_buf = try bs.allocatePool(.loader_data, MMAP_BUF_SIZE);
 	const fb = try setupFramebuffer(bs);
 	const mb2_addr = try allocLowPages(bs, MB2_INFO_CAP);
-	const module_addr = try allocLowPages(bs, MODULE_LOAD_SIZE);
-	const module_end = module_addr + MODULE_LOAD_SIZE;
 	const mmap = try getMemoryMap(bs, mmap_buf);
 	const mem = memoryInfo(mmap);
 	const rsdp = try findAcpiRsdp();
@@ -167,8 +161,6 @@ fn boot() !void {
 
 	var mod_ctx = ModuleCtx{
 		.mb = &mb,
-		.next = @intCast(module_addr),
-		.limit = @intCast(module_end),
 		.failed = false,
 	};
 	var config: BootpackFile = undefined;
@@ -448,19 +440,15 @@ fn loadModule(file: *const BootpackFile, name: [*:0]const u8, ctx: *ModuleCtx) !
 	if (file.size == 0) {
 		return;
 	}
-	const start = alignUp(ctx.next, 4096);
+	const start = @intFromPtr(file.data);
 	const end = start + file.size;
-	if (end > ctx.limit) {
-		return BootError.ModulePoolFull;
-	}
-
-	const dst = bytesAt(start, file.size);
-	const src: [*]const u8 = @ptrCast(file.data);
-	@memcpy(dst, src[0..file.size]);
-	if (mb2_add_module(ctx.mb, start, end, name) != 0) {
+	if (end > std.math.maxInt(u32)) {
 		return BootError.ModuleLoadFailed;
 	}
-	ctx.next = end;
+
+	if (mb2_add_module(ctx.mb, @intCast(start), @intCast(end), name) != 0) {
+		return BootError.ModuleLoadFailed;
+	}
 	puts("[UEFI] module ");
 	putsC(name);
 	puts(" ");
@@ -493,10 +481,6 @@ fn allocLowPages(bs: *BootServices, size: usize) !usize {
 fn bytesAt(addr: usize, size: usize) []u8 {
 	const ptr: [*]u8 = @ptrFromInt(addr);
 	return ptr[0..size];
-}
-
-fn alignUp(value: u32, boundary: u32) u32 {
-	return (value + boundary - 1) & ~(boundary - 1);
 }
 
 fn cstrEq(str: [*c]const u8, comptime lit: []const u8) bool {

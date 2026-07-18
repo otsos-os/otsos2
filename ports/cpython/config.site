@@ -25,3 +25,5 @@ ac_cv_func_dladdr1=no
 ac_cv_func___fpu_control=no
 ac_cv_func_plock=no
 ac_cv_func__getpty=no
+ac_cv_search_initscr=no
+ac_cv_search_update_panels=no
