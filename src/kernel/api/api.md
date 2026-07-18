@@ -16,6 +16,7 @@ Data handles:
 - `dataWrite(handle, buf, count)`
 - `dataSeek(handle, offset, whence)`
 - `dataPipe(handles[2])`
+- `dataDir(op, path, newpath)` creates, removes, or renames directories.
 
 Process:
 - `procCopy()`
@@ -23,6 +24,7 @@ Process:
 - `procExit(code)`
 - `procWait(status)`
 - `procKill(pid, sig)`
+- `procPerm(pid)` returns `API_PROC_PERM_USER` or `API_PROC_PERM_KUSR`.
 
 Other:
 - `memMap(args)`

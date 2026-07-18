@@ -1,0 +1,33 @@
+Yabox
+=====
+
+Yabox is a small set of native otsos2 userland utilities.
+
+It is not a busybox-style multicall binary.  Every tool is its own ELF
+program linked against libc/native and uses the native syscall API directly.
+
+Tools:
+- cat - print file data to stdout
+- ls - list directory contents
+- mkdir - create directory
+- rmdir - remove directory
+- mv - move file or directory
+- touch - create empty file
+- rm - remove file
+- cp - copy file
+- pwd - print current directory
+- whoami - print current process permission class
+
+Build:
+- make -C ports/yabox
+
+Native API used by directory tools:
+- dataDir(API_DATA_DIR_MKDIR, path, NULL)
+- dataDir(API_DATA_DIR_RMDIR, path, NULL)
+- dataDir(API_DATA_DIR_RENAME, oldpath, newpath)
+
+Native API used by permission-aware tools:
+- procPerm(pid)
+
+procPerm(0) checks the current process.  The return value is
+API_PROC_PERM_USER or API_PROC_PERM_KUSR.

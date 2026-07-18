@@ -561,6 +561,9 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size)
 	if (strchr(filename, '/') != 0) {
 		path_len = strlen(filename);
 		last_slash = -1;
+		if (filename[0] == '/') {
+			last_slash = 0;
+		}
 
 		for (i = path_len - 1; i > 0; i--) {
 			if (filename[i] == '/') {
@@ -602,6 +605,9 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size)
 		}
 	} else {
 		strcpy(file_name, filename);
+	}
+	if (file_name[0] == '\0') {
+		return (-1);
 	}
 
 	if (file_exists) {

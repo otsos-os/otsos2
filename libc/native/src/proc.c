@@ -3,6 +3,7 @@
 $define %type api_proc_info as struct with process table entry
 $define %func procSpawn as function with args const char *, char *const *, char *const *
 $define %func procSpawnAbi as function with args const char *, char *const *, char *const *, uint32_t
+$define %func procPerm as function with args uint32_t
 $define %func procExit as procedure with args int
 
 */
@@ -12,6 +13,7 @@ $define %func procExit as procedure with args int
 $space %export procClone, procCopy, procSpawn, procSpawnAbi, procSpawnNative
 $space %export procWait, procRun, procExit
 $space %export procKill, procList, procGetpid, procGetppid, procGettid
+$space %export procPerm
 $space %export threadExit, threadJoin, procExitGroup, procSetTidAddress
 $space %export procSetsid, procGetsid, kusrAuth, personality
 
@@ -123,6 +125,11 @@ int
 procGettid(void)
 {
 	return (__sysret_int(__syscall0(CALL_PROC_GETTID)));
+}
+int
+procPerm(uint32_t pid)
+{
+	return (__sysret_int(__syscall1(CALL_PROC_PERM, (long)pid)));
 }
 
 void

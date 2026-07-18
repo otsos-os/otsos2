@@ -8,6 +8,7 @@ $define %type api_net_msg as native datagram descriptor
 $define %type kevent as struct with native event data
 $define %func termWrite as function with args const void *, size_t
 $define %func dataOpen as function with args const char *, int
+$define %func dataDir as function with args uint32_t, const char *, const char *
 $define %func fsMnt as function with args const char *, const char *, const char *, uint64_t, const void *
 $define %func fsUmnt as function with args const char *, uint64_t
 $define %func procSpawn as function with args const char *, char *const *, char *const *
@@ -19,7 +20,7 @@ $define %func procSpawnAbi as function with args const char *, char *const *, ch
 
 $space %export termRead, termReadFlags, termWrite, termPrint
 $space %export dataOpen, dataClose, dataRead, dataWrite, dataReadFull
-$space %export dataWriteFull, dataSeek, dataPipe
+$space %export dataWriteFull, dataSeek, dataPipe, dataDir
 $space %export fsChdir, fsGetcwd, fsListdir, fsStat, fsRename, fsUnlink
 $space %export fsMnt, fsUmnt
 $space %export procSpawn, procSpawnAbi, procSpawnNative, procWait
@@ -55,6 +56,7 @@ $space %export drmDriverList, drmDriverSwitch
 #define CALL_DATA_WRITE		0x203
 #define CALL_DATA_SEEK		0x204
 #define CALL_DATA_PIPE		0x205
+#define CALL_DATA_DIR		0x210
 #define CALL_FS_CHDIR		0x206
 #define CALL_FS_GETCWD		0x207
 #define CALL_FS_LISTDIR		0x208
@@ -86,6 +88,7 @@ $space %export drmDriverList, drmDriverSwitch
 #define CALL_FUTEX_WAKE		0x410
 #define CALL_PROC_SETSID	0x411
 #define CALL_PROC_GETSID	0x412
+#define CALL_PROC_PERM		0x413
 #define CALL_SYS_INFO		0x500
 #define CALL_SYS_MEMINFO	0x501
 #define CALL_SYS_KMEMINFO	0x502
@@ -111,6 +114,9 @@ $space %export drmDriverList, drmDriverSwitch
 #define API_OPEN_CREATE		0x0040
 #define API_OPEN_TRUNC		0x0200
 #define API_OPEN_APPEND		0x0400
+#define API_DATA_DIR_MKDIR	1
+#define API_DATA_DIR_RMDIR	2
+#define API_DATA_DIR_RENAME	3
 
 #define API_SEEK_SET		0
 #define API_SEEK_CUR		1
@@ -127,6 +133,8 @@ $space %export drmDriverList, drmDriverSwitch
 
 #define API_CLONE_VM		0x00000100
 #define API_CLONE_THREAD	0x00010000
+#define API_PROC_PERM_USER	0
+#define API_PROC_PERM_KUSR	1
 
 #define API_INPUT_NONBLOCK	0x00000001
 
@@ -504,6 +512,7 @@ int	dataReadFull(int handle, void *buf, size_t count);
 int	dataWriteFull(int handle, const void *buf, size_t count);
 long	dataSeek(int handle, long offset, int whence);
 int	dataPipe(int handles[2]);
+int	dataDir(uint32_t op, const char *path, const char *newpath);
 
 int	fsChdir(const char *path);
 int	fsGetcwd(char *buf, size_t size);
@@ -535,6 +544,7 @@ int	procList(struct api_proc_info *buf, uint32_t max_entries);
 int	procGetpid(void);
 int	procGetppid(void);
 int	procGettid(void);
+int	procPerm(uint32_t pid);
 void	threadExit(int code) __attribute__((noreturn));
 int	threadJoin(uint32_t tid, int *status);
 void	procExitGroup(int code) __attribute__((noreturn));

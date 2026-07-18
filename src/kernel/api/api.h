@@ -65,6 +65,10 @@ typedef struct {
 #define API_OPEN_TRUNC 0x0200
 #define API_OPEN_APPEND 0x0400
 
+#define API_DATA_DIR_MKDIR	1
+#define API_DATA_DIR_RMDIR	2
+#define API_DATA_DIR_RENAME	3
+
 #define API_SEEK_SET 0
 #define API_SEEK_CUR 1
 #define API_SEEK_END 2
@@ -279,6 +283,9 @@ struct api_proc_info {
 };
 #define API_PROC_SPAWN_ABI_POSIX	0
 #define API_PROC_SPAWN_ABI_NATIVE	1
+#define	API_PROC_PERM_USER		0
+#define	API_PROC_PERM_KUSR		1
+
 struct api_proc_spawn_args {
 	u32			size;
 	u32			flags;
@@ -479,6 +486,7 @@ int api_data_close(int handle);
 long api_data_seek(int handle, long offset, int whence);
 int api_proc_wait(int *status);
 int api_data_pipe(int handles[2]);
+int api_data_dir(u32 op, const char *path, const char *newpath);
 long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs);
 u64 api_mem_map(const void *uargs);
 int api_mem_unmap(void *addr, u64 length);
@@ -515,6 +523,7 @@ void api_release_object(int index);
 int api_proc_getpid(void);
 int api_proc_getppid(void);
 int api_proc_gettid(void);
+int api_proc_perm(u32 pid);
 void api_thread_exit(int code);
 int api_thread_join(u32 tid, int *status);
 void api_proc_exit_group(int code);

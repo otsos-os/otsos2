@@ -50,11 +50,15 @@ NATIVE_LIBC = $(NATIVE_DIR)/lib/libc.a
 NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
 NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 DLD_BIN = ../libc/LibExec/dld/drld
+YABOX_DIR = $(PORTS_DIR)/yabox
+YABOX_TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv
 LIBC_ENABLED := $(shell sh ../tools/toml_get.sh config.toml libc enabled true)
 MULTIBOOT_MODULES := $(shell perl ../tools/modules.pl config.toml)
 CPYTHON_ENABLED := $(if $(filter python,$(MULTIBOOT_MODULES)),true,false)
 DRLD_ENABLED := $(if $(filter drld,$(MULTIBOOT_MODULES)),true,false)
 NATIVE_SO_ENABLED := $(if $(filter native-so,$(MULTIBOOT_MODULES)),true,false)
+YABOX_MODULES := $(filter $(YABOX_TOOLS),$(MULTIBOOT_MODULES))
+YABOX_BINS := $(YABOX_MODULES:%=$(YABOX_DIR)/%)
 ifeq ($(CPYTHON_ENABLED),false)
 CPYTHON_BIN =
 endif
@@ -190,6 +194,7 @@ SHM_O = ../bin/shm.o
 API_NET_O = ../bin/api_net.o
 
 PIPE_O = ../bin/pipe.o
+DATA_DIR_O = ../bin/data_dir.o
 CLONE_O = ../bin/clone.o
 SYSCALL_O = ../bin/syscall.o
 UNAME_O = ../bin/uname.o
@@ -284,6 +289,7 @@ POSIX_SOCKET_O = ../bin/posix_socket.o
 POSIX_SIGNAL_O = ../bin/posix_signal.o
 SIGNAL_O = ../bin/signal.o
 PROC_PID_O = ../bin/proc_pid.o
+PROC_PERM_O = ../bin/proc_perm.o
 THREAD_API_O = ../bin/thread_api.o
 FUTEX_O = ../bin/futex.o
 SYS_O = ../bin/sys.o
@@ -298,7 +304,7 @@ ET_CLOCKSOURCE_O = ../bin/et_clocksource.o
 CMOS_RTC_O = ../bin/cmos_rtc.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDIO_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(API_NET_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
+      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(API_NET_O) $(PIPE_O) $(DATA_DIR_O) $(CLONE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(SESSION_O) $(THREAD_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(FS_META_O) $(MOUNT_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
@@ -315,7 +321,7 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(VFS_O) $(VFS_BACK_O) $(DEVFS_O) $(LINK_O) \
       $(POSIX_O) $(POSIX_IO_O) $(POSIX_PROC_O) $(POSIX_FS_O) \
       $(POSIX_MEM_O) $(POSIX_SOCKET_O) $(POSIX_SIGNAL_O) $(SIGNAL_O) \
-      $(PROC_PID_O) $(THREAD_API_O) $(FUTEX_O) $(SYS_O) \
+      $(PROC_PID_O) $(PROC_PERM_O) $(THREAD_API_O) $(FUTEX_O) $(SYS_O) \
       $(API_TIME_O) $(TERM_POWER_O) $(TERM_INFO_O) $(INPUT_O) \
       $(TIME_O) $(CLOCKSOURCE_O) $(ET_CLOCKSOURCE_O) $(CMOS_RTC_O)
 
@@ -437,6 +443,11 @@ $(UDP_ECHO_BIN): $(NATIVE_CRT0) $(NATIVE_LIBC)
 	@echo "  MAKE    ports/udp_echo"
 	@$(MAKE) -C $(PORTS_DIR) udp_echo LIBC_ENABLED=$(LIBC_ENABLED)
 
+.PHONY: $(YABOX_BINS)
+$(YABOX_BINS): $(NATIVE_CRT0) $(NATIVE_SO)
+	@echo "  MAKE    ports/yabox"
+	@$(MAKE) -C $(YABOX_DIR) $(notdir $@)
+
 .PHONY: $(POSIX_HELLO_BIN)
 $(POSIX_HELLO_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/posix_hello"
@@ -537,7 +548,7 @@ $(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BU
 		exit 1; \
 	fi
 
-$(BIOS_BOOTPACK): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
+$(BIOS_BOOTPACK): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
 	@rm -rf $(BIOS_PAYLOAD_DIR)
 	@mkdir -p $(BIOS_PAYLOAD_DIR)
 	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
@@ -549,6 +560,7 @@ $(BIOS_BOOTPACK): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN)
 			yes) src=$(YES_BIN);; \
 			fetch) src=$(FETCH_BIN);; \
 			sh) src=$(SHELL_BIN);; \
+			ls|cat|touch|pwd|whoami|rm|mkdir|rmdir|cp|mv) src=$(YABOX_DIR)/$$m;; \
 			oven) src=$(OVEN_BIN);; \
 			cursord) src=$(CURSORD_BIN);; \
 			shmtest) src=$(SHMTEST_BIN);; \
@@ -837,6 +849,10 @@ $(API_NET_O): kernel/api/net.c kernel/api/api.h kernel/net/endpoint.h kernel/use
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(PIPE_O): kernel/api/pipe.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DATA_DIR_O): kernel/api/data_dir.c kernel/api/api.h kernel/drivers/fs/vfs/vfs.h kernel/other/restrict.h kernel/useraddr.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1202,6 +1218,10 @@ $(SIGNAL_O): kernel/api/signal.c kernel/api/signal.h kernel/process.h kernel/thr
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(PROC_PID_O): kernel/api/proc_pid.c kernel/api/api.h kernel/process.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(PROC_PERM_O): kernel/api/proc_perm.c kernel/api/api.h kernel/process.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

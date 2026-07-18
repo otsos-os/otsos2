@@ -3,13 +3,14 @@
 $define %type int as native data handle
 $define %func dataOpen as function with args const char *, int
 $define %func dataRead as function with args int, void *, size_t
+$define %func dataDir as function with args uint32_t, const char *, const char *
 
 */
 
 /* !SPACE!
 
 $space %export dataOpen, dataClose, dataRead, dataWrite, dataReadFull
-$space %export dataWriteFull, dataSeek, dataPipe
+$space %export dataWriteFull, dataSeek, dataPipe, dataDir
 
 */
 
@@ -104,4 +105,10 @@ int
 dataPipe(int handles[2])
 {
 	return (__sysret_int(__syscall1(CALL_DATA_PIPE, (long)handles)));
+}
+int
+dataDir(uint32_t op, const char *path, const char *newpath)
+{
+	return (__sysret_int(__syscall3(CALL_DATA_DIR, (long)op,
+	    (long)path, (long)newpath)));
 }

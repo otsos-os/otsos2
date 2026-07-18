@@ -181,6 +181,10 @@ void syscall_handler(registers_t *regs) {
   case CALL_DATA_PIPE:
     regs->rax = (u64)api_data_pipe((int *)arg1);
     break;
+  case CALL_DATA_DIR:
+    regs->rax = (u64)api_data_dir((u32)arg1, (const char *)arg2,
+                                  (const char *)arg3);
+    break;
   case CALL_FS_CHDIR:
     regs->rax = (u64)api_fs_chdir((const char *)arg1);
     break;
@@ -341,6 +345,9 @@ void syscall_handler(registers_t *regs) {
     break;
   case CALL_PROC_GETTID:
     regs->rax = (u64)api_proc_gettid();
+    break;
+  case CALL_PROC_PERM:
+    regs->rax = (u64)api_proc_perm((u32)arg1);
     break;
   case CALL_PROC_EXIT_GROUP:
     api_proc_exit_group((int)arg1);

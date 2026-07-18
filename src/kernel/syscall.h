@@ -61,6 +61,7 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_DATA_WRITE		0x203
 #define	CALL_DATA_SEEK		0x204
 #define	CALL_DATA_PIPE		0x205
+#define	CALL_DATA_DIR		0x210
 #define	CALL_FS_CHDIR		0x206
 #define	CALL_FS_GETCWD		0x207
 #define	CALL_FS_LISTDIR		0x208
@@ -109,6 +110,7 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_PROC_SET_TID_ADDR	0x40E
 #define	CALL_PROC_SETSID		0x411
 #define	CALL_PROC_GETSID		0x412
+#define	CALL_PROC_PERM		0x413
 #define	CALL_FUTEX_WAIT		0x40F
 #define	CALL_FUTEX_WAKE		0x410
 #define	CALL_SYS_RANDOM		0x503

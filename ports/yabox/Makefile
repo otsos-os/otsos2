@@ -4,14 +4,15 @@ LD ?= ld.lld
 
 ROOT = ../..
 NATIVE_DIR = $(ROOT)/libc/native
-NATIVE_LIB = $(NATIVE_DIR)/libnativec.a
-NATIVE_CRT0 = $(NATIVE_DIR)/build/crt0.o
+NATIVE_LIB = $(NATIVE_DIR)/lib/libc.a
+NATIVE_SO = $(NATIVE_DIR)/lib/native.so
+NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
 TARGET_CFLAGS ?= --target=$(TARGET)
-CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fno-pic -fno-stack-protector \
+CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fPIE -fno-stack-protector \
 	-nostdlib -nostdinc -fno-builtin -O2 -Wall -Wextra \
 	-I$(NATIVE_DIR)/include -I.
-LDFLAGS ?= -m elf_x86_64 -T $(ROOT)/init/linker.ld \
-	--oformat=elf64-x86-64 -nostdlib
+LDFLAGS ?= -m elf_x86_64 -pie --oformat=elf64-x86-64 \
+	-nostdlib -dynamic-linker /lib/drld --export-dynamic
 
 TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv
 COMMON = build/common.o
@@ -19,16 +20,16 @@ OBJS = $(TOOLS:%=build/%.o)
 BINS = $(TOOLS:%=%)
 OLD_BINS = $(TOOLS:%=yabox/%)
 
-.PHONY: clean
+.PHONY: all clean
 
-all: $(NATIVE_LIB) $(BINS)
+all: $(NATIVE_SO) $(NATIVE_CRT0) $(BINS)
 
-$(NATIVE_LIB):
+$(NATIVE_LIB) $(NATIVE_SO) $(NATIVE_CRT0):
 	$(MAKE) -C $(NATIVE_DIR)
 
-$(BINS): %: build/%.o $(COMMON) $(NATIVE_LIB)
+$(BINS): %: build/%.o $(COMMON) $(NATIVE_SO) $(NATIVE_CRT0)
 	@echo "  LLD      $@"
-	@$(LD) $(LDFLAGS) $(NATIVE_CRT0) $< $(COMMON) $(NATIVE_LIB) -o $@
+	@$(LD) $(LDFLAGS) $(NATIVE_CRT0) $< $(COMMON) $(NATIVE_SO) -o $@
 
 build/%.o: %.c yabox.h
 	@mkdir -p build
