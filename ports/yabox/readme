@@ -15,6 +15,7 @@ Tools:
 - touch - create empty file
 - rm - remove file
 - cp - copy file
+- unzip - extract stored zip archives
 - pwd - print current directory
 - whoami - print current process permission class
 

@@ -53,7 +53,7 @@ NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
 NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 DLD_BIN = ../libc/LibExec/dld/drld
 YABOX_DIR = $(PORTS_DIR)/yabox
-YABOX_TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv
+YABOX_TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv unzip
 LIBC_ENABLED := $(shell sh ../tools/toml_get.sh config.toml libc enabled true)
 MULTIBOOT_MODULES := $(shell perl ../tools/modules.pl config.toml)
 CPYTHON_ENABLED := $(if $(filter python,$(MULTIBOOT_MODULES)),true,false)
@@ -477,7 +477,7 @@ $(CPYTHON_BIN): $(LIBC_DEPS)
 	@$(MAKE) -C $(PORTS_DIR) cpython LIBC_ENABLED=$(LIBC_ENABLED) CPYTHON_ENABLED=$(CPYTHON_ENABLED)
 endif
 
-$(CPYTHON_STDLIB_ZIP): $(CPYTHON_BIN)
+$(CPYTHON_STDLIB_ZIP): $(CPYTHON_BIN) Makefile
 	@echo "  ZIP     python stdlib"
 	@mkdir -p $(dir $@)
 	@set -e; \
@@ -486,13 +486,21 @@ $(CPYTHON_STDLIB_ZIP): $(CPYTHON_BIN)
 	cd $(CPYTHON_DIR)/Lib; \
 	test -f encodings/__init__.py; \
 	zip -0 -q -r "$$zip_path" * \
-		-x '*/__pycache__/*' \
+		-x '__pycache__/' '__pycache__/*' '__pycache__/**' \
+		-x '*/__pycache__/' '*/__pycache__/*' \
 		-x 'test/*' 'test/**' \
 		-x 'idlelib/*' 'idlelib/**' \
 		-x 'tkinter/*' 'tkinter/**' \
 		-x 'turtledemo/*' 'turtledemo/**' \
 		-x 'ensurepip/*' 'ensurepip/**' \
-		-x 'venv/*' 'venv/**'
+		-x 'venv/*' 'venv/**'; \
+	extra_dir=$$(dirname "$$zip_path")/python-stdlib-extra; \
+	rm -rf "$$extra_dir"; \
+	mkdir -p "$$extra_dir/lib-dynload"; \
+	cd "$$extra_dir"; \
+	zip -0 -q -r "$$zip_path" lib-dynload; \
+	cd "$$(dirname "$$zip_path")"; \
+	rm -rf "$$extra_dir"
 
 .PHONY: $(DLD_BIN)
 $(DLD_BIN):
@@ -579,7 +587,7 @@ $(BIOS_BOOTPACK): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN)
 			yes) src=$(YES_BIN);; \
 			fetch) src=$(FETCH_BIN);; \
 			sh) src=$(SHELL_BIN);; \
-			ls|cat|touch|pwd|whoami|rm|mkdir|rmdir|cp|mv) src=$(YABOX_DIR)/$$m;; \
+			ls|cat|touch|pwd|whoami|rm|mkdir|rmdir|cp|mv|unzip) src=$(YABOX_DIR)/$$m;; \
 			oven) src=$(OVEN_BIN);; \
 			cursord) src=$(CURSORD_BIN);; \
 			shmtest) src=$(SHMTEST_BIN);; \

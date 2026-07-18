@@ -449,8 +449,8 @@ chainfs_read_file(const char *filename, u8 *buffer, u32 buffer_size,
 	}
 
 	*bytes_read = copied;
-	drivers_log("ChainFS: Read %u bytes from '%s'\n",
-	    copied, filename);
+	/*drivers_log("ChainFS: Read %u bytes from '%s'\n",
+	    copied, filename);*/
 	return (0);
 }
 
@@ -731,8 +731,8 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size)
 
 	kmem_free(allocated_blocks);
 
-	drivers_log("ChainFS: Wrote %u bytes to '%s' using "
-	    "%u blocks\n", size, filename, blocks_needed);
+	/*drivers_log("ChainFS: Wrote %u bytes to '%s' using "
+	    "%u blocks\n", size, filename, blocks_needed);*/
 	return (0);
 }
 int

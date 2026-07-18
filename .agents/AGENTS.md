@@ -142,6 +142,11 @@ Monolithic kernel with the following rough layers:
 - Builds `lib/crt0.o` and `lib/libc.a` for freestanding userspace binaries.
 - Keep POSIX-only work on musl / personality layer; do not blur the two.
 
+### Native archive library (`libc/LibArchive`)
+
+- Small native userspace archive library built on top of `libc/native`.
+- Currently exports `la_zip_extract()` for ZIP extraction.  Supported ZIP
+  method is stored/no-compression only;
 ### Dynamic linking support
 
 - The kernel already handles `PT_INTERP` in both `spawn.c` (`api_proc_spawn`)

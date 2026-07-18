@@ -1,0 +1,937 @@
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[UEFI] OTSOS UEFI loader
+[UEFI] bootpack 0x02587800 bytes
+[UEFI] ACPI RSDP 0x3ed7e014
+[UEFI] module config 0x000008dd bytes
+[UEFI] module cat 0x000020c8 bytes
+[UEFI] module lua 0x0010adc8 bytes
+[UEFI] module pwd 0x00001dd0 bytes
+[UEFI] module yes 0x00001778 bytes
+[UEFI] module cp 0x000021e0 bytes
+[UEFI] module drld 0x00007520 bytes
+[UEFI] module cursord 0x00001f90 bytes
+[UEFI] module unzip 0x00003220 bytes
+[UEFI] module init 0x000015a0 bytes
+[UEFI] module python-stdlib 0x00a1e366 bytes
+[UEFI] module fetch 0x00002010 bytes
+[UEFI] module native-so 0x00008220 bytes
+[UEFI] module python 0x0152fe78 bytes
+[UEFI] module touch 0x00001e48 bytes
+[UEFI] module mkdir 0x00001db8 bytes
+[UEFI] module mv 0x00001e68 bytes
+[UEFI] module ls 0x00002058 bytes
+[UEFI] module oven 0x00004b38 bytes
+[UEFI] module posix_hello 0x00001788 bytes
+[UEFI] module udp_echo 0x00005d30 bytes
+[UEFI] module rmdir 0x00001db8 bytes
+[UEFI] module rm 0x00001da8 bytes
+[UEFI] module whoami 0x00001e70 bytes
+[UEFI] module ld-musl 0x002e02e0 bytes
+[UEFI] module sh 0x000053d0 bytes
+[UEFI] module musl_test 0x00032f28 bytes
+[UEFI] exit boot services
+[UEFI] kernel entry 0x00100030
+[BOOTMEM] initialized: 5 ranges, free=962656 KB
+Heap initialized at ffffffff803b0000free block size: 8388568
+loaded config from (2269 bytes)
+[driver] [EVENTTIMER] registered "i8254" frequency 1193182 Hz quality 100
+[PMAP] Initialized. CR3: 102000[RAMDISK] pool allocated: 38449152 bytes at ffffffff80bb0000[KMEM] growth pool set: ffffffff8305b000[VM_PAGE] initialized: 221413 pages from bootmem (8734 KB metadata)
+[LAPIC] id=0 ver=20 base=0xfee00000[driver] [TIMER] using event timer "i8254" at 1000 Hz
+[driver] [RTC] CMOS time: 2026-7-18 22:18:38 (epoch 1784413118)
+[TIME] timezone offset: 3 hours
+[TIME] initialized, waiting for clocksource
+[TIMECOUNTER] registered et_timer_ticks: freq=1000 Hz, quality=100
+[TIMECOUNTER] selecting et_timer_ticks
+[TIME] windup with et_timer_ticks: scale=0x4189374bc6a7f0
+[vm_object] initialized
+[LAPIC] calibrating via pit timer...
+[LAPIC] calibrated freq=7658900 Hz
+[driver] [EVENTTIMER] registered "LAPIC" frequency 7658900 Hz quality 1000
+[driver] [APIC] switching to lapic timer 1000 with hz  1000
+[driver] [TIMER] using event timer "LAPIC" at 1000 Hz
+[SYSCALL] syscall/sysret initialized
+[EVENT] Initializing event subsystem...
+[EVENT] registered filter 'read' (id=-1)
+[EVENT] registered filter 'write' (id=-2)
+[EVENT] registered filter 'timer' (id=-3)
+[EVENT] registered filter 'proc' (id=-4)
+[EVENT] registered filter 'signal' (id=-5)
+[EVENT] registered filter 'user' (id=-6)
+[EVENT] registered filter 'kbd' (id=-7)
+[EVENT] registered filter 'mouse' (id=-8)
+[EVENT] Event subsystem initialized (32 kqueue slots)
+[RNG] initializing ChaCha20-DRBG...
+[RNG] CSPRNG ready (pool=256 bytes, reseed threshold=1048576 bytes)
+[driver] [DISK] Disk manager initialized
+[driver] [DISK] Registered disk 0: ramdisk0 (Type: 2, Sectors: 271704)
+[driver] [RAMDISK] Initialized: pool 38449152 bytes (9387 blocks), grow 100663296 bytes (24576 blocks), 271704 sectors max
+boot from mb2 (magic: 0x36d76289)
+Tag type: 2, size: 30 (BOOT_LOADER_NAME)
+Tag type: 4, size: 16 (BASIC_MEMINFO)
+Tag type: 6, size: 2824 (MMAP)
+Tag type: 8, size: 32 (FRAMEBUFFER)
+Tag type: 15, size: 44 (ACPI_NEW)
+Tag type: 3, size: 23 (other)
+Tag type: 3, size: 20 (other)
+Tag type: 3, size: 20 (other)
+Tag type: 3, size: 20 (other)
+Tag type: 3, size: 20 (other)
+Tag type: 3, size: 19 (other)
+Tag type: 3, size: 21 (other)
+Tag type: 3, size: 24 (other)
+Tag type: 3, size: 22 (other)
+Tag type: 3, size: 21 (other)
+Tag type: 3, size: 30 (other)
+Tag type: 3, size: 22 (other)
+Tag type: 3, size: 26 (other)
+Tag type: 3, size: 23 (other)
+Tag type: 3, size: 22 (other)
+Tag type: 3, size: 22 (other)
+Tag type: 3, size: 19 (other)
+Tag type: 3, size: 19 (other)
+Tag type: 3, size: 21 (other)
+Tag type: 3, size: 28 (other)
+Tag type: 3, size: 25 (other)
+Tag type: 3, size: 22 (other)
+Tag type: 3, size: 19 (other)
+Tag type: 3, size: 23 (other)
+Tag type: 3, size: 24 (other)
+Tag type: 3, size: 19 (other)
+Tag type: 3, size: 26 (other)
+config geted
+[driver] [FBDEV] hw fb mapped: 1024x768
+[driver] [KMS] topology: 1 connector + 1 crtc + primary/cursor planes
+[driver] [DRM] ready, driver 'fbdev'
+[driver] [ACPI] found ACPI_NEW multiboot2 tag
+[driver] [ACPI] RSDP found at 3d497b68[driver] [ACPI] using XSDT at 3ed7d0e8[driver] [ACPI] XSDT has 4 entries
+[driver] [ACPI]   table: FACP  len=244
+[driver] [ACPI]   table: APIC  len=92
+[driver] [ACPI]   table: SSDT  len=69
+[driver] [ACPI]   table: BGRT  len=56
+[driver] [ACPI] FADT found: SCI int=9, PM1a=0xb004, SMI cmd=0x442e
+[driver] [ACPI] MADT found: local APIC at 0xfee00000, flags=0x1
+[IOAPIC] addr=0xfec00000[SMP] BSP lapic 0, 2 total cpus
+[SMP] starting AP 1 (lapic 1) stack=ffffffff803ebb60[PMAP] Initialized. CR3: 102000[SYSCALL] syscall/sysret initialized
+[LAPIC] AP timer started count=7658
+[SMP] with ap  1 1 init succesful ,tss at ffffffff803ebba8[SMP] AP 1 online
+CPU: Intel(R) Core(TM) i5-10300H CPU @ 2.50GHz
+RAM: 943 MB (966044 KB)
+[driver] [POWER] ACPI reset register available at 0x4050
+[driver] [POWER] DSDT at 3ed7a000[driver] [POWER] found _S5_ at DSDT offset 8960
+[driver] [POWER] S5 SLP_TYP: a=5, b=5
+[driver] [POWER] initialized: PM1a=0xb004 PM1b=0x0 SLP_TYP_S5=5/5
+[driver] [PWRBTN] initialized: PM1a_EVT=0xb000 PM1b_EVT=0x0
+[PCI] driver registered: virtio-gpu
+[PCI] driver registered: virtio-net
+[driver] [NETDEV] lo registered (02:00:00:00:00:01)
+[driver] [NET] iface lo on lo (02:00:00:00:00:01)
+[driver] [LOOPBACK] loopback interface lo ready
+[driver] [NET] network subsystem initialized
+[PCI] scan complete: 10 device(s)
+[PCI] driver registered: watchdog-i6300esb
+[PCI] driver registered: watchdog-ich-tco
+[driver] [WDT] ich_tco: PMBASE not set
+[driver] [POWER] ACPI already enabled
+kmem heap                       idt                             timer                           pmap                            syscall                         disk manager                    ramdisk                         framebuffer                     drm                             acpi                            power                           pci scan                        watchdog                        [NET_TEST] 1 device(s) 1 interface(s)
+[driver] [NETDEV] devices (1):
+[driver]   0: lo mac=02:00:00:00:00:01 mtu=65535 flags=0x15 driver=loopback
+[driver] [NET] interfaces (1):
+[driver]   0: lo dev=lo mac=02:00:00:00:00:01 flags=0x5 mtu=65535
+[driver]       ip=127.0.0.1 mask=255.0.0.0
+[NET_TEST] polling lo
+[NET_TEST] lo mac=02:00:00:00:00:01 link=up
+[NET_TEST] === ARP test ===
+[NET_TEST] sending ARP request for gateway 127.0.0.1...
+[NET_TEST] lo: ARP reply from 127.0.0.1 (02:00:00:00:00:01)
+[NET_TEST] === ICMP echo test ===
+[NET_TEST] sending ICMP echo request to 127.0.0.1...
+[driver] [ICMP] echo reply to 127.0.0.1 (seq=1) len=64
+[NET_TEST] === UDP test ===
+[NET_TEST] sending UDP datagram to 127.0.0.1:7...
+[driver] [UDP] port 12345 -> 7 (15 bytes), no listener
+[driver] [ICMP] unreachable type=3 code=3 to 127.0.0.1
+[NET_TEST] lo stats: tx=8 done=8 drop=0 rx=8 delivered=8 drop=0 icmp_unreach=1 frag_drop=0
+[driver] [KEYBOARD] detected: PS/2 Keyboard
+[driver] [KEYBOARD] switch to driver: PS/2 Keyboard
+[driver] [MOUSE] PS/2 mouse ready (4-byte packets)
+ps/2 mouse                      [driver] ChainFS: Initializing... (g_chainfs at ffffffff801a5360[driver] ChainFS: Invalid magic number 0x0, expected 0xcafebabe
+chainfs init                    [CHAINFS] init failed, formatting disk...
+[driver] ChainFS: Formatting disk with 271704 blocks, 4096 max files
+[driver] ChainFS: Format complete
+[driver] ChainFS: Initializing... (g_chainfs at ffffffff801a5360[CHAINFS] magic overwritten by memcpy at ffffffff801a5360[driver] [CHAINFS] g_chainfs phys=1a5360[driver] ChainFS: Initialized successfully
+[driver]   Total blocks: 271704
+[driver]   File table blocks: 512
+[driver]   Block map blocks: 2119
+[driver]   Data area start: 2632
+[driver]   Root directory block: 0
+chainfs format                  chainfs ready                   [driver] [DEVFS] mounted at /dev (8 devices, RAM-backed)
+[driver] [VFS] backends mounted: / chainfs, /dev devfs
+[driver] [VFS] initialized (vnode pool: 256 slots)
+vfs                             [driver] ChainFS: Created directory: /conf
+[driver] ChainFS: Created directory: /conf/boot
+loaded runtime config from /conf/boot/config.toml
+[USERSPACE] Initializing userspace subsystem...
+[GDT] Initializing GDT with Ring 3 support...
+[GDT] GDT loaded at ffffffff801cbc40[GDT] Kernel stack RSP0: ffffffff801cbc40[PROC] Initializing process subsystem...
+[THREAD] Initializing thread subsystem...
+[THREAD] Thread table initialized (128 slots)
+[SCHED] strict=1 smart=1 migration_threshold=2 zkill=1
+[PROC] Process table initialized (64 slots)
+[USERSPACE] Userspace ready
+[API] Initializing handle tables at ffffffff801c2240[driver] ChainFS: Created directory: /lib
+[KERNEL] Installed /lib/native.so from module 'native-so' (33312 bytes)
+[driver] ChainFS: Directory already exists: /lib
+[KERNEL] Installed /lib/drld from module 'drld' (29984 bytes)
+[driver] ChainFS: Directory already exists: /lib
+[KERNEL] Installed /lib/ld-musl-x86_64.so.1 from module 'ld-musl' (3015392 bytes)
+[driver] ChainFS: Created directory: /usr
+[driver] ChainFS: Created directory: /usr/local
+[driver] ChainFS: Created directory: /usr/local/lib
+[KERNEL] Installed /usr/local/lib/python314.zip from module 'python-stdlib' (10609510 bytes)
+[driver] ChainFS: Created directory: /bin
+[KERNEL] Installed /bin/python from module 'python' (22216312 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/lua from module 'lua' (1093064 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/musl_test from module 'musl_test' (208680 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/posix_hello from module 'posix_hello' (6024 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/udp_echo from module 'udp_echo' (23856 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/cursord from module 'cursord' (8080 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/oven from module 'oven' (19256 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/unzip from module 'unzip' (12832 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/mv from module 'mv' (7784 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/cp from module 'cp' (8672 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/rmdir from module 'rmdir' (7608 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/mkdir from module 'mkdir' (7608 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/rm from module 'rm' (7592 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/whoami from module 'whoami' (7792 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/pwd from module 'pwd' (7632 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/touch from module 'touch' (7752 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/cat from module 'cat' (8392 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/ls from module 'ls' (8280 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/sh from module 'sh' (21456 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/fetch from module 'fetch' (8208 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/yes from module 'yes' (6008 bytes)
+[driver] ChainFS: Directory already exists: /bin
+[KERNEL] Installed /bin/init from module 'init' (5536 bytes)
+[KUSR] Initializing...
+[driver] ChainFS: Directory already exists: /conf
+[KERNEL] Found init module at 39d1d600[USERSPACE] Loading init process from module...
+[USERSPACE] Module at 39d1d600[USERSPACE] Loading ELF process 'init' (5536 bytes)
+[ELF] Loading segment: vaddr=400000[ELF] Loading segment: vaddr=4002e0[ELF] main loaded: entry=400000[USERSPACE] Allocating user stack: 16 pages at 7fffffff0000[SCHED] PID 1 preferred_cpu=0
+[
+Hello init (event-driven)
+[EVENT] Created kqueue idx=0 owner_pid=1
+[EVENT] added knote ident=0 filter=-1
+Enter program path (relative, e.g. hello): j  /usr/local/bin   lib/               /bin/sh'
+[SPAWN] Error: failed to read file '/bin/sh''
+procSpawn failed
+Enter program path (relative, e.g. hello): cl  /bin./  /sh
+[ELF] Loading segment: vaddr=400000[ELF] Loading segment: vaddr=402790[ELF] Loading segment: vaddr=4061e0[ELF] Loading segment: vaddr=4072c0[ELF] main loaded: entry=402790[SPAWN] PT_INTERP '/lib/drld'
+[ELF] Loading segment: vaddr=40000000[ELF] Loading segment: vaddr=400048b0[ELF] Loading segment: vaddr=40004df8[ELF] loaded interp: base=0[SCHED] PID 2 preferred_cpu=1
+[THREAD] Created thread tid=2 for PID 2 rip=40000000[SPAWN] Created 'sh' (PID 2) from '/bin/sh'
+[EVFILT_PROC] attach: monitoring pid=2
+[EVENT] added knote ident=2 filter=-4
+[SYSCALL] PID 2 personality: 1 -> 0
+[SYSCALL] PID 2 personality: 0 -> 0
+otsos2 shell (sh) - type 'help' for commands
+/ $ clear
+clear
+[2J[H/ $ ls /usr/local/lib
+ls /usr/local/lib
+python314.zip  
+/ $ unzip /usr/loca/li   l/lib/python314.zip /usr/local/lib/python3.14
+unzip /usr/local/lib/python314.zip /usr/local/lib/python3.14
+[ELF] Loading segment: vaddr=400000[ELF] Loading segment: vaddr=401d70[ELF] Loading segment: vaddr=4044c0[ELF] Loading segment: vaddr=4055d8[ELF] main loaded: entry=401d70[SPAWN] PT_INTERP '/lib/drld'
+[ELF] Loading segment: vaddr=40000000[ELF] Loading segment: vaddr=400048b0[ELF] Loading segment: vaddr=40004df8[ELF] loaded interp: base=0[SCHED] PID 3 preferred_cpu=0
+[THREAD] Created thread tid=3 for PID 3 rip=40000000[SPAWN] Created 'unzip' (PID 3) from '/bin/unzip'
+[SYSCALL] PID 3 personality: 1 -> 0
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14
+extract __future__.py
+extract __hello__.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/__phello__
+extract __phello__/
+extract __phello__/__init__.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/__phello__/ham
+extract __phello__/ham/
+extract __phello__/ham/__init__.py
+extract __phello__/ham/eggs.py
+extract __phello__/spam.py
+extract _aix_support.py
+extract _android_support.py
+extract _apple_support.py
+extract _ast_unparse.py
+extract _collections_abc.py
+extract _colorize.py
+extract _compat_pickle.py
+extract _ios_support.py
+extract _markupbase.py
+extract _opcode_metadata.py
+extract _osx_support.py
+extract _py_abc.py
+extract _py_warnings.py
+extract _pydatetime.py
+extract _pydecimal.py
+extract _pyio.py
+extract _pylong.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/_pyrepl
+extract _pyrepl/
+extract _pyrepl/commands.py
+extract _pyrepl/reader.py
+extract _pyrepl/fancy_termios.py
+extract _pyrepl/__main__.py
+extract _pyrepl/_threading_handler.py
+extract _pyrepl/windows_eventqueue.py
+extract _pyrepl/unix_eventqueue.py
+extract _pyrepl/__init__.py
+extract _pyrepl/keymap.py
+extract _pyrepl/completing_reader.py
+extract _pyrepl/terminfo.py
+extract _pyrepl/_module_completer.py
+extract _pyrepl/windows_console.py
+extract _pyrepl/main.py
+extract _pyrepl/base_eventqueue.py
+extract _pyrepl/readline.py
+extract _pyrepl/simple_interact.py
+extract _pyrepl/pager.py
+extract _pyrepl/console.py
+extract _pyrepl/mypy.ini
+extract _pyrepl/input.py
+extract _pyrepl/unix_console.py
+extract _pyrepl/historical_reader.py
+extract _pyrepl/trace.py
+extract _pyrepl/types.py
+extract _pyrepl/utils.py
+extract _sitebuiltins.py
+extract _strptime.py
+extract _threading_local.py
+extract _weakrefset.py
+extract abc.py
+extract annotationlib.py
+extract antigravity.py
+extract argparse.py
+extract ast.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/asyncio
+extract asyncio/
+extract asyncio/events.py
+extract asyncio/protocols.py
+extract asyncio/queues.py
+extract asyncio/__main__.py
+extract asyncio/log.py
+extract asyncio/format_helpers.py
+extract asyncio/__init__.py
+extract asyncio/base_events.py
+extract asyncio/transports.py
+extract asyncio/streams.py
+extract asyncio/tasks.py
+extract asyncio/coroutines.py
+extract asyncio/constants.py
+extract asyncio/base_futures.py
+extract asyncio/staggered.py
+extract asyncio/unix_events.py
+extract asyncio/trsock.py
+extract asyncio/windows_utils.py
+extract asyncio/timeouts.py
+extract asyncio/threads.py
+extract asyncio/windows_events.py
+extract asyncio/base_subprocess.py
+extract asyncio/tools.py
+extract asyncio/runners.py
+extract asyncio/sslproto.py
+extract asyncio/subprocess.py
+extract asyncio/mixins.py
+extract asyncio/base_tasks.py
+extract asyncio/selector_events.py
+extract asyncio/futures.py
+extract asyncio/exceptions.py
+extract asyncio/graph.py
+extract asyncio/taskgroups.py
+extract asyncio/locks.py
+extract asyncio/proactor_events.py
+extract base64.py
+extract bdb.py
+extract bisect.py
+extract bz2.py
+extract cProfile.py
+extract calendar.py
+extract cmd.py
+extract code.py
+extract codecs.py
+extract codeop.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/collections
+extract collections/
+extract collections/__init__.py
+extract colorsys.py
+extract compileall.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/compression
+extract compression/
+extract compression/__init__.py
+extract compression/gzip.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/compression/zstd
+extract compression/zstd/
+extract compression/zstd/__init__.py
+extract compression/zstd/_zstdfile.py
+extract compression/zlib.py
+extract compression/bz2.py
+extract compression/lzma.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/compression/_common
+extract compression/_common/
+extract compression/_common/_streams.py
+extract compression/_common/__init__.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/concurrent
+extract concurrent/
+extract concurrent/__init__.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/concurrent/futures
+extract concurrent/futures/
+extract concurrent/futures/process.py
+extract concurrent/futures/__init__.py
+extract concurrent/futures/thread.py
+extract concurrent/futures/_base.py
+extract concurrent/futures/interpreter.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/concurrent/interpreters
+extract concurrent/interpreters/
+extract concurrent/interpreters/__init__.py
+extract concurrent/interpreters/_crossinterp.py
+extract concurrent/interpreters/_queues.py
+extract configparser.py
+extract contextlib.py
+extract contextvars.py
+extract copy.py
+extract copyreg.py
+extract csv.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/ctypes
+extract ctypes/
+extract ctypes/util.py
+extract ctypes/_aix.py
+extract ctypes/__init__.py
+extract ctypes/_endian.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/ctypes/macholib
+extract ctypes/macholib/
+extract ctypes/macholib/dylib.py
+extract ctypes/macholib/README.ctypes
+extract ctypes/macholib/fetch_macholib
+extract ctypes/macholib/__init__.py
+extract ctypes/macholib/dyld.py
+extract ctypes/macholib/framework.py
+extract ctypes/macholib/fetch_macholib.bat
+extract ctypes/_layout.py
+extract ctypes/wintypes.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/curses
+extract curses/
+extract curses/__init__.py
+extract curses/panel.py
+extract curses/ascii.py
+extract curses/has_key.py
+extract curses/textpad.py
+extract dataclasses.py
+extract datetime.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/dbm
+extract dbm/
+extract dbm/ndbm.py
+extract dbm/__init__.py
+extract dbm/gnu.py
+extract dbm/sqlite3.py
+extract dbm/dumb.py
+extract decimal.py
+extract difflib.py
+extract dis.py
+extract doctest.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/email
+extract email/
+extract email/feedparser.py
+extract email/architecture.rst
+extract email/__init__.py
+extract email/iterators.py
+extract email/header.py
+extract email/parser.py
+extract email/encoders.py
+extract email/contentmanager.py
+extract email/message.py
+extract email/base64mime.py
+extract email/policy.py
+extract email/errors.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/email/mime
+extract email/mime/
+extract email/mime/__init__.py
+extract email/mime/nonmultipart.py
+extract email/mime/message.py
+extract email/mime/image.py
+extract email/mime/audio.py
+extract email/mime/base.py
+extract email/mime/text.py
+extract email/mime/multipart.py
+extract email/mime/application.py
+extract email/charset.py
+extract email/_policybase.py
+extract email/_encoded_words.py
+extract email/quoprimime.py
+extract email/generator.py
+extract email/_header_value_parser.py
+extract email/utils.py
+extract email/_parseaddr.py
+extract email/headerregistry.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/encodings
+extract encodings/
+extract encodings/iso8859_4.py
+extract encodings/iso2022_jp.py
+extract encodings/koi8_t.py
+extract encodings/cp1125.py
+extract encodings/cp869.py
+extract encodings/iso8859_3.py
+extract encodings/mac_cyrillic.py
+extract encodings/iso8859_10.py
+extract encodings/cp273.py
+extract encodings/mac_greek.py
+extract encodings/mac_iceland.py
+extract encodings/shift_jis.py
+extract encodings/iso2022_kr.py
+extract encodings/undefined.py
+extract encodings/iso8859_5.py
+extract encodings/cp949.py
+extract encodings/iso2022_jp_2.py
+extract encodings/iso2022_jp_1.py
+extract encodings/oem.py
+extract encodings/mbcs.py
+extract encodings/cp1258.py
+extract encodings/utf_16_le.py
+extract encodings/base64_codec.py
+extract encodings/__init__.py
+extract encodings/cp775.py
+extract encodings/mac_turkish.py
+extract encodings/cp1252.py
+extract encodings/cp1251.py
+extract encodings/cp932.py
+extract encodings/idna.py
+extract encodings/iso8859_8.py
+extract encodings/cp950.py
+extract encodings/utf_8_sig.py
+extract encodings/iso8859_7.py
+extract encodings/aliases.py
+extract encodings/iso8859_13.py
+extract encodings/cp037.py
+extract encodings/iso8859_15.py
+extract encodings/uu_codec.py
+extract encodings/iso8859_6.py
+extract encodings/cp857.py
+extract encodings/cp863.py
+extract encodings/hex_codec.py
+extract encodings/iso8859_1.py
+extract encodings/cp424.py
+extract encodings/cp1255.py
+extract encodings/iso2022_jp_3.py
+extract encodings/cp1254.py
+extract encodings/bz2_codec.py
+extract encodings/utf_16.py
+extract encodings/cp437.py
+extract encodings/koi8_u.py
+extract encodings/iso8859_16.py
+extract encodings/big5hkscs.py
+extract encodings/cp720.py
+extract encodings/ptcp154.py
+extract encodings/utf_32_le.py
+extract encodings/shift_jis_2004.py
+extract encodings/cp866.py
+extract encodings/cp855.py
+extract encodings/cp861.py
+extract encodings/cp1257.py
+extract encodings/cp500.py
+extract encodings/mac_farsi.py
+extract encodings/utf_7.py
+extract encodings/cp856.py
+extract encodings/utf_32_be.py
+extract encodings/cp1140.py
+extract encodings/big5.py
+extract encodings/gbk.py
+extract encodings/utf_8.py
+extract encodings/cp860.py
+extract encodings/gb2312.py
+extract encodings/shift_jisx0213.py
+extract encodings/zlib_codec.py
+extract encodings/cp862.py
+extract encodings/cp875.py
+[KMEM] grow: new_area=ffffffff8305b000extract encodings/mac_roman.py
+extract encodings/cp1256.py
+[KMEM] grow: new_area=ffffffff8305f000extract encodings/cp874.py
+[KMEM] grow: new_area=ffffffff83061000[KMEM] grow: new_area=ffffffff83063000extract encodings/iso8859_9.py
+extract encodings/utf_32.py
+extract encodings/ascii.py
+[KMEM] grow: new_area=ffffffff83066000[KMEM] grow: new_area=ffffffff83068000[KMEM] grow: new_area=ffffffff8306a000extract encodings/mac_latin2.py
+extract encodings/euc_kr.py
+extract encodings/punycode.py
+extract encodings/latin_1.py
+extract encodings/hz.py
+extract encodings/charmap.py
+[KMEM] grow: new_area=ffffffff8306e000[KMEM] grow: new_area=ffffffff83070000extract encodings/palmos.py
+[KMEM] grow: new_area=ffffffff83073000[KMEM] grow: new_area=ffffffff83075000extract encodings/iso8859_14.py
+[KMEM] grow: new_area=ffffffff83078000extract encodings/hp_roman8.py
+extract encodings/utf_16_be.py
+extract encodings/iso2022_jp_ext.py
+[KMEM] grow: new_area=ffffffff8307b000[KMEM] grow: new_area=ffffffff8307d000extract encodings/mac_croatian.py
+[KMEM] grow: new_area=ffffffff83080000[KMEM] grow: new_area=ffffffff83082000extract encodings/cp1006.py
+[KMEM] grow: new_area=ffffffff83084000[KMEM] grow: new_area=ffffffff83086000extract encodings/koi8_r.py
+[KMEM] grow: new_area=ffffffff83089000[KMEM] grow: new_area=ffffffff8308b000[KMEM] grow: new_area=ffffffff8308f000[KMEM] grow: new_area=ffffffff83094000extract encodings/cp865.py
+[KMEM] grow: new_area=ffffffff8309b000[KMEM] grow: new_area=ffffffff8309d000extract encodings/cp850.py
+extract encodings/_win_cp_codecs.py
+extract encodings/gb18030.py
+extract encodings/cp1250.py
+[KMEM] grow: new_area=ffffffff830a5000[KMEM] grow: new_area=ffffffff830a9000[KMEM] grow: new_area=ffffffff830af000extract encodings/cp864.py
+[KMEM] grow: new_area=ffffffff830b7000extract encodings/cp737.py
+extract encodings/kz1048.py
+extract encodings/cp1253.py
+extract encodings/iso2022_jp_2004.py
+extract encodings/iso8859_11.py
+[KMEM] grow: new_area=ffffffff830c0000extract encodings/mac_romanian.py
+extract encodings/rot_13.py
+extract encodings/euc_jisx0213.py
+extract encodings/euc_jp.py
+extract encodings/johab.py
+[KMEM] grow: new_area=ffffffff830c2000[KMEM] grow: new_area=ffffffff830c4000[KMEM] grow: new_area=ffffffff830c6000[KMEM] grow: new_area=ffffffff830c9000[KMEM] grow: new_area=ffffffff830cd000[KMEM] grow: new_area=ffffffff830d2000extract encodings/cp858.py
+extract encodings/cp1026.py
+extract encodings/tis_620.py
+extract encodings/iso8859_2.py
+extract encodings/quopri_codec.py
+extract encodings/euc_jis_2004.py
+extract encodings/raw_unicode_escape.py
+[KMEM] grow: new_area=ffffffff830da000[KMEM] grow: new_area=ffffffff830dc000[KMEM] grow: new_area=ffffffff830e0000[KMEM] grow: new_area=ffffffff830e4000[KMEM] grow: new_area=ffffffff830eb000extract encodings/cp852.py
+extract encodings/unicode_escape.py
+[KMEM] grow: new_area=ffffffff830f3000extract encodings/mac_arabic.py
+[KMEM] grow: new_area=ffffffff830fb000[KMEM] grow: new_area=ffffffff83101000[KMEM] grow: new_area=ffffffff83103000[KMEM] grow: new_area=ffffffff8310f000extract enum.py
+extract filecmp.py
+extract fileinput.py
+extract fnmatch.py
+[KMEM] grow: new_area=ffffffff8311d000extract fractions.py
+[KMEM] grow: new_area=ffffffff83125000extract ftplib.py
+[KMEM] grow: new_area=ffffffff8312b000[KMEM] grow: new_area=ffffffff83130000[KMEM] grow: new_area=ffffffff83138000extract functools.py
+extract genericpath.py
+extract getopt.py
+extract getpass.py
+extract gettext.py
+[KMEM] grow: new_area=ffffffff83142000extract glob.py
+extract graphlib.py
+[KMEM] grow: new_area=ffffffff83146000[KMEM] grow: new_area=ffffffff83149000[KMEM] grow: new_area=ffffffff8314d000[KMEM] grow: new_area=ffffffff83153000extract gzip.py
+extract hashlib.py
+[KMEM] grow: new_area=ffffffff8315a000extract heapq.py
+extract hmac.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/html
+extract html/
+extract html/__init__.py
+[KMEM] grow: new_area=ffffffff83160000extract html/parser.py
+[KMEM] grow: new_area=ffffffff83165000[KMEM] grow: new_area=ffffffff83169000[KMEM] grow: new_area=ffffffff8316f000[KMEM] grow: new_area=ffffffff83177000[KMEM] grow: new_area=ffffffff83183000extract html/entities.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/http
+extract http/
+extract http/__init__.py
+[KMEM] grow: new_area=ffffffff83193000[KMEM] grow: new_area=ffffffff831a1000extract http/cookiejar.py
+extract http/client.py
+extract http/cookies.py
+[KMEM] grow: new_area=ffffffff831b3000extract http/server.py
+[KMEM] grow: new_area=ffffffff831bb000[KMEM] grow: new_area=ffffffff831c1000[KMEM] grow: new_area=ffffffff831cb000extract imaplib.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/importlib
+extract importlib/
+extract importlib/util.py
+extract importlib/__init__.py
+[KMEM] grow: new_area=ffffffff831d7000[KMEM] grow: new_area=ffffffff831df000extract importlib/_bootstrap_external.py
+extract importlib/abc.py
+extract importlib/simple.py
+extract importlib/readers.py
+[KMEM] grow: new_area=ffffffff831ea000[KMEM] grow: new_area=ffffffff831f2000extract importlib/_bootstrap.py
+extract importlib/_abc.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/importlib/metadata
+extract importlib/metadata/
+extract importlib/metadata/_text.py
+extract importlib/metadata/_meta.py
+extract importlib/metadata/_functools.py
+[KMEM] grow: new_area=ffffffff831ff000extract importlib/metadata/__init__.py
+extract importlib/metadata/_itertools.py
+extract importlib/metadata/_adapters.py
+extract importlib/metadata/_collections.py
+extract importlib/metadata/diagnose.py
+extract importlib/machinery.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/importlib/resources
+extract importlib/resources/
+extract importlib/resources/_functional.py
+extract importlib/resources/__init__.py
+extract importlib/resources/abc.py
+extract importlib/resources/_common.py
+extract importlib/resources/simple.py
+extract importlib/resources/readers.py
+extract importlib/resources/_itertools.py
+extract importlib/resources/_adapters.py
+[KMEM] grow: new_area=ffffffff83208000[KMEM] grow: new_area=ffffffff8320c000[KMEM] grow: new_area=ffffffff83214000[KMEM] grow: new_area=ffffffff8321d000[KMEM] grow: new_area=ffffffff8322c000[KMEM] grow: new_area=ffffffff8323e000extract inspect.py
+extract io.py
+extract ipaddress.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/json
+extract json/
+extract json/__main__.py
+extract json/__init__.py
+extract json/decoder.py
+extract json/encoder.py
+extract json/scanner.py
+extract json/tool.py
+extract keyword.py
+extract linecache.py
+[KMEM] grow: new_area=ffffffff8325b000[KMEM] grow: new_area=ffffffff83264000[KMEM] grow: new_area=ffffffff83270000extract locale.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/logging
+extract logging/
+extract logging/config.py
+[KMEM] grow: new_area=ffffffff83281000[KMEM] grow: new_area=ffffffff8328b000[KMEM] grow: new_area=ffffffff83298000extract logging/__init__.py
+extract logging/handlers.py
+extract lzma.py
+[KMEM] grow: new_area=ffffffff832ab000[KMEM] grow: new_area=ffffffff832b3000[KMEM] grow: new_area=ffffffff832c0000extract mailbox.py
+extract mimetypes.py
+extract modulefinder.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/multiprocessing
+extract multiprocessing/
+extract multiprocessing/util.py
+extract multiprocessing/queues.py
+extract multiprocessing/spawn.py
+extract multiprocessing/process.py
+extract multiprocessing/__init__.py
+extract multiprocessing/popen_spawn_win32.py
+extract multiprocessing/popen_fork.py
+extract multiprocessing/popen_spawn_posix.py
+[KMEM] grow: new_area=ffffffff832d0000[KMEM] grow: new_area=ffffffff832d2000[KMEM] grow: new_area=ffffffff832d5000[KMEM] grow: new_area=ffffffff832d7000[KMEM] grow: new_area=ffffffff832dc000[KMEM] grow: new_area=ffffffff832e3000extract multiprocessing/managers.py
+extract multiprocessing/resource_tracker.py
+extract multiprocessing/reduction.py
+extract multiprocessing/sharedctypes.py
+[KMEM] grow: new_area=ffffffff832eb000[KMEM] grow: new_area=ffffffff832ee000[KMEM] grow: new_area=ffffffff832f2000[KMEM] grow: new_area=ffffffff832f8000[KMEM] grow: new_area=ffffffff83300000extract multiprocessing/connection.py
+extract multiprocessing/resource_sharer.py
+extract multiprocessing/context.py
+extract multiprocessing/heap.py
+extract multiprocessing/shared_memory.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/multiprocessing/dummy
+extract multiprocessing/dummy/
+extract multiprocessing/dummy/__init__.py
+extract multiprocessing/dummy/connection.py
+[KMEM] grow: new_area=ffffffff8330b000extract multiprocessing/forkserver.py
+extract multiprocessing/synchronize.py
+[KMEM] grow: new_area=ffffffff8330f000[KMEM] grow: new_area=ffffffff83313000[KMEM] grow: new_area=ffffffff83317000[KMEM] grow: new_area=ffffffff8331e000extract multiprocessing/pool.py
+extract multiprocessing/popen_forkserver.py
+extract netrc.py
+[KMEM] grow: new_area=ffffffff83326000extract ntpath.py
+extract nturl2path.py
+extract numbers.py
+extract opcode.py
+extract operator.py
+[KMEM] grow: new_area=ffffffff8332d000[KMEM] grow: new_area=ffffffff83331000[KMEM] grow: new_area=ffffffff83336000[KMEM] grow: new_area=ffffffff8333d000[KMEM] grow: new_area=ffffffff83347000extract optparse.py
+[KMEM] grow: new_area=ffffffff83354000extract os.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/pathlib
+extract pathlib/
+[KMEM] grow: new_area=ffffffff8335e000extract pathlib/__init__.py
+extract pathlib/_local.py
+extract pathlib/_os.py
+extract pathlib/types.py
+[KMEM] grow: new_area=ffffffff83369000[KMEM] grow: new_area=ffffffff83371000[KMEM] grow: new_area=ffffffff8337a000[KMEM] grow: new_area=ffffffff8338a000[KMEM] grow: new_area=ffffffff8339c000extract pdb.py
+extract pickle.py
+[KMEM] grow: new_area=ffffffff833bc000extract pickletools.py
+extract pkgutil.py
+[KMEM] grow: new_area=ffffffff833be000[KMEM] grow: new_area=ffffffff833c8000extract platform.py
+extract plistlib.py
+extract poplib.py
+extract posixpath.py
+[KMEM] grow: new_area=ffffffff833d4000[KMEM] grow: new_area=ffffffff833d6000extract pprint.py
+[KMEM] grow: new_area=ffffffff833dc000extract profile.py
+[KMEM] grow: new_area=ffffffff833e1000[KMEM] grow: new_area=ffffffff833e3000[KMEM] grow: new_area=ffffffff833e9000extract pstats.py
+extract pty.py
+extract py_compile.py
+extract pyclbr.py
+[KMEM] grow: new_area=ffffffff833f1000[KMEM] grow: new_area=ffffffff833f6000[KMEM] grow: new_area=ffffffff833fe000[KMEM] grow: new_area=ffffffff83408000[KMEM] grow: new_area=ffffffff83418000extract pydoc.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/pydoc_data
+extract pydoc_data/
+extract pydoc_data/__init__.py
+[KMEM] grow: new_area=ffffffff8342b000[KMEM] grow: new_area=ffffffff8342d000[KMEM] grow: new_area=ffffffff83442000[KMEM] grow: new_area=ffffffff83459000[KMEM] grow: new_area=ffffffff83482000[KMEM] grow: new_area=ffffffff834b0000[KMEM] grow: new_area=ffffffff83501000extract pydoc_data/topics.py
+extract pydoc_data/module_docs.py
+extract pydoc_data/_pydoc.css
+extract queue.py
+extract quopri.py
+extract random.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/re
+extract re/
+extract re/__init__.py
+extract re/_parser.py
+extract re/_constants.py
+extract re/_casefix.py
+extract re/_compiler.py
+extract reprlib.py
+extract rlcompleter.py
+extract runpy.py
+extract sched.py
+extract secrets.py
+extract selectors.py
+extract shelve.py
+extract shlex.py
+extract shutil.py
+extract signal.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/site-packages
+extract site-packages/
+extract site-packages/README.txt
+extract site.py
+extract smtplib.py
+extract socket.py
+extract socketserver.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/sqlite3
+extract sqlite3/
+extract sqlite3/__main__.py
+extract sqlite3/__init__.py
+extract sqlite3/dump.py
+extract sqlite3/dbapi2.py
+extract sre_compile.py
+extract sre_constants.py
+extract sre_parse.py
+extract ssl.py
+extract stat.py
+extract statistics.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/string
+extract string/
+extract string/__init__.py
+extract string/templatelib.py
+extract stringprep.py
+extract struct.py
+[KMEM] grow: new_area=ffffffff8355d000[KMEM] grow: new_area=ffffffff83568000[KMEM] grow: new_area=ffffffff83576000extract subprocess.py
+extract symtable.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/sysconfig
+extract sysconfig/
+extract sysconfig/__main__.py
+extract sysconfig/__init__.py
+extract tabnanny.py
+[KMEM] grow: new_area=ffffffff8358b000[KMEM] grow: new_area=ffffffff83597000[KMEM] grow: new_area=ffffffff835a5000[KMEM] grow: new_area=ffffffff835bd000extract tarfile.py
+extract tempfile.py
+extract textwrap.py
+extract this.py
+extract threading.py
+extract timeit.py
+extract token.py
+extract tokenize.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/tomllib
+extract tomllib/
+extract tomllib/__init__.py
+extract tomllib/_re.py
+extract tomllib/_parser.py
+extract tomllib/_types.py
+extract tomllib/mypy.ini
+extract trace.py
+[KMEM] grow: new_area=ffffffff835d8000[KMEM] grow: new_area=ffffffff835dd000[KMEM] grow: new_area=ffffffff835e5000[KMEM] grow: new_area=ffffffff835ee000extract traceback.py
+extract tracemalloc.py
+extract tty.py
+[KMEM] grow: new_area=ffffffff835fd000[KMEM] grow: new_area=ffffffff83608000[KMEM] grow: new_area=ffffffff83615000[KMEM] grow: new_area=ffffffff8362a000extract turtle.py
+extract types.py
+[KMEM] grow: new_area=ffffffff83644000[KMEM] grow: new_area=ffffffff83658000extract typing.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/unittest
+extract unittest/
+extract unittest/util.py
+extract unittest/__main__.py
+extract unittest/async_case.py
+extract unittest/__init__.py
+extract unittest/loader.py
+extract unittest/main.py
+extract unittest/result.py
+[KMEM] grow: new_area=ffffffff83678000[KMEM] grow: new_area=ffffffff83691000extract unittest/mock.py
+extract unittest/signals.py
+extract unittest/runner.py
+extract unittest/suite.py
+extract unittest/case.py
+extract unittest/_log.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/urllib
+extract urllib/
+extract urllib/__init__.py
+extract urllib/response.py
+[KMEM] grow: new_area=ffffffff836ac000extract urllib/request.py
+extract urllib/robotparser.py
+extract urllib/parse.py
+extract urllib/error.py
+extract uuid.py
+extract warnings.py
+extract wave.py
+[KMEM] grow: new_area=ffffffff836be000extract weakref.py
+[KMEM] grow: new_area=ffffffff836c2000[KMEM] grow: new_area=ffffffff836c6000[KMEM] grow: new_area=ffffffff836cc000extract webbrowser.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/wsgiref
+extract wsgiref/
+extract wsgiref/util.py
+extract wsgiref/__init__.py
+extract wsgiref/headers.py
+extract wsgiref/simple_server.py
+[KMEM] grow: new_area=ffffffff836d3000extract wsgiref/validate.py
+[KMEM] grow: new_area=ffffffff836d7000extract wsgiref/handlers.py
+extract wsgiref/types.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/xml
+extract xml/
+extract xml/__init__.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/xml/dom
+extract xml/dom/
+extract xml/dom/minicompat.py
+extract xml/dom/NodeFilter.py
+extract xml/dom/__init__.py
+[KMEM] grow: new_area=ffffffff836dd000[KMEM] grow: new_area=ffffffff836df000[KMEM] grow: new_area=ffffffff836e3000[KMEM] grow: new_area=ffffffff836e9000[KMEM] grow: new_area=ffffffff836f1000[KMEM] grow: new_area=ffffffff836fc000extract xml/dom/minidom.py
+extract xml/dom/pulldom.py
+extract xml/dom/domreg.py
+extract xml/dom/expatbuilder.py
+extract xml/dom/xmlbuilder.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/xml/parsers
+extract xml/parsers/
+extract xml/parsers/__init__.py
+extract xml/parsers/expat.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/xml/etree
+extract xml/etree/
+extract xml/etree/cElementTree.py
+extract xml/etree/__init__.py
+[KMEM] grow: new_area=ffffffff8370c000[KMEM] grow: new_area=ffffffff83714000[KMEM] grow: new_area=ffffffff8371d000[KMEM] grow: new_area=ffffffff8372d000extract xml/etree/ElementTree.py
+extract xml/etree/ElementInclude.py
+extract xml/etree/ElementPath.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/xml/sax
+extract xml/sax/
+extract xml/sax/_exceptions.py
+extract xml/sax/expatreader.py
+extract xml/sax/handler.py
+extract xml/sax/__init__.py
+extract xml/sax/saxutils.py
+extract xml/sax/xmlreader.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/xmlrpc
+extract xmlrpc/
+extract xmlrpc/__init__.py
+[KMEM] grow: new_area=ffffffff8373f000extract xmlrpc/client.py
+[KMEM] grow: new_area=ffffffff83747000extract xmlrpc/server.py
+extract zipapp.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/zipfile
+extract zipfile/
+extract zipfile/__main__.py
+[KMEM] grow: new_area=ffffffff83750000[KMEM] grow: new_area=ffffffff83758000[KMEM] grow: new_area=ffffffff83761000[KMEM] grow: new_area=ffffffff8376f000extract zipfile/__init__.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/zipfile/_path
+extract zipfile/_path/
+extract zipfile/_path/__init__.py
+extract zipfile/_path/glob.py
+extract zipimport.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/zoneinfo
+extract zoneinfo/
+extract zoneinfo/__init__.py
+extract zoneinfo/_common.py
+extract zoneinfo/_tzpath.py
+extract zoneinfo/_zoneinfo.py
+[driver] ChainFS: Created directory: /usr/local/lib/python3.14/lib-dynload
+extract lib-dynload/
+[PROC] Process 'unzip' (PID 3) exited with code 0
+/ $ python
+python
+[KMEM] grow: new_area=ffffffff84ee3000[ELF] Loading segment: vaddr=400000[ELF] Loading segment: vaddr=5e80e0[ELF] Loading segment: vaddr=83db40[ELF] Loading segment: vaddr=893910[ELF] main loaded: entry=5e80e0[SPAWN] PT_INTERP '/lib/ld-musl-x86_64.so.1'
+[ELF] Loading segment: vaddr=40000000[ELF] Loading segment: vaddr=4004b630[ELF] Loading segment: vaddr=400b19a0[ELF] Loading segment: vaddr=400b2f10[ELF] loaded interp: base=40000000[SCHED] PID 4 preferred_cpu=1
+[THREAD] Created thread tid=4 for PID 4 rip=400aa610[SPAWN] Created 'python' (PID 4) from '/bin/python'
+print(2)
+das
+ddffffd
+hello
+sadas

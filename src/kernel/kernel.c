@@ -119,6 +119,7 @@ $space %export kmain
 #include <mlibc/stdio.h>
 #include <mlibc/stdlib.h>
 #include <userland/userspace.h>
+#define BOOT_CHAINFS_MAX_FILES	4096
 
 extern void	cpuid_get(u32 code, u32 *res);
 extern void	cinfo(char *buf);
@@ -1013,7 +1014,8 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 			format_blocks =
 			    selected_disk->total_sectors;
 		}
-		fmt_ok = (chainfs_format(format_blocks, 128) == 0);
+		fmt_ok = (chainfs_format(format_blocks,
+		    BOOT_CHAINFS_MAX_FILES) == 0);
 		status_line("chainfs format", fmt_ok);
 		fs_ok = fmt_ok;
 	}
