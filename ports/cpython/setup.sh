@@ -7,12 +7,13 @@ MUSL_DIR="../../../libc/musl"
 SRC_DIR="$SCRIPT_DIR/cpython"
 SUBMODULE_PATH="ports/cpython/cpython"
 SUBMODULE_URL="https://github.com/python/cpython.git"
+SUBMODULE_BRANCH="3.14"
 if [ ! -f "$SRC_DIR/configure" ]; then
 	cd "$REPO_ROOT"
 	if git ls-files --error-unmatch "$SUBMODULE_PATH" >/dev/null 2>&1; then
-		git submodule update --init --depth 1 "$SUBMODULE_PATH"
+		git submodule update --init --depth 1 --remote "$SUBMODULE_PATH"
 	else
-		git submodule add --depth 1 "$SUBMODULE_URL" "$SUBMODULE_PATH"
+		git submodule add --depth 1 --branch "$SUBMODULE_BRANCH" "$SUBMODULE_URL" "$SUBMODULE_PATH"
 	fi
 fi
 if grep -q 'otsos: all' "$SRC_DIR/Makefile.pre.in" 2>/dev/null; then

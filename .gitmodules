@@ -5,3 +5,4 @@
 [submodule "ports/cpython/cpython"]
 	path = ports/cpython/cpython
 	url = https://github.com/python/cpython.git
+	branch = 3.14
