@@ -137,6 +137,8 @@ typedef struct profile_stats {
 	int		exit_status;
 } profile_stats_t;
 
+static profile_manifest_t	g_profile_manifest;
+
 static void
 profile_usage(void)
 {
@@ -1420,7 +1422,6 @@ done:
 int
 main(int argc, char **argv, char **envp)
 {
-	profile_manifest_t	manifest;
 	profile_opts_t		opts;
 	int			rc, i;
 
@@ -1435,26 +1436,26 @@ main(int argc, char **argv, char **envp)
 			return (0);
 		}
 	}
-	if (profile_manifest_load(&manifest) != 0) {
+	if (profile_manifest_load(&g_profile_manifest) != 0) {
 		ybx_error("profile", "trace manifest", errno);
 		return (1);
 	}
 	profile_opts_init(&opts);
-	rc = profile_parse_argv(&opts, &manifest, argc, argv);
+	rc = profile_parse_argv(&opts, &g_profile_manifest, argc, argv);
 	if (rc != 0) {
 		return (rc < 0 ? 1 : 0);
 	}
 	if (opts.list_events || opts.list_sources || opts.list_pmu) {
 		if (opts.list_events) {
-			profile_list_events(stdout, &manifest);
+			profile_list_events(stdout, &g_profile_manifest);
 		}
 		if (opts.list_sources) {
-			profile_list_sources(stdout, &manifest);
+			profile_list_sources(stdout, &g_profile_manifest);
 		}
 		if (opts.list_pmu) {
-			profile_list_pmu(stdout, &manifest);
+			profile_list_pmu(stdout, &g_profile_manifest);
 		}
 		return (0);
 	}
-	return (profile_run(&opts, &manifest, envp));
+	return (profile_run(&opts, &g_profile_manifest, envp));
 }
