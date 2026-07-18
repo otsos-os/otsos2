@@ -3,13 +3,15 @@
 $define %type api_fs_stat as struct with native file metadata
 $define %type api_dirent as struct with native directory entry
 $define %func fsStat as function with args const char *, api_fs_stat *
+$define %func fsMnt as function with args const char *, const char *, const char *, uint64_t, const void *
+$define %func fsUmnt as function with args const char *, uint64_t
 
 */
 
 /* !SPACE!
 
 $space %export fsChdir, fsGetcwd, fsListdir, fsStat, fsRename, fsUnlink
-$space %export fsLinkNew, fsLinkGo
+$space %export fsLinkNew, fsLinkGo, fsMnt, fsUmnt
 
 */
 
@@ -73,4 +75,17 @@ fsLinkGo(const char *path, char *buf, uint32_t bufsize)
 {
 	return (__sysret_int(__syscall3(CALL_FS_LINKGO, (long)path,
 	    (long)buf, (long)bufsize)));
+}
+int
+fsMnt(const char *source, const char *target, const char *fstype,
+    uint64_t flags, const void *data)
+{
+	return (__sysret_int(__syscall5(CALL_FS_MNT, (long)source,
+	    (long)target, (long)fstype, (long)flags, (long)data)));
+}
+int
+fsUmnt(const char *target, uint64_t flags)
+{
+	return (__sysret_int(__syscall2(CALL_FS_UMNT, (long)target,
+	    (long)flags)));
 }

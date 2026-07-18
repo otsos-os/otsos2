@@ -220,8 +220,9 @@ posix_do_open(const char *path, int posix_flags, u64 mode)
 	}
 
 	if (posix_flags & POSIX_O_TRUNC) {
-		if (vn->write_fn) {
-			vn->write_fn(vn, NULL, 0, 0);
+		if (vn->type != VCHR && vfs_truncate(path, 0) != 0) {
+			vnode_release(vn);
+			return (-POSIX_EIO);
 		}
 		vn->size = 0;
 	}

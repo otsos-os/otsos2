@@ -206,6 +206,7 @@ CHDIR_O = ../bin/chdir.o
 GETCWD_O = ../bin/getcwd.o
 LISTDIR_O = ../bin/listdir.o
 FS_META_O = ../bin/fs_meta.o
+MOUNT_O = ../bin/mount.o
 PROCLIST_O = ../bin/proclist.o
 ELF_O = ../bin/elf.o
 USERSPACE_O = ../bin/userspace.o
@@ -270,6 +271,7 @@ EVENT_KBD_O = ../bin/event_kbd.o
 EVENT_MOUSE_O = ../bin/event_mouse.o
 
 VFS_O = ../bin/vfs.o
+VFS_BACK_O = ../bin/vfs_back.o
 DEVFS_O = ../bin/devfs.o
 LINK_O = ../bin/link.o
 POSIX_O = ../bin/posix.o
@@ -297,7 +299,7 @@ CMOS_RTC_O = ../bin/cmos_rtc.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDIO_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
       $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(API_NET_O) $(PIPE_O) $(CLONE_O) $(SYSCALL_O) \
-      $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(SESSION_O) $(THREAD_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(FS_META_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
+      $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(SESSION_O) $(THREAD_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(FS_META_O) $(MOUNT_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
@@ -310,7 +312,7 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
       $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
       $(EVENT_KBD_O) $(EVENT_MOUSE_O) \
-      $(VFS_O) $(DEVFS_O) $(LINK_O) \
+      $(VFS_O) $(VFS_BACK_O) $(DEVFS_O) $(LINK_O) \
       $(POSIX_O) $(POSIX_IO_O) $(POSIX_PROC_O) $(POSIX_FS_O) \
       $(POSIX_MEM_O) $(POSIX_SOCKET_O) $(POSIX_SIGNAL_O) $(SIGNAL_O) \
       $(PROC_PID_O) $(THREAD_API_O) $(FUTEX_O) $(SYS_O) \
@@ -898,6 +900,10 @@ $(FS_META_O): kernel/api/fs_meta.c kernel/api/api.h kernel/drivers/fs/vfs/vfs.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+$(MOUNT_O): kernel/api/mount.c kernel/api/api.h kernel/drivers/fs/vfs/vfs.h kernel/other/restrict.h kernel/useraddr.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
 $(PROCLIST_O): kernel/api/proclist.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
@@ -1145,7 +1151,14 @@ $(INPUT_O): kernel/api/input.c kernel/api/api.h kernel/drivers/keyboard/keyboard
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(VFS_O): kernel/drivers/fs/vfs/vfs.c kernel/drivers/fs/vfs/vfs.h
+$(VFS_O): kernel/drivers/fs/vfs/vfs.c kernel/drivers/fs/vfs/vfs.h \
+    kernel/drivers/fs/vfs/back/vfs_back.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(VFS_BACK_O): kernel/drivers/fs/vfs/back/vfs_back.c \
+    kernel/drivers/fs/vfs/back/vfs_back.h kernel/drivers/fs/vfs/vfs.h \
+    kernel/drivers/fs/chainFS/chainfs.h kernel/drivers/fs/devfs/devfs.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

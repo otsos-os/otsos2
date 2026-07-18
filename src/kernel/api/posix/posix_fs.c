@@ -25,6 +25,7 @@
  */
 
 #include <kernel/api/posix/posix.h>
+#include <kernel/api/api.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
@@ -65,6 +66,78 @@ copy_user_string(const char *user, int max_len)
 	memcpy(kbuf, user, len);
 	kbuf[len] = '\0';
 	return (kbuf);
+}
+
+static s64
+posix_api_ret(int ret)
+{
+	int	err;
+
+	if (ret >= 0) {
+		return ((s64)ret);
+	}
+
+	err = -ret;
+	switch (err) {
+	case API_ERR_PERM:
+		return (-POSIX_EPERM);
+	case API_ERR_ACCESS:
+		return (-POSIX_EACCES);
+	case API_ERR_NOT_FOUND:
+		return (-POSIX_ENOENT);
+	case API_ERR_BAD_ADDR:
+		return (-POSIX_EFAULT);
+	case API_ERR_BUSY:
+		return (-POSIX_EBUSY);
+	case API_ERR_EXISTS:
+		return (-POSIX_EEXIST);
+	case API_ERR_NODEV:
+		return (-POSIX_ENODEV);
+	case API_ERR_NOT_DIR:
+		return (-POSIX_ENOTDIR);
+	case API_ERR_IS_DIR:
+		return (-POSIX_EISDIR);
+	case API_ERR_NOT_SUPPORTED:
+		return (-POSIX_ENOSYS);
+	case API_ERR_TOO_BIG:
+		return (-POSIX_ENAMETOOLONG);
+	case API_ERR_READ_ONLY:
+		return (-POSIX_EROFS);
+	case API_ERR_BAD_VALUE:
+	case API_ERR_INVAL:
+	default:
+		return (-POSIX_EINVAL);
+	}
+}
+
+s64
+posix_mount(u64 source, u64 target, u64 fstype, u64 flags, u64 data,
+    u64 a6, registers_t *regs)
+{
+	int	ret;
+
+	(void)a6;
+	(void)regs;
+
+	ret = api_fs_mnt((const char *)source, (const char *)target,
+	    (const char *)fstype, flags, (const void *)data);
+	return (posix_api_ret(ret));
+}
+
+s64
+posix_umount2(u64 target, u64 flags, u64 a3, u64 a4, u64 a5, u64 a6,
+    registers_t *regs)
+{
+	int	ret;
+
+	(void)a3;
+	(void)a4;
+	(void)a5;
+	(void)a6;
+	(void)regs;
+
+	ret = api_fs_umnt((const char *)target, flags);
+	return (posix_api_ret(ret));
 }
 
 s64

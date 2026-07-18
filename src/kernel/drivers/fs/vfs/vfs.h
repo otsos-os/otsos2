@@ -34,9 +34,15 @@ $define %type int as 32 bit signed
 $define %type char as 8 bit signed
 $define %type vnode_t as struct with type, refcount, size, mode, name, ops, data
 $define %type vfs_ops_t as struct with read, write, stat, readdir function pointers
+$define %type vfs_back_ops as backend operation table forward declaration
 $define %type posix_stat_t as struct with POSIX stat fields
 
 $define %func vfs_init as procedure with args void
+$define %func vfs_mount as function with args const char *, const struct vfs_back_ops *
+$define %func vfs_mount_named as function with args const char *, const char *, u64
+$define %func vfs_umount as function with args const char *
+$define %func vfs_unmount as function with args const char *
+$define %func vfs_mount_can_exec as function with args const char *
 $define %func vfs_resolve as function with args const char *, vnode_t **
 $define %func vfs_resolve_nofollow as function with args const char *, vnode_t **
 $define %func vfs_create_file as function with args const char *
@@ -62,7 +68,9 @@ $define %func vnode_readlink as function with args vnode_t *, char *, size_t
 
 /* !SPACE!
 
-$space %export vfs_init, vfs_resolve, vfs_resolve_nofollow, vfs_create_file
+$space %export vfs_init, vfs_mount, vfs_mount_named
+$space %export vfs_umount, vfs_unmount, vfs_mount_can_exec
+$space %export vfs_resolve, vfs_resolve_nofollow, vfs_create_file
 $space %export vfs_mkdir, vfs_rmdir, vfs_unlink, vfs_rename
 $space %export vfs_truncate, vfs_symlink, vfs_link, vfs_readlink
 $space %export vnode_acquire, vnode_release
@@ -86,6 +94,27 @@ $space %export vfs_is_initialized
 #define VSOCK	6
 
 #define VFS_MAX_VNODES	256
+
+#define	VFS_MNT_RDONLY		0x00000001ULL
+#define	VFS_MNT_NOSUID		0x00000002ULL
+#define	VFS_MNT_NODEV		0x00000004ULL
+#define	VFS_MNT_NOEXEC		0x00000008ULL
+#define	VFS_MNT_SYNCHRONOUS	0x00000010ULL
+#define	VFS_MNT_MANDLOCK	0x00000040ULL
+#define	VFS_MNT_DIRSYNC		0x00000080ULL
+#define	VFS_MNT_NOATIME		0x00000400ULL
+#define	VFS_MNT_NODIRATIME	0x00000800ULL
+#define	VFS_MNT_RELATIME	0x00200000ULL
+#define	VFS_MNT_KUSR_ONLY	0x100000000ULL
+
+#define	VFS_MNT_SUPPORTED	(VFS_MNT_RDONLY | VFS_MNT_NOSUID | \
+				    VFS_MNT_NODEV | VFS_MNT_NOEXEC | \
+				    VFS_MNT_SYNCHRONOUS | \
+				    VFS_MNT_MANDLOCK | VFS_MNT_DIRSYNC | \
+				    VFS_MNT_NOATIME | \
+				    VFS_MNT_NODIRATIME | \
+				    VFS_MNT_RELATIME | \
+				    VFS_MNT_KUSR_ONLY)
 
 #define POSIX_S_IFMT	0xF000
 #define POSIX_S_IFREG	0x8000
@@ -124,13 +153,14 @@ typedef struct posix_stat {
 
 typedef struct vnode {
 	int		type;
-  int		refcount;
-  int		data_owned;
-  u64		size;
-  u32		mode;
-  u32		uid;
-  u32		gid;
-  char		name[32];
+	int		refcount;
+	int		data_owned;
+	u64		size;
+	u32		mode;
+	u32		uid;
+	u32		gid;
+	u32		mount_id;
+	char		name[32];
 	void		*data;
 	int		(*read_fn)(struct vnode *, void *, u64, u64);
 	int		(*write_fn)(struct vnode *, const void *, u64, u64);
@@ -140,8 +170,17 @@ typedef struct vnode {
 	int		(*readlink_fn)(struct vnode *, char *, size_t);
 } vnode_t;
 
+struct vfs_back_ops;
+
 void		vfs_init(void);
 int		vfs_is_initialized(void);
+int		vfs_mount(const char *path,
+		    const struct vfs_back_ops *ops);
+int		vfs_mount_named(const char *path, const char *fstype,
+		    u64 flags);
+int		vfs_umount(const char *path);
+int		vfs_unmount(const char *path);
+int		vfs_mount_can_exec(const char *path);
 int		vfs_resolve(const char *path, vnode_t **out);
 int		vfs_resolve_nofollow(const char *path, vnode_t **out);
 int		vfs_create_file(const char *path);

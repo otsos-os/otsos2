@@ -8,6 +8,8 @@ $define %type api_net_msg as native datagram descriptor
 $define %type kevent as struct with native event data
 $define %func termWrite as function with args const void *, size_t
 $define %func dataOpen as function with args const char *, int
+$define %func fsMnt as function with args const char *, const char *, const char *, uint64_t, const void *
+$define %func fsUmnt as function with args const char *, uint64_t
 $define %func procSpawn as function with args const char *, char *const *, char *const *
 $define %func procSpawnAbi as function with args const char *, char *const *, char *const *, uint32_t
 
@@ -19,6 +21,7 @@ $space %export termRead, termReadFlags, termWrite, termPrint
 $space %export dataOpen, dataClose, dataRead, dataWrite, dataReadFull
 $space %export dataWriteFull, dataSeek, dataPipe
 $space %export fsChdir, fsGetcwd, fsListdir, fsStat, fsRename, fsUnlink
+$space %export fsMnt, fsUmnt
 $space %export procSpawn, procSpawnAbi, procSpawnNative, procWait
 $space %export procRun, procExit, procKill
 $space %export memMap, memUnmap, eventKqueue, eventWait, eventClose
@@ -60,6 +63,8 @@ $space %export drmDriverList, drmDriverSwitch
 #define CALL_FS_UNLINK		0x20B
 #define CALL_FS_LINKNEW		0x20C
 #define CALL_FS_LINKGO		0x20D
+#define CALL_FS_MNT		0x20E
+#define CALL_FS_UMNT		0x20F
 #define CALL_MEM_MAP		0x300
 #define CALL_MEM_UNMAP		0x301
 #define CALL_PROC_CLONE		0x400
@@ -139,6 +144,18 @@ $space %export drmDriverList, drmDriverSwitch
 #define API_FS_TYPE_CHR		3
 #define API_FS_TYPE_PIPE	4
 #define API_FS_TYPE_LNK		5
+
+#define API_MS_RDONLY		0x00000001ULL
+#define API_MS_NOSUID		0x00000002ULL
+#define API_MS_NODEV		0x00000004ULL
+#define API_MS_NOEXEC		0x00000008ULL
+#define API_MS_SYNCHRONOUS	0x00000010ULL
+#define API_MS_MANDLOCK	0x00000040ULL
+#define API_MS_DIRSYNC		0x00000080ULL
+#define API_MS_NOATIME		0x00000400ULL
+#define API_MS_NODIRATIME	0x00000800ULL
+#define API_MS_RELATIME	0x00200000ULL
+#define API_MS_KUSR_ONLY	0x100000000ULL
 
 #define EVFILT_READ		(-1)
 #define EVFILT_WRITE		(-2)
@@ -496,6 +513,9 @@ int	fsRename(const char *oldpath, const char *newpath);
 int	fsUnlink(const char *path);
 int	fsLinkNew(const char *target, const char *linkpath, uint32_t flags);
 int	fsLinkGo(const char *path, char *buf, uint32_t bufsize);
+int	fsMnt(const char *source, const char *target, const char *fstype,
+	    uint64_t flags, const void *data);
+int	fsUmnt(const char *target, uint64_t flags);
 
 void	*memMap(const struct mem_map_args *args);
 int	memUnmap(void *addr, size_t length);

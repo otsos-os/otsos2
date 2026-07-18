@@ -152,6 +152,10 @@ static int read_file_into_buffer(const char *path, u8 **out_buf,
   if (vfs_resolve(path, &vn) != 0 || vn == NULL) {
     return -API_ERR_NOT_FOUND;
   }
+  if (!vfs_mount_can_exec(path)) {
+    vnode_release(vn);
+    return -API_ERR_ACCESS;
+  }
 
   if (vn->type == VDIR) {
     vnode_release(vn);

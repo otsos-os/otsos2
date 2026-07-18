@@ -107,6 +107,8 @@ void syscall_handler(registers_t *regs) {
   u64 arg1 = regs->rdi;
   u64 arg2 = regs->rsi;
   u64 arg3 = regs->rdx;
+  u64 arg4 = regs->r10;
+  u64 arg5 = regs->r8;
 
   if (syscall_number == CALL_PERSONALITY) {
     process_t *proc = process_current();
@@ -207,6 +209,15 @@ void syscall_handler(registers_t *regs) {
   case CALL_FS_LINKGO:
     regs->rax = (u64)api_fs_linkgo((const char *)arg1,
                                 (char *)arg2, (u32)arg3);
+    break;
+  case CALL_FS_MNT:
+    regs->rax = (u64)api_fs_mnt((const char *)arg1,
+                                (const char *)arg2,
+                                (const char *)arg3, arg4,
+                                (const void *)arg5);
+    break;
+  case CALL_FS_UMNT:
+    regs->rax = (u64)api_fs_umnt((const char *)arg1, arg2);
     break;
   case CALL_MEM_MAP:
     regs->rax = (u64)api_mem_map((const void *)arg1);

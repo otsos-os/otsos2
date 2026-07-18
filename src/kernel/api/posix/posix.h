@@ -275,6 +275,8 @@ $space %export posix_getrandom
 #define SYS_kill		62
 #define SYS_uname		63
 #define SYS_shmdt		67
+#define SYS_mount		165
+#define SYS_umount2		166
 #define SYS_time		201
 #define SYS_gettimeofday	96
 #define SYS_clock_gettime	228
@@ -339,6 +341,18 @@ $space %export posix_getrandom
 #define POSIX_CLOCK_REALTIME	0
 #define POSIX_CLOCK_MONOTONIC	1
 #define POSIX_CLOCK_TIMER_ABSTIME	1
+
+#define POSIX_MS_RDONLY		0x00000001ULL
+#define POSIX_MS_NOSUID		0x00000002ULL
+#define POSIX_MS_NODEV		0x00000004ULL
+#define POSIX_MS_NOEXEC		0x00000008ULL
+#define POSIX_MS_SYNCHRONOUS	0x00000010ULL
+#define POSIX_MS_MANDLOCK	0x00000040ULL
+#define POSIX_MS_DIRSYNC	0x00000080ULL
+#define POSIX_MS_NOATIME	0x00000400ULL
+#define POSIX_MS_NODIRATIME	0x00000800ULL
+#define POSIX_MS_RELATIME	0x00200000ULL
+#define POSIX_MS_KUSR_ONLY	0x100000000ULL
 
 /* futex operations */
 #define FUTEX_WAIT		0

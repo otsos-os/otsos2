@@ -117,6 +117,10 @@ s64	posix_fcntl(u64 fd, u64 cmd, u64 arg, u64 a4, u64 a5, u64 a6,
 	    registers_t *regs);
 s64	posix_flock(u64 fd, u64 op, u64 a3, u64 a4, u64 a5, u64 a6,
 	    registers_t *regs);
+s64	posix_mount(u64 source, u64 target, u64 fstype, u64 flags, u64 data,
+	    u64 a6, registers_t *regs);
+s64	posix_umount2(u64 target, u64 flags, u64 a3, u64 a4, u64 a5,
+	    u64 a6, registers_t *regs);
 s64	posix_getcwd(u64 buf, u64 size, u64 a3, u64 a4, u64 a5, u64 a6,
 	    registers_t *regs);
 s64	posix_chdir(u64 path, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
@@ -363,6 +367,12 @@ posix_syscall_handler(registers_t *regs)
 		break;
 	case SYS_flock:
 		ret = posix_flock(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_mount:
+		ret = posix_mount(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_umount2:
+		ret = posix_umount2(a1, a2, a3, a4, a5, a6, regs);
 		break;
 	case SYS_getcwd:
 		ret = posix_getcwd(a1, a2, a3, a4, a5, a6, regs);

@@ -130,6 +130,18 @@ struct api_term_info {
 #define	API_FS_TYPE_PIPE	4
 #define	API_FS_TYPE_LNK		5
 
+#define	API_MS_RDONLY		VFS_MNT_RDONLY
+#define	API_MS_NOSUID		VFS_MNT_NOSUID
+#define	API_MS_NODEV		VFS_MNT_NODEV
+#define	API_MS_NOEXEC		VFS_MNT_NOEXEC
+#define	API_MS_SYNCHRONOUS	VFS_MNT_SYNCHRONOUS
+#define	API_MS_MANDLOCK		VFS_MNT_MANDLOCK
+#define	API_MS_DIRSYNC		VFS_MNT_DIRSYNC
+#define	API_MS_NOATIME		VFS_MNT_NOATIME
+#define	API_MS_NODIRATIME	VFS_MNT_NODIRATIME
+#define	API_MS_RELATIME		VFS_MNT_RELATIME
+#define	API_MS_KUSR_ONLY	VFS_MNT_KUSR_ONLY
+
 struct api_fs_stat {
 	u32	type;
 	u32	mode;
@@ -486,6 +498,9 @@ int api_fs_unlink(const char *path);
 
 int api_fs_linknew(const char *target, const char *linkpath, u32 flags);
 int api_fs_linkgo(const char *path, char *buf, u32 bufsize);
+int api_fs_mnt(const char *source, const char *target, const char *fstype,
+    u64 flags, const void *data);
+int api_fs_umnt(const char *target, u64 flags);
 int api_proc_list(struct api_proc_info *buf, u32 max_entries);
 int api_kusr_auth(const char *password);
 int api_drm_call(u64 op, void *arg);

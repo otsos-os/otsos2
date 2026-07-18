@@ -232,39 +232,26 @@ devfs_find(const char *name)
 static const char *
 devfs_strip_prefix(const char *path)
 {
-	const char	*prefix;
-	int		i;
-	int		match;
+	const char	*p;
 
-	if (strcmp(path, "/dev/") == 0) {
+	if (!path || path[0] == '\0') {
 		return ("");
 	}
-
-	prefix = "/dev/";
-	match = 1;
-	for (i = 0; i < 5; i++) {
-		if (path[i] != prefix[i]) {
-			match = 0;
-			break;
-		}
-	}
-	if (match) {
-		return (path + 5);
+	if (path[0] != '/') {
+		return (path);
 	}
 
-	prefix = "dev/";
-	match = 1;
-	for (i = 0; i < 4; i++) {
-		if (path[i] != prefix[i]) {
-			match = 0;
-			break;
-		}
+	p = path + 1;
+	while (*p != '\0' && *p != '/') {
+		p++;
 	}
-	if (match) {
-		return (path + 4);
+	if (*p == '\0') {
+		return ("");
 	}
-
-	return (path);
+	if (p[1] == '\0') {
+		return ("");
+	}
+	return (p + 1);
 }
 
 int
