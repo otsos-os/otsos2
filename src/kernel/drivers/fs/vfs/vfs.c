@@ -87,6 +87,7 @@ $space %export vfs_read_file_full, vfs_write_file
 */
 
 #include <kernel/api/posix/posix.h>
+#include <kernel/api/errno.h>
 #include <kernel/drivers/fs/vfs/back/vfs_back.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <mlibc/mlibc.h>
@@ -125,19 +126,24 @@ int
 vfs_mount(const char *path, const struct vfs_back_ops *ops)
 {
 	vnode_t	*vn;
+	int	ret;
 
 	if (!vfs_initialized || !path || !ops || path[0] == '\0') {
-		return (-1);
+		return (-API_ERR_BAD_VALUE);
 	}
 	if (strcmp(path, "/") == 0) {
-		return (-1);
+		return (-API_ERR_BUSY);
 	}
-	if (vfs_resolve_nofollow(path, &vn) != 0 || !vn) {
-		return (-1);
+	ret = vfs_resolve_nofollow(path, &vn);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (!vn) {
+		return (-API_ERR_NOT_FOUND);
 	}
 	if (vn->type != VDIR) {
 		vnode_release(vn);
-		return (-1);
+		return (-API_ERR_NOT_DIR);
 	}
 
 	vnode_release(vn);
@@ -148,23 +154,28 @@ int
 vfs_mount_named(const char *path, const char *fstype, u64 flags)
 {
 	vnode_t	*vn;
+	int	ret;
 
 	if (!vfs_initialized || !path || !fstype || path[0] == '\0' ||
 	    fstype[0] == '\0') {
-		return (-1);
+		return (-API_ERR_BAD_VALUE);
 	}
 	if ((flags & ~VFS_MNT_SUPPORTED) != 0) {
-		return (-1);
+		return (-API_ERR_NOT_SUPPORTED);
 	}
 	if (strcmp(path, "/") == 0) {
-		return (-1);
+		return (-API_ERR_BUSY);
 	}
-	if (vfs_resolve_nofollow(path, &vn) != 0 || !vn) {
-		return (-1);
+	ret = vfs_resolve_nofollow(path, &vn);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (!vn) {
+		return (-API_ERR_NOT_FOUND);
 	}
 	if (vn->type != VDIR) {
 		vnode_release(vn);
-		return (-1);
+		return (-API_ERR_NOT_DIR);
 	}
 
 	vnode_release(vn);
@@ -175,7 +186,7 @@ int
 vfs_umount(const char *path)
 {
 	if (!vfs_initialized || !path || path[0] == '\0') {
-		return (-1);
+		return (-API_ERR_BAD_VALUE);
 	}
 	return (vfs_back_umount(path));
 }
@@ -291,11 +302,14 @@ vnode_release(vnode_t *vn)
 int
 vnode_read(vnode_t *vn, void *buf, u64 count, u64 offset)
 {
-	if (!vn || !vn->read_fn) {
-		return (-1);
+	if (!vn || !buf) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (!vn->read_fn) {
+		return (-API_ERR_NOT_SUPPORTED);
 	}
 	if (!vfs_back_mount_can_read(vn->mount_id)) {
-		return (-1);
+		return (-API_ERR_ACCESS);
 	}
 	return (vn->read_fn(vn, buf, count, offset));
 }
@@ -303,11 +317,14 @@ vnode_read(vnode_t *vn, void *buf, u64 count, u64 offset)
 int
 vnode_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
 {
-	if (!vn || !vn->write_fn) {
-		return (-1);
+	if (!vn || !buf) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (!vn->write_fn) {
+		return (-API_ERR_NOT_SUPPORTED);
 	}
 	if (!vfs_back_mount_can_write(vn->mount_id)) {
-		return (-1);
+		return (-API_ERR_ACCESS);
 	}
 	return (vn->write_fn(vn, buf, count, offset));
 }
@@ -316,10 +333,10 @@ int
 vnode_stat(vnode_t *vn, posix_stat_t *st)
 {
 	if (!vn || !st) {
-		return (-1);
+		return (-API_ERR_BAD_VALUE);
 	}
 	if (!vfs_back_mount_can_read(vn->mount_id)) {
-		return (-1);
+		return (-API_ERR_ACCESS);
 	}
 
 	if (vn->stat_fn) {
@@ -340,11 +357,17 @@ vnode_stat(vnode_t *vn, posix_stat_t *st)
 int
 vnode_readdir(vnode_t *vn, u32 index, char *name, int *type)
 {
-	if (!vn || vn->type != VDIR || !vn->readdir_fn) {
-		return (-1);
+	if (!vn || !name) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (vn->type != VDIR) {
+		return (-API_ERR_NOT_DIR);
+	}
+	if (!vn->readdir_fn) {
+		return (-API_ERR_NOT_SUPPORTED);
 	}
 	if (!vfs_back_mount_can_read(vn->mount_id)) {
-		return (-1);
+		return (-API_ERR_ACCESS);
 	}
 	return (vn->readdir_fn(vn, index, name, type));
 }
@@ -356,7 +379,7 @@ vnode_ioctl(vnode_t *vn, u64 cmd, void *arg)
 		return (-POSIX_ENOTTY);
 	}
 	if (!vfs_back_mount_can_read(vn->mount_id)) {
-		return (-1);
+		return (-API_ERR_ACCESS);
 	}
 	if (vn->ioctl_fn) {
 		return (vn->ioctl_fn(vn, cmd, arg));
@@ -368,13 +391,13 @@ int
 vnode_readlink(vnode_t *vn, char *buf, size_t bufsize)
 {
 	if (!vn || !buf || bufsize == 0) {
-		return (-1);
+		return (-API_ERR_BAD_VALUE);
 	}
 	if (vn->type != VLNK || !vn->readlink_fn) {
-		return (-1);
+		return (-API_ERR_BAD_VALUE);
 	}
 	if (!vfs_back_mount_can_read(vn->mount_id)) {
-		return (-1);
+		return (-API_ERR_ACCESS);
 	}
 	return (vn->readlink_fn(vn, buf, bufsize));
 }
@@ -452,14 +475,18 @@ vfs_chdir(const char *path)
 	int	ret;
 
 	if (!path || path[0] == '\0') {
-		return (-1);
+		return (-API_ERR_BAD_VALUE);
 	}
-	if (vfs_resolve(path, &vn) != 0 || !vn) {
-		return (-1);
+	ret = vfs_resolve(path, &vn);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (!vn) {
+		return (-API_ERR_NOT_FOUND);
 	}
 	if (vn->type != VDIR) {
 		vnode_release(vn);
-		return (-1);
+		return (-API_ERR_NOT_DIR);
 	}
 
 	vnode_release(vn);
@@ -471,7 +498,7 @@ int
 vfs_getcwd(char *buf, u32 size)
 {
 	if (!buf || size == 0) {
-		return (-1);
+		return (-API_ERR_BAD_VALUE);
 	}
 	return (vfs_back_getcwd(buf, size));
 }
@@ -483,21 +510,26 @@ vfs_read_file_full(const char *path, u8 *buf, u32 bufsize,
 	vnode_t		*vn;
 	posix_stat_t	st;
 	u32		file_size;
-	int		n;
+	int		n, ret;
 
-	if (!bytes_read) {
-		return (-1);
+	if (!bytes_read || (!buf && bufsize != 0)) {
+		return (-API_ERR_BAD_VALUE);
 	}
-	if (vfs_resolve(path, &vn) != 0 || !vn) {
-		return (-1);
+	ret = vfs_resolve(path, &vn);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (!vn) {
+		return (-API_ERR_NOT_FOUND);
 	}
 	if (vn->type == VDIR) {
 		vnode_release(vn);
-		return (-1);
+		return (-API_ERR_IS_DIR);
 	}
-	if (vnode_stat(vn, &st) != 0) {
+	ret = vnode_stat(vn, &st);
+	if (ret != 0) {
 		vnode_release(vn);
-		return (-1);
+		return (ret);
 	}
 
 	file_size = (u32)st.st_size;
@@ -508,13 +540,13 @@ vfs_read_file_full(const char *path, u8 *buf, u32 bufsize,
 	}
 	if (file_size > bufsize) {
 		vnode_release(vn);
-		return (-1);
+		return (-API_ERR_TOO_BIG);
 	}
 
 	n = vnode_read(vn, buf, file_size, 0);
 	if (n < 0) {
 		vnode_release(vn);
-		return (-1);
+		return (n);
 	}
 
 	vnode_release(vn);

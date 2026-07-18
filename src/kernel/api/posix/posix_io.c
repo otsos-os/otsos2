@@ -73,6 +73,65 @@ copy_user_string(const char *user, int max_len)
 	return (kbuf);
 }
 
+static s64
+posix_vfs_ret(int ret)
+{
+	int	err;
+
+	if (ret >= 0) {
+		return ((s64)ret);
+	}
+
+	err = -ret;
+	switch (err) {
+	case API_ERR_PERM:
+		return (-POSIX_EPERM);
+	case API_ERR_ACCESS:
+		return (-POSIX_EACCES);
+	case API_ERR_NOT_FOUND:
+		return (-POSIX_ENOENT);
+	case API_ERR_BAD_ADDR:
+		return (-POSIX_EFAULT);
+	case API_ERR_NO_MEMORY:
+	case API_ERR_NOMEM:
+		return (-POSIX_ENOMEM);
+	case API_ERR_BUSY:
+		return (-POSIX_EBUSY);
+	case API_ERR_EXISTS:
+		return (-POSIX_EEXIST);
+	case API_ERR_NODEV:
+		return (-POSIX_ENODEV);
+	case API_ERR_NOT_DIR:
+		return (-POSIX_ENOTDIR);
+	case API_ERR_IS_DIR:
+		return (-POSIX_EISDIR);
+	case API_ERR_NOT_SUPPORTED:
+		return (-POSIX_ENOSYS);
+	case API_ERR_TOO_BIG:
+		return (-POSIX_ENAMETOOLONG);
+	case API_ERR_FILE_TOO_BIG:
+		return (-POSIX_EFBIG);
+	case API_ERR_HANDLES_FULL:
+		return (-POSIX_EMFILE);
+	case API_ERR_OBJECTS_FULL:
+		return (-POSIX_ENOSPC);
+	case API_ERR_READ_ONLY:
+		return (-POSIX_EROFS);
+	case API_ERR_NO_SPACE:
+		return (-POSIX_ENOSPC);
+	case API_ERR_IO:
+		return (-POSIX_EIO);
+	case API_ERR_CROSS_DEVICE:
+		return (-POSIX_EXDEV);
+	case API_ERR_NOT_EMPTY:
+		return (-POSIX_ENOTEMPTY);
+	case API_ERR_BAD_VALUE:
+	case API_ERR_INVAL:
+	default:
+		return (-POSIX_EINVAL);
+	}
+}
+
 static int
 posix_check_perm(vnode_t *vn, int access)
 {
@@ -123,6 +182,7 @@ posix_do_open(const char *path, int posix_flags, u64 mode)
   int			fd;
   int			exists;
   int			perm;
+  int			ret;
   int			want;
 
 	(void)mode;
@@ -141,7 +201,8 @@ posix_do_open(const char *path, int posix_flags, u64 mode)
   }
 
   vn = NULL;
-  if (vfs_resolve(path, &vn) == 0 && vn != NULL) {
+  ret = vfs_resolve(path, &vn);
+  if (ret == 0 && vn != NULL) {
 		exists = 1;
 		if (vn->type == VDIR) {
 			/*
@@ -156,12 +217,14 @@ posix_do_open(const char *path, int posix_flags, u64 mode)
 			}
 		}
 	} else {
+		if (ret != 0 && ret != -API_ERR_NOT_FOUND) {
+			return (posix_vfs_ret(ret));
+		}
 		exists = 0;
 	}
 
 	if (vn != NULL && vn->type == VCHR && strcmp(vn->name, "ptmx") == 0) {
 		vnode_t		*master_vn;
-		int		 ret;
 
 		vnode_release(vn);
 		ret = pty_open_master(&master_vn);
@@ -180,11 +243,16 @@ posix_do_open(const char *path, int posix_flags, u64 mode)
 			return (-POSIX_ENOTDIR);
 		}
 
-		if (vfs_create_file(path) != 0) {
-			return (-POSIX_EIO);
+		ret = vfs_create_file(path);
+		if (ret != 0) {
+			return (posix_vfs_ret(ret));
 		}
 
-		if (vfs_resolve(path, &vn) != 0 || vn == NULL) {
+		ret = vfs_resolve(path, &vn);
+		if (ret != 0) {
+			return (posix_vfs_ret(ret));
+		}
+		if (vn == NULL) {
 			return (-POSIX_EIO);
 		}
 
@@ -220,9 +288,12 @@ posix_do_open(const char *path, int posix_flags, u64 mode)
 	}
 
 	if (posix_flags & POSIX_O_TRUNC) {
-		if (vn->type != VCHR && vfs_truncate(path, 0) != 0) {
-			vnode_release(vn);
-			return (-POSIX_EIO);
+		if (vn->type != VCHR) {
+			ret = vfs_truncate(path, 0);
+			if (ret != 0) {
+				vnode_release(vn);
+				return (posix_vfs_ret(ret));
+			}
 		}
 		vn->size = 0;
 	}
@@ -467,7 +538,7 @@ posix_read(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 	} else {
 		n = vnode_read(pfd->vnode, buf, count, pfd->offset);
 		if (n < 0) {
-			return (-POSIX_EIO);
+			return (posix_vfs_ret(n));
 		}
 	}
 
@@ -541,7 +612,7 @@ posix_write(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 	} else {
 		n = vnode_write(pfd->vnode, buf, count, pfd->offset);
 		if (n < 0) {
-			return (-POSIX_EIO);
+			return (posix_vfs_ret(n));
 		}
 	}
 
@@ -736,7 +807,7 @@ posix_pread64(u64 fd_u, u64 buf_u, u64 count, u64 pos_u, u64 a5,
 
 	n = vnode_read(pfd->vnode, buf, count, pos_u);
 	if (n < 0) {
-		return (-POSIX_EIO);
+		return (posix_vfs_ret(n));
 	}
 
 	return ((s64)n);
@@ -782,7 +853,7 @@ posix_pwrite64(u64 fd_u, u64 buf_u, u64 count, u64 pos_u, u64 a5,
 
 	n = vnode_write(pfd->vnode, buf, count, pos_u);
 	if (n < 0) {
-		return (-POSIX_EIO);
+		return (posix_vfs_ret(n));
 	}
 
 	return ((s64)n);
@@ -795,6 +866,7 @@ posix_stat(u64 path_u, u64 buf_u, u64 a3, u64 a4, u64 a5, u64 a6,
 	char		*path;
 	vnode_t		*vn;
 	posix_stat_t	*st;
+	int		ret;
 
 	(void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
 
@@ -808,16 +880,22 @@ posix_stat(u64 path_u, u64 buf_u, u64 a3, u64 a4, u64 a5, u64 a6,
 		return (-POSIX_EFAULT);
 	}
 
-	if (vfs_resolve(path, &vn) != 0 || vn == NULL) {
+	ret = vfs_resolve(path, &vn);
+	if (ret != 0) {
+		kmem_free(path);
+		return (posix_vfs_ret(ret));
+	}
+	if (vn == NULL) {
 		kmem_free(path);
 		return (-POSIX_ENOENT);
 	}
 
 	st = (posix_stat_t *)buf_u;
-	if (vnode_stat(vn, st) != 0) {
+	ret = vnode_stat(vn, st);
+	if (ret != 0) {
 		vnode_release(vn);
 		kmem_free(path);
-		return (-POSIX_EIO);
+		return (posix_vfs_ret(ret));
 	}
 
 	vnode_release(vn);
@@ -832,6 +910,7 @@ posix_fstat(u64 fd_u, u64 buf_u, u64 a3, u64 a4, u64 a5, u64 a6,
 	struct process	*proc;
 	posix_fd_t	*pfd;
 	posix_stat_t	*st;
+	int		ret;
 
 	(void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
 
@@ -850,8 +929,9 @@ posix_fstat(u64 fd_u, u64 buf_u, u64 a3, u64 a4, u64 a5, u64 a6,
 	}
 
 	st = (posix_stat_t *)buf_u;
-	if (vnode_stat(pfd->vnode, st) != 0) {
-		return (-POSIX_EIO);
+	ret = vnode_stat(pfd->vnode, st);
+	if (ret != 0) {
+		return (posix_vfs_ret(ret));
 	}
 
 	return (0);
@@ -864,6 +944,7 @@ posix_lstat(u64 path_u, u64 buf_u, u64 a3, u64 a4, u64 a5, u64 a6,
 	char		*path;
 	vnode_t		*vn;
 	posix_stat_t	*st;
+	int		ret;
 
 	(void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
 
@@ -877,16 +958,22 @@ posix_lstat(u64 path_u, u64 buf_u, u64 a3, u64 a4, u64 a5, u64 a6,
 		return (-POSIX_EFAULT);
 	}
 
-	if (vfs_resolve_nofollow(path, &vn) != 0 || vn == NULL) {
+	ret = vfs_resolve_nofollow(path, &vn);
+	if (ret != 0) {
+		kmem_free(path);
+		return (posix_vfs_ret(ret));
+	}
+	if (vn == NULL) {
 		kmem_free(path);
 		return (-POSIX_ENOENT);
 	}
 
 	st = (posix_stat_t *)buf_u;
-	if (vnode_stat(vn, st) != 0) {
+	ret = vnode_stat(vn, st);
+	if (ret != 0) {
 		vnode_release(vn);
 		kmem_free(path);
-		return (-POSIX_EIO);
+		return (posix_vfs_ret(ret));
 	}
 
 	vnode_release(vn);
@@ -1240,6 +1327,7 @@ posix_access(u64 path_u, u64 mode, u64 a3, u64 a4, u64 a5, u64 a6,
   char		*path;
   vnode_t		*vn;
   int			perm;
+  int			ret;
   int			want;
 
   (void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
@@ -1254,7 +1342,12 @@ posix_access(u64 path_u, u64 mode, u64 a3, u64 a4, u64 a5, u64 a6,
     return (-POSIX_EACCES);
   }
 
-  if (vfs_resolve(path, &vn) != 0 || vn == NULL) {
+  ret = vfs_resolve(path, &vn);
+  if (ret != 0) {
+    kmem_free(path);
+    return (posix_vfs_ret(ret));
+  }
+  if (vn == NULL) {
     kmem_free(path);
     return (-POSIX_ENOENT);
   }
@@ -1284,7 +1377,7 @@ posix_getdents64(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5,
 	u8		*buf;
 	u32		idx;
 	u64		pos;
-	int		type;
+	int		type, ret;
 	char		name[32];
 
 	(void)a4; (void)a5; (void)a6; (void)regs;
@@ -1313,11 +1406,13 @@ posix_getdents64(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5,
 
 	while (pos + sizeof(posix_dirent64_t) <= count) {
 		memset(name, 0, sizeof(name));
-		int	ret;
 
 		type = POSIX_DT_UNKNOWN;
 		ret = vnode_readdir(pfd->vnode, idx, name, &type);
-		if (ret <= 0) {
+		if (ret < 0) {
+			return (posix_vfs_ret(ret));
+		}
+		if (ret == 0) {
 			break;
 		}
 

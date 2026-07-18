@@ -33,7 +33,7 @@ int
 api_fs_chdir(const char *path)
 {
 	char	kpath[256];
-	int	len;
+	int	len, ret;
 
 	if (!is_user_address(path, 1)) {
 		return (-API_ERR_BAD_ADDR);
@@ -52,8 +52,9 @@ api_fs_chdir(const char *path)
 		len++;
 	}
 
-	if (vfs_chdir(kpath) != 0) {
-		return (-API_ERR_NOT_FOUND);
+	ret = vfs_chdir(kpath);
+	if (ret != 0) {
+		return (ret);
 	}
 
 	return (0);

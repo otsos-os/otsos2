@@ -129,6 +129,7 @@ $space %export vfs_back_chdir, vfs_back_getcwd, vfs_back_write_file
 
 */
 
+#include <kernel/api/errno.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/drivers/fs/vfs/back/vfs_back.h>
@@ -237,7 +238,7 @@ vfs_mount_path_copy(const char *src, char *dst, int size)
 	int	len;
 
 	if (!src || !dst || size <= 1 || src[0] != '/') {
-		return (-1);
+		return (-API_ERR_BAD_VALUE);
 	}
 
 	len = strlen(src);
@@ -245,7 +246,7 @@ vfs_mount_path_copy(const char *src, char *dst, int size)
 		len--;
 	}
 	if (len <= 0 || len >= size) {
-		return (-1);
+		return (-API_ERR_TOO_BIG);
 	}
 
 	memset(dst, 0, (size_t)size);
@@ -381,10 +382,10 @@ vfs_mount_root_name(const char *path, char *out, int size)
 	int	i;
 
 	if (!path || !out || size <= 1) {
-		return (-1);
+		return (-API_ERR_BAD_VALUE);
 	}
 	if (path[0] != '/' || path[1] == '\0') {
-		return (-1);
+		return (-API_ERR_BAD_VALUE);
 	}
 
 	i = 1;
@@ -393,7 +394,7 @@ vfs_mount_root_name(const char *path, char *out, int size)
 		i++;
 	}
 	if (i == 1 || i >= size) {
-		return (-1);
+		return (-API_ERR_TOO_BIG);
 	}
 	out[i - 1] = '\0';
 	return (0);
@@ -453,14 +454,19 @@ chainfs_vnode_read(vnode_t *vn, void *buf, u64 count, u64 offset)
 	char			*path;
 	u32			entry_block, entry_offset;
 	u32			bytes_read, to_read;
+	int			ret;
 
 	path = (char *)vn->data;
-	if (!path) {
-		return (-1);
+	if (!path || !buf) {
+		return (-API_ERR_BAD_VALUE);
 	}
-	if (chainfs_find_file(path, &entry, &entry_block,
-	    &entry_offset) != 0) {
-		return (-1);
+	ret = chainfs_find_file(path, &entry, &entry_block,
+	    &entry_offset);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (entry.type == CHAINFS_TYPE_DIR) {
+		return (-API_ERR_IS_DIR);
 	}
 	if (offset >= entry.size) {
 		return (0);
@@ -472,9 +478,10 @@ chainfs_vnode_read(vnode_t *vn, void *buf, u64 count, u64 offset)
 	}
 
 	bytes_read = 0;
-	if (chainfs_read_file_range(path, (u8 *)buf, to_read,
-	    (u32)offset, &bytes_read) != 0) {
-		return (-1);
+	ret = chainfs_read_file_range(path, (u8 *)buf, to_read,
+	    (u32)offset, &bytes_read);
+	if (ret != 0) {
+		return (ret);
 	}
 
 	vn->size = entry.size;
@@ -490,20 +497,25 @@ chainfs_vnode_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
 	u32			entry_block, entry_offset;
 	u32			bytes_read, end_pos, new_size, old_size;
 	u32			write_off;
-	int			result;
+	int			result, ret;
 
 	path = (char *)vn->data;
-	if (!path || offset > 0xFFFFFFFFULL || count > 0xFFFFFFFFULL) {
-		return (-1);
+	if (!path || !buf || offset > 0xFFFFFFFFULL ||
+	    count > 0x7FFFFFFFULL) {
+		return (-API_ERR_BAD_VALUE);
 	}
-	if (chainfs_find_file(path, &entry, &entry_block,
-	    &entry_offset) != 0) {
-		return (-1);
+	ret = chainfs_find_file(path, &entry, &entry_block,
+	    &entry_offset);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (entry.type == CHAINFS_TYPE_DIR) {
+		return (-API_ERR_IS_DIR);
 	}
 
 	write_off = (u32)offset;
 	if ((u32)count > 0xFFFFFFFFU - write_off) {
-		return (-1);
+		return (-API_ERR_FILE_TOO_BIG);
 	}
 
 	old_size = entry.size;
@@ -511,20 +523,21 @@ chainfs_vnode_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
 	new_size = (end_pos > old_size) ? end_pos : old_size;
 	if (new_size == 0) {
 		result = chainfs_write_file(path, (const u8 *)"", 0);
-		return (result == 0 ? 0 : -1);
+		return (result == 0 ? 0 : result);
 	}
 
 	new_data = (u8 *)kmem_calloc(new_size, 1);
 	if (!new_data) {
-		return (-1);
+		return (-API_ERR_NO_MEMORY);
 	}
 
 	if (old_size > 0) {
 		bytes_read = 0;
-		if (chainfs_read_file(path, new_data, old_size,
-		    &bytes_read) != 0) {
+		ret = chainfs_read_file(path, new_data, old_size,
+		    &bytes_read);
+		if (ret != 0) {
 			kmem_free(new_data);
-			return (-1);
+			return (ret);
 		}
 	}
 
@@ -533,7 +546,7 @@ chainfs_vnode_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
 	kmem_free(new_data);
 
 	if (result != 0) {
-		return (-1);
+		return (result);
 	}
 
 	vn->size = new_size;
@@ -546,8 +559,8 @@ chainfs_vnode_readlink(vnode_t *vn, char *buf, size_t bufsize)
 	char	*path;
 
 	path = (char *)vn->data;
-	if (!path) {
-		return (-1);
+	if (!path || !buf || bufsize == 0) {
+		return (-API_ERR_BAD_VALUE);
 	}
 	return (chainfs_readlink(path, buf, (u32)bufsize));
 }
@@ -558,14 +571,16 @@ chainfs_vnode_stat(vnode_t *vn, posix_stat_t *st)
 	chainfs_file_entry_t	entry;
 	char			*path;
 	u32			entry_block, entry_offset;
+	int			ret;
 
 	path = (char *)vn->data;
 	if (!path || !st) {
-		return (-1);
+		return (-API_ERR_BAD_VALUE);
 	}
-	if (chainfs_find_file(path, &entry, &entry_block,
-	    &entry_offset) != 0) {
-		return (-1);
+	ret = chainfs_find_file(path, &entry, &entry_block,
+	    &entry_offset);
+	if (ret != 0) {
+		return (ret);
 	}
 
 	memset(st, 0, sizeof(posix_stat_t));
@@ -588,16 +603,18 @@ chainfs_vnode_readdir(vnode_t *vn, u32 index, char *name, int *type)
 	chainfs_file_entry_t	entries[VFS_BACK_ROOT_ENTRIES];
 	char			*path;
 	u32			count;
+	int			ret;
 
 	path = (char *)vn->data;
 	if (!path || !name) {
-		return (-1);
+		return (-API_ERR_BAD_VALUE);
 	}
 
 	count = 0;
-	if (chainfs_list_dir(path, entries, VFS_BACK_ROOT_ENTRIES,
-	    &count) != 0) {
-		return (-1);
+	ret = chainfs_list_dir(path, entries, VFS_BACK_ROOT_ENTRIES,
+	    &count);
+	if (ret != 0) {
+		return (ret);
 	}
 	if (index >= count) {
 		return (0);
@@ -616,18 +633,22 @@ vfs_root_readdir(vnode_t *vn, u32 index, char *name, int *type)
 	chainfs_file_entry_t	entries[VFS_BACK_ROOT_ENTRIES];
 	char			mount_name[32];
 	u32			count, seen, mount_index;
-	int			i;
+	int			i, ret;
 
 	(void)vn;
 
-	if (!name || !chainfs_back_ready()) {
-		return (-1);
+	if (!name) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (!chainfs_back_ready()) {
+		return (-API_ERR_IO);
 	}
 
 	count = 0;
-	if (chainfs_list_dir("/", entries, VFS_BACK_ROOT_ENTRIES,
-	    &count) != 0) {
-		return (-1);
+	ret = chainfs_list_dir("/", entries, VFS_BACK_ROOT_ENTRIES,
+	    &count);
+	if (ret != 0) {
+		return (ret);
 	}
 
 	if (index < count) {
@@ -720,7 +741,7 @@ static int
 chainfs_back_init(void)
 {
 	if (!chainfs_back_ready()) {
-		return (-1);
+		return (-API_ERR_IO);
 	}
 	return (0);
 }
@@ -729,7 +750,7 @@ static int
 chainfs_back_create_file(const char *path)
 {
 	if (!chainfs_back_ready()) {
-		return (-1);
+		return (-API_ERR_IO);
 	}
 	return (chainfs_write_file(path, (const u8 *)"", 0));
 }
@@ -738,7 +759,7 @@ static int
 chainfs_back_mkdir(const char *path)
 {
 	if (!chainfs_back_ready()) {
-		return (-1);
+		return (-API_ERR_IO);
 	}
 	return (chainfs_mkdir(path));
 }
@@ -747,7 +768,7 @@ static int
 chainfs_back_rmdir(const char *path)
 {
 	if (!chainfs_back_ready()) {
-		return (-1);
+		return (-API_ERR_IO);
 	}
 	return (chainfs_rmdir(path));
 }
@@ -756,7 +777,7 @@ static int
 chainfs_back_unlink(const char *path)
 {
 	if (!chainfs_back_ready()) {
-		return (-1);
+		return (-API_ERR_IO);
 	}
 	return (chainfs_delete_file(path));
 }
@@ -768,43 +789,46 @@ chainfs_back_rename(const char *oldpath, const char *newpath)
 	u8			*buf;
 	u32			entry_block, entry_offset;
 	u32			bytes_read;
+	int			ret;
 
 	if (!chainfs_back_ready()) {
-		return (-1);
+		return (-API_ERR_IO);
 	}
-	if (chainfs_find_file(oldpath, &entry, &entry_block,
-	    &entry_offset) != 0) {
-		return (-1);
+	ret = chainfs_find_file(oldpath, &entry, &entry_block,
+	    &entry_offset);
+	if (ret != 0) {
+		return (ret);
 	}
 	if (entry.type == CHAINFS_TYPE_DIR) {
-		return (-1);
+		return (-API_ERR_IS_DIR);
 	}
 	if (entry.size == 0) {
-		if (chainfs_write_file(newpath, (const u8 *)"", 0) != 0) {
-			return (-1);
+		ret = chainfs_write_file(newpath, (const u8 *)"", 0);
+		if (ret != 0) {
+			return (ret);
 		}
-		chainfs_delete_file(oldpath);
-		return (0);
+		return (chainfs_delete_file(oldpath));
 	}
 
 	buf = (u8 *)kmem_calloc(entry.size, 1);
 	if (!buf) {
-		return (-1);
+		return (-API_ERR_NO_MEMORY);
 	}
 
 	bytes_read = 0;
-	if (chainfs_read_file(oldpath, buf, entry.size, &bytes_read) != 0) {
+	ret = chainfs_read_file(oldpath, buf, entry.size, &bytes_read);
+	if (ret != 0) {
 		kmem_free(buf);
-		return (-1);
+		return (ret);
 	}
-	if (chainfs_write_file(newpath, buf, entry.size) != 0) {
+	ret = chainfs_write_file(newpath, buf, entry.size);
+	if (ret != 0) {
 		kmem_free(buf);
-		return (-1);
+		return (ret);
 	}
 
 	kmem_free(buf);
-	chainfs_delete_file(oldpath);
-	return (0);
+	return (chainfs_delete_file(oldpath));
 }
 
 static int
@@ -814,16 +838,21 @@ chainfs_back_truncate(const char *path, u64 length)
 	u8			*buf;
 	u32			entry_block, entry_offset;
 	u32			bytes_read, to_read;
+	int			ret;
 
-	if (!chainfs_back_ready() || length > 0xFFFFFFFFULL) {
-		return (-1);
+	if (!chainfs_back_ready()) {
+		return (-API_ERR_IO);
 	}
-	if (chainfs_find_file(path, &entry, &entry_block,
-	    &entry_offset) != 0) {
-		return (-1);
+	if (length > 0xFFFFFFFFULL) {
+		return (-API_ERR_FILE_TOO_BIG);
+	}
+	ret = chainfs_find_file(path, &entry, &entry_block,
+	    &entry_offset);
+	if (ret != 0) {
+		return (ret);
 	}
 	if (entry.type == CHAINFS_TYPE_DIR) {
-		return (-1);
+		return (-API_ERR_IS_DIR);
 	}
 	if (length == 0) {
 		return (chainfs_write_file(path, (const u8 *)"", 0));
@@ -834,22 +863,24 @@ chainfs_back_truncate(const char *path, u64 length)
 
 	buf = (u8 *)kmem_calloc((size_t)length, 1);
 	if (!buf) {
-		return (-1);
+		return (-API_ERR_NO_MEMORY);
 	}
 
 	if (entry.size > 0) {
 		to_read = (entry.size < length) ? entry.size : (u32)length;
 		bytes_read = 0;
-		if (chainfs_read_file(path, buf, to_read,
-		    &bytes_read) != 0) {
+		ret = chainfs_read_file(path, buf, to_read,
+		    &bytes_read);
+		if (ret != 0) {
 			kmem_free(buf);
-			return (-1);
+			return (ret);
 		}
 	}
 
-	if (chainfs_write_file(path, buf, (u32)length) != 0) {
+	ret = chainfs_write_file(path, buf, (u32)length);
+	if (ret != 0) {
 		kmem_free(buf);
-		return (-1);
+		return (ret);
 	}
 
 	kmem_free(buf);
@@ -860,7 +891,7 @@ static int
 chainfs_back_symlink(const char *target, const char *linkpath)
 {
 	if (!chainfs_back_ready()) {
-		return (-1);
+		return (-API_ERR_IO);
 	}
 	return (chainfs_symlink(target, linkpath));
 }
@@ -869,7 +900,7 @@ static int
 chainfs_back_link(const char *oldpath, const char *newpath)
 {
 	if (!chainfs_back_ready()) {
-		return (-1);
+		return (-API_ERR_IO);
 	}
 	return (chainfs_link(oldpath, newpath));
 }
@@ -878,7 +909,7 @@ static int
 chainfs_back_chdir(const char *path)
 {
 	if (!chainfs_back_ready()) {
-		return (-1);
+		return (-API_ERR_IO);
 	}
 	return (chainfs_chdir(path));
 }
@@ -887,10 +918,10 @@ static int
 chainfs_back_getcwd(char *buf, u32 size)
 {
 	if (!chainfs_back_ready()) {
-		return (-1);
+		return (-API_ERR_IO);
 	}
 	if (chainfs_get_current_path(buf, size) == NULL) {
-		return (-1);
+		return (-API_ERR_TOO_BIG);
 	}
 	return (0);
 }
@@ -899,7 +930,7 @@ static int
 chainfs_back_write_file(const char *path, const u8 *data, u32 size)
 {
 	if (!chainfs_back_ready()) {
-		return (-1);
+		return (-API_ERR_IO);
 	}
 	return (chainfs_write_file(path, data, size));
 }
@@ -934,20 +965,30 @@ devfs_back_lookup(const char *path)
 int
 vfs_back_init(void)
 {
+	int	ret;
+
 	vfs_mount_count = 0;
 	vfs_next_mount_id = 1;
 
-	if (chainfs_back_ops.init && chainfs_back_ops.init() != 0) {
-		return (-1);
+	if (chainfs_back_ops.init) {
+		ret = chainfs_back_ops.init();
+		if (ret != 0) {
+			return (ret);
+		}
 	}
-	if (vfs_back_mount("/", &chainfs_back_ops) != 0) {
-		return (-1);
+	ret = vfs_back_mount("/", &chainfs_back_ops);
+	if (ret != 0) {
+		return (ret);
 	}
-	if (devfs_back_ops.init && devfs_back_ops.init() != 0) {
-		return (-1);
+	if (devfs_back_ops.init) {
+		ret = devfs_back_ops.init();
+		if (ret != 0) {
+			return (ret);
+		}
 	}
-	if (vfs_back_mount("/dev", &devfs_back_ops) != 0) {
-		return (-1);
+	ret = vfs_back_mount("/dev", &devfs_back_ops);
+	if (ret != 0) {
+		return (ret);
 	}
 
 	drivers_log("[VFS] backends mounted: / chainfs, /dev devfs\n");
@@ -964,27 +1005,28 @@ int
 vfs_back_mount_flags(const char *path, const vfs_back_ops_t *ops, u64 flags)
 {
 	char	mount_path[VFS_BACK_MAX_PATH];
-	int	i, len;
+	int	i, len, ret;
 
 	if (!path || !ops || !ops->lookup) {
-		return (-1);
+		return (-API_ERR_BAD_VALUE);
 	}
 	if ((flags & ~VFS_MNT_SUPPORTED) != 0) {
-		return (-1);
+		return (-API_ERR_NOT_SUPPORTED);
 	}
 	if (vfs_mount_count >= VFS_BACK_MAX_MOUNTS) {
-		return (-1);
+		return (-API_ERR_OBJECTS_FULL);
 	}
 
-	if (vfs_mount_path_copy(path, mount_path,
-	    sizeof(mount_path)) != 0) {
-		return (-1);
+	ret = vfs_mount_path_copy(path, mount_path,
+	    sizeof(mount_path));
+	if (ret != 0) {
+		return (ret);
 	}
 	len = strlen(mount_path);
 
 	for (i = 0; i < vfs_mount_count; i++) {
 		if (strcmp(vfs_mounts[i].path, mount_path) == 0) {
-			return (-1);
+			return (-API_ERR_EXISTS);
 		}
 	}
 
@@ -1009,7 +1051,7 @@ vfs_back_mount_named(const char *path, const char *fstype, u64 flags)
 
 	ops = vfs_back_find_ops(fstype);
 	if (!ops) {
-		return (-2);
+		return (-API_ERR_NODEV);
 	}
 	return (vfs_back_mount_flags(path, ops, flags));
 }
@@ -1019,13 +1061,15 @@ vfs_back_umount(const char *path)
 {
 	char	mount_path[VFS_BACK_MAX_PATH];
 	int	i, j;
+	int	ret;
 
-	if (vfs_mount_path_copy(path, mount_path,
-	    sizeof(mount_path)) != 0) {
-		return (-1);
+	ret = vfs_mount_path_copy(path, mount_path,
+	    sizeof(mount_path));
+	if (ret != 0) {
+		return (ret);
 	}
 	if (strcmp(mount_path, "/") == 0) {
-		return (-1);
+		return (-API_ERR_BUSY);
 	}
 
 	for (i = 0; i < vfs_mount_count; i++) {
@@ -1033,7 +1077,7 @@ vfs_back_umount(const char *path)
 			continue;
 		}
 		if (vfs_mounts[i].refs != 0) {
-			return (-2);
+			return (-API_ERR_BUSY);
 		}
 		for (j = 0; j < vfs_mount_count; j++) {
 			if (j == i) {
@@ -1041,12 +1085,14 @@ vfs_back_umount(const char *path)
 			}
 			if (vfs_path_starts_with(vfs_mounts[j].path,
 			    mount_path)) {
-				return (-2);
+				return (-API_ERR_BUSY);
 			}
 		}
-		if (vfs_mounts[i].ops && vfs_mounts[i].ops->umount &&
-		    vfs_mounts[i].ops->umount(mount_path) != 0) {
-			return (-1);
+		if (vfs_mounts[i].ops && vfs_mounts[i].ops->umount) {
+			ret = vfs_mounts[i].ops->umount(mount_path);
+			if (ret != 0) {
+				return (ret);
+			}
 		}
 		for (j = i; j < vfs_mount_count - 1; j++) {
 			vfs_mounts[j] = vfs_mounts[j + 1];
@@ -1057,7 +1103,7 @@ vfs_back_umount(const char *path)
 		return (0);
 	}
 
-	return (-1);
+	return (-API_ERR_NOT_FOUND);
 }
 
 int
@@ -1107,7 +1153,7 @@ vfs_back_mount_ref(u32 mount_id)
 			return (0);
 		}
 	}
-	return (-1);
+	return (-API_ERR_BAD_VALUE);
 }
 
 int
@@ -1127,7 +1173,7 @@ vfs_back_mount_unref(u32 mount_id)
 		}
 		return (0);
 	}
-	return (-1);
+	return (-API_ERR_BAD_VALUE);
 }
 
 int
@@ -1137,10 +1183,10 @@ vfs_back_resolve(const char *path, vnode_t **out, int follow)
 	char		resolved[VFS_BACK_MAX_PATH];
 	const char	*cur;
 	vnode_t		*vn;
-	int		link_count, last_slash, i;
+	int		link_count, last_slash, link_len, ret, i;
 
 	if (!path || !out || path[0] == '\0') {
-		return (-1);
+		return (-API_ERR_BAD_VALUE);
 	}
 
 	cur = path;
@@ -1148,7 +1194,7 @@ vfs_back_resolve(const char *path, vnode_t **out, int follow)
 	for (;;) {
 		vn = vfs_back_lookup(cur);
 		if (!vn) {
-			return (-1);
+			return (-API_ERR_NOT_FOUND);
 		}
 		if (!follow || vn->type != VLNK) {
 			*out = vn;
@@ -1156,16 +1202,20 @@ vfs_back_resolve(const char *path, vnode_t **out, int follow)
 		}
 		if (!vn->readlink_fn || link_count++ >= 40) {
 			vnode_release(vn);
-			return (-1);
+			return (-API_ERR_TOO_BIG);
 		}
-		if (vn->readlink_fn(vn, link_target,
-		    sizeof(link_target)) < 0) {
+		ret = vn->readlink_fn(vn, link_target,
+		    sizeof(link_target));
+		if (ret < 0) {
 			vnode_release(vn);
-			return (-1);
+			return (ret);
 		}
 		vnode_release(vn);
 
 		if (link_target[0] == '/') {
+			if (strlen(link_target) >= VFS_BACK_MAX_PATH) {
+				return (-API_ERR_TOO_BIG);
+			}
 			cur = link_target;
 		} else {
 			last_slash = -1;
@@ -1175,11 +1225,20 @@ vfs_back_resolve(const char *path, vnode_t **out, int follow)
 				}
 			}
 			if (last_slash > 0) {
+				link_len = strlen(link_target);
+				if (last_slash + 1 + link_len >=
+				    VFS_BACK_MAX_PATH) {
+					return (-API_ERR_TOO_BIG);
+				}
 				memcpy(resolved, cur, last_slash);
 				resolved[last_slash] = '\0';
 				strcat(resolved, "/");
 				strcat(resolved, link_target);
 			} else {
+				if (strlen(link_target) >=
+				    VFS_BACK_MAX_PATH) {
+					return (-API_ERR_TOO_BIG);
+				}
 				strcpy(resolved, link_target);
 			}
 			cur = resolved;
@@ -1192,12 +1251,21 @@ vfs_back_create_file(const char *path)
 {
 	vfs_mount_t	*mnt;
 
+	if (!path || path[0] == '\0') {
+		return (-API_ERR_BAD_VALUE);
+	}
 	mnt = vfs_back_find_mount(path);
-	if (!mnt || !mnt->ops || !mnt->ops->create_file) {
-		return (-1);
+	if (!mnt || !mnt->ops) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	if (!mnt->ops->create_file) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
+	if ((mnt->flags & VFS_MNT_RDONLY) != 0) {
+		return (-API_ERR_READ_ONLY);
 	}
 	if (!vfs_back_mount_access_ok(mnt, 1, 0)) {
-		return (-1);
+		return (-API_ERR_ACCESS);
 	}
 	return (mnt->ops->create_file(path));
 }
@@ -1207,12 +1275,21 @@ vfs_back_mkdir(const char *path)
 {
 	vfs_mount_t	*mnt;
 
+	if (!path || path[0] == '\0') {
+		return (-API_ERR_BAD_VALUE);
+	}
 	mnt = vfs_back_find_mount(path);
-	if (!mnt || !mnt->ops || !mnt->ops->mkdir) {
-		return (-1);
+	if (!mnt || !mnt->ops) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	if (!mnt->ops->mkdir) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
+	if ((mnt->flags & VFS_MNT_RDONLY) != 0) {
+		return (-API_ERR_READ_ONLY);
 	}
 	if (!vfs_back_mount_access_ok(mnt, 1, 0)) {
-		return (-1);
+		return (-API_ERR_ACCESS);
 	}
 	return (mnt->ops->mkdir(path));
 }
@@ -1222,12 +1299,21 @@ vfs_back_rmdir(const char *path)
 {
 	vfs_mount_t	*mnt;
 
+	if (!path || path[0] == '\0') {
+		return (-API_ERR_BAD_VALUE);
+	}
 	mnt = vfs_back_find_mount(path);
-	if (!mnt || !mnt->ops || !mnt->ops->rmdir) {
-		return (-1);
+	if (!mnt || !mnt->ops) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	if (!mnt->ops->rmdir) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
+	if ((mnt->flags & VFS_MNT_RDONLY) != 0) {
+		return (-API_ERR_READ_ONLY);
 	}
 	if (!vfs_back_mount_access_ok(mnt, 1, 0)) {
-		return (-1);
+		return (-API_ERR_ACCESS);
 	}
 	return (mnt->ops->rmdir(path));
 }
@@ -1237,12 +1323,21 @@ vfs_back_unlink(const char *path)
 {
 	vfs_mount_t	*mnt;
 
+	if (!path || path[0] == '\0') {
+		return (-API_ERR_BAD_VALUE);
+	}
 	mnt = vfs_back_find_mount(path);
-	if (!mnt || !mnt->ops || !mnt->ops->unlink) {
-		return (-1);
+	if (!mnt || !mnt->ops) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	if (!mnt->ops->unlink) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
+	if ((mnt->flags & VFS_MNT_RDONLY) != 0) {
+		return (-API_ERR_READ_ONLY);
 	}
 	if (!vfs_back_mount_access_ok(mnt, 1, 0)) {
-		return (-1);
+		return (-API_ERR_ACCESS);
 	}
 	return (mnt->ops->unlink(path));
 }
@@ -1252,14 +1347,26 @@ vfs_back_rename(const char *oldpath, const char *newpath)
 {
 	vfs_mount_t	*old_mnt, *new_mnt;
 
+	if (!oldpath || !newpath || oldpath[0] == '\0' ||
+	    newpath[0] == '\0') {
+		return (-API_ERR_BAD_VALUE);
+	}
 	old_mnt = vfs_back_find_mount(oldpath);
 	new_mnt = vfs_back_find_mount(newpath);
-	if (!old_mnt || old_mnt != new_mnt || !old_mnt->ops ||
-	    !old_mnt->ops->rename) {
-		return (-1);
+	if (!old_mnt || !new_mnt) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	if (old_mnt != new_mnt) {
+		return (-API_ERR_CROSS_DEVICE);
+	}
+	if (!old_mnt->ops || !old_mnt->ops->rename) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
+	if ((old_mnt->flags & VFS_MNT_RDONLY) != 0) {
+		return (-API_ERR_READ_ONLY);
 	}
 	if (!vfs_back_mount_access_ok(old_mnt, 1, 0)) {
-		return (-1);
+		return (-API_ERR_ACCESS);
 	}
 	return (old_mnt->ops->rename(oldpath, newpath));
 }
@@ -1269,12 +1376,21 @@ vfs_back_truncate(const char *path, u64 length)
 {
 	vfs_mount_t	*mnt;
 
+	if (!path || path[0] == '\0') {
+		return (-API_ERR_BAD_VALUE);
+	}
 	mnt = vfs_back_find_mount(path);
-	if (!mnt || !mnt->ops || !mnt->ops->truncate) {
-		return (-1);
+	if (!mnt || !mnt->ops) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	if (!mnt->ops->truncate) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
+	if ((mnt->flags & VFS_MNT_RDONLY) != 0) {
+		return (-API_ERR_READ_ONLY);
 	}
 	if (!vfs_back_mount_access_ok(mnt, 1, 0)) {
-		return (-1);
+		return (-API_ERR_ACCESS);
 	}
 	return (mnt->ops->truncate(path, length));
 }
@@ -1284,12 +1400,22 @@ vfs_back_symlink(const char *target, const char *linkpath)
 {
 	vfs_mount_t	*mnt;
 
+	if (!target || !linkpath || target[0] == '\0' ||
+	    linkpath[0] == '\0') {
+		return (-API_ERR_BAD_VALUE);
+	}
 	mnt = vfs_back_find_mount(linkpath);
-	if (!mnt || !mnt->ops || !mnt->ops->symlink) {
-		return (-1);
+	if (!mnt || !mnt->ops) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	if (!mnt->ops->symlink) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
+	if ((mnt->flags & VFS_MNT_RDONLY) != 0) {
+		return (-API_ERR_READ_ONLY);
 	}
 	if (!vfs_back_mount_access_ok(mnt, 1, 0)) {
-		return (-1);
+		return (-API_ERR_ACCESS);
 	}
 	return (mnt->ops->symlink(target, linkpath));
 }
@@ -1299,14 +1425,26 @@ vfs_back_link(const char *oldpath, const char *newpath)
 {
 	vfs_mount_t	*old_mnt, *new_mnt;
 
+	if (!oldpath || !newpath || oldpath[0] == '\0' ||
+	    newpath[0] == '\0') {
+		return (-API_ERR_BAD_VALUE);
+	}
 	old_mnt = vfs_back_find_mount(oldpath);
 	new_mnt = vfs_back_find_mount(newpath);
-	if (!old_mnt || old_mnt != new_mnt || !old_mnt->ops ||
-	    !old_mnt->ops->link) {
-		return (-1);
+	if (!old_mnt || !new_mnt) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	if (old_mnt != new_mnt) {
+		return (-API_ERR_CROSS_DEVICE);
+	}
+	if (!old_mnt->ops || !old_mnt->ops->link) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
+	if ((old_mnt->flags & VFS_MNT_RDONLY) != 0) {
+		return (-API_ERR_READ_ONLY);
 	}
 	if (!vfs_back_mount_access_ok(old_mnt, 1, 0)) {
-		return (-1);
+		return (-API_ERR_ACCESS);
 	}
 	return (old_mnt->ops->link(oldpath, newpath));
 }
@@ -1318,10 +1456,14 @@ vfs_back_readlink(const char *path, char *buf, size_t bufsize)
 	int	ret;
 
 	if (!path || !buf || bufsize == 0) {
-		return (-1);
+		return (-API_ERR_BAD_VALUE);
 	}
-	if (vfs_back_resolve(path, &vn, 0) != 0 || !vn) {
-		return (-1);
+	ret = vfs_back_resolve(path, &vn, 0);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (!vn) {
+		return (-API_ERR_NOT_FOUND);
 	}
 
 	ret = vnode_readlink(vn, buf, bufsize);
@@ -1334,9 +1476,15 @@ vfs_back_chdir(const char *path)
 {
 	vfs_mount_t	*mnt;
 
+	if (!path || path[0] == '\0') {
+		return (-API_ERR_BAD_VALUE);
+	}
 	mnt = vfs_back_find_mount(path);
-	if (!mnt || !mnt->ops || !mnt->ops->chdir) {
-		return (-1);
+	if (!mnt || !mnt->ops) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	if (!mnt->ops->chdir) {
+		return (-API_ERR_NOT_SUPPORTED);
 	}
 	return (mnt->ops->chdir(path));
 }
@@ -1346,9 +1494,12 @@ vfs_back_getcwd(char *buf, u32 size)
 {
 	vfs_mount_t	*mnt;
 
+	if (!buf || size == 0) {
+		return (-API_ERR_BAD_VALUE);
+	}
 	mnt = vfs_back_root_mount();
 	if (!mnt || !mnt->ops || !mnt->ops->getcwd) {
-		return (-1);
+		return (-API_ERR_NOT_SUPPORTED);
 	}
 	return (mnt->ops->getcwd(buf, size));
 }
@@ -1358,12 +1509,21 @@ vfs_back_write_file(const char *path, const u8 *data, u32 size)
 {
 	vfs_mount_t	*mnt;
 
+	if (!path || path[0] == '\0' || (!data && size != 0)) {
+		return (-API_ERR_BAD_VALUE);
+	}
 	mnt = vfs_back_find_mount(path);
-	if (!mnt || !mnt->ops || !mnt->ops->write_file) {
-		return (-1);
+	if (!mnt || !mnt->ops) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	if (!mnt->ops->write_file) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
+	if ((mnt->flags & VFS_MNT_RDONLY) != 0) {
+		return (-API_ERR_READ_ONLY);
 	}
 	if (!vfs_back_mount_access_ok(mnt, 1, 0)) {
-		return (-1);
+		return (-API_ERR_ACCESS);
 	}
 	return (mnt->ops->write_file(path, data, size));
 }

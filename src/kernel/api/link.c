@@ -93,13 +93,15 @@ api_fs_linknew(const char *target, const char *linkpath, u32 flags)
 	}
 	switch (flags) {
 	case API_LINK_SYMLINK:
-		if (vfs_symlink(ktarget, klinkpath) != 0) {
-			return (-API_ERR_IO);
+		ret = vfs_symlink(ktarget, klinkpath);
+		if (ret != 0) {
+			return (ret);
 		}
 		break;
 	case API_LINK_HARD:
-		if (vfs_link(ktarget, klinkpath) != 0) {
-			return (-API_ERR_IO);
+		ret = vfs_link(ktarget, klinkpath);
+		if (ret != 0) {
+			return (ret);
 		}
 		break;
 	default:
@@ -129,8 +131,9 @@ api_fs_linkgo(const char *path, char *buf, u32 bufsize)
 	if (restrict_kusr_check(kpath)) {
 		return (-API_ERR_PERM);
 	}
-	if (vfs_readlink(kpath, ktarget, sizeof(ktarget)) != 0) {
-		return (-API_ERR_NOT_FOUND);
+	ret = vfs_readlink(kpath, ktarget, sizeof(ktarget));
+	if (ret < 0) {
+		return (ret);
 	}
 	ktarget[sizeof(ktarget) - 1] = '\0';
 	len = strlen(ktarget);

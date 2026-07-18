@@ -60,6 +60,7 @@
 #define API_ERR_READ_ONLY 30
 #define API_ERR_PIPE_CLOSED 32
 #define API_ERR_NO_CALL 38
+#define API_ERR_NOT_EMPTY 39
 #define API_ERR_NOT_SUPPORTED 95
 
 #endif

@@ -107,6 +107,7 @@ api_data_open(const char *path, int flags)
 	vnode_t		*vn;
 	int		handle;
 	int		object_index;
+	int		ret;
 	posix_stat_t	st;
 
 	handles = api_get_handle_table();
@@ -131,18 +132,21 @@ api_data_open(const char *path, int flags)
 	}
 
 	vn = NULL;
-	if (vfs_resolve(kpath, &vn) != 0 || vn == NULL) {
+	ret = vfs_resolve(kpath, &vn);
+	if (ret != 0 || vn == NULL) {
 		if (!(flags & API_OPEN_CREATE)) {
 			kmem_free(kpath);
-			return (-API_ERR_NOT_FOUND);
+			return (ret != 0 ? ret : -API_ERR_NOT_FOUND);
 		}
-		if (vfs_create_file(kpath) != 0) {
+		ret = vfs_create_file(kpath);
+		if (ret != 0) {
 			kmem_free(kpath);
-			return (-API_ERR_IO);
+			return (ret);
 		}
-		if (vfs_resolve(kpath, &vn) != 0 || vn == NULL) {
+		ret = vfs_resolve(kpath, &vn);
+		if (ret != 0 || vn == NULL) {
 			kmem_free(kpath);
-			return (-API_ERR_IO);
+			return (ret != 0 ? ret : -API_ERR_IO);
 		}
 	}
 
@@ -159,12 +163,12 @@ api_data_open(const char *path, int flags)
 		return (-API_ERR_PERM);
 	}
 
-	if (flags & API_OPEN_TRUNC) {
-		if (vn->type == VCHR) {
-		} else if (vfs_truncate(kpath, 0) != 0) {
+	if ((flags & API_OPEN_TRUNC) && vn->type != VCHR) {
+		ret = vfs_truncate(kpath, 0);
+		if (ret != 0) {
 			vnode_release(vn);
 			kmem_free(kpath);
-			return (-API_ERR_IO);
+			return (ret);
 		}
 		vn->size = 0;
 	}

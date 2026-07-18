@@ -102,12 +102,17 @@ api_fs_stat(const char *path, struct api_fs_stat *buf)
 	}
 
 	vn = NULL;
-	if (vfs_resolve(kpath, &vn) != 0 || vn == NULL) {
+	ret = vfs_resolve(kpath, &vn);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (vn == NULL) {
 		return (-API_ERR_NOT_FOUND);
 	}
-	if (vnode_stat(vn, &st) != 0) {
+	ret = vnode_stat(vn, &st);
+	if (ret != 0) {
 		vnode_release(vn);
-		return (-API_ERR_IO);
+		return (ret);
 	}
 
 	memset(&kst, 0, sizeof(kst));
@@ -145,8 +150,9 @@ api_fs_rename(const char *oldpath, const char *newpath)
 	if (restrict_kusr_check(kold) || restrict_kusr_check(knew)) {
 		return (-API_ERR_PERM);
 	}
-	if (vfs_rename(kold, knew) != 0) {
-		return (-API_ERR_NOT_FOUND);
+	ret = vfs_rename(kold, knew);
+	if (ret != 0) {
+		return (ret);
 	}
 	return (0);
 }
@@ -164,8 +170,9 @@ api_fs_unlink(const char *path)
 	if (restrict_kusr_check(kpath)) {
 		return (-API_ERR_PERM);
 	}
-	if (vfs_unlink(kpath) != 0) {
-		return (-API_ERR_NOT_FOUND);
+	ret = vfs_unlink(kpath);
+	if (ret != 0) {
+		return (ret);
 	}
 	return (0);
 }

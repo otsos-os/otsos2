@@ -114,7 +114,7 @@ api_data_read(int handle, void *buf, u32 count)
 	n = vnode_read(objects[object_index].vn, buf, count,
 	    objects[object_index].offset);
 	if (n < 0) {
-		return (-API_ERR_IO);
+		return (n);
 	}
 
 	objects[object_index].offset += (u32)n;

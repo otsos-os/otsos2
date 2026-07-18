@@ -1,4 +1,5 @@
 #include <kernel/drivers/net/unix_sock.h>
+#include <kernel/api/errno.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/api/posix/posix.h>
 #include <kernel/process.h>
@@ -7,6 +8,41 @@
 #include <mm/kmem.h>
 
 static unix_sock_t	unix_socks[UNIX_SOCK_MAX];
+
+static int
+unix_sock_api_ret(int ret)
+{
+	int	err;
+
+	if (ret >= 0) {
+		return (ret);
+	}
+
+	err = -ret;
+	switch (err) {
+	case API_ERR_EXISTS:
+		return (-POSIX_EADDRINUSE);
+	case API_ERR_NOT_FOUND:
+		return (-POSIX_ENOENT);
+	case API_ERR_NOT_DIR:
+		return (-POSIX_ENOTDIR);
+	case API_ERR_TOO_BIG:
+		return (-POSIX_ENAMETOOLONG);
+	case API_ERR_NO_MEMORY:
+	case API_ERR_NOMEM:
+		return (-POSIX_ENOMEM);
+	case API_ERR_NO_SPACE:
+		return (-POSIX_ENOSPC);
+	case API_ERR_ACCESS:
+	case API_ERR_PERM:
+		return (-POSIX_EACCES);
+	case API_ERR_BAD_VALUE:
+	case API_ERR_INVAL:
+		return (-POSIX_EINVAL);
+	default:
+		return (-POSIX_EIO);
+	}
+}
 
 static int
 sock_alloc_id(void)
@@ -116,8 +152,11 @@ unix_sock_find_by_path(const char *path)
 int
 unix_sock_bind(unix_sock_t *s, const char *path)
 {
-	int	len;
+	int	len, ret;
 
+	if (!path) {
+		return (-POSIX_EINVAL);
+	}
 	len = strlen(path);
 	if (len <= 0 || len >= 108)
 		return (-POSIX_EINVAL);
@@ -127,9 +166,10 @@ unix_sock_bind(unix_sock_t *s, const char *path)
 
 	strcpy(s->bound_path, path);
 
-	if (chainfs_create_socket(path) != 0) {
+	ret = chainfs_create_socket(path);
+	if (ret != 0) {
 		s->bound_path[0] = '\0';
-		return (-POSIX_EIO);
+		return (unix_sock_api_ret(ret));
 	}
 
 	s->state = UNIX_SOCK_BOUND;

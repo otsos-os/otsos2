@@ -31,7 +31,7 @@ api_data_seek(int handle, long offset, int whence)
 {
 	api_handle_t	*handles;
 	api_object_t	*objects;
-	int		object_index;
+	int		object_index, ret;
 	posix_stat_t	st;
 	long long	new_off;
 
@@ -67,8 +67,9 @@ api_data_seek(int handle, long offset, int whence)
 		return (-API_ERR_BAD_HANDLE);
 	}
 
-	if (vnode_stat(objects[object_index].vn, &st) != 0) {
-		return (-API_ERR_IO);
+	ret = vnode_stat(objects[object_index].vn, &st);
+	if (ret != 0) {
+		return (ret);
 	}
 
 	new_off = 0;

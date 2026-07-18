@@ -42,6 +42,7 @@ $space %export errno, __errno_location
 #define EROFS		30
 #define EPIPE		32
 #define ENOSYS		38
+#define ENOTEMPTY	39
 #define ENOTSUP		95
 
 int	*__errno_location(void);

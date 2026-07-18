@@ -87,6 +87,9 @@ posix_api_ret(int ret)
 		return (-POSIX_ENOENT);
 	case API_ERR_BAD_ADDR:
 		return (-POSIX_EFAULT);
+	case API_ERR_NO_MEMORY:
+	case API_ERR_NOMEM:
+		return (-POSIX_ENOMEM);
 	case API_ERR_BUSY:
 		return (-POSIX_EBUSY);
 	case API_ERR_EXISTS:
@@ -101,8 +104,22 @@ posix_api_ret(int ret)
 		return (-POSIX_ENOSYS);
 	case API_ERR_TOO_BIG:
 		return (-POSIX_ENAMETOOLONG);
+	case API_ERR_FILE_TOO_BIG:
+		return (-POSIX_EFBIG);
+	case API_ERR_HANDLES_FULL:
+		return (-POSIX_EMFILE);
+	case API_ERR_OBJECTS_FULL:
+		return (-POSIX_ENOSPC);
 	case API_ERR_READ_ONLY:
 		return (-POSIX_EROFS);
+	case API_ERR_NO_SPACE:
+		return (-POSIX_ENOSPC);
+	case API_ERR_IO:
+		return (-POSIX_EIO);
+	case API_ERR_CROSS_DEVICE:
+		return (-POSIX_EXDEV);
+	case API_ERR_NOT_EMPTY:
+		return (-POSIX_ENOTEMPTY);
 	case API_ERR_BAD_VALUE:
 	case API_ERR_INVAL:
 	default:
@@ -158,7 +175,7 @@ posix_chdir(u64 path_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	kmem_free(path);
 
 	if (ret != 0) {
-		return (-POSIX_ENOENT);
+		return (posix_api_ret(ret));
 	}
 
 	return (0);
@@ -173,6 +190,7 @@ posix_getcwd(u64 buf_u, u64 size_u, u64 a3, u64 a4, u64 a5, u64 a6,
 	u32	path_len;
 	char	*buf;
 	u32	size;
+	int	ret;
 
 	(void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
 
@@ -188,8 +206,9 @@ posix_getcwd(u64 buf_u, u64 size_u, u64 a3, u64 a4, u64 a5, u64 a6,
 	}
 
 	memset(kbuf, 0, sizeof(kbuf));
-	if (vfs_getcwd(kbuf, sizeof(kbuf)) != 0) {
-		return (-POSIX_EIO);
+	ret = vfs_getcwd(kbuf, sizeof(kbuf));
+	if (ret != 0) {
+		return (posix_api_ret(ret));
 	}
 
 	path = kbuf;
@@ -223,7 +242,7 @@ posix_mkdir(u64 path_u, u64 mode, u64 a3, u64 a4, u64 a5, u64 a6,
 	kmem_free(path);
 
 	if (ret != 0) {
-		return (-POSIX_EEXIST);
+		return (posix_api_ret(ret));
 	}
 
 	return (0);
@@ -247,7 +266,7 @@ posix_rmdir(u64 path_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	kmem_free(path);
 
 	if (ret != 0) {
-		return (-POSIX_ENOTEMPTY);
+		return (posix_api_ret(ret));
 	}
 
 	return (0);
@@ -271,7 +290,7 @@ posix_unlink(u64 path_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	kmem_free(path);
 
 	if (ret != 0) {
-		return (-POSIX_ENOENT);
+		return (posix_api_ret(ret));
 	}
 
 	return (0);
@@ -302,7 +321,7 @@ posix_rename(u64 oldpath_u, u64 newpath_u, u64 a3, u64 a4, u64 a5,
 	kmem_free(newpath);
 
 	if (ret != 0) {
-		return (-POSIX_ENOENT);
+		return (posix_api_ret(ret));
 	}
 
 	return (0);
@@ -341,7 +360,7 @@ posix_readlink(u64 path_u, u64 buf_u, u64 bufsize, u64 a4, u64 a5,
 
 	if (ret < 0) {
 		kmem_free(kbuf);
-		return (-POSIX_EINVAL);
+		return (posix_api_ret(ret));
 	}
 
 	memcpy((void *)buf_u, kbuf, ret);
@@ -374,7 +393,7 @@ posix_symlink(u64 target_u, u64 linkpath_u, u64 a3, u64 a4, u64 a5,
 	kmem_free(linkpath);
 
 	if (ret != 0) {
-		return (-POSIX_EIO);
+		return (posix_api_ret(ret));
 	}
 
 	return (0);
@@ -424,7 +443,7 @@ posix_link(u64 oldpath_u, u64 newpath_u, u64 a3, u64 a4, u64 a5,
 	kmem_free(newpath);
 
 	if (ret != 0) {
-		return (-POSIX_EPERM);
+		return (posix_api_ret(ret));
 	}
 	return (0);
 }

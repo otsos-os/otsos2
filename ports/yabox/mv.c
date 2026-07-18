@@ -1,5 +1,6 @@
 /* !DEFINES!
 
+$define %type api_fs_stat as native file metadata
 $define %func move_one as function with args const char *, const char *
 $define %func main as start with args int, char **, char **
 
@@ -20,11 +21,17 @@ $space %export main
 static int
 move_one(const char *src, const char *dst)
 {
+	struct api_fs_stat	st;
 	int	code;
 
-	if (dataDir(API_DATA_DIR_RENAME, src, dst) < 0) {
+	if (fsStat(src, &st) < 0) {
 		code = errno;
 		ybx_error("mv", src, code);
+		return (1);
+	}
+	if (dataDir(API_DATA_DIR_RENAME, src, dst) < 0) {
+		code = errno;
+		ybx_error("mv", dst, code);
 		return (1);
 	}
 	return (0);

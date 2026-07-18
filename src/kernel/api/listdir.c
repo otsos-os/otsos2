@@ -58,27 +58,36 @@ int api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries) {
    * it to an absolute path so that VFS can handle it uniformly.
    */
   if (path == NULL || path[0] == '\0') {
-    if (vfs_getcwd(curpath, sizeof(curpath)) != 0) {
-      return -API_ERR_IO;
+    ret = vfs_getcwd(curpath, sizeof(curpath));
+    if (ret != 0) {
+      return ret;
     }
     resolve_path = curpath;
   } else {
     resolve_path = path;
   }
 
-  if (vfs_resolve(resolve_path, &vn) != 0 || vn == NULL) {
+  ret = vfs_resolve(resolve_path, &vn);
+  if (ret != 0) {
+    return ret;
+  }
+  if (vn == NULL) {
     return -API_ERR_NOT_FOUND;
   }
 
   if (vn->type != VDIR) {
     vnode_release(vn);
-    return -API_ERR_BAD_VALUE;
+    return -API_ERR_NOT_DIR;
   }
 
   for (i = 0; i < max_entries; i++) {
     type = 0;
     ret = vnode_readdir(vn, i, name, &type);
-    if (ret <= 0) {
+    if (ret < 0) {
+      vnode_release(vn);
+      return ret;
+    }
+    if (ret == 0) {
       break;
     }
 

@@ -126,11 +126,8 @@ api_fs_mnt(const char *source, const char *target, const char *fstype,
 	}
 
 	ret = vfs_mount_named(ktarget, kfstype, flags);
-	if (ret == -2) {
-		return (-API_ERR_NODEV);
-	}
 	if (ret != 0) {
-		return (-API_ERR_BAD_VALUE);
+		return (ret);
 	}
 	return (0);
 }
@@ -162,11 +159,8 @@ api_fs_umnt(const char *target, u64 flags)
 	}
 
 	ret = vfs_umount(ktarget);
-	if (ret == -2) {
-		return (-API_ERR_BUSY);
-	}
 	if (ret != 0) {
-		return (-API_ERR_BAD_VALUE);
+		return (ret);
 	}
 	return (0);
 }

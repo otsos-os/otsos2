@@ -32,6 +32,8 @@
 int
 api_fs_getcwd(char *buf, u32 size)
 {
+	int	ret;
+
 	if (!buf || size == 0) {
 		return (-API_ERR_BAD_VALUE);
 	}
@@ -39,8 +41,9 @@ api_fs_getcwd(char *buf, u32 size)
 		return (-API_ERR_BAD_ADDR);
 	}
 
-	if (vfs_getcwd(buf, size) != 0) {
-		return (-API_ERR_IO);
+	ret = vfs_getcwd(buf, size);
+	if (ret != 0) {
+		return (ret);
 	}
 
 	return (0);

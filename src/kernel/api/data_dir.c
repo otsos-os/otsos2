@@ -93,13 +93,15 @@ api_data_dir(u32 op, const char *path, const char *newpath)
 
 	switch (op) {
 	case API_DATA_DIR_MKDIR:
-		if (vfs_mkdir(kpath) != 0) {
-			return (-API_ERR_IO);
+		ret = vfs_mkdir(kpath);
+		if (ret != 0) {
+			return (ret);
 		}
 		return (0);
 	case API_DATA_DIR_RMDIR:
-		if (vfs_rmdir(kpath) != 0) {
-			return (-API_ERR_NOT_FOUND);
+		ret = vfs_rmdir(kpath);
+		if (ret != 0) {
+			return (ret);
 		}
 		return (0);
 	case API_DATA_DIR_RENAME:
@@ -110,8 +112,9 @@ api_data_dir(u32 op, const char *path, const char *newpath)
 		if (restrict_kusr_check(knewpath)) {
 			return (-API_ERR_PERM);
 		}
-		if (vfs_rename(kpath, knewpath) != 0) {
-			return (-API_ERR_NOT_FOUND);
+		ret = vfs_rename(kpath, knewpath);
+		if (ret != 0) {
+			return (ret);
 		}
 		return (0);
 	default:

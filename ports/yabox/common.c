@@ -82,8 +82,12 @@ ybx_strerror(int code)
 		return ("broken pipe");
 	case ENOSYS:
 		return ("no such syscall");
+	case ENOTEMPTY:
+		return ("directory not empty");
 	case ENOTSUP:
 		return ("operation not supported");
+	case 22:
+		return ("invalid argument");
 	default:
 		return ("unknown error");
 	}

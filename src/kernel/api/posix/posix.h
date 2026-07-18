@@ -89,6 +89,7 @@ $space %export posix_getrandom
 #define POSIX_EINVAL		22
 #define POSIX_EMFILE		24
 #define POSIX_ENOTTY		25
+#define POSIX_EFBIG		27
 #define POSIX_ENOSPC		28
 #define POSIX_ESPIPE		29
 #define POSIX_EROFS		30
