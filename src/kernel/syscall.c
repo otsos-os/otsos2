@@ -36,6 +36,7 @@
 #include <kernel/thread.h>
 #include <kernel/syscall.h>
 #include <kernel/other/config.h>
+#include <kernel/trace/trace.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <mlibc/stdio.h>
@@ -109,11 +110,14 @@ void syscall_handler(registers_t *regs) {
   u64 arg3 = regs->rdx;
   u64 arg4 = regs->r10;
   u64 arg5 = regs->r8;
+  u64 arg6 = regs->r9;
+  u64 trace_start = trace_syscall_enter(regs);
 
   if (syscall_number == CALL_PERSONALITY) {
     process_t *proc = process_current();
     if (!proc) {
       regs->rax = (u64)(-API_ERR_BAD_VALUE);
+      trace_syscall_exit(regs, syscall_number, regs->rax, trace_start);
       return;
     }
     u64 old_personality = (u64)proc->personality;
@@ -125,6 +129,7 @@ void syscall_handler(registers_t *regs) {
                   (int)new_personality);
     }
     regs->rax = old_personality;
+    trace_syscall_exit(regs, syscall_number, regs->rax, trace_start);
     return;
   }
 
@@ -134,6 +139,7 @@ void syscall_handler(registers_t *regs) {
     if (cur_proc->personality == PERSONALITY_POSIX) {
       posix_syscall_handler(regs);
       posix_signal_deliver(cur_proc, regs);
+      trace_syscall_exit(regs, syscall_number, regs->rax, trace_start);
       return;
     }
   } else {
@@ -331,6 +337,27 @@ void syscall_handler(registers_t *regs) {
     regs->rax = (u64)api_net_ctl((int)arg1, (int)arg2,
         (void *)arg3);
     break;
+  case CALL_TRACE_OPEN:
+    regs->rax = (u64)api_trace_open((u32)arg1);
+    break;
+  case CALL_TRACE_CLOSE:
+    regs->rax = (u64)api_trace_close((int)arg1);
+    break;
+  case CALL_TRACE_READ:
+    regs->rax = (u64)api_trace_read((int)arg1,
+        (struct api_trace_read *)arg2);
+    break;
+  case CALL_TRACE_CTL:
+    regs->rax = (u64)api_trace_ctl((int)arg1, (u32)arg2,
+        (void *)arg3);
+    break;
+  case CALL_TRACE_INFO:
+    regs->rax = (u64)api_trace_info((u32)arg1, (void *)arg2);
+    break;
+  case CALL_TRACE_MARK:
+    regs->rax = (u64)api_trace_mark((u32)arg1, arg2, arg3, arg4,
+        arg5, arg6);
+    break;
   case CALL_PROC_GETPID:
     regs->rax = (u64)api_proc_getpid();
     break;
@@ -388,4 +415,5 @@ void syscall_handler(registers_t *regs) {
   if (cur_proc) {
     signal_deliver(cur_proc, regs);
   }
+  trace_syscall_exit(regs, syscall_number, regs->rax, trace_start);
 }

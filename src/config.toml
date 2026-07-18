@@ -28,6 +28,30 @@ smart_migration = true
 migration_threshold = 2
 zkill = true
 
+[trace]
+enabled = true
+ring_records = 1024
+sample_every_ticks = 10
+stack_depth = 4
+
+[trace.sources]
+main = true
+pmu = true
+syscall = true
+handler = true
+scheduler = true
+event = true
+user = true
+
+[trace.pmu]
+enabled = true
+cycles = true
+instructions = true
+cache_references = true
+cache_misses = true
+branch_instructions = true
+branch_misses = true
+
 [kshell]
 enabled = true
 prompt = "kshell> "
@@ -68,6 +92,7 @@ rmdir = "/bin/rmdir"
 cp = "/bin/cp"
 mv = "/bin/mv"
 unzip = "/bin/unzip"
+profile = "/bin/profile"
 oven = "/bin/oven"
 cursord = "/bin/cursord"
 # shmtest = "/bin/shmtest"

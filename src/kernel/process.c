@@ -275,6 +275,7 @@ process_exit(int code)
 		td->running_cpu = smp_cpu_index();
 	}
 
+	api_trace_cleanup_process(proc);
 	api_release_handles(proc);
 	posix_cleanup_process(proc);
 	if (proc->owns_address_space) {
@@ -428,6 +429,7 @@ process_kill(u32 pid)
 		return (0);
 	}
 
+	api_trace_cleanup_process(proc);
 	api_release_handles(proc);
 	posix_cleanup_process(proc);
 	if (proc->owns_address_space) {

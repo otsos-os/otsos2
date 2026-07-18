@@ -56,6 +56,7 @@ $space %export scheduler_tick
 #include <kernel/scheduler.h>
 #include <kernel/smp/smp.h>
 #include <kernel/thread.h>
+#include <kernel/trace/trace.h>
 #include <kernel/api/posix/posix.h>
 #include <mm/vm/vm_map.h>
 static int	sched_strict_process_separation;
@@ -270,6 +271,7 @@ scheduler_reap_orphans(thread_t *skip)
 		if (proc->ppid != 0 && process_get(proc->ppid) != NULL) {
 			continue;
 		}
+		api_trace_cleanup_process(proc);
 		api_release_handles(proc);
 		posix_cleanup_process(proc);
 		if (proc->owns_address_space && proc->cr3 != 0) {
@@ -294,6 +296,7 @@ scheduler_tick(registers_t *regs)
 	static u32	last_magic = 0;
 	thread_t	*current, *next;
 	process_t	*cur_proc;
+	u32		trace_reason;
 	int		locked_here;
 
 	if (last_magic == 0) {
@@ -316,6 +319,7 @@ scheduler_tick(registers_t *regs)
 	if (!regs) {
 		return;
 	}
+	trace_sched_tick(regs);
 
 	current = thread_current();
 	if (!current) {
@@ -337,6 +341,7 @@ scheduler_tick(registers_t *regs)
 		if (next->proc) {
 			pmap_load(next->proc->cr3);
 		}
+		trace_sched_switch(NULL, next, TRACE_SCHED_BOOT, regs);
 		thread_load_context(next, regs);
 		return;
 	}
@@ -363,6 +368,7 @@ scheduler_tick(registers_t *regs)
 			return;
 		}
 		thread_save_context(current, regs);
+		trace_sched_switch(current, next, TRACE_SCHED_SLEEP, regs);
 		thread_set_current(next);
 		if (locked_here) {
 			smp_unlock();
@@ -377,6 +383,7 @@ scheduler_tick(registers_t *regs)
 		return;
 	}
 
+	trace_reason = TRACE_SCHED_PREEMPT;
 	locked_here = !smp_lock_held();
 	if (locked_here) {
 		smp_lock();
@@ -415,6 +422,10 @@ scheduler_tick(registers_t *regs)
 		return;
 	}
 
+	if (current->state == PROC_STATE_ZOMBIE) {
+		trace_reason = TRACE_SCHED_EXIT;
+	}
+	trace_sched_switch(current, next, trace_reason, regs);
 	thread_set_current(next);
 	if (locked_here) {
 		smp_unlock();

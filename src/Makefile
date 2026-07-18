@@ -10,7 +10,7 @@ QEMU_GUI_OPTS ?= -display gtk
 QEMU_NODISPLAY_OPTS ?= -display none
 
 TARGET_CFLAGS ?= --target=$(TARGET)
-CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fno-pic -fstack-protector-strong -g -O2 -fno-builtin -mno-red-zone -mcmodel=kernel -mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-80387 -I. -Ikernel -Ikernel/drivers/video
+CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fno-pic -fstack-protector-strong -g -O2 -fno-omit-frame-pointer -fno-builtin -mno-red-zone -mcmodel=kernel -mno-sse -mno-mmx -mno-sse2 -mno-avx -mno-80387 -I. -Ikernel -Ikernel/drivers/video
 LDFLAGS ?= -m elf_x86_64 -T linker.ld -Map=../bin/kernel.map
 NASM_FORMAT ?= elf64
 ZIG_TARGET ?= x86_64-freestanding
@@ -53,7 +53,7 @@ NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
 NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 DLD_BIN = ../libc/LibExec/dld/drld
 YABOX_DIR = $(PORTS_DIR)/yabox
-YABOX_TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv unzip
+YABOX_TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv unzip profile
 LIBC_ENABLED := $(shell sh ../tools/toml_get.sh config.toml libc enabled true)
 MULTIBOOT_MODULES := $(shell perl ../tools/modules.pl config.toml)
 CPYTHON_ENABLED := $(if $(filter python,$(MULTIBOOT_MODULES)),true,false)
@@ -194,6 +194,7 @@ WAIT_O = ../bin/wait.o
 MMAP_O = ../bin/mmap.o
 SHM_O = ../bin/shm.o
 API_NET_O = ../bin/api_net.o
+API_TRACE_O = ../bin/api_trace.o
 
 PIPE_O = ../bin/pipe.o
 DATA_DIR_O = ../bin/data_dir.o
@@ -221,6 +222,8 @@ USERSPACE_ASM_O = ../bin/userspace_asm.o
 SYSCALL_ASM_O = ../bin/syscall_asm.o
 USERADDR_O = ../bin/useraddr.o
 SCHEDULER_O = ../bin/scheduler.o
+TRACE_O = ../bin/trace.o
+TRACE_PMU_O = ../bin/trace_pmu.o
 ACPI_O = ../bin/acpi.o
 ACPI_TABLES_O = ../bin/acpi_tables.o
 SMP_O = ../bin/smp.o
@@ -306,8 +309,9 @@ ET_CLOCKSOURCE_O = ../bin/et_clocksource.o
 CMOS_RTC_O = ../bin/cmos_rtc.o
 
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDIO_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
-      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(API_NET_O) $(PIPE_O) $(DATA_DIR_O) $(CLONE_O) $(SYSCALL_O) \
+      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(API_NET_O) $(API_TRACE_O) $(PIPE_O) $(DATA_DIR_O) $(CLONE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(SESSION_O) $(THREAD_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(FS_META_O) $(MOUNT_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
+      $(TRACE_O) $(TRACE_PMU_O) \
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
@@ -575,7 +579,7 @@ $(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BU
 		exit 1; \
 	fi
 
-$(BIOS_BOOTPACK): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
+$(BIOS_BOOTPACK): Makefile config.toml $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
 	@rm -rf $(BIOS_PAYLOAD_DIR)
 	@mkdir -p $(BIOS_PAYLOAD_DIR)
 	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
@@ -587,7 +591,7 @@ $(BIOS_BOOTPACK): $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN)
 			yes) src=$(YES_BIN);; \
 			fetch) src=$(FETCH_BIN);; \
 			sh) src=$(SHELL_BIN);; \
-			ls|cat|touch|pwd|whoami|rm|mkdir|rmdir|cp|mv|unzip) src=$(YABOX_DIR)/$$m;; \
+			ls|cat|touch|pwd|whoami|rm|mkdir|rmdir|cp|mv|unzip|profile) src=$(YABOX_DIR)/$$m;; \
 			oven) src=$(OVEN_BIN);; \
 			cursord) src=$(CURSORD_BIN);; \
 			shmtest) src=$(SHMTEST_BIN);; \
@@ -675,7 +679,7 @@ $(IDT_ASM_O): kernel/interrupts/idt.asm
 	@echo "  AS      $<"
 	@$(AS) -f $(NASM_FORMAT) -g -F dwarf $< -o $@
 
-$(KERNEL_O): kernel/kernel.c
+$(KERNEL_O): kernel/kernel.c kernel/trace/trace.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -687,7 +691,7 @@ $(PIC_O): kernel/interrupts/pic.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(HANDLERS_O): kernel/interrupts/handlers.c kernel/mm/vm/vm_map.h kernel/interrupts/apic/lapic.h
+$(HANDLERS_O): kernel/interrupts/handlers.c kernel/mm/vm/vm_map.h kernel/interrupts/apic/lapic.h kernel/trace/trace.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -847,7 +851,7 @@ $(OPEN_O): kernel/api/open.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(SYSCALL_O): kernel/syscall.c kernel/api/shm.h kernel/other/config.h
+$(SYSCALL_O): kernel/syscall.c kernel/api/api.h kernel/api/shm.h kernel/other/config.h kernel/trace/trace.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -876,6 +880,10 @@ $(SHM_O): kernel/api/shm.c kernel/api/shm.h kernel/api/api.h kernel/mm/vm/vm_map
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(API_NET_O): kernel/api/net.c kernel/api/api.h kernel/net/endpoint.h kernel/useraddr.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(API_TRACE_O): kernel/api/trace.c kernel/api/api.h kernel/trace/trace.h kernel/useraddr.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -959,7 +967,15 @@ $(USERADDR_O): kernel/useraddr.c kernel/useraddr.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(SCHEDULER_O): kernel/scheduler.c kernel/scheduler.h kernel/process.h kernel/mm/vm/pmap.h kernel/gdt.h kernel/interrupts/idt.h
+$(SCHEDULER_O): kernel/scheduler.c kernel/scheduler.h kernel/process.h kernel/mm/vm/pmap.h kernel/gdt.h kernel/interrupts/idt.h kernel/trace/trace.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(TRACE_O): kernel/trace/trace.c kernel/trace/trace.h kernel/other/config.h kernel/process.h kernel/thread.h kernel/smp/smp.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(TRACE_PMU_O): kernel/trace/trace_pmu.c kernel/trace/trace.h kernel/other/config.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -983,7 +999,7 @@ $(ACPI_TABLES_O): kernel/drivers/acpi/tables.c kernel/drivers/acpi/acpi.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(SMP_O): kernel/smp/smp.c kernel/smp/smp.h kernel/gdt.h kernel/interrupts/apic/lapic.h
+$(SMP_O): kernel/smp/smp.c kernel/smp/smp.h kernel/gdt.h kernel/interrupts/apic/lapic.h kernel/trace/trace.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1150,7 +1166,7 @@ $(SYSCALL_ASM_O): kernel/syscall_asm.asm
 	@echo "  AS      $<"
 	@$(AS) -f $(NASM_FORMAT) -g -F dwarf $< -o $@
 
-$(EVENT_O): kernel/event/event.c kernel/event/event.h kernel/api/api.h
+$(EVENT_O): kernel/event/event.c kernel/event/event.h kernel/api/api.h kernel/trace/trace.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

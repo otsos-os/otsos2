@@ -42,6 +42,7 @@
 #include <kernel/scheduler.h>
 #include <kernel/smp/smp.h>
 #include <kernel/thread.h>
+#include <kernel/trace/trace.h>
 #include <mlibc/mlibc.h>
 
 extern void kernel_panic(registers_t *regs);
@@ -56,6 +57,7 @@ void isr_handler(registers_t *regs) {
   if (regs->int_no == 128) {
     syscall_handler(regs);
   } else {
+    trace_exception(regs);
     if ((regs->cs & 3) == 3) {
       process_t *proc = process_current();
 
@@ -100,6 +102,7 @@ void isr_handler(registers_t *regs) {
 void irq_handler(registers_t *regs) {
   u8 irq;
 
+  trace_irq_enter(regs);
   if (regs->int_no >= 32 && regs->int_no < 48) {
     irq = (u8)(regs->int_no - 32);
     virtio_net_irq(irq);
@@ -107,6 +110,7 @@ void irq_handler(registers_t *regs) {
 
   if (regs->int_no == 32) {
     eventtimer_dispatch();
+    trace_sample_tick(regs);
     power_button_poll();
     watchdog_tick();
     event_timer_tick();
@@ -124,6 +128,7 @@ void irq_handler(registers_t *regs) {
     scheduler_tick(regs);
   } else if (regs->int_no == 48) {
     eventtimer_dispatch();
+    trace_sample_tick(regs);
     power_button_poll();
     watchdog_tick();
     event_timer_tick();
@@ -133,12 +138,15 @@ void irq_handler(registers_t *regs) {
     ps2_mouse_poll();
     scheduler_tick(regs);
     terminal_update();
+    trace_irq_exit(regs);
     lapic_eoi();
     return;
   } else if (regs->int_no == 255) {
+    trace_irq_exit(regs);
     return;
   }
 
   if (regs->int_no >= 32 && regs->int_no < 48)
     pic_send_eoi(regs->int_no - 32);
+  trace_irq_exit(regs);
 }

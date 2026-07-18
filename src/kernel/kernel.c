@@ -115,6 +115,7 @@ $space %export kmain
 #include <kernel/other/config.h>
 #include <kernel/syscall.h>
 #include <kernel/smp/smp.h>
+#include <kernel/trace/trace.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdio.h>
 #include <mlibc/stdlib.h>
@@ -785,6 +786,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	vm_object_init();
 	uma_init();
 	enable_sse();
+	trace_init();
 	__asm__ volatile("sti");
 
 	if (!disable_apic && strcmp(config_get_string("timer", "default_timer",

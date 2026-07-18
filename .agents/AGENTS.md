@@ -74,6 +74,9 @@ Monolithic kernel with the following rough layers:
 - `console/` — kernel terminal, pty, and console rendering.
 - `event/` — kqueue-style event system (read, write, timer, proc, signal, user,
   keyboard and mouse filters).
+- `trace/` — kernel observability core: event registry, per-CPU ring buffers,
+  trace sessions, PMU counter sampling, syscall/IRQ/scheduler/kqueue
+  tracepoints. Runtime toggles live under `[trace]` in `src/config.toml`.
 - `kshell/` — optional kernel debug shell configured via `config.toml`.
 - `crypto/` — SHA-256, HMAC-SHA256, PBKDF2, ChaCha20, RNG, plus `kusr`
   authentication.
@@ -218,6 +221,7 @@ Monolithic kernel with the following rough layers:
 - `src/userland/userspace.c:139` — `userspace_load_elf()` — create a process.
 - `init/init.c:250` — `_start()` — first userspace process.
 - `src/kernel/scheduler.c` — `scheduler_tick()` — timer-driven preemption.
+- `src/kernel/trace/trace.c` — `trace_init()` — profiling/tracing core.
 - `src/kernel/drivers/fs/chainFS/chainfs.c:91` — `chainfs_init()` — root FS.
 - `src/kernel/drivers/video/drm/drm.c` — DRM core.
 - `src/kernel/api/api.h` — native syscall structs and constants.

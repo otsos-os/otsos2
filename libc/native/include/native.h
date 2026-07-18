@@ -5,14 +5,19 @@ $define %type api_kmeminfo as struct with native kernel memory data
 $define %type api_fs_stat as struct with native file metadata
 $define %type api_net_addr as native IPv4 endpoint address
 $define %type api_net_msg as native datagram descriptor
+$define %type api_trace_record as native trace record
+$define %type api_trace_filter as native trace session filter
 $define %type kevent as struct with native event data
 $define %func termWrite as function with args const void *, size_t
 $define %func dataOpen as function with args const char *, int
 $define %func dataDir as function with args uint32_t, const char *, const char *
-$define %func fsMnt as function with args const char *, const char *, const char *, uint64_t, const void *
+$define %func fsMnt as function with args mount tuple
 $define %func fsUmnt as function with args const char *, uint64_t
-$define %func procSpawn as function with args const char *, char *const *, char *const *
-$define %func procSpawnAbi as function with args const char *, char *const *, char *const *, uint32_t
+$define %func procSpawn as function with args spawn tuple
+$define %func procSpawnAbi as function with args spawn tuple, uint32_t
+$define %func traceOpen as function with args uint32_t
+$define %func traceRead as function with args int, api_trace_read *
+$define %func traceMark as function with args uint32_t, five uint64_t
 
 */
 
@@ -32,6 +37,8 @@ $space %export drmGemMmap, drmFbCreate, drmFbDestroy, drmGetObjects
 $space %export drmAtomicCommit, drmRapiClear, drmRapiPutPixel
 $space %export drmRapiFillRect, drmRapiGlyph, drmRapiScroll, drmRapiBlit
 $space %export drmDriverList, drmDriverSwitch
+$space %export traceOpen, traceClose, traceRead, traceCtl, traceInfo
+$space %export traceMark
 
 */
 
@@ -106,6 +113,12 @@ $space %export drmDriverList, drmDriverSwitch
 #define CALL_NET_SEND		0x803
 #define CALL_NET_RECV		0x804
 #define CALL_NET_CTL		0x805
+#define CALL_TRACE_OPEN		0x900
+#define CALL_TRACE_CLOSE	0x901
+#define CALL_TRACE_READ		0x902
+#define CALL_TRACE_CTL		0x903
+#define CALL_TRACE_INFO		0x904
+#define CALL_TRACE_MARK		0x905
 #define CALL_PERSONALITY	0xFFFF
 
 #define API_OPEN_READ		0x0001
@@ -146,6 +159,81 @@ $space %export drmDriverList, drmDriverSwitch
 #define API_NET_MSG_TRUNC	0x00000002
 #define API_NET_CTL_GET_LOCAL	1
 #define API_NET_CTL_GET_PEER	2
+
+#define API_TRACE_MAX_CPUS		32
+#define API_TRACE_MAX_EVENTS		128
+#define API_TRACE_EVENT_WORDS		2
+#define API_TRACE_RECORD_ARGS		6
+#define API_TRACE_RECORD_STACK		8
+#define API_TRACE_NAME_LEN		32
+#define API_TRACE_PROVIDER_LEN		16
+#define API_TRACE_MAX_FIELDS		8
+#define API_TRACE_MAX_PMU_COUNTERS	16
+#define API_TRACE_READ_MAX_RECORDS	4096
+
+#define API_TRACE_OPEN_SYSTEM		0x00000001
+#define API_TRACE_OPEN_KERNEL_STACK	0x00000002
+
+#define API_TRACE_FILTER_HAS_PID	0x00000001
+#define API_TRACE_FILTER_HAS_TID	0x00000002
+#define API_TRACE_FILTER_HAS_CPU	0x00000004
+
+#define API_TRACE_REC_F_USER		0x00000001
+#define API_TRACE_REC_F_LOST_BEFORE	0x00000002
+#define API_TRACE_REC_F_PMU_VALID	0x00000004
+
+#define API_TRACE_SOURCE_MAIN		0
+#define API_TRACE_SOURCE_PMU		1
+#define API_TRACE_SOURCE_SYSCALL	2
+#define API_TRACE_SOURCE_HANDLER	3
+#define API_TRACE_SOURCE_SCHEDULER	4
+#define API_TRACE_SOURCE_EVENT		5
+#define API_TRACE_SOURCE_USER		6
+#define API_TRACE_SOURCE_COUNT		7
+#define API_TRACE_SOURCE_MASK_ALL \
+	((1ULL << API_TRACE_SOURCE_COUNT) - 1)
+
+#define API_TRACE_EV_CORE_BOOT		0
+#define API_TRACE_EV_PROFILE_SAMPLE	1
+#define API_TRACE_EV_PMU_COUNTERS	2
+#define API_TRACE_EV_SYSCALL_ENTER	3
+#define API_TRACE_EV_SYSCALL_EXIT	4
+#define API_TRACE_EV_IRQ_ENTER		5
+#define API_TRACE_EV_IRQ_EXIT		6
+#define API_TRACE_EV_EXCEPTION		7
+#define API_TRACE_EV_SCHED_TICK		8
+#define API_TRACE_EV_SCHED_SWITCH	9
+#define API_TRACE_EV_EVENT_KQUEUE_CREATE	10
+#define API_TRACE_EV_EVENT_KQUEUE_DESTROY	11
+#define API_TRACE_EV_EVENT_KNOTE_READY	12
+#define API_TRACE_EV_EVENT_KEVENT_WAIT	13
+#define API_TRACE_EV_EVENT_KEVENT_RETURN	14
+#define API_TRACE_EV_EVENT_TIMER_TICK	15
+#define API_TRACE_EV_USER_MARK		16
+#define API_TRACE_EV_COUNT		17
+
+#define API_TRACE_PMU_CYCLES		0
+#define API_TRACE_PMU_INSTRUCTIONS	1
+#define API_TRACE_PMU_CACHE_REFERENCES	2
+#define API_TRACE_PMU_CACHE_MISSES	3
+#define API_TRACE_PMU_BRANCH_INSTRUCTIONS	4
+#define API_TRACE_PMU_BRANCH_MISSES	5
+#define API_TRACE_PMU_COUNTER_COUNT	6
+
+#define API_TRACE_OP_START		1
+#define API_TRACE_OP_STOP		2
+#define API_TRACE_OP_SET_FILTER		3
+#define API_TRACE_OP_ENABLE_EVENT	4
+#define API_TRACE_OP_ENABLE_SOURCE	5
+#define API_TRACE_OP_SET_PMU		6
+#define API_TRACE_OP_LOAD_PROGRAM	7
+#define API_TRACE_OP_UNLOAD_PROGRAM	8
+#define API_TRACE_OP_FLUSH		9
+
+#define API_TRACE_INFO_STATS		1
+#define API_TRACE_INFO_EVENTS		2
+#define API_TRACE_INFO_SOURCES		3
+#define API_TRACE_INFO_PMU		4
 
 #define API_FS_TYPE_REG		1
 #define API_FS_TYPE_DIR		2
@@ -317,6 +405,111 @@ struct api_timeinfo {
 	uint64_t	frequency;
 	int64_t		timezone_offset;
 	char		clocksource[32];
+};
+
+struct api_trace_record {
+	uint64_t	seq;
+	uint64_t	tsc;
+	uint64_t	ticks;
+	uint64_t	pid;
+	uint64_t	tid;
+	uint64_t	ip;
+	uint64_t	sp;
+	uint64_t	bp;
+	uint64_t	args[API_TRACE_RECORD_ARGS];
+	uint64_t	stack[API_TRACE_RECORD_STACK];
+	uint32_t	cpu;
+	uint32_t	event;
+	uint32_t	source;
+	uint32_t	flags;
+	uint16_t	stack_count;
+	uint16_t	reserved;
+};
+
+struct api_trace_filter {
+	uint64_t	source_mask;
+	uint64_t	event_mask[API_TRACE_EVENT_WORDS];
+	int		pid;
+	int		tid;
+	int		cpu;
+	uint32_t	flags;
+};
+
+struct api_trace_read {
+	struct api_trace_record	*records;
+	uint32_t		max_records;
+	uint32_t		records_read;
+	uint64_t		read_records;
+	uint64_t		lost_records;
+	uint32_t		flags;
+	uint32_t		reserved;
+};
+
+struct api_trace_stats {
+	uint64_t	records_written;
+	uint64_t	records_lost;
+	uint64_t	event_count[API_TRACE_MAX_EVENTS];
+	uint64_t	source_count[API_TRACE_SOURCE_COUNT];
+	uint32_t	ring_records;
+	uint32_t	session_count;
+	uint32_t	enabled;
+	uint32_t	initialized;
+};
+
+struct api_trace_field {
+	char		name[API_TRACE_NAME_LEN];
+	uint16_t	index;
+	uint16_t	flags;
+	uint32_t	reserved;
+};
+
+struct api_trace_event {
+	uint16_t	id;
+	uint16_t	source;
+	uint32_t	flags;
+	uint32_t	enabled;
+	uint32_t	field_count;
+	char		provider[API_TRACE_PROVIDER_LEN];
+	char		name[API_TRACE_NAME_LEN];
+	struct api_trace_field fields[API_TRACE_MAX_FIELDS];
+};
+
+struct api_trace_events {
+	struct api_trace_event	*events;
+	uint32_t		max_events;
+	uint32_t		count;
+};
+
+struct api_trace_source {
+	uint16_t	id;
+	uint16_t	reserved;
+	uint32_t	enabled;
+	char		name[API_TRACE_NAME_LEN];
+};
+
+struct api_trace_sources {
+	struct api_trace_source	*sources;
+	uint32_t		max_sources;
+	uint32_t		count;
+};
+
+struct api_trace_toggle {
+	uint32_t	id;
+	uint32_t	enabled;
+};
+
+struct api_trace_pmu_counter {
+	uint32_t	id;
+	uint32_t	enabled;
+	char		name[API_TRACE_NAME_LEN];
+};
+
+struct api_trace_pmu {
+	struct api_trace_pmu_counter	*counters;
+	uint32_t			max_counters;
+	uint32_t			count;
+	uint32_t			source_enabled;
+	uint32_t			events_enabled;
 };
 
 struct api_net_addr {
@@ -563,6 +756,14 @@ int	sysCpuInfo(struct api_cpuinfo *buf);
 int	sysRandom(void *buf, size_t len);
 int	sysTimeInfo(struct api_timeinfo *buf);
 int	sysTime(void);
+
+int	traceOpen(uint32_t flags);
+int	traceClose(int trace);
+ssize_t	traceRead(int trace, struct api_trace_read *args);
+int	traceCtl(int trace, uint32_t op, void *arg);
+int	traceInfo(uint32_t op, void *arg);
+int	traceMark(uint32_t id, uint64_t a0, uint64_t a1, uint64_t a2,
+	    uint64_t a3, uint64_t a4);
 
 int	drmCall(uint64_t op, void *arg);
 int	drmInfo(struct api_drm_info *info);

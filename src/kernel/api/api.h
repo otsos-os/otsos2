@@ -472,6 +472,186 @@ struct api_timeinfo {
   char clocksource[32];
 };
 
+#define	API_TRACE_MAX_CPUS		32
+#define	API_TRACE_MAX_EVENTS		128
+#define	API_TRACE_EVENT_WORDS		2
+#define	API_TRACE_RECORD_ARGS		6
+#define	API_TRACE_RECORD_STACK		8
+#define	API_TRACE_NAME_LEN		32
+#define	API_TRACE_PROVIDER_LEN		16
+#define	API_TRACE_MAX_FIELDS		8
+#define	API_TRACE_MAX_PMU_COUNTERS	16
+#define	API_TRACE_READ_MAX_RECORDS	4096
+
+#define	API_TRACE_OPEN_SYSTEM		0x00000001
+#define	API_TRACE_OPEN_KERNEL_STACK	0x00000002
+
+#define	API_TRACE_FILTER_HAS_PID		0x00000001
+#define	API_TRACE_FILTER_HAS_TID		0x00000002
+#define	API_TRACE_FILTER_HAS_CPU		0x00000004
+
+#define	API_TRACE_REC_F_USER		0x00000001
+#define	API_TRACE_REC_F_LOST_BEFORE	0x00000002
+#define	API_TRACE_REC_F_PMU_VALID	0x00000004
+
+#define	API_TRACE_SOURCE_MAIN		0
+#define	API_TRACE_SOURCE_PMU		1
+#define	API_TRACE_SOURCE_SYSCALL		2
+#define	API_TRACE_SOURCE_HANDLER		3
+#define	API_TRACE_SOURCE_SCHEDULER	4
+#define	API_TRACE_SOURCE_EVENT		5
+#define	API_TRACE_SOURCE_USER		6
+#define	API_TRACE_SOURCE_COUNT		7
+#define	API_TRACE_SOURCE_MASK_ALL \
+	((1ULL << API_TRACE_SOURCE_COUNT) - 1)
+
+#define	API_TRACE_EV_CORE_BOOT		0
+#define	API_TRACE_EV_PROFILE_SAMPLE	1
+#define	API_TRACE_EV_PMU_COUNTERS	2
+#define	API_TRACE_EV_SYSCALL_ENTER	3
+#define	API_TRACE_EV_SYSCALL_EXIT	4
+#define	API_TRACE_EV_IRQ_ENTER		5
+#define	API_TRACE_EV_IRQ_EXIT		6
+#define	API_TRACE_EV_EXCEPTION		7
+#define	API_TRACE_EV_SCHED_TICK		8
+#define	API_TRACE_EV_SCHED_SWITCH	9
+#define	API_TRACE_EV_EVENT_KQUEUE_CREATE	10
+#define	API_TRACE_EV_EVENT_KQUEUE_DESTROY	11
+#define	API_TRACE_EV_EVENT_KNOTE_READY	12
+#define	API_TRACE_EV_EVENT_KEVENT_WAIT	13
+#define	API_TRACE_EV_EVENT_KEVENT_RETURN	14
+#define	API_TRACE_EV_EVENT_TIMER_TICK	15
+#define	API_TRACE_EV_USER_MARK		16
+#define	API_TRACE_EV_COUNT		17
+
+#define	API_TRACE_PMU_CYCLES		0
+#define	API_TRACE_PMU_INSTRUCTIONS	1
+#define	API_TRACE_PMU_CACHE_REFERENCES	2
+#define	API_TRACE_PMU_CACHE_MISSES	3
+#define	API_TRACE_PMU_BRANCH_INSTRUCTIONS	4
+#define	API_TRACE_PMU_BRANCH_MISSES	5
+#define	API_TRACE_PMU_COUNTER_COUNT	6
+
+#define	API_TRACE_OP_START		1
+#define	API_TRACE_OP_STOP		2
+#define	API_TRACE_OP_SET_FILTER		3
+#define	API_TRACE_OP_ENABLE_EVENT	4
+#define	API_TRACE_OP_ENABLE_SOURCE	5
+#define	API_TRACE_OP_SET_PMU		6
+#define	API_TRACE_OP_LOAD_PROGRAM	7
+#define	API_TRACE_OP_UNLOAD_PROGRAM	8
+#define	API_TRACE_OP_FLUSH		9
+
+#define	API_TRACE_INFO_STATS		1
+#define	API_TRACE_INFO_EVENTS		2
+#define	API_TRACE_INFO_SOURCES		3
+#define	API_TRACE_INFO_PMU		4
+
+struct api_trace_record {
+	u64	seq;
+	u64	tsc;
+	u64	ticks;
+	u64	pid;
+	u64	tid;
+	u64	ip;
+	u64	sp;
+	u64	bp;
+	u64	args[API_TRACE_RECORD_ARGS];
+	u64	stack[API_TRACE_RECORD_STACK];
+	u32	cpu;
+	u32	event;
+	u32	source;
+	u32	flags;
+	u16	stack_count;
+	u16	reserved;
+};
+
+struct api_trace_filter {
+	u64	source_mask;
+	u64	event_mask[API_TRACE_EVENT_WORDS];
+	int	pid;
+	int	tid;
+	int	cpu;
+	u32	flags;
+};
+
+struct api_trace_read {
+	struct api_trace_record	*records;
+	u32			max_records;
+	u32			records_read;
+	u64			read_records;
+	u64			lost_records;
+	u32			flags;
+	u32			reserved;
+};
+
+struct api_trace_stats {
+	u64	records_written;
+	u64	records_lost;
+	u64	event_count[API_TRACE_MAX_EVENTS];
+	u64	source_count[API_TRACE_SOURCE_COUNT];
+	u32	ring_records;
+	u32	session_count;
+	u32	enabled;
+	u32	initialized;
+};
+
+struct api_trace_field {
+	char	name[API_TRACE_NAME_LEN];
+	u16	index;
+	u16	flags;
+	u32	reserved;
+};
+
+struct api_trace_event {
+	u16	id;
+	u16	source;
+	u32	flags;
+	u32	enabled;
+	u32	field_count;
+	char	provider[API_TRACE_PROVIDER_LEN];
+	char	name[API_TRACE_NAME_LEN];
+	struct api_trace_field fields[API_TRACE_MAX_FIELDS];
+};
+
+struct api_trace_events {
+	struct api_trace_event	*events;
+	u32			max_events;
+	u32			count;
+};
+
+struct api_trace_source {
+	u16	id;
+	u16	reserved;
+	u32	enabled;
+	char	name[API_TRACE_NAME_LEN];
+};
+
+struct api_trace_sources {
+	struct api_trace_source	*sources;
+	u32			max_sources;
+	u32			count;
+};
+
+struct api_trace_toggle {
+	u32	id;
+	u32	enabled;
+};
+
+struct api_trace_pmu_counter {
+	u32	id;
+	u32	enabled;
+	char	name[API_TRACE_NAME_LEN];
+};
+
+struct api_trace_pmu {
+	struct api_trace_pmu_counter	*counters;
+	u32				max_counters;
+	u32				count;
+	u32				source_enabled;
+	u32				events_enabled;
+};
+
 int api_term_read(void *buf, u32 count, u32 flags);
 int api_term_write(const void *buf, u32 count);
 int api_data_read(int handle, void *buf, u32 count);
@@ -548,5 +728,12 @@ int api_net_connect(int handle, const struct api_net_addr *uaddr);
 int api_net_send(int handle, const struct api_net_msg *umsg);
 int api_net_recv(int handle, struct api_net_msg *umsg);
 int api_net_ctl(int handle, int op, void *arg);
+int api_trace_open(u32 flags);
+int api_trace_close(int trace);
+int api_trace_read(int trace, struct api_trace_read *args);
+int api_trace_ctl(int trace, u32 op, void *arg);
+int api_trace_info(u32 op, void *arg);
+int api_trace_mark(u32 id, u64 a0, u64 a1, u64 a2, u64 a3, u64 a4);
+void api_trace_cleanup_process(struct process *proc);
 
 #endif

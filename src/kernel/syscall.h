@@ -101,6 +101,13 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_NET_RECV		0x804
 #define	CALL_NET_CTL		0x805
 
+#define	CALL_TRACE_OPEN		0x900
+#define	CALL_TRACE_CLOSE	0x901
+#define	CALL_TRACE_READ		0x902
+#define	CALL_TRACE_CTL		0x903
+#define	CALL_TRACE_INFO		0x904
+#define	CALL_TRACE_MARK		0x905
+
 #define	CALL_PROC_GETPID	0x408
 #define	CALL_PROC_GETPPID	0x409
 #define	CALL_PROC_THREAD_EXIT	0x40A

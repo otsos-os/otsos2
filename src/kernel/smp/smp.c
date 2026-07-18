@@ -90,6 +90,7 @@ $space %export ap_main
 #include <kernel/process.h>
 #include <kernel/smp/smp.h>
 #include <kernel/syscall.h>
+#include <kernel/trace/trace.h>
 #include <mlibc/stdio.h>
 /* bkl - big kernel lock*/
 static		spinlock_t	smp_bkl;
@@ -567,6 +568,7 @@ ap_main(u8 cpu_index)
 	syscall_init();
 	smp_cpu_map[cpu_index].tss = tss;
 	smp_tss_register(lapic_id, tss);
+	trace_cpu_online();
 	lapic_timer_init_ap();
 	smp_ap_ready[cpu_index] = 1;
 	printk("[SMP] with ap  %u %u init succesful ,tss at %p\n",

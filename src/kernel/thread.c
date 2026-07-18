@@ -186,6 +186,9 @@ thread_create(process_t *proc, u64 rip, u64 rsp, u64 cs, u64 ss)
 	td->prev = NULL;
 	td->exit_code = 0;
 	td->fs_base = 0;
+	td->trace_last_tsc = 0;
+	td->trace_runtime_cycles = 0;
+	td->trace_switches = 0;
 	td->running_cpu = -1;
 
 	td->state = PROC_STATE_RUNNABLE;

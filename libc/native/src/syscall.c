@@ -2,8 +2,9 @@
 
 $define %type long as native syscall integer
 $define %func __syscall0 as function with args long
-$define %func __syscall4 as function with args long, long, long, long, long
-$define %func __syscall5 as function with args long, long, long, long, long, long
+$define %func __syscall4 as function with args long x5
+$define %func __syscall5 as function with args long x6
+$define %func __syscall6 as function with args long x7
 $define %func __sysret as function with args long
 
 */
@@ -11,7 +12,7 @@ $define %func __sysret as function with args long
 /* !SPACE!
 
 $space %export __syscall0, __syscall1, __syscall2
-$space %export __syscall3, __syscall4, __syscall5
+$space %export __syscall3, __syscall4, __syscall5, __syscall6
 $space %export __sysret, __sysret_int
 
 */
@@ -92,6 +93,26 @@ __syscall5(long num, long a1, long a2, long a3, long a4, long a5)
 	    : "=a"(ret)
 	    : "a"(num), "D"(a1), "S"(a2), "d"(a3), "r"(r10),
 	      "r"(r8)
+	    : "rcx", "r11", "memory");
+	return (ret);
+}
+
+long
+__syscall6(long num, long a1, long a2, long a3, long a4, long a5,
+    long a6)
+{
+	register long	r10 __asm__("r10");
+	register long	r8 __asm__("r8");
+	register long	r9 __asm__("r9");
+	long		ret;
+
+	r10 = a4;
+	r8 = a5;
+	r9 = a6;
+	__asm__ volatile("syscall"
+	    : "=a"(ret)
+	    : "a"(num), "D"(a1), "S"(a2), "d"(a3), "r"(r10),
+	      "r"(r8), "r"(r9)
 	    : "rcx", "r11", "memory");
 	return (ret);
 }

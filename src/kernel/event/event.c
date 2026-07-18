@@ -91,6 +91,7 @@ $space %export event_notify_net_change
 #include <kernel/thread.h>
 #include <kernel/smp/smp.h>
 #include <kernel/panic.h>
+#include <kernel/trace/trace.h>
 #include <mm/kmem.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -260,6 +261,8 @@ kqueue_create(void)
 			    "owner_pid=%d\n", i,
 			    process_current() ?
 			    (int)process_current()->pid : 0);
+			trace_kqueue_create(i, kqueue_pool[i].owner ?
+			    kqueue_pool[i].owner->pid : 0);
 			return (i);
 		}
 	}
@@ -300,6 +303,7 @@ kqueue_destroy(int kq_idx)
 	}
 
 	proc_wakeup(kq->wait_channel);
+	trace_kqueue_destroy(kq_idx);
 
 	memset(kq, 0, sizeof(kqueue_t));
 	printk("[EVENT] Destroyed kqueue idx=%d\n", kq_idx);
@@ -415,6 +419,7 @@ knote_ready(knote_t *kn)
 
 	knote_add_to_ready(kq, kn);
 	kqueue_wakeup(kq);
+	trace_knote_ready(kn->filter, kn->ident, kn->data);
 }
 
 void
@@ -660,6 +665,7 @@ kevent_process(int kq_idx, struct kevent *changelist,
 	if (!kq) {
 		return (-API_ERR_BAD_HANDLE);
 	}
+	trace_kevent_wait(kq_idx, nchanges, nevents, timeout_ms);
 
 	for (i = 0; i < nchanges; i++) {
 		struct kevent	*kev;
@@ -689,15 +695,18 @@ kevent_process(int kq_idx, struct kevent *changelist,
 	}
 
 	if (nevents <= 0) {
+		trace_kevent_return(kq_idx, 0, timeout_ms);
 		return (0);
 	}
 
 	count = collect_events(kq, eventlist, nevents);
 	if (count > 0) {
+		trace_kevent_return(kq_idx, count, timeout_ms);
 		return (count);
 	}
 
 	if (timeout_ms == 0) {
+		trace_kevent_return(kq_idx, 0, timeout_ms);
 		return (0);
 	}
 
@@ -710,13 +719,17 @@ kevent_process(int kq_idx, struct kevent *changelist,
 
 	while (1) {
 		if (kq->ready_count > 0) {
-			return (collect_events(kq, eventlist,
-			    nevents));
+			count = collect_events(kq, eventlist,
+			    nevents);
+			trace_kevent_return(kq_idx, count, timeout_ms);
+			return (count);
 		}
 
 		if (timeout_ms > 0) {
 			elapsed = timer_get_ticks() - start_ticks;
 			if (elapsed >= timeout_ticks) {
+				trace_kevent_return(kq_idx, 0,
+				    timeout_ms);
 				return (0);
 			}
 		}
@@ -733,6 +746,7 @@ event_timer_tick(void)
 	if (!event_initialized) {
 		return;
 	}
+	trace_event_timer_tick();
 
 	{
 		extern void filter_timer_tick(void);
