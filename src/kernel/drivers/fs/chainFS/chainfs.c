@@ -1042,11 +1042,17 @@ chainfs_delete_file(const char *filename)
 {
 	chainfs_file_entry_t	entry;
 	u32			entry_block, entry_offset;
+	u32			start_block;
 	chainfs_file_entry_t	*entries;
 
 	if (chainfs_find_file(filename, &entry, &entry_block,
 	    &entry_offset) != 0) {
 		drivers_log("ChainFS: File '%s' not found\n",
+		    filename);
+		return (-1);
+	}
+	if (entry.type == CHAINFS_TYPE_DIR) {
+		drivers_log("ChainFS: '%s' a directory\n",
 		    filename);
 		return (-1);
 	}
@@ -1058,13 +1064,15 @@ chainfs_delete_file(const char *filename)
 
 	if (entries[entry_offset].nlink > 1) {
 		entries[entry_offset].nlink--;
+		disk_write(g_chainfs.disk, entry_block,
+		    g_chainfs.sector_buffer);
 	} else {
-		chainfs_free_block_chain(entry.start_block);
+		start_block = entry.start_block;
 		entries[entry_offset].status = 0;
+		disk_write(g_chainfs.disk, entry_block,
+		    g_chainfs.sector_buffer);
+		chainfs_free_block_chain(start_block);
 	}
-
-	disk_write(g_chainfs.disk, entry_block,
-	    g_chainfs.sector_buffer);
 
 	drivers_log("ChainFS: Deleted file '%s'\n", filename);
 	return (0);
