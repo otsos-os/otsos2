@@ -346,7 +346,7 @@ execve_read_file(const char *path, u8 **out_buf, u32 *out_size)
 	if (vfs_resolve(path, &vn) != 0 || vn == NULL) {
 		return (-POSIX_ENOENT);
 	}
-	if (!vfs_mount_can_exec(path)) {
+	if (!vnode_can_exec(vn)) {
 		vnode_release(vn);
 		return (-POSIX_EACCES);
 	}
@@ -939,7 +939,7 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 		kmem_free(kpath);
 		return (-POSIX_ENOENT);
 	}
-	if (!vfs_mount_can_exec(kpath)) {
+	if (!vnode_can_exec(vn)) {
 		vnode_release(vn);
 		free_string_array(kargv);
 		free_string_array(kenvp);

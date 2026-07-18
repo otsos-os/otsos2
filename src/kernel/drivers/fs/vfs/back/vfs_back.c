@@ -78,6 +78,7 @@ $define %func vfs_back_umount as function with args const char *
 $define %func vfs_back_mount_can_read as function with args u32
 $define %func vfs_back_mount_can_write as function with args u32
 $define %func vfs_back_mount_can_exec as function with args const char *
+$define %func vfs_back_mount_can_exec_id as function with args u32
 $define %func vfs_back_mount_ref as function with args u32
 $define %func vfs_back_mount_unref as function with args u32
 $define %func vfs_back_resolve as function with args const char *, vnode_t **, int
@@ -119,7 +120,7 @@ $space %internal devfs_back_init, devfs_back_lookup
 $space %export vfs_back_init, vfs_back_mount, vfs_back_mount_flags
 $space %export vfs_back_mount_named, vfs_back_umount
 $space %export vfs_back_mount_can_read, vfs_back_mount_can_write
-$space %export vfs_back_mount_can_exec
+$space %export vfs_back_mount_can_exec, vfs_back_mount_can_exec_id
 $space %export vfs_back_mount_ref, vfs_back_mount_unref
 $space %export vfs_back_resolve
 $space %export vfs_back_create_file, vfs_back_mkdir, vfs_back_rmdir
@@ -1136,6 +1137,16 @@ vfs_back_mount_can_exec(const char *path)
 	vfs_mount_t	*mnt;
 
 	mnt = vfs_back_find_mount(path);
+	return (vfs_back_mount_access_ok(mnt, 0, 1));
+}
+int
+vfs_back_mount_can_exec_id(u32 mount_id)
+{
+	vfs_mount_t	*mnt;
+	if (mount_id == 0) {
+		return (1);
+	}
+	mnt = vfs_back_find_mount_id(mount_id);
 	return (vfs_back_mount_access_ok(mnt, 0, 1));
 }
 

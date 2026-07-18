@@ -56,6 +56,7 @@ $define %func vfs_link as function with args const char *, const char *
 $define %func vfs_readlink as function with args const char *, char *, size_t
 $define %func vnode_acquire as function with args vnode_t *
 $define %func vnode_release as procedure with args vnode_t *
+$define %func vnode_can_exec as function with args vnode_t *
 $define %func vnode_read as function with args vnode_t *, void *, u64, u64
 $define %func vnode_write as function with args vnode_t *, const void *, u64, u64
 $define %func vnode_stat as function with args vnode_t *, posix_stat_t *
@@ -73,7 +74,7 @@ $space %export vfs_umount, vfs_unmount, vfs_mount_can_exec
 $space %export vfs_resolve, vfs_resolve_nofollow, vfs_create_file
 $space %export vfs_mkdir, vfs_rmdir, vfs_unlink, vfs_rename
 $space %export vfs_truncate, vfs_symlink, vfs_link, vfs_readlink
-$space %export vnode_acquire, vnode_release
+$space %export vnode_acquire, vnode_release, vnode_can_exec
 $space %export vnode_read, vnode_write, vnode_stat, vnode_readdir
 $space %export vnode_readlink
 $space %export vnode_alloc
@@ -201,6 +202,7 @@ int		vfs_write_file(const char *path, const u8 *data, u32 size);
 vnode_t		*vnode_alloc(int type, const char *name);
 vnode_t		*vnode_acquire(vnode_t *vn);
 void		vnode_release(vnode_t *vn);
+int		vnode_can_exec(vnode_t *vn);
 int		vnode_read(vnode_t *vn, void *buf, u64 count, u64 offset);
 int		vnode_write(vnode_t *vn, const void *buf, u64 count,
 		    u64 offset);

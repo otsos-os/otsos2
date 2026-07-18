@@ -177,13 +177,13 @@ posix_check_perm(vnode_t *vn, int access)
 static s64
 posix_do_open(const char *path, int posix_flags, u64 mode)
 {
-  struct process	*proc;
-  vnode_t		*vn;
-  int			fd;
-  int			exists;
-  int			perm;
-  int			ret;
-  int			want;
+	struct process	*proc;
+	vnode_t		*vn;
+	int		fd;
+	int		exists;
+	int		perm;
+	int		ret;
+	int		want;
 
 	(void)mode;
 
@@ -192,18 +192,27 @@ posix_do_open(const char *path, int posix_flags, u64 mode)
 		return (-POSIX_EFAULT);
 	}
 
-  if (path[0] == '\0') {
-    return (-POSIX_ENOENT);
-  }
+	if (path[0] == '\0') {
+		return (-POSIX_ENOENT);
+	}
 
-  if (restrict_kusr_check(path)) {
-    return (-POSIX_EACCES);
-  }
+	if (restrict_kusr_check(path)) {
+		return (-POSIX_EACCES);
+	}
 
-  vn = NULL;
-  ret = vfs_resolve(path, &vn);
-  if (ret == 0 && vn != NULL) {
+	vn = NULL;
+	if (posix_flags & POSIX_O_NOFOLLOW) {
+		ret = vfs_resolve_nofollow(path, &vn);
+	} else {
+		ret = vfs_resolve(path, &vn);
+	}
+	if (ret == 0 && vn != NULL) {
 		exists = 1;
+		if ((posix_flags & POSIX_O_NOFOLLOW) &&
+		    vn->type == VLNK) {
+			vnode_release(vn);
+			return (-POSIX_ELOOP);
+		}
 		if (vn->type == VDIR) {
 			/*
 			 * Directories may be opened read-only (for
