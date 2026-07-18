@@ -156,37 +156,11 @@ free_string_array(char **arr)
 }
 
 static u64
-allocate_execve_stack(void)
+allocate_execve_stack(process_t *proc)
 {
-	u64	stack_pages;
-	u64	stack_bottom;
-	u64	i;
-
-	stack_pages = (USER_STACK_SIZE + PAGE_SIZE - 1) / PAGE_SIZE;
-	stack_bottom = USER_STACK_TOP;
-
-	for (i = 0; i < stack_pages; i++) {
-		u64	page;
-
-		page = vm_page_alloc_phys(0);
-		if (!page) {
-			u64	j;
-			for (j = 0; j < i; j++) {
-				u64	vaddr, paddr;
-				vaddr = stack_bottom + (j * PAGE_SIZE);
-				paddr = pmap_extract(vaddr);
-				pmap_remove(vaddr);
-				if (paddr) {
-					vm_page_free_phys(paddr);
-				}
-			}
-			return (0);
-		}
-		memset((void *)(page + KERNEL_VMA), 0, PAGE_SIZE);
-		pmap_enter(stack_bottom + (i * PAGE_SIZE), page,
-		    PTE_PRESENT | PTE_RW | PTE_USER | PTE_NX);
+	if (vm_map_create_user_stack(proc) != 0) {
+		return (0);
 	}
-
 	return (USER_STACK_BASE);
 }
 
@@ -889,6 +863,7 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
     u64 a6, registers_t *regs)
 {
 	struct process	*proc;
+	process_t	new_as;
 	char		*kpath;
 	char		**kargv;
 	char		**kenvp;
@@ -1009,6 +984,7 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 
 	data_start = 0;
 	data_end = 0;
+	memset(&new_as, 0, sizeof(new_as));
 
 	new_cr3 = pmap_create();
 	if (!new_cr3) {
@@ -1020,6 +996,9 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 	}
 
 	old_cr3 = pmap_get_cr3();
+	new_as.cr3 = new_cr3;
+	new_as.owns_address_space = 1;
+	new_as.mmap_base = MMAP_BASE;
 	pmap_load(new_cr3);
 
 	{
@@ -1102,7 +1081,7 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 		}
 	}
 
-	user_stack = allocate_execve_stack();
+	user_stack = allocate_execve_stack(&new_as);
 	if (user_stack == 0) {
 		pmap_load(old_cr3);
 		pmap_destroy(new_cr3);
@@ -1117,6 +1096,7 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 		err = build_execve_stack(kargv, argc, kenvp, envc,
 		    &aux, &new_rsp, &argv_addr, &envp_addr);
 		if (err < 0) {
+			vm_map_free_all(&new_as);
 			pmap_load(old_cr3);
 			pmap_destroy(new_cr3);
 			free_string_array(kargv);
@@ -1129,13 +1109,25 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 	free_string_array(kargv);
 	free_string_array(kenvp);
 
+	if (data_end != 0) {
+		register_data_bss(&new_as, data_start, data_end);
+	}
+
 	pmap_load(old_cr3);
 
 	if (proc->owns_address_space && proc->cr3) {
+		u64	dead_cr3;
+
+		dead_cr3 = proc->cr3;
 		vm_map_free_all(proc);
-		pmap_destroy(proc->cr3);
+		pmap_load(new_cr3);
+		pmap_destroy(dead_cr3);
+	} else {
+		pmap_load(new_cr3);
 	}
 
+	proc->vma_list = new_as.vma_list;
+	new_as.vma_list = NULL;
 	proc->cr3 = new_cr3;
 	proc->entry_point = entry_point;
 	proc->user_stack = user_stack;
@@ -1186,12 +1178,9 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 	regs->r14 = 0;
 	regs->r15 = 0;
 
-	pmap_load(new_cr3);
-
 	if (data_end != 0) {
 		proc->brk_min = data_end;
 		proc->brk = data_end;
-		register_data_bss(proc, data_start, data_end);
 	}
 
 	return (0);

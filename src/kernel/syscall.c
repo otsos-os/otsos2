@@ -130,10 +130,10 @@ void syscall_handler(registers_t *regs) {
 
   process_t *cur_proc = process_current();
   if (cur_proc) {
-    signal_deliver(cur_proc, regs);
     config_poll();
     if (cur_proc->personality == PERSONALITY_POSIX) {
       posix_syscall_handler(regs);
+      posix_signal_deliver(cur_proc, regs);
       return;
     }
   } else {
@@ -383,5 +383,9 @@ void syscall_handler(registers_t *regs) {
     printk("Unknown syscall: %d\n", syscall_number);
     regs->rax = -API_ERR_NO_CALL;
     break;
+  }
+
+  if (cur_proc) {
+    signal_deliver(cur_proc, regs);
   }
 }

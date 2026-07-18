@@ -69,35 +69,11 @@ void userspace_init(void) {
 }
 
 /* Allocate and map user stack */
-static u64 allocate_user_stack(void) {
-  /* Allocate stack pages */
-  u64 stack_pages = (USER_STACK_SIZE + PAGE_SIZE - 1) / PAGE_SIZE;
-  u64 stack_bottom = USER_STACK_TOP;
-
-  printk("[USERSPACE] Allocating user stack: %d pages at %p\n",
-              (int)stack_pages, (void *)stack_bottom);
-
-  for (u64 i = 0; i < stack_pages; i++) {
-    u64 page = vm_page_alloc_phys(0);
-    if (!page) {
-      printk("[USERSPACE] Error: Failed to allocate stack page\n");
-      for (u64 j = 0; j < i; j++) {
-        u64 vaddr = stack_bottom + (j * PAGE_SIZE);
-        u64 paddr = pmap_extract(vaddr);
-        pmap_remove(vaddr);
-        if (paddr) {
-          vm_page_free_phys(paddr);
-        }
-      }
-      return 0;
-    }
-    memset((void *)(page + KERNEL_VMA), 0, PAGE_SIZE);
-
-    u64 vaddr = stack_bottom + (i * PAGE_SIZE);
-    pmap_enter(vaddr, page, PTE_PRESENT | PTE_RW | PTE_USER | PTE_NX);
+static u64 allocate_user_stack(process_t *proc) {
+  if (vm_map_create_user_stack(proc) != 0) {
+    printk("[USERSPACE] Error: Failed to allocate user stack\n");
+    return 0;
   }
-
-  /* Return top of stack (stack grows downward) */
   return USER_STACK_BASE;
 }
 
@@ -147,6 +123,18 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
     return NULL;
   }
 
+  /* Allocate a new process slot */
+  process_t *new_proc = alloc_process();
+  if (!new_proc) {
+    printk("[USERSPACE] Error: No free process slots\n");
+    pmap_destroy(new_cr3);
+    return NULL;
+  }
+  memset(new_proc, 0, sizeof(process_t));
+  new_proc->cr3 = new_cr3;
+  new_proc->owns_address_space = 1;
+  new_proc->mmap_base = MMAP_BASE;
+
   u64 old_cr3 = pmap_get_cr3();
   pmap_load(new_cr3);
 
@@ -157,28 +145,23 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
     printk("[USERSPACE] Error: Failed to load ELF\n");
     pmap_load(old_cr3);
     pmap_destroy(new_cr3);
+    memset(new_proc, 0, sizeof(process_t));
     return NULL;
   }
 
   /* Allocate user stack */
-  u64 user_stack = allocate_user_stack();
+  u64 user_stack = allocate_user_stack(new_proc);
   if (user_stack == 0) {
+    vm_map_free_all(new_proc);
     pmap_load(old_cr3);
     pmap_destroy(new_cr3);
+    memset(new_proc, 0, sizeof(process_t));
     return NULL;
   }
+
+  register_data_bss(new_proc, li.data_start, li.data_end);
 
   pmap_load(old_cr3);
-
-  /* Allocate a new process slot */
-  process_t *new_proc = alloc_process();
-  if (!new_proc) {
-    printk("[USERSPACE] Error: No free process slots\n");
-    pmap_destroy(new_cr3);
-    return NULL;
-  }
-
-  memset(new_proc, 0, sizeof(process_t));
 
   /* Initialize process */
   new_proc->pid = next_pid++;
@@ -217,7 +200,6 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
     new_proc->brk_min = MMAP_BASE;
   }
   new_proc->brk = new_proc->brk_min;
-  register_data_bss(new_proc, li.data_start, li.data_end);
   api_init_process(new_proc);
   posix_init_process(new_proc);
   new_proc->personality = PERSONALITY_OTSOS;
@@ -227,6 +209,9 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
                                USER_CS, USER_DS);
   if (!td) {
     printk("[USERSPACE] error: Failed to create thread\n");
+    pmap_load(new_cr3);
+    vm_map_free_all(new_proc);
+    pmap_load(old_cr3);
     pmap_destroy(new_cr3);
     memset(new_proc, 0, sizeof(process_t));
     return NULL;

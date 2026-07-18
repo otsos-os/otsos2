@@ -27,16 +27,111 @@
 #include <kernel/api/posix/posix.h>
 #include <kernel/api/posix/posix_socket.h>
 #include <kernel/api/api.h>
+#include <kernel/signal.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/console/terminal.h>
 #include <kernel/console/pty.h>
+#include <kernel/drivers/timer.h>
 #include <kernel/other/restrict.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
 #include <kernel/useraddr.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
+
+static int	posix_poll_wait_channel;
+
+void
+posix_poll_notify(void)
+{
+	proc_wakeup(&posix_poll_wait_channel);
+}
+
+static int
+posix_debug_python(void)
+{
+	struct process	*proc;
+
+	proc = process_current();
+	if (!proc) {
+		return (0);
+	}
+	return (strcmp(proc->name, "python") == 0);
+}
+
+static const char *
+posix_debug_ioctl_name(u64 cmd)
+{
+	switch (cmd) {
+	case POSIX_TIOCGWINSZ:
+		return ("TIOCGWINSZ");
+	case POSIX_TIOCSWINSZ:
+		return ("TIOCSWINSZ");
+	case POSIX_TCGETS:
+		return ("TCGETS");
+	case POSIX_TCSETS:
+		return ("TCSETS");
+	case POSIX_TCSETSW:
+		return ("TCSETSW");
+	case POSIX_TCSETSF:
+		return ("TCSETSF");
+	case POSIX_TCFLSH:
+		return ("TCFLSH");
+	case POSIX_FIONREAD:
+		return ("FIONREAD");
+	case POSIX_TIOCGPGRP:
+		return ("TIOCGPGRP");
+	case POSIX_TIOCSPGRP:
+		return ("TIOCSPGRP");
+	case POSIX_TIOCGSID:
+		return ("TIOCGSID");
+	case POSIX_TIOCSCTTY:
+		return ("TIOCSCTTY");
+	case POSIX_TIOCGPTN:
+		return ("TIOCGPTN");
+	default:
+		return ("unknown");
+	}
+}
+
+static const char *
+posix_debug_vnode_name(vnode_t *vn)
+{
+	if (!vn) {
+		return ("null");
+	}
+	if (!vn->name) {
+		return ("noname");
+	}
+	return (vn->name);
+}
+
+static void
+posix_debug_fd_line(const char *op, int fd, posix_fd_t *pfd, s64 ret,
+    u64 extra)
+{
+	vnode_t	*vn;
+
+	if (!posix_debug_python()) {
+		return;
+	}
+	vn = pfd ? pfd->vnode : NULL;
+	printk("[PYDBG] %s fd=%d vnode=%s type=%d flags=%d extra=%u -> %d\n",
+	    op, fd, posix_debug_vnode_name(vn), vn ? vn->type : -1,
+	    pfd ? pfd->flags : 0, (u32)extra, (int)ret);
+}
+
+static void
+posix_debug_path_line(const char *op, const char *path, s64 ret)
+{
+	if (!posix_debug_python()) {
+		return;
+	}
+	printk("[PYPATH] %s path=%s -> %d\n", op,
+	    path ? path : "(null)", (int)ret);
+}
 
 static char *
 copy_user_string(const char *user, int max_len)
@@ -119,6 +214,8 @@ posix_vfs_ret(int ret)
 		return (-POSIX_EROFS);
 	case API_ERR_NO_SPACE:
 		return (-POSIX_ENOSPC);
+	case API_ERR_PIPE_CLOSED:
+		return (-POSIX_EPIPE);
 	case API_ERR_IO:
 		return (-POSIX_EIO);
 	case API_ERR_CROSS_DEVICE:
@@ -385,6 +482,7 @@ posix_open(u64 path_u, u64 flags, u64 mode, u64 a4, u64 a5, u64 a6,
 	}
 
 	ret = posix_do_open(path, (int)flags, mode);
+	posix_debug_path_line("open", path, ret);
 	kmem_free(path);
 
 	return (ret);
@@ -439,11 +537,13 @@ posix_openat(u64 dirfd_u, u64 path_u, u64 flags, u64 mode, u64 a5,
 		}
 
 		ret = posix_do_open(resolved, (int)flags, mode);
+		posix_debug_path_line("openat", resolved, ret);
 		kmem_free(resolved);
 		return (ret);
 	}
 
 	ret = posix_do_open(path, (int)flags, mode);
+	posix_debug_path_line("openat", path, ret);
 	kmem_free(path);
 	return (ret);
 }
@@ -454,6 +554,7 @@ posix_close(u64 fd_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 {
 	struct process	*proc;
 	posix_fd_t	*pfd;
+	pipe_t		*pipe;
 	int		fd;
 
 	(void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
@@ -470,6 +571,18 @@ posix_close(u64 fd_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	}
 
 	if (pfd->vnode) {
+		if (pfd->vnode->type == VPIPE && pfd->vnode->data) {
+			pipe = (pipe_t *)pfd->vnode->data;
+			if (pfd->flags & POSIX_O_WRONLY) {
+				if (pipe->writers > 0) {
+					pipe->writers--;
+				}
+			} else if (pipe->readers > 0) {
+				pipe->readers--;
+			}
+			proc_wakeup((void *)pipe);
+			posix_poll_notify();
+		}
 		if (pfd->vnode->type == VSOCK)
 			posix_socket_close(pfd->vnode);
 		vnode_release(pfd->vnode);
@@ -490,6 +603,8 @@ posix_read(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 {
 	struct process	*proc;
 	posix_fd_t	*pfd;
+	pipe_t		*pipe;
+	s64		ret;
 	int		fd;
 	void		*buf;
 	int		n;
@@ -504,6 +619,8 @@ posix_read(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 
 	pfd = posix_get_fd(proc, fd);
 	if (!pfd) {
+		posix_debug_fd_line("read.badfd", fd, NULL, -POSIX_EBADF,
+		    count);
 		return (-POSIX_EBADF);
 	}
 
@@ -527,34 +644,64 @@ posix_read(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 		n = terminal_read_vnode(pfd->vnode, buf, (u32)count,
 		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0, 0);
 		if (n < 0) {
+			posix_debug_fd_line("read.tty", fd, pfd, (s64)n,
+			    count);
 			return ((s64)n);
 		}
 	} else if (pfd->vnode->ioctl_fn == pty_master_ioctl) {
 		n = pty_master_read(pfd->vnode, buf, (u32)count,
 		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
 		if (n < 0) {
+			posix_debug_fd_line("read.ptyM", fd, pfd, (s64)n,
+			    count);
 			return ((s64)n);
 		}
 	} else if (pfd->vnode->ioctl_fn == pty_slave_ioctl) {
 		n = pty_slave_read(pfd->vnode, buf, (u32)count,
 		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
 		if (n < 0) {
+			posix_debug_fd_line("read.ptyS", fd, pfd, (s64)n,
+			    count);
 			return ((s64)n);
+		}
+	} else if (pfd->vnode->type == VPIPE) {
+		pipe = (pipe_t *)pfd->vnode->data;
+		if (!pipe) {
+			return (-POSIX_EBADF);
+		}
+		if ((pfd->flags & POSIX_O_NONBLOCK) && pipe->size == 0 &&
+		    pipe->writers > 0) {
+			return (-POSIX_EAGAIN);
+		}
+		n = pipe_read(pipe, buf, (u32)count);
+		if (n < 0) {
+			ret = posix_vfs_ret(n);
+			posix_debug_fd_line("read.pipe", fd, pfd, ret,
+			    count);
+			return (ret);
 		}
 	} else if (pfd->vnode->type == VSOCK) {
 		n = posix_socket_read(pfd->vnode, buf, (u32)count,
 		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
 		if (n < 0) {
+			posix_debug_fd_line("read.sock", fd, pfd, (s64)n,
+			    count);
 			return ((s64)n);
 		}
 	} else {
 		n = vnode_read(pfd->vnode, buf, count, pfd->offset);
 		if (n < 0) {
-			return (posix_vfs_ret(n));
+			ret = posix_vfs_ret(n);
+			posix_debug_fd_line("read.vfs", fd, pfd, ret,
+			    count);
+			return (ret);
 		}
 	}
 
 	pfd->offset += (u64)n;
+	if (fd <= 2) {
+		posix_debug_fd_line("read", fd, pfd, (s64)n, count);
+	}
 	return ((s64)n);
 }
 
@@ -564,6 +711,8 @@ posix_write(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 {
 	struct process	*proc;
 	posix_fd_t	*pfd;
+	pipe_t		*pipe;
+	s64		ret;
 	int		fd;
 	const void	*buf;
 	int		n;
@@ -578,6 +727,8 @@ posix_write(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 
 	pfd = posix_get_fd(proc, fd);
 	if (!pfd) {
+		posix_debug_fd_line("write.badfd", fd, NULL, -POSIX_EBADF,
+		    count);
 		return (-POSIX_EBADF);
 	}
 
@@ -604,34 +755,67 @@ posix_write(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5, u64 a6,
 	if (pfd->vnode->ioctl_fn == terminal_ioctl_vnode) {
 		n = terminal_write_vnode(pfd->vnode, buf, (u32)count);
 		if (n < 0) {
+			posix_debug_fd_line("write.tty", fd, pfd,
+			    -POSIX_EIO, count);
 			return (-POSIX_EIO);
 		}
 	} else if (pfd->vnode->ioctl_fn == pty_master_ioctl) {
 		n = pty_master_write(pfd->vnode, buf, (u32)count,
 		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
 		if (n < 0) {
+			posix_debug_fd_line("write.ptyM", fd, pfd, (s64)n,
+			    count);
 			return ((s64)n);
 		}
 	} else if (pfd->vnode->ioctl_fn == pty_slave_ioctl) {
 		n = pty_slave_write(pfd->vnode, buf, (u32)count,
 		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
 		if (n < 0) {
+			posix_debug_fd_line("write.ptyS", fd, pfd, (s64)n,
+			    count);
 			return ((s64)n);
+		}
+	} else if (pfd->vnode->type == VPIPE) {
+		pipe = (pipe_t *)pfd->vnode->data;
+		if (!pipe) {
+			return (-POSIX_EBADF);
+		}
+		if (pipe->readers == 0) {
+			return (-POSIX_EPIPE);
+		}
+		if ((pfd->flags & POSIX_O_NONBLOCK) &&
+		    pipe->size >= PIPE_BUF_SIZE) {
+			return (-POSIX_EAGAIN);
+		}
+		n = pipe_write(pipe, buf, (u32)count);
+		if (n < 0) {
+			ret = posix_vfs_ret(n);
+			posix_debug_fd_line("write.pipe", fd, pfd, ret,
+			    count);
+			return (ret);
 		}
 	} else if (pfd->vnode->type == VSOCK) {
 		n = posix_socket_write(pfd->vnode, buf, (u32)count,
 		    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
 		if (n < 0) {
+			posix_debug_fd_line("write.sock", fd, pfd, (s64)n,
+			    count);
 			return ((s64)n);
 		}
 	} else {
 		n = vnode_write(pfd->vnode, buf, count, pfd->offset);
 		if (n < 0) {
-			return (posix_vfs_ret(n));
+			ret = posix_vfs_ret(n);
+			posix_debug_fd_line("write.vfs", fd, pfd, ret,
+			    count);
+			return (ret);
 		}
 	}
 
 	pfd->offset += (u64)n;
+	if (fd <= 2) {
+		posix_debug_fd_line("write", fd, pfd, (s64)n, count);
+	}
 	return ((s64)n);
 }
 
@@ -729,6 +913,817 @@ posix_writev(u64 fd_u, u64 iov_u, u64 iovcnt_u, u64 a4, u64 a5,
 		}
 	}
 	return ((s64)total);
+}
+
+static int
+posix_poll_terminal_readable(vnode_t *vn)
+{
+	int	idx;
+
+	idx = (int)(unsigned long)vn->data;
+	if (idx == -1) {
+		idx = terminal_get_active();
+	}
+	terminal_input_poll();
+	return (terminal_read_available(idx) > 0);
+}
+
+static int
+posix_poll_pipe_readable(pipe_t *p)
+{
+	if (!p) {
+		return (0);
+	}
+	return (p->size > 0 || p->writers == 0);
+}
+
+static int
+posix_poll_pipe_writable(pipe_t *p)
+{
+	if (!p) {
+		return (0);
+	}
+	return (p->readers > 0 && p->size < PIPE_BUF_SIZE);
+}
+
+static int
+posix_poll_socket_readable(unix_sock_t *s)
+{
+	if (!s || s->state == UNIX_SOCK_FREE) {
+		return (0);
+	}
+	if (s->state == UNIX_SOCK_LISTENING) {
+		return (s->accept_count > 0);
+	}
+	if (s->shut_rd || s->state == UNIX_SOCK_CLOSED) {
+		return (1);
+	}
+	if (s->type == SOCK_DGRAM) {
+		return (s->msg_count > 0);
+	}
+	if (s->stream_count > 0) {
+		return (1);
+	}
+	if (!s->peer || s->peer->state == UNIX_SOCK_FREE ||
+	    s->peer->state == UNIX_SOCK_CLOSED || s->peer->shut_wr) {
+		return (1);
+	}
+	return (0);
+}
+
+static int
+posix_poll_socket_writable(unix_sock_t *s)
+{
+	int	next;
+
+	if (!s || s->state == UNIX_SOCK_FREE || s->shut_wr) {
+		return (0);
+	}
+	if (s->type == SOCK_DGRAM) {
+		return (s->state != UNIX_SOCK_CLOSED);
+	}
+	if (!s->peer || s->peer->state == UNIX_SOCK_FREE ||
+	    s->peer->state == UNIX_SOCK_CLOSED) {
+		return (0);
+	}
+	next = (s->peer->stream_head + 1) % UNIX_SOCK_BUF_SIZE;
+	return (next != s->peer->stream_tail);
+}
+
+static short
+posix_poll_fd_status(posix_fd_t *pfd)
+{
+	vnode_t		*vn;
+	pipe_t		*p;
+	unix_sock_t	*s;
+	short		 status;
+
+	status = 0;
+	vn = pfd->vnode;
+	if (!vn) {
+		return (POSIX_POLLNVAL);
+	}
+
+	if (vn->type == VPIPE) {
+		p = (pipe_t *)vn->data;
+		if (!p) {
+			return (POSIX_POLLERR);
+		}
+		if ((pfd->flags & POSIX_O_WRONLY) && p->readers == 0) {
+			status |= POSIX_POLLERR;
+		}
+		if (!(pfd->flags & POSIX_O_WRONLY) && p->writers == 0) {
+			status |= POSIX_POLLHUP;
+		}
+		return (status);
+	}
+
+	if (vn->type == VSOCK) {
+		s = (unix_sock_t *)vn->data;
+		if (!s || s->state == UNIX_SOCK_FREE) {
+			return (POSIX_POLLNVAL);
+		}
+		if (s->error != 0) {
+			status |= POSIX_POLLERR;
+		}
+		if (s->state == UNIX_SOCK_CLOSED) {
+			status |= POSIX_POLLHUP;
+		}
+		if (s->type == SOCK_STREAM && s->peer &&
+		    s->peer->state == UNIX_SOCK_CLOSED) {
+			status |= POSIX_POLLHUP;
+		}
+		return (status);
+	}
+
+	return (0);
+}
+
+static int
+posix_poll_fd_readable(posix_fd_t *pfd)
+{
+	vnode_t		*vn;
+	pipe_t		*p;
+	unix_sock_t	*s;
+
+	vn = pfd->vnode;
+	if (!vn) {
+		return (0);
+	}
+	if (vn->ioctl_fn == terminal_ioctl_vnode) {
+		return (posix_poll_terminal_readable(vn));
+	}
+	if (vn->ioctl_fn == pty_master_ioctl ||
+	    vn->ioctl_fn == pty_slave_ioctl) {
+		return (pty_read_available(vn) > 0);
+	}
+	if (vn->type == VPIPE) {
+		p = (pipe_t *)vn->data;
+		return (posix_poll_pipe_readable(p));
+	}
+	if (vn->type == VSOCK) {
+		s = (unix_sock_t *)vn->data;
+		return (posix_poll_socket_readable(s));
+	}
+	if (vn->type == VREG || vn->type == VDIR || vn->read_fn) {
+		return (1);
+	}
+	return (0);
+}
+
+static int
+posix_poll_fd_writable(posix_fd_t *pfd)
+{
+	vnode_t		*vn;
+	pipe_t		*p;
+	unix_sock_t	*s;
+
+	vn = pfd->vnode;
+	if (!vn) {
+		return (0);
+	}
+	if (vn->ioctl_fn == terminal_ioctl_vnode) {
+		return (1);
+	}
+	if (vn->ioctl_fn == pty_master_ioctl ||
+	    vn->ioctl_fn == pty_slave_ioctl) {
+		return (pty_write_available(vn) > 0);
+	}
+	if (vn->type == VPIPE) {
+		p = (pipe_t *)vn->data;
+		return (posix_poll_pipe_writable(p));
+	}
+	if (vn->type == VSOCK) {
+		s = (unix_sock_t *)vn->data;
+		return (posix_poll_socket_writable(s));
+	}
+	if (vn->type == VREG || vn->write_fn) {
+		return (1);
+	}
+	return (0);
+}
+
+static short
+posix_poll_revents(struct process *proc, posix_pollfd_t *pollfd)
+{
+	posix_fd_t	*pfd;
+	short		 revents;
+	short		 read_events;
+	short		 write_events;
+
+	if (pollfd->fd < 0) {
+		return (0);
+	}
+
+	pfd = posix_get_fd(proc, pollfd->fd);
+	if (!pfd) {
+		return (POSIX_POLLNVAL);
+	}
+
+	revents = posix_poll_fd_status(pfd);
+	if (revents & POSIX_POLLNVAL) {
+		return (revents);
+	}
+
+	read_events = POSIX_POLLIN | POSIX_POLLRDNORM;
+	write_events = POSIX_POLLOUT | POSIX_POLLWRNORM;
+
+	if ((pollfd->events & read_events) &&
+	    posix_poll_fd_readable(pfd)) {
+		revents |= pollfd->events & read_events;
+	}
+	if ((pollfd->events & write_events) &&
+	    posix_poll_fd_writable(pfd)) {
+		revents |= pollfd->events & write_events;
+	}
+
+	return (revents);
+}
+
+static u64
+posix_poll_timeout_ticks(int timeout)
+{
+	u64	ticks;
+	u64	freq;
+
+	if (timeout <= 0) {
+		return (0);
+	}
+	freq = timer_get_frequency();
+	if (freq == 0) {
+		return ((u64)timeout);
+	}
+	ticks = ((u64)timeout * freq + 999ULL) / 1000ULL;
+	if (ticks == 0) {
+		ticks = 1;
+	}
+	return (ticks);
+}
+
+s64
+posix_poll(u64 fds_u, u64 nfds_u, u64 timeout_u, u64 a4, u64 a5,
+    u64 a6, registers_t *regs)
+{
+	struct process		*proc;
+	thread_t		*td;
+	posix_pollfd_t		*fds;
+	u64			 timeout_ticks;
+	u64			 start_ticks;
+	u64			 now_ticks;
+	u64			 elapsed;
+	u64			 remaining;
+	int			 timeout;
+	int			 nfds;
+	int			 ready;
+	int			 debug_sleep;
+	int			 i;
+
+	(void)a4; (void)a5; (void)a6; (void)regs;
+
+	proc = process_current();
+	if (!proc) {
+		return (-POSIX_EFAULT);
+	}
+
+	if (nfds_u > 1024) {
+		return (-POSIX_EINVAL);
+	}
+
+	nfds = (int)nfds_u;
+	fds = (posix_pollfd_t *)fds_u;
+	if (nfds > 0) {
+		if (!is_user_address(fds, sizeof(*fds) * nfds_u)) {
+			return (-POSIX_EFAULT);
+		}
+		if (!user_range_fault_in(fds, sizeof(*fds) * nfds_u, 1)) {
+			return (-POSIX_EFAULT);
+		}
+	} else {
+		fds = NULL;
+	}
+
+	timeout = (int)timeout_u;
+	if (timeout < -1) {
+		return (-POSIX_EINVAL);
+	}
+
+	timeout_ticks = posix_poll_timeout_ticks(timeout);
+	start_ticks = timer_get_ticks();
+	td = thread_current();
+	debug_sleep = 0;
+	if (posix_debug_python()) {
+		printk("[PYDBG] poll enter nfds=%d timeout=%d\n",
+		    nfds, timeout);
+	}
+
+	while (1) {
+		ready = 0;
+		for (i = 0; i < nfds; i++) {
+			fds[i].revents = posix_poll_revents(proc, &fds[i]);
+			if (fds[i].revents != 0) {
+				ready++;
+			}
+		}
+
+		if (ready > 0) {
+			if (posix_debug_python()) {
+				printk("[PYDBG] poll ready=%d\n", ready);
+				for (i = 0; i < nfds && i < 4; i++) {
+					printk("[PYDBG]   pollfd[%d] fd=%d "
+					    "events=%d revents=%d\n", i,
+					    fds[i].fd, fds[i].events,
+					    fds[i].revents);
+				}
+			}
+			if (td) {
+				td->sleep_target_ticks = 0;
+			}
+			return ((s64)ready);
+		}
+
+		if (timeout == 0) {
+			if (posix_debug_python()) {
+				printk("[PYDBG] poll timeout=0 -> 0\n");
+			}
+			return (0);
+		}
+
+		if (proc->sigpending & ~proc->sigmask) {
+			if (posix_debug_python()) {
+				printk("[PYDBG] poll interrupted\n");
+			}
+			if (td) {
+				td->sleep_target_ticks = 0;
+			}
+			return (-POSIX_EINTR);
+		}
+
+		if (timeout > 0) {
+			now_ticks = timer_get_ticks();
+			elapsed = now_ticks - start_ticks;
+			if (elapsed >= timeout_ticks) {
+				if (posix_debug_python()) {
+					printk("[PYDBG] poll timeout elapsed "
+					    "ticks=%u\n", (u32)elapsed);
+				}
+				if (td) {
+					td->sleep_target_ticks = 0;
+				}
+				return (0);
+			}
+			remaining = timeout_ticks - elapsed;
+			if (td) {
+				td->sleep_target_ticks = now_ticks + remaining;
+			}
+		}
+
+		if (!debug_sleep && posix_debug_python()) {
+			printk("[PYDBG] poll sleep nfds=%d timeout=%d\n",
+			    nfds, timeout);
+			debug_sleep = 1;
+		}
+		proc_sleep(&posix_poll_wait_channel);
+		if (td) {
+			td->sleep_target_ticks = 0;
+		}
+	}
+}
+
+typedef struct {
+	s64	tv_sec;
+	s64	tv_usec;
+} posix_timeval_t;
+
+typedef struct {
+	s64	tv_sec;
+	s64	tv_nsec;
+} posix_timespec_t;
+
+typedef struct {
+	u64	sigmask;
+	u64	sigsetsize;
+} posix_pselect_sigmask_t;
+
+static int
+posix_fdset_words(int nfds)
+{
+	return ((nfds + 63) / 64);
+}
+
+static int
+posix_fdset_bytes(int nfds)
+{
+	return (posix_fdset_words(nfds) * (int)sizeof(u64));
+}
+
+static void
+posix_fdset_zero(posix_fdset_t *set)
+{
+	memset(set, 0, sizeof(*set));
+}
+
+static int
+posix_fdset_isset(posix_fdset_t *set, int fd)
+{
+	return ((set->bits[fd / 64] & (1ULL << (fd % 64))) != 0);
+}
+
+static void
+posix_fdset_set(posix_fdset_t *set, int fd)
+{
+	set->bits[fd / 64] |= (1ULL << (fd % 64));
+}
+
+static s64
+posix_fdset_copyin(u64 set_u, posix_fdset_t *set, int nfds)
+{
+	int	bytes;
+
+	posix_fdset_zero(set);
+	bytes = posix_fdset_bytes(nfds);
+	if (set_u == 0 || bytes == 0) {
+		return (0);
+	}
+	if (!is_user_address((void *)set_u, (size_t)bytes) ||
+	    !user_range_fault_in((void *)set_u, (size_t)bytes, 0)) {
+		return (-POSIX_EFAULT);
+	}
+	memcpy(set->bits, (void *)set_u, (size_t)bytes);
+	return (0);
+}
+
+static s64
+posix_fdset_copyout(u64 set_u, posix_fdset_t *set, int nfds)
+{
+	int	bytes;
+
+	bytes = posix_fdset_bytes(nfds);
+	if (set_u == 0 || bytes == 0) {
+		return (0);
+	}
+	if (!is_user_address((void *)set_u, (size_t)bytes) ||
+	    !user_range_fault_in((void *)set_u, (size_t)bytes, 1)) {
+		return (-POSIX_EFAULT);
+	}
+	memcpy((void *)set_u, set->bits, (size_t)bytes);
+	return (0);
+}
+
+static int
+posix_select_any(posix_fdset_t *readfds, posix_fdset_t *writefds,
+    posix_fdset_t *exceptfds, int fd)
+{
+	if (posix_fdset_isset(readfds, fd)) {
+		return (1);
+	}
+	if (posix_fdset_isset(writefds, fd)) {
+		return (1);
+	}
+	if (posix_fdset_isset(exceptfds, fd)) {
+		return (1);
+	}
+	return (0);
+}
+
+static s64
+posix_select_scan(struct process *proc, int nfds, posix_fdset_t *readfds,
+    posix_fdset_t *writefds, posix_fdset_t *exceptfds,
+    posix_fdset_t *readout, posix_fdset_t *writeout,
+    posix_fdset_t *exceptout)
+{
+	posix_fd_t	*pfd;
+	short		status;
+	int		ready;
+	int		fd;
+
+	posix_fdset_zero(readout);
+	posix_fdset_zero(writeout);
+	posix_fdset_zero(exceptout);
+	ready = 0;
+
+	for (fd = 0; fd < nfds; fd++) {
+		if (!posix_select_any(readfds, writefds, exceptfds, fd)) {
+			continue;
+		}
+
+		pfd = posix_get_fd(proc, fd);
+		if (!pfd) {
+			return (-POSIX_EBADF);
+		}
+
+		status = posix_poll_fd_status(pfd);
+		if (status & POSIX_POLLNVAL) {
+			return (-POSIX_EBADF);
+		}
+
+		if (posix_fdset_isset(readfds, fd) &&
+		    ((status & (POSIX_POLLERR | POSIX_POLLHUP)) ||
+		    posix_poll_fd_readable(pfd))) {
+			posix_fdset_set(readout, fd);
+			ready++;
+		}
+		if (posix_fdset_isset(writefds, fd) &&
+		    ((status & POSIX_POLLERR) ||
+		    posix_poll_fd_writable(pfd))) {
+			posix_fdset_set(writeout, fd);
+			ready++;
+		}
+		if (posix_fdset_isset(exceptfds, fd) &&
+		    (status & POSIX_POLLPRI)) {
+			posix_fdset_set(exceptout, fd);
+			ready++;
+		}
+	}
+
+	return ((s64)ready);
+}
+
+static u64
+posix_timeout_ms_to_ticks(u64 ms)
+{
+	u64	freq;
+	u64	ticks;
+
+	if (ms == 0) {
+		return (0);
+	}
+	freq = timer_get_frequency();
+	if (freq == 0) {
+		return (ms);
+	}
+	if (ms > (0xffffffffffffffffULL - 999ULL) / freq) {
+		return (0xffffffffffffffffULL);
+	}
+	ticks = (ms * freq + 999ULL) / 1000ULL;
+	if (ticks == 0) {
+		ticks = 1;
+	}
+	return (ticks);
+}
+
+static s64
+posix_select_timeval_timeout(u64 timeout_u, int *has_timeout, u64 *ticks)
+{
+	posix_timeval_t	tv;
+	u64		ms;
+
+	*has_timeout = 0;
+	*ticks = 0;
+	if (timeout_u == 0) {
+		return (0);
+	}
+	if (!is_user_address((void *)timeout_u, sizeof(tv)) ||
+	    !user_range_fault_in((void *)timeout_u, sizeof(tv), 0)) {
+		return (-POSIX_EFAULT);
+	}
+	memcpy(&tv, (void *)timeout_u, sizeof(tv));
+	if (tv.tv_sec < 0 || tv.tv_usec < 0 || tv.tv_usec >= 1000000) {
+		return (-POSIX_EINVAL);
+	}
+	ms = (u64)tv.tv_sec * 1000ULL;
+	ms += ((u64)tv.tv_usec + 999ULL) / 1000ULL;
+	*has_timeout = 1;
+	*ticks = posix_timeout_ms_to_ticks(ms);
+	return (0);
+}
+
+static s64
+posix_select_timespec_timeout(u64 timeout_u, int *has_timeout, u64 *ticks)
+{
+	posix_timespec_t	ts;
+	u64		ms;
+
+	*has_timeout = 0;
+	*ticks = 0;
+	if (timeout_u == 0) {
+		return (0);
+	}
+	if (!is_user_address((void *)timeout_u, sizeof(ts)) ||
+	    !user_range_fault_in((void *)timeout_u, sizeof(ts), 0)) {
+		return (-POSIX_EFAULT);
+	}
+	memcpy(&ts, (void *)timeout_u, sizeof(ts));
+	if (ts.tv_sec < 0 || ts.tv_nsec < 0 || ts.tv_nsec >= 1000000000) {
+		return (-POSIX_EINVAL);
+	}
+	ms = (u64)ts.tv_sec * 1000ULL;
+	ms += ((u64)ts.tv_nsec + 999999ULL) / 1000000ULL;
+	*has_timeout = 1;
+	*ticks = posix_timeout_ms_to_ticks(ms);
+	return (0);
+}
+
+static s64
+posix_select_wait(struct process *proc, int nfds, posix_fdset_t *readfds,
+    posix_fdset_t *writefds, posix_fdset_t *exceptfds,
+    posix_fdset_t *readout, posix_fdset_t *writeout,
+    posix_fdset_t *exceptout, int has_timeout, u64 timeout_ticks)
+{
+	thread_t	*td;
+	u64	start_ticks;
+	u64	now_ticks;
+	u64	elapsed;
+	u64	remaining;
+	s64	ret;
+
+	td = thread_current();
+	start_ticks = timer_get_ticks();
+
+	while (1) {
+		ret = posix_select_scan(proc, nfds, readfds, writefds,
+		    exceptfds, readout, writeout, exceptout);
+		if (ret != 0) {
+			if (td) {
+				td->sleep_target_ticks = 0;
+			}
+			return (ret);
+		}
+
+		if (has_timeout && timeout_ticks == 0) {
+			return (0);
+		}
+
+		if (proc->sigpending & ~proc->sigmask) {
+			if (td) {
+				td->sleep_target_ticks = 0;
+			}
+			return (-POSIX_EINTR);
+		}
+
+		if (has_timeout) {
+			now_ticks = timer_get_ticks();
+			elapsed = now_ticks - start_ticks;
+			if (elapsed >= timeout_ticks) {
+				if (td) {
+					td->sleep_target_ticks = 0;
+				}
+				return (0);
+			}
+			remaining = timeout_ticks - elapsed;
+			if (td) {
+				td->sleep_target_ticks = now_ticks + remaining;
+			}
+		}
+
+		proc_sleep(&posix_poll_wait_channel);
+		if (td) {
+			td->sleep_target_ticks = 0;
+		}
+	}
+}
+
+static void
+posix_select_mask_fixup(struct process *proc)
+{
+	if (!proc) {
+		return;
+	}
+	proc->sigmask &= ~(1ULL << (SIGKILL - 1));
+	proc->sigmask &= ~(1ULL << (SIGSTOP - 1));
+}
+
+static s64
+posix_pselect_apply_mask(struct process *proc, u64 sigmask_u, u64 *oldmask,
+    int *changed)
+{
+	posix_pselect_sigmask_t	data;
+	u64			newmask;
+
+	*changed = 0;
+	*oldmask = 0;
+	if (sigmask_u == 0) {
+		return (0);
+	}
+	if (!is_user_address((void *)sigmask_u, sizeof(data)) ||
+	    !user_range_fault_in((void *)sigmask_u, sizeof(data), 0)) {
+		return (-POSIX_EFAULT);
+	}
+	memcpy(&data, (void *)sigmask_u, sizeof(data));
+	if (data.sigmask == 0) {
+		return (0);
+	}
+	if (data.sigsetsize != 8) {
+		return (-POSIX_EINVAL);
+	}
+	if (!is_user_address((void *)data.sigmask, sizeof(newmask)) ||
+	    !user_range_fault_in((void *)data.sigmask, sizeof(newmask), 0)) {
+		return (-POSIX_EFAULT);
+	}
+	memcpy(&newmask, (void *)data.sigmask, sizeof(newmask));
+
+	*oldmask = proc->sigmask;
+	proc->sigmask = newmask;
+	posix_select_mask_fixup(proc);
+	*changed = 1;
+	return (0);
+}
+
+static s64
+posix_select_common(u64 nfds_u, u64 readfds_u, u64 writefds_u,
+    u64 exceptfds_u, int has_timeout, u64 timeout_ticks)
+{
+	struct process	*proc;
+	posix_fdset_t	readfds, writefds, exceptfds;
+	posix_fdset_t	readout, writeout, exceptout;
+	s64		ret;
+	int		nfds;
+
+	proc = process_current();
+	if (!proc) {
+		return (-POSIX_EFAULT);
+	}
+	if (nfds_u > MAX_POSIX_FDS) {
+		return (-POSIX_EINVAL);
+	}
+	nfds = (int)nfds_u;
+	if (nfds < 0) {
+		return (-POSIX_EINVAL);
+	}
+
+	ret = posix_fdset_copyin(readfds_u, &readfds, nfds);
+	if (ret != 0) {
+		return (ret);
+	}
+	ret = posix_fdset_copyin(writefds_u, &writefds, nfds);
+	if (ret != 0) {
+		return (ret);
+	}
+	ret = posix_fdset_copyin(exceptfds_u, &exceptfds, nfds);
+	if (ret != 0) {
+		return (ret);
+	}
+
+	ret = posix_select_wait(proc, nfds, &readfds, &writefds, &exceptfds,
+	    &readout, &writeout, &exceptout, has_timeout, timeout_ticks);
+	if (ret < 0) {
+		return (ret);
+	}
+
+	if (posix_fdset_copyout(readfds_u, &readout, nfds) != 0) {
+		return (-POSIX_EFAULT);
+	}
+	if (posix_fdset_copyout(writefds_u, &writeout, nfds) != 0) {
+		return (-POSIX_EFAULT);
+	}
+	if (posix_fdset_copyout(exceptfds_u, &exceptout, nfds) != 0) {
+		return (-POSIX_EFAULT);
+	}
+	return (ret);
+}
+
+s64
+posix_select(u64 nfds, u64 readfds, u64 writefds, u64 exceptfds,
+    u64 timeout, u64 a6, registers_t *regs)
+{
+	u64	timeout_ticks;
+	s64	ret;
+	int	has_timeout;
+
+	(void)a6; (void)regs;
+
+	ret = posix_select_timeval_timeout(timeout, &has_timeout,
+	    &timeout_ticks);
+	if (ret != 0) {
+		return (ret);
+	}
+	return (posix_select_common(nfds, readfds, writefds, exceptfds,
+	    has_timeout, timeout_ticks));
+}
+
+s64
+posix_pselect6(u64 nfds, u64 readfds, u64 writefds, u64 exceptfds,
+    u64 timeout, u64 sigmask, registers_t *regs)
+{
+	struct process	*proc;
+	u64		timeout_ticks;
+	u64		oldmask;
+	s64		ret;
+	int		has_timeout;
+	int		mask_changed;
+
+	(void)regs;
+
+	proc = process_current();
+	if (!proc) {
+		return (-POSIX_EFAULT);
+	}
+	ret = posix_select_timespec_timeout(timeout, &has_timeout,
+	    &timeout_ticks);
+	if (ret != 0) {
+		return (ret);
+	}
+	ret = posix_pselect_apply_mask(proc, sigmask, &oldmask,
+	    &mask_changed);
+	if (ret != 0) {
+		return (ret);
+	}
+	ret = posix_select_common(nfds, readfds, writefds, exceptfds,
+	    has_timeout, timeout_ticks);
+	if (mask_changed) {
+		proc->sigmask = oldmask;
+		posix_select_mask_fixup(proc);
+	}
+	return (ret);
 }
 
 s64
@@ -911,10 +1906,12 @@ posix_stat(u64 path_u, u64 buf_u, u64 a3, u64 a4, u64 a5, u64 a6,
 
 	ret = vfs_resolve(path, &vn);
 	if (ret != 0) {
+		posix_debug_path_line("stat", path, posix_vfs_ret(ret));
 		kmem_free(path);
 		return (posix_vfs_ret(ret));
 	}
 	if (vn == NULL) {
+		posix_debug_path_line("stat", path, -POSIX_ENOENT);
 		kmem_free(path);
 		return (-POSIX_ENOENT);
 	}
@@ -922,11 +1919,13 @@ posix_stat(u64 path_u, u64 buf_u, u64 a3, u64 a4, u64 a5, u64 a6,
 	st = (posix_stat_t *)buf_u;
 	ret = vnode_stat(vn, st);
 	if (ret != 0) {
+		posix_debug_path_line("stat", path, posix_vfs_ret(ret));
 		vnode_release(vn);
 		kmem_free(path);
 		return (posix_vfs_ret(ret));
 	}
 
+	posix_debug_path_line("stat", path, 0);
 	vnode_release(vn);
 	kmem_free(path);
 	return (0);
@@ -989,10 +1988,12 @@ posix_lstat(u64 path_u, u64 buf_u, u64 a3, u64 a4, u64 a5, u64 a6,
 
 	ret = vfs_resolve_nofollow(path, &vn);
 	if (ret != 0) {
+		posix_debug_path_line("lstat", path, posix_vfs_ret(ret));
 		kmem_free(path);
 		return (posix_vfs_ret(ret));
 	}
 	if (vn == NULL) {
+		posix_debug_path_line("lstat", path, -POSIX_ENOENT);
 		kmem_free(path);
 		return (-POSIX_ENOENT);
 	}
@@ -1000,11 +2001,13 @@ posix_lstat(u64 path_u, u64 buf_u, u64 a3, u64 a4, u64 a5, u64 a6,
 	st = (posix_stat_t *)buf_u;
 	ret = vnode_stat(vn, st);
 	if (ret != 0) {
+		posix_debug_path_line("lstat", path, posix_vfs_ret(ret));
 		vnode_release(vn);
 		kmem_free(path);
 		return (posix_vfs_ret(ret));
 	}
 
+	posix_debug_path_line("lstat", path, 0);
 	vnode_release(vn);
 	kmem_free(path);
 	return (0);
@@ -1040,6 +2043,9 @@ posix_pipe2(u64 pipefd_u, u64 flags_u, u64 a3, u64 a4, u64 a5,
 
 	pipefd = (int *)pipefd_u;
 	if (!is_user_address(pipefd, sizeof(int) * 2)) {
+		return (-POSIX_EFAULT);
+	}
+	if (!user_range_fault_in(pipefd, sizeof(int) * 2, 1)) {
 		return (-POSIX_EFAULT);
 	}
 
@@ -1316,22 +2322,35 @@ posix_ioctl(u64 fd_u, u64 cmd_u, u64 arg_u, u64 a4, u64 a5, u64 a6,
 {
 	struct process	*proc;
 	posix_fd_t	*pfd;
+	s64		ret;
+	int		fd;
 
-	(void)a4; (void)a5; (void)a6; (void)arg_u; (void)regs;
+	(void)a4; (void)a5; (void)a6; (void)regs;
 
 	proc = process_current();
 	if (!proc) {
 		return (-POSIX_EFAULT);
 	}
 
-	pfd = posix_get_fd(proc, (int)fd_u);
+	fd = (int)fd_u;
+	pfd = posix_get_fd(proc, fd);
 	if (!pfd) {
+		posix_debug_fd_line("ioctl.badfd", fd, NULL, -POSIX_EBADF,
+		    cmd_u);
 		return (-POSIX_EBADF);
 	}
 
 	if (pfd->vnode && pfd->vnode->type == VCHR &&
 	    strcmp(pfd->vnode->name, "fb0") == 0) {
-		return (vnode_ioctl(pfd->vnode, cmd_u, (void *)arg_u));
+		ret = vnode_ioctl(pfd->vnode, cmd_u, (void *)arg_u);
+		if (posix_debug_python()) {
+			printk("[PYDBG] ioctl fd=%d cmd=%s raw=%x vnode=%s "
+			    "type=%d arg=%x -> %d\n", fd,
+			    posix_debug_ioctl_name(cmd_u), (u32)cmd_u,
+			    posix_debug_vnode_name(pfd->vnode),
+			    pfd->vnode->type, (u32)arg_u, (int)ret);
+		}
+		return (ret);
 	}
 
 	switch ((int)cmd_u) {
@@ -1339,14 +2358,31 @@ posix_ioctl(u64 fd_u, u64 cmd_u, u64 arg_u, u64 a4, u64 a5, u64 a6,
 	case POSIX_TIOCSWINSZ:
 	case POSIX_TCGETS:
 	case POSIX_TCSETS:
+	case POSIX_TCSETSW:
+	case POSIX_TCSETSF:
+	case POSIX_TCFLSH:
+	case POSIX_FIONREAD:
 	case POSIX_TIOCGPGRP:
 	case POSIX_TIOCSPGRP:
 	case POSIX_TIOCGSID:
 	case POSIX_TIOCSCTTY:
-		return (vnode_ioctl(pfd->vnode, cmd_u, (void *)arg_u));
+	case POSIX_TIOCGPTN:
+		ret = vnode_ioctl(pfd->vnode, cmd_u, (void *)arg_u);
+		break;
 	default:
-		return (-POSIX_ENOTTY);
+		ret = -POSIX_ENOTTY;
+		break;
 	}
+
+	if (posix_debug_python()) {
+		printk("[PYDBG] ioctl fd=%d cmd=%s raw=%x vnode=%s "
+		    "type=%d arg=%x -> %d\n", fd,
+		    posix_debug_ioctl_name(cmd_u), (u32)cmd_u,
+		    posix_debug_vnode_name(pfd->vnode),
+		    pfd->vnode ? pfd->vnode->type : -1,
+		    (u32)arg_u, (int)ret);
+	}
+	return (ret);
 }
 
 s64
@@ -1367,22 +2403,26 @@ posix_access(u64 path_u, u64 mode, u64 a3, u64 a4, u64 a5, u64 a6,
   }
 
   if (restrict_kusr_check(path)) {
+    posix_debug_path_line("access", path, -POSIX_EACCES);
     kmem_free(path);
     return (-POSIX_EACCES);
   }
 
   ret = vfs_resolve(path, &vn);
   if (ret != 0) {
+    posix_debug_path_line("access", path, posix_vfs_ret(ret));
     kmem_free(path);
     return (posix_vfs_ret(ret));
   }
   if (vn == NULL) {
+    posix_debug_path_line("access", path, -POSIX_ENOENT);
     kmem_free(path);
     return (-POSIX_ENOENT);
   }
 
   want = (int)mode & 7;
   perm = posix_check_perm(vn, want);
+  posix_debug_path_line("access", path, (s64)perm);
   vnode_release(vn);
   kmem_free(path);
   return ((s64)perm);
@@ -1403,10 +2443,13 @@ posix_getdents64(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5,
 {
 	struct process	*proc;
 	posix_fd_t	*pfd;
+	posix_dirent64_t	*de;
 	u8		*buf;
 	u32		idx;
+	u32		name_len;
 	u64		pos;
 	int		type, ret;
+	u16		reclen;
 	char		name[32];
 
 	(void)a4; (void)a5; (void)a6; (void)regs;
@@ -1428,12 +2471,15 @@ posix_getdents64(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5,
 	if (!is_user_address((void *)buf_u, count)) {
 		return (-POSIX_EFAULT);
 	}
+	if (!user_range_fault_in((void *)buf_u, count, 1)) {
+		return (-POSIX_EFAULT);
+	}
 
 	buf = (u8 *)buf_u;
 	pos = 0;
-	idx = 0;
+	idx = (u32)pfd->offset;
 
-	while (pos + sizeof(posix_dirent64_t) <= count) {
+	while (pos + POSIX_DIRENT64_NAME_OFF + 1 <= count) {
 		memset(name, 0, sizeof(name));
 
 		type = POSIX_DT_UNKNOWN;
@@ -1445,13 +2491,9 @@ posix_getdents64(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5,
 			break;
 		}
 
-		posix_dirent64_t	*de;
-		u32			name_len;
-		u16			reclen;
-
 		name_len = strlen(name);
-		reclen = (u16)((sizeof(posix_dirent64_t) - 256 +
-		    name_len + 1 + 7) & ~7);
+		reclen = (u16)((POSIX_DIRENT64_NAME_OFF + name_len + 1 +
+		    7) & ~7);
 
 		if (pos + reclen > count) {
 			break;
@@ -1459,7 +2501,7 @@ posix_getdents64(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5,
 
 		de = (posix_dirent64_t *)(buf + pos);
 		de->d_ino = idx + 1;
-		de->d_off = (s64)(pos + reclen);
+		de->d_off = (s64)(idx + 1);
 		de->d_reclen = reclen;
 		de->d_type = (u8)type;
 		memcpy(de->d_name, name, name_len);
@@ -1469,6 +2511,9 @@ posix_getdents64(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5,
 		idx++;
 	}
 
+	pfd->offset = (u64)idx;
+	posix_debug_fd_line("getdents64", (int)fd_u, pfd, (s64)pos,
+	    pfd->offset);
 	return ((s64)pos);
 }
 

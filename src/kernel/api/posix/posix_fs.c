@@ -204,6 +204,9 @@ posix_getcwd(u64 buf_u, u64 size_u, u64 a3, u64 a4, u64 a5, u64 a6,
 	if (!is_user_address(buf, size)) {
 		return (-POSIX_EFAULT);
 	}
+	if (!user_range_fault_in(buf, size, 1)) {
+		return (-POSIX_EFAULT);
+	}
 
 	memset(kbuf, 0, sizeof(kbuf));
 	ret = vfs_getcwd(kbuf, sizeof(kbuf));
@@ -221,7 +224,7 @@ posix_getcwd(u64 buf_u, u64 size_u, u64 a3, u64 a4, u64 a5, u64 a6,
 	memcpy(buf, path, path_len);
 	buf[path_len] = '\0';
 
-	return ((s64)(u64)buf);
+	return ((s64)(path_len + 1));
 }
 
 s64

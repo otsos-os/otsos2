@@ -26,10 +26,30 @@
 
 #include <kernel/api/posix/posix.h>
 #include <kernel/process.h>
+#include <kernel/signal.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
+
+#define POSIX_REG_R8		0
+#define POSIX_REG_R9		1
+#define POSIX_REG_R10		2
+#define POSIX_REG_R11		3
+#define POSIX_REG_R12		4
+#define POSIX_REG_R13		5
+#define POSIX_REG_R14		6
+#define POSIX_REG_R15		7
+#define POSIX_REG_RDI		8
+#define POSIX_REG_RSI		9
+#define POSIX_REG_RBP		10
+#define POSIX_REG_RBX		11
+#define POSIX_REG_RDX		12
+#define POSIX_REG_RAX		13
+#define POSIX_REG_RCX		14
+#define POSIX_REG_RSP		15
+#define POSIX_REG_RIP		16
+#define POSIX_REG_EFL		17
 
 typedef struct {
 	u64	sa_handler;
@@ -38,18 +58,51 @@ typedef struct {
 	u64	sa_mask;
 } posix_sigaction_kernel_t;
 
+static void
+posix_signal_mask_fixup(struct process *proc)
+{
+	if (!proc) {
+		return;
+	}
+	proc->sigmask &= ~(1ULL << (SIGKILL - 1));
+	proc->sigmask &= ~(1ULL << (SIGSTOP - 1));
+}
+
+static int
+posix_signal_debug_python(struct process *proc)
+{
+	if (!proc) {
+		return (0);
+	}
+	return (strcmp(proc->name, "python") == 0);
+}
+
+static void
+posix_sigreturn_badframe(struct process *proc)
+{
+	if (proc) {
+		posix_cleanup_process(proc);
+	}
+	process_exit(128 + SIGSEGV);
+}
+
 s64
 posix_rt_sigaction(u64 signum_u, u64 act_u, u64 oldact_u,
     u64 sigsetsize, u64 a5, u64 a6, registers_t *regs)
 {
+	posix_sigaction_kernel_t	act;
+	posix_sigaction_kernel_t	old;
 	struct process	*proc;
 	int		signum;
 
-	(void)sigsetsize; (void)a5; (void)a6; (void)regs;
+	(void)a5; (void)a6; (void)regs;
 
 	proc = process_current();
 	if (!proc) {
 		return (-POSIX_EFAULT);
+	}
+	if (sigsetsize != 8) {
+		return (-POSIX_EINVAL);
 	}
 
 	signum = (int)signum_u;
@@ -58,40 +111,35 @@ posix_rt_sigaction(u64 signum_u, u64 act_u, u64 oldact_u,
 		return (-POSIX_EINVAL);
 	}
 
-	if (signum == 9 || signum == 15) {
-		if (oldact_u && is_user_address((void *)oldact_u, 32)) {
-			posix_sigaction_kernel_t	*old;
-			old = (posix_sigaction_kernel_t *)oldact_u;
-			old->sa_handler = proc->
-			    sigaction[signum - 1].handler;
-			old->sa_flags = proc->sigaction[signum - 1].flags;
-			old->sa_restorer = proc->
-			    sigaction[signum - 1].restorer;
-			old->sa_mask = proc->sigaction[signum - 1].mask;
+	if (oldact_u) {
+		if (!is_user_address((void *)oldact_u, sizeof(old)) ||
+		    !user_range_fault_in((void *)oldact_u, sizeof(old), 1)) {
+			return (-POSIX_EFAULT);
 		}
-		return (0);
+		memset(&old, 0, sizeof(old));
+		old.sa_handler = proc->sigaction[signum - 1].handler;
+		old.sa_flags = proc->sigaction[signum - 1].flags;
+		old.sa_restorer = proc->sigaction[signum - 1].restorer;
+		old.sa_mask = proc->sigaction[signum - 1].mask;
+		memcpy((void *)oldact_u, &old, sizeof(old));
 	}
 
-	if (oldact_u && is_user_address((void *)oldact_u, 32)) {
-		posix_sigaction_kernel_t	*old;
-		old = (posix_sigaction_kernel_t *)oldact_u;
-		old->sa_handler = proc->
-		    sigaction[signum - 1].handler;
-		old->sa_flags = proc->sigaction[signum - 1].flags;
-		old->sa_restorer = proc->
-		    sigaction[signum - 1].restorer;
-		old->sa_mask = proc->sigaction[signum - 1].mask;
+	if (act_u && (signum == SIGKILL || signum == SIGSTOP)) {
+		return (-POSIX_EINVAL);
 	}
 
-	if (act_u && is_user_address((void *)act_u, 32)) {
-		posix_sigaction_kernel_t	*act;
-		act = (posix_sigaction_kernel_t *)act_u;
+	if (act_u) {
+		if (!is_user_address((void *)act_u, sizeof(act)) ||
+		    !user_range_fault_in((void *)act_u, sizeof(act), 0)) {
+			return (-POSIX_EFAULT);
+		}
+		memcpy(&act, (void *)act_u, sizeof(act));
 		proc->sigaction[signum - 1].handler =
-		    (u64)act->sa_handler;
-		proc->sigaction[signum - 1].flags = act->sa_flags;
+		    (u64)act.sa_handler;
+		proc->sigaction[signum - 1].flags = act.sa_flags;
 		proc->sigaction[signum - 1].restorer =
-		    (u64)act->sa_restorer;
-		proc->sigaction[signum - 1].mask = act->sa_mask;
+		    (u64)act.sa_restorer;
+		proc->sigaction[signum - 1].mask = act.sa_mask;
 	}
 
 	return (0);
@@ -102,46 +150,54 @@ posix_rt_sigprocmask(u64 how_u, u64 set_u, u64 oldset_u,
     u64 sigsetsize, u64 a5, u64 a6, registers_t *regs)
 {
 	struct process	*proc;
+	u64		set_value;
+	u64		old_value;
 	int		how;
-	u64		*set;
-	u64		*oldset;
 
-	(void)sigsetsize; (void)a5; (void)a6; (void)regs;
+	(void)a5; (void)a6; (void)regs;
 
 	proc = process_current();
 	if (!proc) {
 		return (-POSIX_EFAULT);
 	}
-
-	how = (int)how_u;
-	set = (u64 *)set_u;
-	oldset = (u64 *)oldset_u;
-
-	if (oldset && is_user_address(oldset, sizeof(u64))) {
-		*oldset = proc->sigmask;
+	if (sigsetsize != 8) {
+		return (-POSIX_EINVAL);
 	}
 
-	if (set && is_user_address(set, sizeof(u64))) {
+	how = (int)how_u;
+
+	if (oldset_u) {
+		if (!is_user_address((void *)oldset_u, sizeof(old_value)) ||
+		    !user_range_fault_in((void *)oldset_u, sizeof(old_value),
+		    1)) {
+			return (-POSIX_EFAULT);
+		}
+		old_value = proc->sigmask;
+		memcpy((void *)oldset_u, &old_value, sizeof(old_value));
+	}
+
+	if (set_u) {
+		if (!is_user_address((void *)set_u, sizeof(set_value)) ||
+		    !user_range_fault_in((void *)set_u, sizeof(set_value),
+		    0)) {
+			return (-POSIX_EFAULT);
+		}
+		memcpy(&set_value, (void *)set_u, sizeof(set_value));
 		switch (how) {
 		case POSIX_SIG_BLOCK:
-			proc->sigmask |= *set;
+			proc->sigmask |= set_value;
 			break;
 		case POSIX_SIG_UNBLOCK:
-			proc->sigmask &= ~(*set);
+			proc->sigmask &= ~set_value;
 			break;
 		case POSIX_SIG_SETMASK:
-			proc->sigmask = *set;
+			proc->sigmask = set_value;
 			break;
 		default:
 			return (-POSIX_EINVAL);
 		}
 
-		if (proc->sigmask & (1ULL << (9 - 1))) {
-			proc->sigmask &= ~(1ULL << (9 - 1));
-		}
-		if (proc->sigmask & (1ULL << (15 - 1))) {
-			proc->sigmask &= ~(1ULL << (15 - 1));
-		}
+		posix_signal_mask_fixup(proc);
 	}
 
 	return (0);
@@ -151,8 +207,9 @@ s64
 posix_rt_sigreturn(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
     registers_t *regs)
 {
+	posix_rt_sigframe_t	frame;
 	struct process	*proc;
-	struct thread	*td;
+	posix_mcontext_t	*mc;
 
 	(void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
 
@@ -161,36 +218,46 @@ posix_rt_sigreturn(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 		return (-POSIX_EFAULT);
 	}
 
-	td = proc->cur_thread;
-	if (!td) {
-		td = proc->main_thread;
+	if (!is_user_address((void *)regs->rsp, sizeof(frame)) ||
+	    !user_range_fault_in((void *)regs->rsp, sizeof(frame), 0)) {
+		posix_sigreturn_badframe(proc);
+		return (-POSIX_EFAULT);
 	}
-	if (!td) {
+	memcpy(&frame, (void *)regs->rsp, sizeof(frame));
+	mc = &frame.uc.mcontext;
+
+	if (!is_user_address((void *)mc->gregs[POSIX_REG_RIP], 1) ||
+	    !is_user_address((void *)mc->gregs[POSIX_REG_RSP], 1)) {
+		posix_sigreturn_badframe(proc);
 		return (-POSIX_EFAULT);
 	}
 
-	regs->r15 = td->saved_context.r15;
-	regs->r14 = td->saved_context.r14;
-	regs->r13 = td->saved_context.r13;
-	regs->r12 = td->saved_context.r12;
-	regs->r11 = td->saved_context.r11;
-	regs->r10 = td->saved_context.r10;
-	regs->r9 = td->saved_context.r9;
-	regs->r8 = td->saved_context.r8;
-	regs->rbp = td->saved_context.rbp;
-	regs->rdi = td->saved_context.rdi;
-	regs->rsi = td->saved_context.rsi;
-	regs->rdx = td->saved_context.rdx;
-	regs->rcx = td->saved_context.rcx;
-	regs->rbx = td->saved_context.rbx;
-	regs->rax = td->saved_context.rax;
-	regs->rip = td->saved_context.rip;
-	regs->cs = td->saved_context.cs;
-	regs->rflags = td->saved_context.rflags;
-	regs->rsp = td->saved_context.rsp;
-	regs->ss = td->saved_context.ss;
+	regs->r8 = mc->gregs[POSIX_REG_R8];
+	regs->r9 = mc->gregs[POSIX_REG_R9];
+	regs->r10 = mc->gregs[POSIX_REG_R10];
+	regs->r11 = mc->gregs[POSIX_REG_R11];
+	regs->r12 = mc->gregs[POSIX_REG_R12];
+	regs->r13 = mc->gregs[POSIX_REG_R13];
+	regs->r14 = mc->gregs[POSIX_REG_R14];
+	regs->r15 = mc->gregs[POSIX_REG_R15];
+	regs->rdi = mc->gregs[POSIX_REG_RDI];
+	regs->rsi = mc->gregs[POSIX_REG_RSI];
+	regs->rbp = mc->gregs[POSIX_REG_RBP];
+	regs->rbx = mc->gregs[POSIX_REG_RBX];
+	regs->rdx = mc->gregs[POSIX_REG_RDX];
+	regs->rax = mc->gregs[POSIX_REG_RAX];
+	regs->rcx = mc->gregs[POSIX_REG_RCX];
+	regs->rsp = mc->gregs[POSIX_REG_RSP];
+	regs->rip = mc->gregs[POSIX_REG_RIP];
+	regs->rflags = mc->gregs[POSIX_REG_EFL];
 
-	proc->sigmask = td->saved_sigmask;
+	proc->sigmask = frame.uc.sigmask[0];
+	posix_signal_mask_fixup(proc);
+
+	if (posix_signal_debug_python(proc)) {
+		printk("[PYDBG] sigreturn rip=%p rsp=%p rax=%p\n",
+		    (void *)regs->rip, (void *)regs->rsp, (void *)regs->rax);
+	}
 
 	return ((s64)regs->rax);
 }

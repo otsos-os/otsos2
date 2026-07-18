@@ -225,6 +225,7 @@ unix_sock_connect_stream(unix_sock_t *c, unix_sock_t *target)
 	unix_sock_hold(n);
 
 	proc_wakeup(&target->accept_wait);
+	posix_poll_notify();
 	return (0);
 }
 
@@ -278,6 +279,7 @@ unix_sock_stream_read(unix_sock_t *s, void *buf, u32 count, int nonblock)
 			    UNIX_SOCK_BUF_SIZE;
 			s->stream_count--;
 			proc_wakeup(&s->peer->write_wait);
+			posix_poll_notify();
 		} else if (nonblock) {
 			if (n == 0)
 				return (-POSIX_EAGAIN);
@@ -335,6 +337,7 @@ unix_sock_stream_write(unix_sock_t *s, const void *buf, u32 count,
 		s->peer->stream_head = next;
 		s->peer->stream_count++;
 		proc_wakeup(&s->peer->read_wait);
+		posix_poll_notify();
 	}
 	return ((int)count);
 }
@@ -377,6 +380,7 @@ unix_sock_dgram_sendto(unix_sock_t *s, const void *buf, u32 len,
 	target->msg_count++;
 
 	proc_wakeup(&target->read_wait);
+	posix_poll_notify();
 	return ((int)len);
 }
 
@@ -571,9 +575,11 @@ unix_sock_shutdown(unix_sock_t *s, int how)
 
 	proc_wakeup(&s->read_wait);
 	proc_wakeup(&s->write_wait);
+	posix_poll_notify();
 
 	if (s->peer) {
 		proc_wakeup(&s->peer->read_wait);
 		proc_wakeup(&s->peer->write_wait);
+		posix_poll_notify();
 	}
 }

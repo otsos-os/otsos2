@@ -44,6 +44,7 @@ $define %func vm_map_find_free as function with args process_t *, u64
 $define %func vm_map_range_free as function with args process_t *, u64, u64, vma_t *
 $define %func vm_map_clip_range as function with args process_t *, u64, u64
 $define %func vm_map_insert as function with args process_t *, u64, u64, u32, u32, u32, vm_object_t *, u64
+$define %func vm_map_create_user_stack as function with args process_t *
 $define %func vm_map_remove as function with args process_t *, u64
 $define %func vm_map_remove_range as function with args process_t *, u64, u64
 $define %func vm_map_relocate as function with args process_t *, vma_t *, u64, u64
@@ -61,7 +62,8 @@ $space %internal align_up, page_flags_for_prot
 $space %internal vm_map_shm_attach_vma, vm_map_shm_detach_vma
 $space %internal vm_map_unlink, vm_map_insert_vma, vm_map_clip
 $space %export vm_map_find_free, vm_map_range_free, vm_map_clip_range
-$space %export vm_map_insert, vm_map_remove, vm_map_remove_range
+$space %export vm_map_insert, vm_map_create_user_stack
+$space %export vm_map_remove, vm_map_remove_range
 $space %export vm_map_relocate, vm_map_lookup, vm_map_free_all
 $space %export vm_map_fork, vm_map_fault, vm_cow_fault
 
@@ -323,6 +325,59 @@ vm_map_insert(process_t *proc, u64 start, u64 end, u32 prot,
 	vm_object_ref(object);
 
 	vm_map_insert_vma(proc, vma);
+
+	return (0);
+}
+
+int
+vm_map_create_user_stack(process_t *proc)
+{
+	vm_object_t	*obj;
+	u64		page;
+	u64		va;
+	u64		index;
+
+	if (proc == NULL) {
+		return (-1);
+	}
+	if (!vm_map_range_free(proc, USER_STACK_LIMIT, USER_STACK_END,
+	    NULL)) {
+		return (-1);
+	}
+
+	obj = vm_object_create(VM_OBJ_ANON, USER_STACK_MAX_SIZE, NULL);
+	if (obj == NULL) {
+		return (-1);
+	}
+
+	if (vm_map_insert(proc, USER_STACK_LIMIT, USER_STACK_END,
+	    API_MAP_READ | API_MAP_WRITE,
+	    API_MAP_PRIVATE | API_MAP_ANON, 0, obj, 0) != 0) {
+		vm_object_unref(obj);
+		return (-1);
+	}
+	vm_object_unref(obj);
+
+	for (va = USER_STACK_TOP; va < USER_STACK_END; va += PAGE_SIZE) {
+		page = vm_page_alloc_phys(0);
+		if (page == 0) {
+			vm_map_remove_range(proc, USER_STACK_LIMIT,
+			    USER_STACK_END);
+			return (-1);
+		}
+		memset((void *)(page + KERNEL_VMA), 0, PAGE_SIZE);
+		pmap_enter(va, page, PTE_PRESENT | PTE_RW | PTE_USER |
+		    PTE_NX);
+
+		index = (va - USER_STACK_LIMIT) / PAGE_SIZE;
+		if (vm_object_set_page(obj, index, page) != 0) {
+			pmap_remove(va);
+			vm_page_free_phys(page);
+			vm_map_remove_range(proc, USER_STACK_LIMIT,
+			    USER_STACK_END);
+			return (-1);
+		}
+	}
 
 	return (0);
 }

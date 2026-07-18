@@ -39,7 +39,12 @@ struct vm_object;
 
 #define MAX_PROCESSES 64
 #define PROCESS_NAME_LEN 32
-#define USER_STACK_SIZE (64 * 1024)   /* 64 KB user stack */
+#define USER_STACK_SIZE (64 * 1024)   /* initial mapped user stack */
+#define USER_STACK_MAX_SIZE (8 * 1024 * 1024)
+#define USER_STACK_END 0x0000800000000000ULL
+#define USER_STACK_BASE (USER_STACK_END - 16)
+#define USER_STACK_TOP (USER_STACK_END - USER_STACK_SIZE)
+#define USER_STACK_LIMIT (USER_STACK_END - USER_STACK_MAX_SIZE)
 #define KERNEL_STACK_SIZE (16 * 1024) // 16 kb kheap for thread
 
 /* Virtual Memory Area — tracks a mapped region of a process's address space. */

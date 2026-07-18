@@ -37,6 +37,7 @@ $define %func vm_map_find_free as function with args process_t *, u64
 $define %func vm_map_range_free as function with args process_t *, u64, u64, vma_t *
 $define %func vm_map_clip_range as function with args process_t *, u64, u64
 $define %func vm_map_insert as function with args process_t *, u64, u64, u32, u32, u32, vm_object_t *, u64
+$define %func vm_map_create_user_stack as function with args process_t *
 $define %func vm_map_remove as function with args process_t *, u64
 $define %func vm_map_remove_range as function with args process_t *, u64, u64
 $define %func vm_map_relocate as function with args process_t *, vma_t *, u64, u64
@@ -51,7 +52,8 @@ $define %func vm_cow_fault as function with args u64, u64
 /* !SPACE!
 
 $space %export vm_map_find_free, vm_map_range_free, vm_map_clip_range
-$space %export vm_map_insert, vm_map_remove, vm_map_remove_range
+$space %export vm_map_insert, vm_map_create_user_stack
+$space %export vm_map_remove, vm_map_remove_range
 $space %export vm_map_relocate, vm_map_lookup, vm_map_free_all
 $space %export vm_map_fork, vm_map_fault, vm_cow_fault
 
@@ -80,6 +82,7 @@ int		vm_map_clip_range(process_t *proc, u64 start, u64 end);
 int		vm_map_insert(process_t *proc, u64 start, u64 end,
 		    u32 prot, u32 flags, u32 gem_handle,
 		    vm_object_t *object, u64 object_offset);
+int		vm_map_create_user_stack(process_t *proc);
 int		vm_map_remove(process_t *proc, u64 addr);
 int		vm_map_remove_range(process_t *proc, u64 start, u64 end);
 int		vm_map_relocate(process_t *proc, vma_t *vma, u64 new_start,

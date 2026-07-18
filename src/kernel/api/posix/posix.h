@@ -36,7 +36,14 @@ $define %type s64 as 64 bit signed
 $define %type int as 32 bit signed
 $define %type char as 8 bit signed
 $define %type posix_fd_t as struct with used, cloexec, flags, offset, vnode
+$define %type posix_pollfd_t as struct with fd, events, revents
+$define %type posix_fdset_t as bitset for select file descriptors
 $define %type posix_sigaction_t as struct with handler, mask, flags, restorer
+$define %type posix_siginfo_t as struct with Linux siginfo header
+$define %type posix_stack_t as struct with signal stack metadata
+$define %type posix_mcontext_t as struct with x86_64 signal registers
+$define %type posix_ucontext_t as struct with Linux ucontext payload
+$define %type posix_rt_sigframe_t as struct with siginfo and ucontext
 $define %type posix_stat_t as packed struct with POSIX stat fields
 $define %type posix_utsname_t as struct with uname fields
 $define %type registers_t as struct with CPU register snapshot
@@ -51,6 +58,7 @@ $define %func posix_get_fd as function with args struct process *, int
 $define %func posix_signal_pending as function with args struct process *
 $define %func posix_signal_deliver as procedure with args struct process *, registers_t *
 $define %func posix_getrandom as function with args u64, u64, u64, u64, u64, u64, registers_t *
+$define %func posix_poll_notify as procedure with args void
 
 */
 
@@ -61,6 +69,7 @@ $space %export posix_init_process, posix_copy_fds, posix_cleanup_process
 $space %export posix_alloc_fd, posix_get_fd
 $space %export posix_signal_pending, posix_signal_deliver
 $space %export posix_getrandom
+$space %export posix_poll_notify
 
 */
 
@@ -155,6 +164,7 @@ $space %export posix_getrandom
 #define POSIX_IPC_EXCL		02000
 
 #define MAX_POSIX_FDS		256
+#define POSIX_FDSET_WORDS	(MAX_POSIX_FDS / 64)
 #define MAX_POSIX_SIGS		64
 #define POSIX_SIG_BLOCK		0
 #define POSIX_SIG_UNBLOCK	1
@@ -186,6 +196,27 @@ $space %export posix_getrandom
 #define POSIX_F_SETFL		4
 #define POSIX_FD_CLOEXEC	1
 
+#define POSIX_SIG_DFL		0
+#define POSIX_SIG_IGN		1
+
+#define POSIX_SA_SIGINFO	0x00000004
+#define POSIX_SA_RESTORER	0x04000000
+#define POSIX_SA_ONSTACK	0x08000000
+#define POSIX_SA_RESTART	0x10000000
+#define POSIX_SA_NODEFER	0x40000000
+#define POSIX_SA_RESETHAND	0x80000000
+
+#define POSIX_POLLIN		0x0001
+#define POSIX_POLLPRI		0x0002
+#define POSIX_POLLOUT		0x0004
+#define POSIX_POLLERR		0x0008
+#define POSIX_POLLHUP		0x0010
+#define POSIX_POLLNVAL		0x0020
+#define POSIX_POLLRDNORM	0x0040
+#define POSIX_POLLRDBAND	0x0080
+#define POSIX_POLLWRNORM	0x0100
+#define POSIX_POLLWRBAND	0x0200
+
 #define POSIX_DT_UNKNOWN	0
 #define POSIX_DT_FIFO		1
 #define POSIX_DT_CHR		2
@@ -195,15 +226,25 @@ $space %export posix_getrandom
 #define POSIX_DT_LNK		10
 #define POSIX_DT_SOCK		12
 
+#define POSIX_DIRENT64_NAME_OFF	19
+
 #define POSIX_TIOCGWINSZ	0x5413
 #define POSIX_TIOCSWINSZ	0x5414
 #define POSIX_TCGETS		0x5401
 #define POSIX_TCSETS		0x5402
+#define POSIX_TCSETSW		0x5403
+#define POSIX_TCSETSF		0x5404
+#define POSIX_TCFLSH		0x540B
 #define POSIX_TIOCGPGRP		0x540F
 #define POSIX_TIOCSPGRP		0x5410
 #define POSIX_TIOCGSID		0x5429
 #define	POSIX_TIOCSCTTY		0x540E
 #define	POSIX_TIOCGPTN		0x80045430
+#define	POSIX_FIONREAD		0x541B
+
+#define POSIX_TCIFLUSH		0
+#define POSIX_TCOFLUSH		1
+#define POSIX_TCIOFLUSH		2
 
 
 #define POSIX_MAP_READ		0x1
@@ -236,6 +277,7 @@ $space %export posix_getrandom
 #define SYS_mmap		9
 #define SYS_readv		19
 #define SYS_writev		20
+#define SYS_select		23
 #define SYS_mprotect		10
 #define SYS_munmap		11
 #define SYS_brk		12
@@ -316,6 +358,7 @@ $space %export posix_getrandom
 #define SYS_exit_group		231
 #define SYS_dup3		292
 #define SYS_pipe2		293
+#define SYS_pselect6		270
 
 #define SYS_clone		56
 #define SYS_gettid		186
@@ -432,12 +475,57 @@ typedef struct posix_fd {
 	vnode_t		*vnode;
 } posix_fd_t;
 
+typedef struct posix_pollfd {
+	int		fd;
+	short		events;
+	short		revents;
+} posix_pollfd_t;
+
+typedef struct {
+	u64		bits[POSIX_FDSET_WORDS];
+} posix_fdset_t;
+
 typedef struct {
 	u64		handler;
 	u64		mask;
 	u32		flags;
 	u64		restorer;
 } posix_sigaction_t;
+
+typedef struct {
+	int		signo;
+	int		errno_;
+	int		code;
+	int		pad0;
+	u64		fields[14];
+} posix_siginfo_t;
+
+typedef struct {
+	u64		ss_sp;
+	int		ss_flags;
+	int		pad0;
+	u64		ss_size;
+} posix_stack_t;
+
+typedef struct {
+	u64		gregs[23];
+	u64		fpregs;
+	u64		reserved[8];
+} posix_mcontext_t;
+
+typedef struct {
+	u64			flags;
+	u64			link;
+	posix_stack_t		stack;
+	posix_mcontext_t	mcontext;
+	u64			sigmask[16];
+	u64			fpregs_mem[64];
+} posix_ucontext_t;
+
+typedef struct {
+	posix_siginfo_t		info;
+	posix_ucontext_t	uc;
+} posix_rt_sigframe_t;
 
 typedef struct {
 	char		sysname[65];
@@ -538,5 +626,6 @@ s64	posix_setsockopt(u64 sockfd, u64 level, u64 optname, u64 optval,
     u64 optlen, u64 a6, registers_t *regs);
 s64	posix_getsockopt(u64 sockfd, u64 level, u64 optname, u64 optval,
     u64 optlen, u64 a6, registers_t *regs);
+void	posix_poll_notify(void);
 
 #endif

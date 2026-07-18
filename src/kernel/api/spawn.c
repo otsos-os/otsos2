@@ -41,6 +41,7 @@
 #include <kernel/useraddr.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
+#include <mm/vm/vm_map.h>
 #include <userland/elf.h>
 #include <userland/userspace.h>
 
@@ -202,29 +203,10 @@ static int read_file_into_buffer(const char *path, u8 **out_buf,
   return 0;
 }
 
-static u64 allocate_user_stack(void) {
-  u64 stack_pages = (USER_STACK_SIZE + PAGE_SIZE - 1) / PAGE_SIZE;
-  u64 stack_bottom = USER_STACK_TOP;
-
-  for (u64 i = 0; i < stack_pages; i++) {
-    u64 page = vm_page_alloc_phys(0);
-    if (!page) {
-      for (u64 j = 0; j < i; j++) {
-        u64 vaddr = stack_bottom + (j * PAGE_SIZE);
-        u64 paddr = pmap_extract(vaddr);
-        pmap_remove(vaddr);
-        if (paddr) {
-          vm_page_free_phys(paddr);
-        }
-      }
-      return 0;
-    }
-    memset((void *)(page + KERNEL_VMA), 0, PAGE_SIZE);
-
-    u64 vaddr = stack_bottom + (i * PAGE_SIZE);
-    pmap_enter(vaddr, page, PTE_PRESENT | PTE_RW | PTE_USER | PTE_NX);
+static u64 allocate_user_stack(process_t *proc) {
+  if (vm_map_create_user_stack(proc) != 0) {
+    return 0;
   }
-
   return USER_STACK_BASE;
 }
 
@@ -530,7 +512,11 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
     elf_buf = NULL;
   }
 
-  u64 user_stack = allocate_user_stack();
+  child->cr3 = new_cr3;
+  child->owns_address_space = 1;
+  child->mmap_base = MMAP_BASE;
+
+  u64 user_stack = allocate_user_stack(child);
   if (user_stack == 0) {
     printk("[SPAWN] Error: allocate_user_stack failed\n");
     pmap_load(old_cr3);
@@ -549,6 +535,7 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
                          &envp_addr);
   if (err < 0) {
     printk("[SPAWN] Error: build_user_stack failed\n");
+    vm_map_free_all(child);
     pmap_load(old_cr3);
     free_spawn_cr3(new_cr3);
     memset(child, 0, sizeof(process_t));
@@ -563,7 +550,6 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
   pmap_load(old_cr3);
 
   u32 pid = next_pid++;
-  memset(child, 0, sizeof(process_t));
 
   child->pid = pid;
   child->ppid = parent->pid;
@@ -609,6 +595,9 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
                                USER_CS, USER_DS);
   if (!td) {
     printk("[SPAWN] Error: failed to create thread\n");
+    pmap_load(new_cr3);
+    vm_map_free_all(child);
+    pmap_load(old_cr3);
     pmap_destroy(new_cr3);
     memset(child, 0, sizeof(process_t));
     kmem_free(kpath);

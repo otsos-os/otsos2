@@ -25,6 +25,7 @@
  */
 
 #include <kernel/api/api.h>
+#include <kernel/api/posix/posix.h>
 #include <kernel/event/event.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
@@ -75,6 +76,7 @@ int pipe_read(pipe_t *p, void *buf, u32 count) {
 
   /* Wake any writer sleeping on this pipe (space freed up). */
   proc_wakeup((void *)p);
+  posix_poll_notify();
 
   return (int)to_read;
 }
@@ -116,6 +118,7 @@ int pipe_write(pipe_t *p, const void *buf, u32 count) {
 
   /* Wake any reader sleeping on this pipe (data arrived). */
   proc_wakeup((void *)p);
+  posix_poll_notify();
 
   return (int)to_write;
 }

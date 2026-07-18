@@ -40,6 +40,7 @@ int	pty_slave_read(vnode_t *vn, void *buf, u32 count, int nonblock);
 int	pty_slave_write(vnode_t *vn, const void *buf, u32 count, int nonblock);
 int	pty_slave_ioctl(vnode_t *vn, u64 cmd, void *arg);
 int	pty_read_available(vnode_t *vn);
+int	pty_write_available(vnode_t *vn);
 vnode_t	*pty_create_slave_vnode(int id);
 
 #endif

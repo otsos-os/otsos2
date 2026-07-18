@@ -155,6 +155,7 @@ pty_to_slave_put(pty_pair_t *p, char c)
 	p->to_slave_count++;
 	proc_wakeup(&p->to_slave_count);
 	knote_notify_all(EVFILT_READ, 0, 0, 1);
+	posix_poll_notify();
 	return (0);
 }
 
@@ -167,7 +168,8 @@ pty_to_slave_get(pty_pair_t *p, char *c)
 	*c = p->to_slave[p->to_slave_tail];
 	p->to_slave_tail = (p->to_slave_tail + 1) % PTY_BUF_SIZE;
 	p->to_slave_count--;
-	proc_wakeup(&p->to_master_count);
+	proc_wakeup(&p->to_slave_count);
+	posix_poll_notify();
 	return (0);
 }
 
@@ -185,6 +187,7 @@ pty_to_master_put(pty_pair_t *p, char c)
 	p->to_master_count++;
 	proc_wakeup(&p->to_master_count);
 	knote_notify_all(EVFILT_READ, 0, 0, 1);
+	posix_poll_notify();
 	return (0);
 }
 
@@ -197,7 +200,89 @@ pty_to_master_get(pty_pair_t *p, char *c)
 	*c = p->to_master[p->to_master_tail];
 	p->to_master_tail = (p->to_master_tail + 1) % PTY_BUF_SIZE;
 	p->to_master_count--;
+	proc_wakeup(&p->to_master_count);
+	posix_poll_notify();
+	return (0);
+}
+
+static int
+pty_is_master(vnode_t *vn)
+{
+	return (vn && vn->ioctl_fn == pty_master_ioctl);
+}
+
+static int
+pty_output_count(pty_pair_t *p, vnode_t *vn)
+{
+	if (pty_is_master(vn)) {
+		return (p->to_slave_count);
+	}
+	return (p->to_master_count);
+}
+
+static void *
+pty_output_channel(pty_pair_t *p, vnode_t *vn)
+{
+	if (pty_is_master(vn)) {
+		return (&p->to_slave_count);
+	}
+	return (&p->to_master_count);
+}
+
+static void
+pty_clear_to_slave(pty_pair_t *p)
+{
+	p->to_slave_head = 0;
+	p->to_slave_tail = 0;
+	p->to_slave_count = 0;
 	proc_wakeup(&p->to_slave_count);
+	posix_poll_notify();
+}
+
+static void
+pty_clear_to_master(pty_pair_t *p)
+{
+	p->to_master_head = 0;
+	p->to_master_tail = 0;
+	p->to_master_count = 0;
+	proc_wakeup(&p->to_master_count);
+	posix_poll_notify();
+}
+
+static void
+pty_flush_input(pty_pair_t *p, vnode_t *vn)
+{
+	if (pty_is_master(vn)) {
+		pty_clear_to_master(p);
+	} else {
+		pty_clear_to_slave(p);
+	}
+}
+
+static void
+pty_flush_output(pty_pair_t *p, vnode_t *vn)
+{
+	if (pty_is_master(vn)) {
+		pty_clear_to_slave(p);
+	} else {
+		pty_clear_to_master(p);
+	}
+}
+
+static int
+pty_drain_output(pty_pair_t *p, vnode_t *vn)
+{
+	struct process	*proc;
+	void		*channel;
+
+	channel = pty_output_channel(p, vn);
+	while (pty_output_count(p, vn) > 0) {
+		proc = process_current();
+		if (proc && (proc->sigpending & ~proc->sigmask)) {
+			return (-POSIX_EINTR);
+		}
+		proc_sleep(channel);
+	}
 	return (0);
 }
 
@@ -329,6 +414,138 @@ pty_master_write(vnode_t *vn, const void *buf, u32 count, int nonblock)
 	return ((int)count);
 }
 
+static int
+pty_terminal_ioctl(vnode_t *vn, u64 cmd, void *arg)
+{
+	pty_pair_t	*p;
+	struct process	*proc;
+	struct termios	t;
+	struct winsize	ws;
+	int		pgrp;
+	int		queue;
+	int		avail;
+	int		ret;
+	u32		sid;
+
+	p = (pty_pair_t *)vn->data;
+	if (!p || p->id == 0) {
+		return (-POSIX_EBADF);
+	}
+	proc = process_current();
+
+	switch (cmd) {
+	case POSIX_TIOCGWINSZ:
+		if (!arg || !user_range_fault_in(arg, sizeof(ws), 1)) {
+			return (-POSIX_EFAULT);
+		}
+		ws = p->ws;
+		memcpy(arg, &ws, sizeof(ws));
+		return (0);
+
+	case POSIX_TIOCSWINSZ:
+		if (!arg || !user_range_fault_in(arg, sizeof(ws), 0)) {
+			return (-POSIX_EFAULT);
+		}
+		memcpy(&ws, arg, sizeof(ws));
+		p->ws = ws;
+		pty_signal_pgrp(p, SIGWINCH);
+		return (0);
+
+	case POSIX_TCGETS:
+		if (!arg || !user_range_fault_in(arg, sizeof(t), 1)) {
+			return (-POSIX_EFAULT);
+		}
+		t = p->term;
+		memcpy(arg, &t, sizeof(t));
+		return (0);
+
+	case POSIX_TCSETS:
+	case POSIX_TCSETSW:
+	case POSIX_TCSETSF:
+		if (!arg || !user_range_fault_in(arg, sizeof(t), 0)) {
+			return (-POSIX_EFAULT);
+		}
+		if (cmd == POSIX_TCSETSW || cmd == POSIX_TCSETSF) {
+			ret = pty_drain_output(p, vn);
+			if (ret != 0) {
+				return (ret);
+			}
+		}
+		memcpy(&t, arg, sizeof(t));
+		p->term = t;
+		if (cmd == POSIX_TCSETSF) {
+			pty_flush_input(p, vn);
+		}
+		return (0);
+
+	case POSIX_TCFLSH:
+		queue = (int)(unsigned long)arg;
+		if (queue != POSIX_TCIFLUSH && queue != POSIX_TCOFLUSH &&
+		    queue != POSIX_TCIOFLUSH) {
+			return (-POSIX_EINVAL);
+		}
+		if (queue == POSIX_TCIFLUSH || queue == POSIX_TCIOFLUSH) {
+			pty_flush_input(p, vn);
+		}
+		if (queue == POSIX_TCOFLUSH || queue == POSIX_TCIOFLUSH) {
+			pty_flush_output(p, vn);
+		}
+		return (0);
+
+	case POSIX_FIONREAD:
+		if (!arg || !user_range_fault_in(arg, sizeof(avail), 1)) {
+			return (-POSIX_EFAULT);
+		}
+		avail = pty_read_available(vn);
+		memcpy(arg, &avail, sizeof(avail));
+		return (0);
+
+	case POSIX_TIOCGPGRP:
+		if (!arg || !user_range_fault_in(arg, sizeof(pgrp), 1)) {
+			return (-POSIX_EFAULT);
+		}
+		pgrp = (int)p->foreground_pgrp;
+		memcpy(arg, &pgrp, sizeof(pgrp));
+		return (0);
+
+	case POSIX_TIOCSPGRP:
+		if (!arg || !user_range_fault_in(arg, sizeof(pgrp), 0)) {
+			return (-POSIX_EFAULT);
+		}
+		memcpy(&pgrp, arg, sizeof(pgrp));
+		p->foreground_pgrp = (u32)pgrp;
+		return (0);
+
+	case POSIX_TIOCGSID:
+		if (!arg || !user_range_fault_in(arg, sizeof(sid), 1)) {
+			return (-POSIX_EFAULT);
+		}
+		sid = p->session;
+		memcpy(arg, &sid, sizeof(sid));
+		return (0);
+
+	case POSIX_TIOCSCTTY:
+		if (pty_is_master(vn)) {
+			return (-POSIX_ENOTTY);
+		}
+		if (!proc) {
+			return (-POSIX_EFAULT);
+		}
+		if (!proc->is_session_leader) {
+			return (-POSIX_EPERM);
+		}
+		if (p->session != 0 && p->session != proc->sid) {
+			return (-POSIX_EPERM);
+		}
+		p->session = proc->sid;
+		proc->controlling_tty = -2 - p->id;
+		return (0);
+
+	default:
+		return (-POSIX_ENOTTY);
+	}
+}
+
 int
 pty_master_ioctl(vnode_t *vn, u64 cmd, void *arg)
 {
@@ -342,14 +559,14 @@ pty_master_ioctl(vnode_t *vn, u64 cmd, void *arg)
 
 	switch (cmd) {
 	case POSIX_TIOCGPTN:
-		if (!arg || !is_user_address(arg, sizeof(int))) {
+		if (!arg || !user_range_fault_in(arg, sizeof(n), 1)) {
 			return (-POSIX_EFAULT);
 		}
 		n = p->id - 1;
 		memcpy(arg, &n, sizeof(n));
 		return (0);
 	default:
-		return (-POSIX_ENOTTY);
+		return (pty_terminal_ioctl(vn, cmd, arg));
 	}
 }
 
@@ -412,93 +629,12 @@ int
 pty_slave_ioctl(vnode_t *vn, u64 cmd, void *arg)
 {
 	pty_pair_t	*p;
-	struct process	*proc;
-	struct termios	t;
-	struct winsize	ws;
-	int		pgrp;
-	u32		sid;
 
 	p = (pty_pair_t *)vn->data;
 	if (!p || p->id == 0) {
 		return (-POSIX_EBADF);
 	}
-	proc = process_current();
-
-	switch (cmd) {
-	case POSIX_TIOCGWINSZ:
-		if (!arg || !is_user_address(arg, sizeof(struct winsize))) {
-			return (-POSIX_EFAULT);
-		}
-		ws = p->ws;
-		memcpy(arg, &ws, sizeof(ws));
-		return (0);
-
-	case POSIX_TIOCSWINSZ:
-		if (!arg || !is_user_address(arg, sizeof(struct winsize))) {
-			return (-POSIX_EFAULT);
-		}
-		memcpy(&ws, arg, sizeof(ws));
-		p->ws = ws;
-		pty_signal_pgrp(p, SIGWINCH);
-		return (0);
-
-	case POSIX_TCGETS:
-		if (!arg || !is_user_address(arg, sizeof(struct termios))) {
-			return (-POSIX_EFAULT);
-		}
-		t = p->term;
-		memcpy(arg, &t, sizeof(t));
-		return (0);
-
-	case POSIX_TCSETS:
-		if (!arg || !is_user_address(arg, sizeof(struct termios))) {
-			return (-POSIX_EFAULT);
-		}
-		memcpy(&t, arg, sizeof(t));
-		p->term = t;
-		return (0);
-
-	case POSIX_TIOCGPGRP:
-		if (!arg || !is_user_address(arg, sizeof(int))) {
-			return (-POSIX_EFAULT);
-		}
-		pgrp = (int)p->foreground_pgrp;
-		memcpy(arg, &pgrp, sizeof(pgrp));
-		return (0);
-
-	case POSIX_TIOCSPGRP:
-		if (!arg || !is_user_address(arg, sizeof(int))) {
-			return (-POSIX_EFAULT);
-		}
-		memcpy(&pgrp, arg, sizeof(pgrp));
-		p->foreground_pgrp = (u32)pgrp;
-		return (0);
-
-	case POSIX_TIOCGSID:
-		if (!arg || !is_user_address(arg, sizeof(int))) {
-			return (-POSIX_EFAULT);
-		}
-		sid = p->session;
-		memcpy(arg, &sid, sizeof(sid));
-		return (0);
-
-	case POSIX_TIOCSCTTY:
-		if (!proc) {
-			return (-POSIX_EFAULT);
-		}
-		if (!proc->is_session_leader) {
-			return (-POSIX_EPERM);
-		}
-		if (p->session != 0 && p->session != proc->sid) {
-			return (-POSIX_EPERM);
-		}
-		p->session = proc->sid;
-		proc->controlling_tty = -2 - p->id; /* mark as pty */
-		return (0);
-
-	default:
-		return (-POSIX_ENOTTY);
-	}
+	return (pty_terminal_ioctl(vn, cmd, arg));
 }
 
 int
@@ -520,6 +656,26 @@ pty_read_available(vnode_t *vn)
 		return (p->to_slave_count);
 	}
 	return (0);
+}
+
+int
+pty_write_available(vnode_t *vn)
+{
+	pty_pair_t	*p;
+	int		 count;
+
+	if (!vn || !vn->data) {
+		return (0);
+	}
+	p = (pty_pair_t *)vn->data;
+	if (p->id == 0) {
+		return (0);
+	}
+	count = pty_output_count(p, vn);
+	if (count >= PTY_BUF_SIZE - 1) {
+		return (0);
+	}
+	return (PTY_BUF_SIZE - 1 - count);
 }
 
 vnode_t *

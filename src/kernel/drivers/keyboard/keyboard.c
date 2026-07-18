@@ -69,6 +69,7 @@ $space %export kbd_event_put, kbd_event_get, kbd_event_count, kbd_event_reset
 
 */
 
+#include <kernel/api/posix/posix.h>
 #include <kernel/console/terminal.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/keyboard/ps2.h>
@@ -183,6 +184,7 @@ keyboard_common_handler(void)
 	if (ch) {
 		proc_wakeup(ch);
 	}
+	posix_poll_notify();
 }
 
 void
@@ -210,6 +212,7 @@ keyboard_poll(void)
 	if (ch) {
 		proc_wakeup(ch);
 	}
+	posix_poll_notify();
 }
 
 void

@@ -321,6 +321,11 @@ vsnprintf(char *str, size_t size, const char *fmt,
 				}
 				written++;
 			}
+			out = str + written;
+			out_size = (int)size - written;
+			if (out_size < 0) {
+				out_size = 0;
+			}
 			len = format_uint(out, (size_t)out_size,
 			    (u64)(unsigned long)ptr, 16, 0);
 			written += len;

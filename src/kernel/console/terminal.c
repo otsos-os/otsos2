@@ -78,7 +78,9 @@ $define %func terminal_set_active as procedure with args int
 $define %func terminal_restore_active_display as procedure with args void
 $define %func terminal_update as procedure with args void
 $define %func terminal_flush_input_active as procedure with args void
+$define %func terminal_flush_input_idx as procedure with args int
 $define %func terminal_get_input_channel as function with args void
+$define %func terminal_drain_output as function with args int
 $define %func terminal_power_get as function with args int
 $define %func terminal_power_set as function with args int, int
 $define %func terminal_power_reset as function with args int
@@ -107,13 +109,15 @@ $space %export terminal_set_color, terminal_clear_active, terminal_log_mirror
 $space %export terminal_putc_to, terminal_puts_to
 $space %export terminal_set_active, terminal_restore_active_display
 $space %export terminal_update, terminal_flush_input_active
-$space %export terminal_get_input_channel
+$space %export terminal_flush_input_idx, terminal_get_input_channel
+$space %export terminal_drain_output
 $space %export terminal_power_get, terminal_power_set, terminal_power_reset
 $space %export terminal_power_suspend_all
 
 */
 
 #include <kernel/api/errno.h>
+#include <kernel/api/posix/posix.h>
 #include <kernel/console/palette.h>
 #include <kernel/console/terminal.h>
 #include <kernel/drivers/keyboard/keyboard.h>
@@ -779,18 +783,41 @@ terminal_get_input_channel(void)
 }
 
 void
-terminal_flush_input_active(void)
+terminal_flush_input_idx(int idx)
 {
 	terminal_state_t	*term;
 
 	terminal_lazy_init();
-	term = &terminals[terminal_active];
+	if (idx < 0 || idx >= TERM_COUNT) {
+		return;
+	}
+	term = &terminals[idx];
 	term->input_head = 0;
 	term->input_tail = 0;
 	term->input_count = 0;
 	term->line_len = 0;
 	term->line_read_pos = 0;
 	term->eof_pending = 0;
+	posix_poll_notify();
+}
+
+void
+terminal_flush_input_active(void)
+{
+	terminal_flush_input_idx(terminal_active);
+}
+
+int
+terminal_drain_output(int idx)
+{
+	terminal_lazy_init();
+	if (idx < 0 || idx >= TERM_COUNT) {
+		return (-POSIX_EBADF);
+	}
+	if (idx == terminal_active) {
+		terminal_flush_kernel();
+	}
+	return (0);
 }
 
 void
@@ -1309,6 +1336,7 @@ terminal_pump_keyboard(u32 flags)
 
 	if (got_data) {
 		knote_notify_all(EVFILT_READ, 0, 0, 1);
+		posix_poll_notify();
 	}
 }
 
@@ -1807,6 +1835,9 @@ terminal_ioctl_idx(int idx, u64 cmd, void *arg)
 	struct termios	t;
 	struct winsize	ws;
 	int		pgrp;
+	int		queue;
+	int		avail;
+	int		ret;
 	u32		sid;
 
 	if (idx < 0 || idx >= TERM_COUNT) {
@@ -1817,21 +1848,23 @@ terminal_ioctl_idx(int idx, u64 cmd, void *arg)
 
 	switch (cmd) {
 	case POSIX_TIOCGWINSZ:
-		if (!arg || !is_user_address(arg, sizeof(struct winsize))) {
+		if (!arg || !user_range_fault_in(arg, sizeof(ws), 1)) {
 			return (-POSIX_EFAULT);
 		}
-		terminal_get_winsize(idx, (struct winsize *)arg);
+		terminal_get_winsize(idx, &ws);
+		memcpy(arg, &ws, sizeof(ws));
 		return (0);
 
 	case POSIX_TIOCSWINSZ:
-		if (!arg || !is_user_address(arg, sizeof(struct winsize))) {
+		if (!arg || !user_range_fault_in(arg, sizeof(ws), 0)) {
 			return (-POSIX_EFAULT);
 		}
-		terminal_set_winsize(idx, (struct winsize *)arg);
+		memcpy(&ws, arg, sizeof(ws));
+		terminal_set_winsize(idx, &ws);
 		return (0);
 
 	case POSIX_TCGETS:
-		if (!arg || !is_user_address(arg, sizeof(struct termios))) {
+		if (!arg || !user_range_fault_in(arg, sizeof(t), 1)) {
 			return (-POSIX_EFAULT);
 		}
 		terminal_get_termios(idx, &t);
@@ -1839,15 +1872,49 @@ terminal_ioctl_idx(int idx, u64 cmd, void *arg)
 		return (0);
 
 	case POSIX_TCSETS:
-		if (!arg || !is_user_address(arg, sizeof(struct termios))) {
+	case POSIX_TCSETSW:
+	case POSIX_TCSETSF:
+		if (!arg || !user_range_fault_in(arg, sizeof(t), 0)) {
 			return (-POSIX_EFAULT);
+		}
+		if (cmd == POSIX_TCSETSW || cmd == POSIX_TCSETSF) {
+			ret = terminal_drain_output(idx);
+			if (ret != 0) {
+				return (ret);
+			}
 		}
 		memcpy(&t, arg, sizeof(t));
 		terminal_set_termios(idx, &t);
+		if (cmd == POSIX_TCSETSF) {
+			terminal_flush_input_idx(idx);
+		}
+		return (0);
+
+	case POSIX_TCFLSH:
+		queue = (int)(unsigned long)arg;
+		if (queue != POSIX_TCIFLUSH && queue != POSIX_TCOFLUSH &&
+		    queue != POSIX_TCIOFLUSH) {
+			return (-POSIX_EINVAL);
+		}
+		if (queue == POSIX_TCIFLUSH || queue == POSIX_TCIOFLUSH) {
+			terminal_flush_input_idx(idx);
+		}
+		if (queue == POSIX_TCOFLUSH || queue == POSIX_TCIOFLUSH) {
+			return (terminal_drain_output(idx));
+		}
+		return (0);
+
+	case POSIX_FIONREAD:
+		if (!arg || !user_range_fault_in(arg, sizeof(avail), 1)) {
+			return (-POSIX_EFAULT);
+		}
+		terminal_input_poll();
+		avail = terminal_read_available(idx);
+		memcpy(arg, &avail, sizeof(avail));
 		return (0);
 
 	case POSIX_TIOCGPGRP:
-		if (!arg || !is_user_address(arg, sizeof(int))) {
+		if (!arg || !user_range_fault_in(arg, sizeof(pgrp), 1)) {
 			return (-POSIX_EFAULT);
 		}
 		pgrp = (int)terminal_get_pgrp(idx);
@@ -1855,7 +1922,7 @@ terminal_ioctl_idx(int idx, u64 cmd, void *arg)
 		return (0);
 
 	case POSIX_TIOCSPGRP:
-		if (!arg || !is_user_address(arg, sizeof(int))) {
+		if (!arg || !user_range_fault_in(arg, sizeof(pgrp), 0)) {
 			return (-POSIX_EFAULT);
 		}
 		memcpy(&pgrp, arg, sizeof(pgrp));
@@ -1863,7 +1930,7 @@ terminal_ioctl_idx(int idx, u64 cmd, void *arg)
 		return (0);
 
 	case POSIX_TIOCGSID:
-		if (!arg || !is_user_address(arg, sizeof(int))) {
+		if (!arg || !user_range_fault_in(arg, sizeof(sid), 1)) {
 			return (-POSIX_EFAULT);
 		}
 		sid = terminal_get_session(idx);

@@ -37,6 +37,133 @@
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
 
+static u32	posix_debug_last_pid;
+static int	posix_debug_syscalls_left;
+
+#define POSIX_REG_R8		0
+#define POSIX_REG_R9		1
+#define POSIX_REG_R10		2
+#define POSIX_REG_R11		3
+#define POSIX_REG_R12		4
+#define POSIX_REG_R13		5
+#define POSIX_REG_R14		6
+#define POSIX_REG_R15		7
+#define POSIX_REG_RDI		8
+#define POSIX_REG_RSI		9
+#define POSIX_REG_RBP		10
+#define POSIX_REG_RBX		11
+#define POSIX_REG_RDX		12
+#define POSIX_REG_RAX		13
+#define POSIX_REG_RCX		14
+#define POSIX_REG_RSP		15
+#define POSIX_REG_RIP		16
+#define POSIX_REG_EFL		17
+#define POSIX_REG_CSGSFS	18
+#define POSIX_REG_ERR		19
+#define POSIX_REG_TRAPNO	20
+#define POSIX_REG_OLDMASK	21
+
+static int
+posix_debug_python_proc(struct process *proc)
+{
+	if (!proc) {
+		return (0);
+	}
+	return (strcmp(proc->name, "python") == 0);
+}
+
+static const char *
+posix_debug_syscall_name(u64 num)
+{
+	switch (num) {
+	case SYS_read:
+		return ("read");
+	case SYS_write:
+		return ("write");
+	case SYS_open:
+		return ("open");
+	case SYS_openat:
+		return ("openat");
+	case SYS_close:
+		return ("close");
+	case SYS_stat:
+		return ("stat");
+	case SYS_fstat:
+		return ("fstat");
+	case SYS_lstat:
+		return ("lstat");
+	case SYS_poll:
+		return ("poll");
+	case SYS_select:
+		return ("select");
+	case SYS_lseek:
+		return ("lseek");
+	case SYS_mmap:
+		return ("mmap");
+	case SYS_mremap:
+		return ("mremap");
+	case SYS_mprotect:
+		return ("mprotect");
+	case SYS_munmap:
+		return ("munmap");
+	case SYS_brk:
+		return ("brk");
+	case SYS_rt_sigaction:
+		return ("rt_sigaction");
+	case SYS_rt_sigprocmask:
+		return ("rt_sigprocmask");
+	case SYS_ioctl:
+		return ("ioctl");
+	case SYS_access:
+		return ("access");
+	case SYS_fcntl:
+		return ("fcntl");
+	case SYS_getcwd:
+		return ("getcwd");
+	case SYS_getuid:
+		return ("getuid");
+	case SYS_geteuid:
+		return ("geteuid");
+	case SYS_getgid:
+		return ("getgid");
+	case SYS_getegid:
+		return ("getegid");
+	case SYS_getdents64:
+		return ("getdents64");
+	case SYS_futex:
+		return ("futex");
+	case SYS_getrandom:
+		return ("getrandom");
+	case SYS_clock_gettime:
+		return ("clock_gettime");
+	case SYS_pselect6:
+		return ("pselect6");
+	default:
+		return ("?");
+	}
+}
+
+static void
+posix_debug_syscall_trace(struct process *proc, u64 num, s64 ret,
+    u64 a1, u64 a2, u64 a3)
+{
+	if (!posix_debug_python_proc(proc)) {
+		return;
+	}
+	if (posix_debug_last_pid != proc->pid) {
+		posix_debug_last_pid = proc->pid;
+		posix_debug_syscalls_left = 512;
+		printk("[PYSYS] trace start pid=%d\n", (int)proc->pid);
+	}
+	if (posix_debug_syscalls_left <= 0) {
+		return;
+	}
+	posix_debug_syscalls_left--;
+	printk("[PYSYS] %s(%d) ret=%d a1=%x a2=%x a3=%x left=%d\n",
+	    posix_debug_syscall_name(num), (int)num, (int)ret,
+	    (u32)a1, (u32)a2, (u32)a3, posix_debug_syscalls_left);
+}
+
 s64	posix_read(u64 fd, u64 buf, u64 count, u64 a4, u64 a5, u64 a6,
     registers_t *regs);
 s64	posix_write(u64 fd, u64 buf, u64 count, u64 a4, u64 a5, u64 a6,
@@ -57,6 +184,12 @@ s64	posix_fstat(u64 fd, u64 buf, u64 a3, u64 a4, u64 a5, u64 a6,
 	    registers_t *regs);
 s64	posix_lstat(u64 path, u64 buf, u64 a3, u64 a4, u64 a5, u64 a6,
 	    registers_t *regs);
+s64	posix_poll(u64 fds, u64 nfds, u64 timeout, u64 a4, u64 a5, u64 a6,
+	    registers_t *regs);
+s64	posix_select(u64 nfds, u64 readfds, u64 writefds, u64 exceptfds,
+	    u64 timeout, u64 a6, registers_t *regs);
+s64	posix_pselect6(u64 nfds, u64 readfds, u64 writefds, u64 exceptfds,
+	    u64 timeout, u64 sigmask, registers_t *regs);
 s64	posix_lseek(u64 fd, u64 offset, u64 whence, u64 a4, u64 a5,
 	    u64 a6, registers_t *regs);
 s64	posix_mmap(u64 addr, u64 length, u64 prot, u64 flags, u64 fd,
@@ -261,6 +394,15 @@ posix_syscall_handler(registers_t *regs)
 		break;
 	case SYS_lstat:
 		ret = posix_lstat(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_poll:
+		ret = posix_poll(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_select:
+		ret = posix_select(a1, a2, a3, a4, a5, a6, regs);
+		break;
+	case SYS_pselect6:
+		ret = posix_pselect6(a1, a2, a3, a4, a5, a6, regs);
 		break;
 	case SYS_lseek:
 		ret = posix_lseek(a1, a2, a3, a4, a5, a6, regs);
@@ -529,6 +671,7 @@ posix_syscall_handler(registers_t *regs)
 		break;
 	}
 
+	posix_debug_syscall_trace(process_current(), num, ret, a1, a2, a3);
 	regs->rax = (u64)ret;
 }
 
@@ -711,23 +854,86 @@ posix_signal_pending(struct process *proc)
 	return (signal_pending(proc));
 }
 
+static u64
+posix_signal_user_frame_sp(u64 rsp)
+{
+	rsp -= 128;
+	rsp -= sizeof(posix_rt_sigframe_t);
+	rsp &= ~15ULL;
+	return (rsp);
+}
+
+static void
+posix_signal_fill_frame(posix_rt_sigframe_t *frame,
+    posix_rt_sigframe_t *user_frame, registers_t *regs, int sig, u64 oldmask)
+{
+	memset(frame, 0, sizeof(*frame));
+
+	frame->info.signo = sig;
+	frame->uc.mcontext.gregs[POSIX_REG_R8] = regs->r8;
+	frame->uc.mcontext.gregs[POSIX_REG_R9] = regs->r9;
+	frame->uc.mcontext.gregs[POSIX_REG_R10] = regs->r10;
+	frame->uc.mcontext.gregs[POSIX_REG_R11] = regs->r11;
+	frame->uc.mcontext.gregs[POSIX_REG_R12] = regs->r12;
+	frame->uc.mcontext.gregs[POSIX_REG_R13] = regs->r13;
+	frame->uc.mcontext.gregs[POSIX_REG_R14] = regs->r14;
+	frame->uc.mcontext.gregs[POSIX_REG_R15] = regs->r15;
+	frame->uc.mcontext.gregs[POSIX_REG_RDI] = regs->rdi;
+	frame->uc.mcontext.gregs[POSIX_REG_RSI] = regs->rsi;
+	frame->uc.mcontext.gregs[POSIX_REG_RBP] = regs->rbp;
+	frame->uc.mcontext.gregs[POSIX_REG_RBX] = regs->rbx;
+	frame->uc.mcontext.gregs[POSIX_REG_RDX] = regs->rdx;
+	frame->uc.mcontext.gregs[POSIX_REG_RAX] = regs->rax;
+	frame->uc.mcontext.gregs[POSIX_REG_RCX] = regs->rcx;
+	frame->uc.mcontext.gregs[POSIX_REG_RSP] = regs->rsp;
+	frame->uc.mcontext.gregs[POSIX_REG_RIP] = regs->rip;
+	frame->uc.mcontext.gregs[POSIX_REG_EFL] = regs->rflags;
+	frame->uc.mcontext.gregs[POSIX_REG_CSGSFS] = regs->cs & 0xffff;
+	frame->uc.mcontext.gregs[POSIX_REG_ERR] = regs->err_code;
+	frame->uc.mcontext.gregs[POSIX_REG_TRAPNO] = regs->int_no;
+	frame->uc.mcontext.gregs[POSIX_REG_OLDMASK] = oldmask;
+	frame->uc.mcontext.fpregs = (u64)&user_frame->uc.fpregs_mem[0];
+	frame->uc.sigmask[0] = oldmask;
+}
+
+static void
+posix_signal_terminate_badframe(struct process *proc)
+{
+	if (proc) {
+		posix_cleanup_process(proc);
+	}
+	process_exit(128 + SIGSEGV);
+}
+
+static void
+posix_signal_mask_fixup(struct process *proc)
+{
+	if (!proc) {
+		return;
+	}
+	proc->sigmask &= ~(1ULL << (SIGKILL - 1));
+	proc->sigmask &= ~(1ULL << (SIGSTOP - 1));
+}
+
 void
 posix_signal_deliver(struct process *proc, registers_t *regs)
 {
+	posix_rt_sigframe_t	frame;
+	posix_rt_sigframe_t	*user_frame;
+	posix_sigaction_t	*act;
 	u64	pending;
-	int	sig;
 	u64	mask;
-	struct thread	*td;
+	u64	frame_sp;
+	u64	ret_sp;
+	u64	oldmask;
+	u64	handler;
+	u64	flags;
+	u64	action_mask;
+	u64	restorer;
+	int	sig;
+	int	dfl;
 
 	if (!proc || !regs) {
-		return;
-	}
-
-	td = proc->cur_thread;
-	if (!td) {
-		td = proc->main_thread;
-	}
-	if (!td) {
 		return;
 	}
 
@@ -739,9 +945,16 @@ posix_signal_deliver(struct process *proc, registers_t *regs)
 	for (sig = 1; sig <= MAX_POSIX_SIGS; sig++) {
 		mask = (1ULL << (sig - 1));
 		if (pending & mask) {
-			if (proc->sigaction[sig - 1].handler == 0) {
-				int	dfl;
-
+			act = &proc->sigaction[sig - 1];
+			handler = act->handler;
+			flags = act->flags;
+			action_mask = act->mask;
+			restorer = act->restorer;
+			if (handler == POSIX_SIG_IGN) {
+				proc->sigpending &= ~mask;
+				return;
+			}
+			if (handler == POSIX_SIG_DFL) {
 				dfl = posix_signal_default(sig);
 				if (dfl == SIG_DFL_TERMINATE) {
 					proc->sigpending &= ~mask;
@@ -757,17 +970,65 @@ posix_signal_deliver(struct process *proc, registers_t *regs)
 				continue;
 			}
 
-			thread_save_context(td, regs);
-			td->saved_context = td->context;
-			td->saved_sigmask = proc->sigmask;
-			proc->sigmask |= proc->sigaction[sig - 1].mask;
-			proc->sigmask |= mask;
-			proc->sigpending &= ~mask;
+			if (restorer == 0) {
+				proc->sigpending &= ~mask;
+				posix_signal_terminate_badframe(proc);
+				return;
+			}
 
-			regs->rip = proc->sigaction[sig - 1].handler;
+			frame_sp = posix_signal_user_frame_sp(regs->rsp);
+			ret_sp = frame_sp - sizeof(u64);
+			if (!is_user_address((void *)ret_sp,
+			    sizeof(u64) + sizeof(frame))) {
+				proc->sigpending &= ~mask;
+				posix_signal_terminate_badframe(proc);
+				return;
+			}
+			if (!user_range_fault_in((void *)ret_sp,
+			    sizeof(u64) + sizeof(frame), 1)) {
+				proc->sigpending &= ~mask;
+				posix_signal_terminate_badframe(proc);
+				return;
+			}
+
+			user_frame = (posix_rt_sigframe_t *)frame_sp;
+			oldmask = proc->sigmask;
+			posix_signal_fill_frame(&frame, user_frame, regs, sig,
+			    oldmask);
+
+			memcpy(user_frame, &frame, sizeof(frame));
+			memcpy((void *)ret_sp, &restorer, sizeof(restorer));
+
+			proc->sigmask |= action_mask;
+			if (!(flags & POSIX_SA_NODEFER)) {
+				proc->sigmask |= mask;
+			}
+			posix_signal_mask_fixup(proc);
+			proc->sigpending &= ~mask;
+			if (flags & POSIX_SA_RESETHAND) {
+				act->handler = POSIX_SIG_DFL;
+				act->flags = 0;
+				act->restorer = 0;
+				act->mask = 0;
+			}
+
+			if (posix_debug_python_proc(proc)) {
+				printk("[PYDBG] signal deliver sig=%d "
+				    "handler=%p restorer=%p rsp=%p\n", sig,
+				    (void *)handler, (void *)restorer,
+				    (void *)ret_sp);
+			}
+
+			regs->rip = handler;
+			regs->rsp = ret_sp;
 			regs->rdi = (u64)sig;
-			regs->rsi = 0;
-			regs->rdx = 0;
+			if (flags & POSIX_SA_SIGINFO) {
+				regs->rsi = (u64)&user_frame->info;
+				regs->rdx = (u64)&user_frame->uc;
+			} else {
+				regs->rsi = 0;
+				regs->rdx = 0;
+			}
 			return;
 		}
 	}
