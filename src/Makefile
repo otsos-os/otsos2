@@ -271,6 +271,7 @@ NET_IPV4_O = ../bin/net_ipv4.o
 NET_ICMP_O = ../bin/net_icmp.o
 NET_UDP_O = ../bin/net_udp.o
 NET_TCP_O = ../bin/net_tcp.o
+NET_TCP_ENDPOINT_O = ../bin/net_tcp_endpoint.o
 NET_ENDPOINT_O = ../bin/net_endpoint.o
 NET_LOOPBACK_O = ../bin/net_loopback.o
 
@@ -324,7 +325,7 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(TOML_O) $(KUSR_O) $(KUSR_AUTH_O) $(CONFIG_O) $(DRM_API_O) $(RESTRICT_O) \
       $(CRYPTO_UTIL_O) $(CRYPTO_SHA256_O) $(CRYPTO_HMAC_O) $(CRYPTO_PBKDF2_O) $(CRYPTO_RNG_O) $(CRYPTO_CHACHA20_O) \
        $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_PCI_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O) $(VIRTIO_NET_O) \
-       $(NETDEV_O) $(NET_O) $(NET_ETHERNET_O) $(NET_ARP_O) $(NET_IPV4_O) $(NET_ICMP_O) $(NET_UDP_O) $(NET_TCP_O) $(NET_ENDPOINT_O) $(NET_LOOPBACK_O) $(UNIX_SOCK_O) \
+       $(NETDEV_O) $(NET_O) $(NET_ETHERNET_O) $(NET_ARP_O) $(NET_IPV4_O) $(NET_ICMP_O) $(NET_UDP_O) $(NET_TCP_O) $(NET_TCP_ENDPOINT_O) $(NET_ENDPOINT_O) $(NET_LOOPBACK_O) $(UNIX_SOCK_O) \
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
       $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
       $(EVENT_KBD_O) $(EVENT_MOUSE_O) \
@@ -1169,7 +1170,11 @@ $(NET_TCP_O): kernel/net/tcp.c kernel/net/tcp.h kernel/net/ipv4.h kernel/net/eth
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(NET_ENDPOINT_O): kernel/net/endpoint.c kernel/net/endpoint.h kernel/net/udp.h kernel/net/tcp.h kernel/net/ipv4.h kernel/event/event.h
+$(NET_TCP_ENDPOINT_O): kernel/net/tcp_endpoint.c kernel/net/tcp_endpoint.h kernel/net/endpoint_internal.h kernel/net/endpoint.h kernel/net/tcp.h kernel/net/ipv4.h kernel/event/event.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(NET_ENDPOINT_O): kernel/net/endpoint.c kernel/net/endpoint.h kernel/net/endpoint_internal.h kernel/net/tcp_endpoint.h kernel/net/udp.h kernel/net/ipv4.h kernel/event/event.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

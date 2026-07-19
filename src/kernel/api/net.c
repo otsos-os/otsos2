@@ -40,6 +40,7 @@ $define %func api_net_get_endpoint as function with args int, net_endpoint_t **
 $define %func api_net_install_endpoint as function with args net_endpoint_t *
 $define %func api_net_from_user_addr as function with args const api_net_addr *, net_endpoint_addr_t *
 $define %func api_net_to_user_addr as function with args api_net_addr *, const net_endpoint_addr_t *
+$define %func api_net_ctl_privileged as function with args int
 $define %func api_net_open as function with args int, int, u32
 $define %func api_net_bind as function with args int, const api_net_addr *
 $define %func api_net_connect as function with args int, const api_net_addr *
@@ -56,6 +57,7 @@ $define %func api_net_ctl as function with args int, int, void *
 $space %internal api_net_find_free_handle, api_net_get_endpoint
 $space %internal api_net_install_endpoint
 $space %internal api_net_from_user_addr, api_net_to_user_addr
+$space %internal api_net_ctl_privileged
 $space %export api_net_open, api_net_bind, api_net_connect
 $space %export api_net_listen, api_net_accept
 $space %export api_net_send, api_net_recv, api_net_ctl
@@ -64,6 +66,7 @@ $space %export api_net_send, api_net_recv, api_net_ctl
 
 #include <kernel/api/api.h>
 #include <kernel/net/endpoint.h>
+#include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
 
@@ -208,6 +211,12 @@ api_net_to_user_addr(struct api_net_addr *uaddr,
 	    0 : (u32)(addr->ifindex + 1);
 	memcpy(uaddr, &tmp, sizeof(tmp));
 	return (0);
+}
+
+static int
+api_net_ctl_privileged(int op)
+{
+	return (op >= API_NET_CTL_PRIV_BASE);
 }
 
 int
@@ -425,6 +434,11 @@ api_net_ctl(int handle, int op, void *arg)
 	net_endpoint_t		*ep;
 	net_endpoint_addr_t	addr;
 	int			ret;
+
+	if (api_net_ctl_privileged(op) &&
+	    !proc_has_privilege(process_current())) {
+		return (-API_ERR_PERM);
+	}
 
 	ret = api_net_get_endpoint(handle, &ep);
 	if (ret != 0) {
