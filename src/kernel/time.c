@@ -29,7 +29,7 @@
 #include <kernel/drivers/timer.h>
 #include <kernel/drivers/rtc/rtc.h>
 #include <kernel/event/event.h>
-#include <kernel/other/config.h>
+#include <kernel/cm/cm.h>
 #include <kernel/thread.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -362,7 +362,8 @@ time_init(void)
 		boottime.frac = 0;
 	}
 
-	zone_hours = config_get_int("time", "timezone_offset", 0);
+	zone_hours = (int)cm_get_i32_default("SYSTEM", "Time",
+	    "TimezoneOffset", 0);
 	time_zone_offset = (s64)zone_hours * 3600;
 	printk("[TIME] timezone offset: %d hours\n",
 	    zone_hours);

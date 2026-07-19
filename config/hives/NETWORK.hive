@@ -1,0 +1,22 @@
+# Initial network registry hive.
+
+hive NETWORK {
+	key Interfaces.eth0 {
+		bool Enabled = true
+		bool Dhcp = false
+		ipv4 Address = 10.0.2.15
+		ipv4 Netmask = 255.255.255.0
+		ipv4 Gateway = 10.0.2.2
+	}
+
+	key DNS {
+		multi_string Servers = []
+		multi_string Search = []
+	}
+
+	key Dhcp.Client {
+		bool Enabled = false
+		u32 TimeoutMs = 4000
+		u32 RetryCount = 3
+	}
+}

@@ -23,8 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <kernel/cm/cm.h>
 #include <kernel/drivers/uart/uart.h>
-#include <kernel/other/config.h>
 #include <mlibc/stdio.h>
 
 static int	log_enabled = 1;
@@ -38,9 +38,11 @@ stdio_init(void)
 	if (log_initialized) {
 		return;
 	}
-	if (config_is_initialized()) {
-		log_enabled = config_get_bool("log", "enabled", 1);
-		log_drivers = config_get_bool("log", "drivers", 1);
+	if (cm_is_initialized()) {
+		log_enabled = cm_get_bool_default("SYSTEM", "Log",
+		    "Enabled", 1);
+		log_drivers = cm_get_bool_default("SYSTEM", "Log",
+		    "Drivers", 1);
 	}
 	log_initialized = 1;
 }

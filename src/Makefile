@@ -56,8 +56,11 @@ NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 DLD_BIN = ../libc/LibExec/dld/drld
 YABOX_DIR = $(PORTS_DIR)/yabox
 YABOX_TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv unzip profile
+CMSEED_BIN = ../bin/cmseed
+BOOT_HIVE = ../config/hives/BOOT.hive
+HIVE_SOURCES := $(sort $(wildcard ../config/hives/*.hive))
 LIBC_ENABLED := $(shell sh ../tools/toml_get.sh config.toml libc enabled true)
-MULTIBOOT_MODULES := $(shell perl ../tools/modules.pl config.toml)
+MULTIBOOT_MODULES := $(shell $(PYTHON) ../tools/hivec.py --list-boot-modules $(BOOT_HIVE))
 CPYTHON_ENABLED := $(if $(filter python,$(MULTIBOOT_MODULES)),true,false)
 DRLD_ENABLED := $(if $(filter drld,$(MULTIBOOT_MODULES)),true,false)
 NATIVE_SO_ENABLED := $(if $(filter native-so,$(MULTIBOOT_MODULES)),true,false)
@@ -153,6 +156,7 @@ CONSOLE_O = ../bin/console_console.o
 DISK_O = ../bin/disk.o
 RAMDISK_O = ../bin/ramdisk.o
 CHAINFS_O = ../bin/chainfs.o
+HIVEFS_O = ../bin/hivefs.o
 TERMINAL_O = ../bin/console_terminal.o
 PTY_O = ../bin/console_pty.o
 PS2_O = ../bin/ps2.o
@@ -242,10 +246,9 @@ PCI_BAR_O = ../bin/pci_bar.o
 WATCHDOG_O = ../bin/watchdog.o
 WATCHDOG_I6300ESB_O = ../bin/watchdog_i6300esb.o
 WATCHDOG_ICH_TCO_O = ../bin/watchdog_ich_tco.o
-TOML_O = ../bin/toml.o
 KUSR_O = ../bin/kusr.o
 KUSR_AUTH_O = ../bin/kusr_auth.o
-CONFIG_O = ../bin/config.o
+CM_O = ../bin/cm.o
 DRM_API_O = ../bin/drm_api.o
 RESTRICT_O = ../bin/restrict.o
 CRYPTO_UTIL_O = ../bin/crypto_util.o
@@ -322,14 +325,14 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
       $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O) \
       $(KSHELL_OBJ) \
-      $(TOML_O) $(KUSR_O) $(KUSR_AUTH_O) $(CONFIG_O) $(DRM_API_O) $(RESTRICT_O) \
+      $(KUSR_O) $(KUSR_AUTH_O) $(CM_O) $(DRM_API_O) $(RESTRICT_O) \
       $(CRYPTO_UTIL_O) $(CRYPTO_SHA256_O) $(CRYPTO_HMAC_O) $(CRYPTO_PBKDF2_O) $(CRYPTO_RNG_O) $(CRYPTO_CHACHA20_O) \
        $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_PCI_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O) $(VIRTIO_NET_O) \
        $(NETDEV_O) $(NET_O) $(NET_ETHERNET_O) $(NET_ARP_O) $(NET_IPV4_O) $(NET_ICMP_O) $(NET_UDP_O) $(NET_TCP_O) $(NET_TCP_ENDPOINT_O) $(NET_ENDPOINT_O) $(NET_LOOPBACK_O) $(UNIX_SOCK_O) \
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
       $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
       $(EVENT_KBD_O) $(EVENT_MOUSE_O) \
-      $(VFS_O) $(VFS_BACK_O) $(DEVFS_O) $(LINK_O) \
+      $(VFS_O) $(VFS_BACK_O) $(DEVFS_O) $(HIVEFS_O) $(LINK_O) \
       $(POSIX_O) $(POSIX_IO_O) $(POSIX_PROC_O) $(POSIX_FS_O) \
       $(POSIX_MEM_O) $(POSIX_SOCKET_O) $(POSIX_SIGNAL_O) $(SIGNAL_O) \
       $(PROC_PID_O) $(PROC_PERM_O) $(THREAD_API_O) $(FUTEX_O) $(SYS_O) \
@@ -339,6 +342,9 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
 .PHONY: all ask_version check_build_tools check_run_tools check_bios_run_tools kvm
 
 all: check_build_tools ask_version $(ISO_IMAGE)
+
+.PHONY: cmseed
+cmseed: $(CMSEED_BIN)
 
 check_build_tools:
 	@set -e; \
@@ -388,7 +394,7 @@ ask_version:
 			y|Y|yes|YES) \
 				cur_ver=$$(sh ../tools/toml_get.sh config.toml os release "0.0.0"); \
 				if [ -z "$$cur_ver" ]; then \
-					echo "  VERSION failed to parse kernel version from config.toml"; \
+					echo "  VERSION failed to parse kernel version"; \
 					exit 1; \
 				fi; \
 				IFS=.; set -- $$cur_ver; \
@@ -404,6 +410,7 @@ ask_version:
 				fi; \
 				next_ver="$$major.$$minor.$$patch"; \
 				sed -i 's/^release = "[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*"/release = "'"$$next_ver"'"/' config.toml; \
+				sed -i 's/string Release = "[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*"/string Release = "'"$$next_ver"'"/' ../config/hives/SYSTEM.hive; \
 				echo "  VERSION $$cur_ver -> $$next_ver";; \
 			*) \
 				echo "  VERSION unchanged";; \
@@ -537,6 +544,10 @@ $(LDSO_BIN): $(MUSL_LDSO)
 	@echo "  CP      $@"
 	@cp $(MUSL_LDSO) $@
 
+$(CMSEED_BIN): $(HIVE_SOURCES) ../tools/hivec.py
+	@echo "  HIVE    $@"
+	@$(PYTHON) ../tools/hivec.py -o $@ $(HIVE_SOURCES)
+
 $(ISO_IMAGE): check_build_tools $(BIOS_BOOT_IMAGE) $(UEFI_ESP_IMAGE) $(MAKEISO)
 	@echo "  ISO     $(ISO_IMAGE)"
 	@$(PYTHON) $(MAKEISO) --output $(ISO_IMAGE) \
@@ -589,11 +600,11 @@ $(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BU
 		exit 1; \
 	fi
 
-$(BIOS_BOOTPACK): Makefile config.toml $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(POSIX_HELLO_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
+$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(POSIX_HELLO_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
 	@rm -rf $(BIOS_PAYLOAD_DIR)
 	@mkdir -p $(BIOS_PAYLOAD_DIR)
 	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
-	@cp config.toml $(BIOS_PAYLOAD_DIR)/config.toml
+	@cp $(CMSEED_BIN) $(BIOS_PAYLOAD_DIR)/cmseed
 	@for m in $(MULTIBOOT_MODULES); do \
 		src=""; \
 		case $$m in \
@@ -690,7 +701,8 @@ $(IDT_ASM_O): kernel/interrupts/idt.asm
 	@echo "  AS      $<"
 	@$(AS) -f $(NASM_FORMAT) -g -F dwarf $< -o $@
 
-$(KERNEL_O): kernel/kernel.c kernel/trace/trace.h
+$(KERNEL_O): kernel/kernel.c kernel/trace/trace.h kernel/cm/cm.h \
+    kernel/drivers/fs/hivefs/hivefs.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -715,6 +727,12 @@ $(CONSOLE_O): kernel/console/console.c kernel/console/console.h kernel/console/p
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(CHAINFS_O): kernel/drivers/fs/chainFS/chainfs.c
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(HIVEFS_O): kernel/drivers/fs/hivefs/hivefs.c \
+    kernel/drivers/fs/hivefs/hivefs.h kernel/drivers/fs/vfs/vfs.h \
+    kernel/drivers/fs/vfs/back/vfs_back.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -810,11 +828,11 @@ $(PIT_O): kernel/drivers/timers/pit.c kernel/drivers/eventtimer.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(APIC_TIMER_O): kernel/drivers/timers/apic.c kernel/drivers/eventtimer.h kernel/interrupts/apic/lapic.h kernel/drivers/timer.h
+$(APIC_TIMER_O): kernel/drivers/timers/apic.c kernel/drivers/eventtimer.h kernel/interrupts/apic/lapic.h kernel/drivers/timer.h kernel/cm/cm.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(LAPIC_O): kernel/interrupts/apic/lapic.c kernel/interrupts/apic/lapic.h kernel/drivers/timer.h kernel/other/config.h
+$(LAPIC_O): kernel/interrupts/apic/lapic.c kernel/interrupts/apic/lapic.h kernel/drivers/timer.h kernel/cm/cm.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -862,7 +880,7 @@ $(OPEN_O): kernel/api/open.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(SYSCALL_O): kernel/syscall.c kernel/api/api.h kernel/api/shm.h kernel/other/config.h kernel/trace/trace.h
+$(SYSCALL_O): kernel/syscall.c kernel/api/api.h kernel/api/shm.h kernel/trace/trace.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -906,7 +924,7 @@ $(DATA_DIR_O): kernel/api/data_dir.c kernel/api/api.h kernel/drivers/fs/vfs/vfs.
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(UNAME_O): kernel/api/info.c kernel/api/api.h kernel/other/config.h
+$(UNAME_O): kernel/api/info.c kernel/api/api.h kernel/cm/cm.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -978,11 +996,11 @@ $(USERADDR_O): kernel/useraddr.c kernel/useraddr.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(SCHEDULER_O): kernel/scheduler.c kernel/scheduler.h kernel/process.h kernel/mm/vm/pmap.h kernel/gdt.h kernel/interrupts/idt.h kernel/trace/trace.h
+$(SCHEDULER_O): kernel/scheduler.c kernel/scheduler.h kernel/process.h kernel/mm/vm/pmap.h kernel/gdt.h kernel/interrupts/idt.h kernel/trace/trace.h kernel/cm/cm.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(TRACE_O): kernel/trace/trace.c kernel/trace/trace.h kernel/other/config.h kernel/process.h kernel/thread.h kernel/smp/smp.h
+$(TRACE_O): kernel/trace/trace.c kernel/trace/trace.h kernel/cm/cm.h kernel/process.h kernel/thread.h kernel/smp/smp.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -990,7 +1008,7 @@ $(TRACE_PMU_O): kernel/trace/trace_pmu.c kernel/trace/trace.h kernel/drivers/pmu
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(PMU_O): kernel/drivers/pmu/pmu.c kernel/drivers/pmu/pmu.h kernel/other/config.h kernel/smp/smp.h
+$(PMU_O): kernel/drivers/pmu/pmu.c kernel/drivers/pmu/pmu.h kernel/cm/cm.h kernel/smp/smp.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1066,15 +1084,17 @@ $(WATCHDOG_ICH_TCO_O): kernel/drivers/watchdog/devices/ich_tco.c kernel/drivers/
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(TOML_O): mlibc/toml.c mlibc/toml.h
+$(KUSR_O): kernel/other/kusr.c kernel/other/kusr.h kernel/cm/cm.h kernel/crypto/crypto.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(KUSR_O): kernel/other/kusr.c kernel/other/kusr.h mlibc/toml.h kernel/crypto/crypto.h
+$(KUSR_AUTH_O): kernel/api/kusr_auth.c kernel/api/api.h kernel/cm/cm.h kernel/process.h kernel/crypto/crypto.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(KUSR_AUTH_O): kernel/api/kusr_auth.c kernel/api/api.h kernel/process.h mlibc/toml.h kernel/crypto/crypto.h
+$(CM_O): kernel/cm/cm.c kernel/cm/cm.h \
+    kernel/drivers/fs/hivefs/hivefs.h kernel/drivers/fs/vfs/vfs.h \
+    kernel/drivers/fs/vfs/back/vfs_back.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1083,10 +1103,6 @@ $(DRM_API_O): kernel/api/drm.c kernel/api/api.h kernel/drivers/video/drm/drm.h k
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(RESTRICT_O): kernel/other/restrict.c kernel/other/restrict.h kernel/process.h
-	@echo "  CC      $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-
-$(CONFIG_O): kernel/other/config.c kernel/other/config.h mlibc/toml.h kernel/drivers/fs/vfs/vfs.h kernel/drivers/timer.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1244,7 +1260,8 @@ $(VFS_O): kernel/drivers/fs/vfs/vfs.c kernel/drivers/fs/vfs/vfs.h \
 
 $(VFS_BACK_O): kernel/drivers/fs/vfs/back/vfs_back.c \
     kernel/drivers/fs/vfs/back/vfs_back.h kernel/drivers/fs/vfs/vfs.h \
-    kernel/drivers/fs/chainFS/chainfs.h kernel/drivers/fs/devfs/devfs.h
+    kernel/drivers/fs/chainFS/chainfs.h kernel/drivers/fs/devfs/devfs.h \
+    kernel/drivers/fs/hivefs/hivefs.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1264,7 +1281,7 @@ $(POSIX_IO_O): kernel/api/posix/posix_io.c kernel/api/posix/posix.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(POSIX_PROC_O): kernel/api/posix/posix_proc.c kernel/api/posix/posix.h kernel/other/config.h
+$(POSIX_PROC_O): kernel/api/posix/posix_proc.c kernel/api/posix/posix.h kernel/cm/cm.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1336,11 +1353,11 @@ $(UART_O): kernel/drivers/uart/uart.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(STDIO_O): mlibc/stdio.c
+$(STDIO_O): mlibc/stdio.c kernel/cm/cm.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(TIME_O): kernel/time.c kernel/time.h
+$(TIME_O): kernel/time.c kernel/time.h kernel/cm/cm.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1416,5 +1433,6 @@ debug: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 
 clean:
 	@echo "  CLEAN"
-	@rm -f ../bin/*.o ../bin/kernel.bin ../bin/kernel.map $(ISO_IMAGE) $(DISK_IMG)
+	@rm -f ../bin/*.o ../bin/kernel.bin ../bin/kernel.map \
+	    $(CMSEED_BIN) $(ISO_IMAGE) $(DISK_IMG)
 	@rm -rf $(BIOS_BUILD_DIR) $(UEFI_BUILD_DIR)

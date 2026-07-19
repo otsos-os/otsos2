@@ -35,7 +35,6 @@
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/syscall.h>
-#include <kernel/other/config.h>
 #include <kernel/trace/trace.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
@@ -135,15 +134,12 @@ void syscall_handler(registers_t *regs) {
 
   process_t *cur_proc = process_current();
   if (cur_proc) {
-    config_poll();
     if (cur_proc->personality == PERSONALITY_POSIX) {
       posix_syscall_handler(regs);
       posix_signal_deliver(cur_proc, regs);
       trace_syscall_exit(regs, syscall_number, regs->rax, trace_start);
       return;
     }
-  } else {
-    config_poll();
   }
 
   switch (syscall_number) {

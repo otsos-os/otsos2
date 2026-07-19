@@ -59,7 +59,7 @@ $space %export pmu_counter_count, pmu_counter_name, pmu_counter_active
  */
 
 #include <kernel/drivers/pmu/pmu.h>
-#include <kernel/other/config.h>
+#include <kernel/cm/cm.h>
 #include <kernel/smp/smp.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdio.h>
@@ -82,12 +82,12 @@ typedef struct pmu_def {
 } pmu_def_t;
 
 static const pmu_def_t g_pmu_defs[PMU_COUNTER_COUNT] = {
-	{ "cycles", "cycles", 0x3C, 0x00, 0 },
-	{ "instructions", "instructions", 0xC0, 0x00, 1 },
-	{ "cache_references", "cache_references", 0x2E, 0x4F, 3 },
-	{ "cache_misses", "cache_misses", 0x2E, 0x41, 4 },
-	{ "branch_instructions", "branch_instructions", 0xC4, 0x00, 5 },
-	{ "branch_misses", "branch_misses", 0xC5, 0x00, 6 }
+	{ "cycles", "Cycles", 0x3C, 0x00, 0 },
+	{ "instructions", "Instructions", 0xC0, 0x00, 1 },
+	{ "cache_references", "CacheReferences", 0x2E, 0x4F, 3 },
+	{ "cache_misses", "CacheMisses", 0x2E, 0x41, 4 },
+	{ "branch_instructions", "BranchInstructions", 0xC4, 0x00, 5 },
+	{ "branch_misses", "BranchMisses", 0xC5, 0x00, 6 }
 };
 
 static int	g_pmu_initialized;
@@ -162,7 +162,7 @@ pmu_counter_enabled(u32 counter)
 		return (0);
 	}
 	key = g_pmu_defs[counter].config_key;
-	enabled = config_get_bool("trace.pmu", key, 1);
+	enabled = cm_get_bool_default("SYSTEM", "Trace.Pmu", key, 1);
 	return (enabled);
 }
 
@@ -230,10 +230,11 @@ pmu_init(void)
 		g_pmu_hw_index[i] = -1;
 	}
 
-	enabled = config_get_bool("trace.pmu", "enabled", 1);
+	enabled = cm_get_bool_default("SYSTEM", "Trace.Pmu",
+	    "Enabled", 1);
 	if (!enabled) {
 		g_pmu_initialized = 1;
-		drivers_log("[PMU] disabled by config\n");
+		drivers_log("[PMU] disabled by registry\n");
 		return;
 	}
 

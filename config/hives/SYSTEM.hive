@@ -1,0 +1,113 @@
+# Initial system registry hive.
+
+hive SYSTEM {
+	key Os {
+		string SysName = "otsos2"
+		string NodeName = "localhost"
+		string Release = "2.3.3"
+		string Version = "otsos2-kernel-rev2"
+		string Machine = "x86_64"
+		string DomainName = "localdomain"
+	}
+
+	key Timer {
+		u32 Hz = 1000
+		string DefaultTimer = "apic"
+		string TimerToCalibrate = "pit"
+		bool ApicEnabled = true
+		u32 ApicQuality = 1000
+	}
+
+	key Time {
+		i32 TimezoneOffset = 3
+	}
+
+	key Scheduler {
+		bool StrictProcessSeparation = true
+		bool SmartMigration = true
+		u32 MigrationThreshold = 2
+		bool Zkill = true
+	}
+
+	key Trace {
+		bool Enabled = true
+		u32 RingRecords = 1024
+		u32 SampleEveryTicks = 10
+		u32 StackDepth = 4
+	}
+
+	key Trace.Sources {
+		bool Main = true
+		bool Pmu = true
+		bool Syscall = true
+		bool Handler = true
+		bool Scheduler = true
+		bool Event = true
+		bool User = true
+	}
+
+	key Trace.Pmu {
+		bool Enabled = true
+		bool Cycles = true
+		bool Instructions = true
+		bool CacheReferences = true
+		bool CacheMisses = true
+		bool BranchInstructions = true
+		bool BranchMisses = true
+	}
+
+	key Kshell {
+		bool Enabled = true
+		string Prompt = "kshell> "
+	}
+
+	key Kshell.Commands.help {
+		bool Enabled = true
+		string Description = "show command list or detailed help"
+		string Usage = "help [command]"
+	}
+
+	key Kshell.Commands.clear {
+		bool Enabled = true
+		string Description = "clear kshell screen"
+		string Usage = "clear"
+	}
+
+	key Kshell.Commands.echo {
+		bool Enabled = true
+		string Description = "prints text or kernel debug values"
+		string Usage = "echo <text>"
+	}
+
+	key Kshell.Commands.drm_switch {
+		bool Enabled = true
+		string Description = "switch active DRM driver"
+		string Usage = "drm_switch <id>"
+	}
+
+	key Kshell.Commands.exit {
+		bool Enabled = true
+		string Description = "close kshell"
+		string Usage = "exit"
+	}
+
+	key Disk.Pata {
+		bool Enabled = false
+	}
+
+	key Log {
+		bool Enabled = true
+		bool Drivers = true
+	}
+
+	key RuntimeConfig.Sync {
+		bool Enabled = false
+		bool Autosave = false
+		u32 Seconds = 5
+	}
+
+	key Libc {
+		bool Enabled = true
+		string Type = "musl"
+	}
+}

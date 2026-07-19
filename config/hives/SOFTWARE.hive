@@ -1,0 +1,7 @@
+# Initial software registry hive.
+
+hive SOFTWARE {
+	key Otsos {
+		string Vendor = "otsos team"
+	}
+}

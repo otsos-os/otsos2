@@ -1,0 +1,11 @@
+# Initial security registry hive.
+
+hive SECURITY {
+	key Kusr @protected {
+		bool Configured = false
+		string Kdf = "pbkdf2-hmac-sha256"
+		u32 Iterations = 10000
+		string PasswordHash = ""
+		string PasswordSalt = ""
+	}
+}

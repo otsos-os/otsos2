@@ -24,97 +24,145 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u8 as 8 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type int as 32 bit signed
+$define %type char as 8 bit signed
+$define %type process_t as process control block
+
+$define %func api_kusr_auth as function with args const char *
+
+*/
+
+/* !SPACE!
+
+$space %export api_kusr_auth
+
+*/
+
 #include <kernel/api/api.h>
+#include <kernel/cm/cm.h>
 #include <kernel/crypto/crypto.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
-#include <mlibc/toml.h>
 
-#define KUSR_AUTH_HASH_LEN     PBKDF2_DIGEST_SIZE
-#define KUSR_AUTH_SALT_LEN     PBKDF2_SALT_DEFAULT
-#define KUSR_AUTH_HASH_HEX_LEN (KUSR_AUTH_HASH_LEN * 2 + 1)
-#define KUSR_AUTH_SALT_HEX_LEN (KUSR_AUTH_SALT_LEN * 2 + 1)
-#define KUSR_AUTH_DEFAULT_ITERS PBKDF2_DEFAULT_ITERS
+#define	KUSR_AUTH_REG_HIVE		"SECURITY"
+#define	KUSR_AUTH_REG_KEY		"Kusr"
+#define	KUSR_AUTH_HASH_LEN		PBKDF2_DIGEST_SIZE
+#define	KUSR_AUTH_SALT_LEN		PBKDF2_SALT_DEFAULT
+#define	KUSR_AUTH_HASH_HEX_LEN		(KUSR_AUTH_HASH_LEN * 2 + 1)
+#define	KUSR_AUTH_SALT_HEX_LEN		(KUSR_AUTH_SALT_LEN * 2 + 1)
+#define	KUSR_AUTH_DEFAULT_ITERS		PBKDF2_DEFAULT_ITERS
 
-int api_kusr_auth(const char *password) {
-  process_t *proc = process_current();
-  if (!proc) return -API_ERR_BAD_VALUE;
+int
+api_kusr_auth(const char *password)
+{
+	process_t	*proc;
+	char		kpass[128];
+	char		stored_hash[KUSR_AUTH_HASH_HEX_LEN];
+	char		stored_salt[KUSR_AUTH_SALT_HEX_LEN];
+	u8		salt[KUSR_AUTH_SALT_LEN];
+	u8		expected_hash[KUSR_AUTH_HASH_LEN];
+	u32		iterations, salt_decoded, hash_decoded;
+	int		configured, pass_len, max_pass;
+	int		ret, match;
 
-  if (!is_user_address(password, 1))
-    return -API_ERR_BAD_ADDR;
+	proc = process_current();
+	if (!proc) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (!is_user_address(password, 1)) {
+		return (-API_ERR_BAD_ADDR);
+	}
 
-  char kpass[128];
-  int pass_len = 0;
-  while (pass_len < 127) {
-    if (!is_user_address(password + pass_len, 1))
-      return -API_ERR_BAD_ADDR;
-    if (password[pass_len] == '\0') break;
-    kpass[pass_len] = password[pass_len];
-    pass_len++;
-  }
-  kpass[pass_len] = '\0';
+	memset(kpass, 0, sizeof(kpass));
+	max_pass = (int)sizeof(kpass) - 1;
+	pass_len = 0;
+	while (pass_len < max_pass) {
+		if (!is_user_address(password + pass_len, 1)) {
+			return (-API_ERR_BAD_ADDR);
+		}
+		if (password[pass_len] == '\0') {
+			break;
+		}
+		kpass[pass_len] = password[pass_len];
+		pass_len++;
+	}
+	if (pass_len == max_pass) {
+		if (!is_user_address(password + pass_len, 1)) {
+			crypto_secure_wipe(kpass, sizeof(kpass));
+			return (-API_ERR_BAD_ADDR);
+		}
+		if (password[pass_len] != '\0') {
+			crypto_secure_wipe(kpass, sizeof(kpass));
+			return (-API_ERR_TOO_BIG);
+		}
+	}
 
-  toml_doc_t *doc = toml_parse_file("/conf/kernel.toml");
-  if (!doc) {
-    crypto_secure_wipe(kpass, sizeof(kpass));
-    return -API_ERR_NOT_FOUND;
-  }
+	configured = 0;
+	ret = cm_get_bool(KUSR_AUTH_REG_HIVE, KUSR_AUTH_REG_KEY,
+	    "Configured", &configured);
+	if (ret != 0 || !configured) {
+		crypto_secure_wipe(kpass, sizeof(kpass));
+		return (-API_ERR_NOT_FOUND);
+	}
 
-  const char *stored_hash = toml_get(doc, "kusr", "password_hash");
-  const char *stored_salt = toml_get(doc, "kusr", "password_salt");
-  const char *stored_iters = toml_get(doc, "kusr", "password_iterations");
+	ret = cm_get_string(KUSR_AUTH_REG_HIVE, KUSR_AUTH_REG_KEY,
+	    "PasswordHash", stored_hash, sizeof(stored_hash));
+	if (ret != 0) {
+		crypto_secure_wipe(kpass, sizeof(kpass));
+		return (ret);
+	}
+	ret = cm_get_string(KUSR_AUTH_REG_HIVE, KUSR_AUTH_REG_KEY,
+	    "PasswordSalt", stored_salt, sizeof(stored_salt));
+	if (ret != 0) {
+		crypto_secure_wipe(kpass, sizeof(kpass));
+		crypto_secure_wipe(stored_hash, sizeof(stored_hash));
+		return (ret);
+	}
 
-  if (!stored_hash || !stored_salt) {
-    toml_free(doc);
-    crypto_secure_wipe(kpass, sizeof(kpass));
-    return -API_ERR_NOT_FOUND;
-  }
+	iterations = cm_get_u32_default(KUSR_AUTH_REG_HIVE,
+	    KUSR_AUTH_REG_KEY, "Iterations", KUSR_AUTH_DEFAULT_ITERS);
+	memset(salt, 0, sizeof(salt));
+	memset(expected_hash, 0, sizeof(expected_hash));
+	salt_decoded = 0;
+	hash_decoded = 0;
 
-  u32 iterations = KUSR_AUTH_DEFAULT_ITERS;
-  if (stored_iters) {
-    int parsed = atoi(stored_iters);
-    if (parsed > 0)
-      iterations = (u32)parsed;
-  }
+	ret = crypto_hex_decode(stored_salt, salt, KUSR_AUTH_SALT_LEN,
+	    &salt_decoded);
+	if (ret != 0 || salt_decoded != KUSR_AUTH_SALT_LEN) {
+		crypto_secure_wipe(kpass, sizeof(kpass));
+		crypto_secure_wipe(stored_hash, sizeof(stored_hash));
+		crypto_secure_wipe(stored_salt, sizeof(stored_salt));
+		crypto_secure_wipe(salt, sizeof(salt));
+		return (-API_ERR_BAD_VALUE);
+	}
+	ret = crypto_hex_decode(stored_hash, expected_hash,
+	    KUSR_AUTH_HASH_LEN, &hash_decoded);
+	if (ret != 0 || hash_decoded != KUSR_AUTH_HASH_LEN) {
+		crypto_secure_wipe(kpass, sizeof(kpass));
+		crypto_secure_wipe(stored_hash, sizeof(stored_hash));
+		crypto_secure_wipe(stored_salt, sizeof(stored_salt));
+		crypto_secure_wipe(salt, sizeof(salt));
+		crypto_secure_wipe(expected_hash, sizeof(expected_hash));
+		return (-API_ERR_BAD_VALUE);
+	}
 
-  u8 salt[KUSR_AUTH_SALT_LEN];
-  u8 expected_hash[KUSR_AUTH_HASH_LEN];
-  u32 salt_decoded = 0;
-  u32 hash_decoded = 0;
+	match = pbkdf2_verify((const u8 *)kpass, (u32)pass_len,
+	    salt, KUSR_AUTH_SALT_LEN, iterations, expected_hash,
+	    KUSR_AUTH_HASH_LEN);
+	crypto_secure_wipe(kpass, sizeof(kpass));
+	crypto_secure_wipe(stored_hash, sizeof(stored_hash));
+	crypto_secure_wipe(stored_salt, sizeof(stored_salt));
+	crypto_secure_wipe(salt, sizeof(salt));
+	crypto_secure_wipe(expected_hash, sizeof(expected_hash));
 
-  if (crypto_hex_decode(stored_salt, salt, KUSR_AUTH_SALT_LEN, &salt_decoded) != 0
-      || salt_decoded != KUSR_AUTH_SALT_LEN) {
-    toml_free(doc);
-    crypto_secure_wipe(kpass, sizeof(kpass));
-    crypto_secure_wipe(salt, sizeof(salt));
-    return -API_ERR_BAD_VALUE;
-  }
-
-  if (crypto_hex_decode(stored_hash, expected_hash, KUSR_AUTH_HASH_LEN,
-                        &hash_decoded) != 0
-      || hash_decoded != KUSR_AUTH_HASH_LEN) {
-    toml_free(doc);
-    crypto_secure_wipe(kpass, sizeof(kpass));
-    crypto_secure_wipe(salt, sizeof(salt));
-    crypto_secure_wipe(expected_hash, sizeof(expected_hash));
-    return -API_ERR_BAD_VALUE;
-  }
-
-  toml_free(doc);
-
-  int match = pbkdf2_verify((const u8 *)kpass, (u32)pass_len,
-                            salt, KUSR_AUTH_SALT_LEN,
-                            iterations,
-                            expected_hash, KUSR_AUTH_HASH_LEN);
-
-  crypto_secure_wipe(kpass, sizeof(kpass));
-  crypto_secure_wipe(salt, sizeof(salt));
-  crypto_secure_wipe(expected_hash, sizeof(expected_hash));
-
-  if (match != 0)
-    return -API_ERR_PERM;
-
-  proc->kusr_auth = 1;
-  return 0;
+	if (match != 0) {
+		return (-API_ERR_PERM);
+	}
+	proc->kusr_auth = 1;
+	return (0);
 }

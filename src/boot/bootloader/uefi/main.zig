@@ -26,7 +26,6 @@ const BootError = error{
 	BadBootpack,
 	AcpiNotFound,
 	BootpackTooLarge,
-	ConfigNotFound,
 	FileReadFailed,
 	GopUnavailable,
 	KernelLoadFailed,
@@ -164,11 +163,6 @@ fn boot() !void {
 		.mb = &mb,
 		.failed = false,
 	};
-	var config: BootpackFile = undefined;
-	if (bootpack_find(&pack, "config.toml", &config) != 0) {
-		return BootError.ConfigNotFound;
-	}
-	try loadModule(&config, "config", &mod_ctx);
 	if (bootpack_foreach(&pack, moduleCallback, &mod_ctx) != 0 or mod_ctx.failed) {
 		return BootError.ModuleLoadFailed;
 	}
@@ -459,7 +453,7 @@ fn loadModule(file: *const BootpackFile, name: [*:0]const u8, ctx: *ModuleCtx) !
 
 fn moduleCallback(file: *const BootpackFile, arg: ?*anyopaque) callconv(.c) c_int {
 	const ctx: *ModuleCtx = @ptrCast(@alignCast(arg.?));
-	if (cstrEq(file.name, "kernel.bin") or cstrEq(file.name, "config.toml")) {
+	if (cstrEq(file.name, "kernel.bin")) {
 		return 0;
 	}
 	const name: [*:0]const u8 = @ptrCast(file.name);

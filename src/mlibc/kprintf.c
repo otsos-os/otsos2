@@ -28,11 +28,11 @@
 #include <mlibc/mlibc.h>
 #include <lib/com1.h>
 #include <kernel/console/console.h>
-#include <kernel/other/config.h>
+#include <kernel/cm/cm.h>
 #include <stdarg.h>
 
 /* ------------------------------------------------------------------ */
-/* Log state -- defaults to all-on before kprintf_init() reads config */
+/* Log state -- defaults to all-on before kprintf_init() reads registry */
 /* ------------------------------------------------------------------ */
 
 int	log_enabled = 1;
@@ -554,6 +554,6 @@ driver_printf(const char *fmt, ...)
 void
 kprintf_init(void)
 {
-	log_enabled = config_get_bool("log", "enabled", 1);
-	log_drivers = config_get_bool("log", "drivers", 1);
+	log_enabled = cm_get_bool_default("SYSTEM", "Log", "Enabled", 1);
+	log_drivers = cm_get_bool_default("SYSTEM", "Log", "Drivers", 1);
 }

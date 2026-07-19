@@ -133,6 +133,7 @@ $space %export vfs_back_chdir, vfs_back_getcwd, vfs_back_write_file
 #include <kernel/api/errno.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
+#include <kernel/drivers/fs/hivefs/hivefs.h>
 #include <kernel/drivers/fs/vfs/back/vfs_back.h>
 #include <kernel/process.h>
 #include <mlibc/mlibc.h>
@@ -277,6 +278,9 @@ vfs_back_find_ops(const char *fstype)
 	}
 	if (strcmp(fstype, "devfs") == 0) {
 		return (&devfs_back_ops);
+	}
+	if (strcmp(fstype, "hivefs") == 0) {
+		return (hivefs_back_ops());
 	}
 	return (NULL);
 }
@@ -634,7 +638,7 @@ vfs_root_readdir(vnode_t *vn, u32 index, char *name, int *type)
 	chainfs_file_entry_t	entries[VFS_BACK_ROOT_ENTRIES];
 	char			mount_name[32];
 	u32			count, seen, mount_index;
-	int			i, ret;
+	int			duplicate, i, k, ret;
 
 	(void)vn;
 
@@ -668,6 +672,16 @@ vfs_root_readdir(vnode_t *vn, u32 index, char *name, int *type)
 		}
 		if (vfs_mount_root_name(vfs_mounts[i].path, mount_name,
 		    sizeof(mount_name)) != 0) {
+			continue;
+		}
+		duplicate = 0;
+		for (k = 0; k < (int)count; k++) {
+			if (strcmp(entries[k].name, mount_name) == 0) {
+				duplicate = 1;
+				break;
+			}
+		}
+		if (duplicate) {
 			continue;
 		}
 		if (seen == mount_index) {

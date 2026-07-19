@@ -89,7 +89,7 @@ $space %export kshell_try_open_if_requested, kshell_run
 #include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/rapi/rapi.h>
 #include <kernel/kshell/kshell.h>
-#include <kernel/other/config.h>
+#include <kernel/cm/cm.h>
 #include <mlibc/mlibc.h>
 
 static volatile int	kshell_open_requested;
@@ -440,16 +440,21 @@ struct kshell_help_ctx {
 };
 
 static int
-kshell_help_list_cb(const char *section, void *ctx)
+kshell_help_list_cb(const char *cmd, void *ctx)
 {
 	struct kshell_help_ctx	*hc;
-	const char		*cmd;
-	const char		*pfx;
+	char			key[128];
 
 	hc = (struct kshell_help_ctx *)ctx;
-	pfx = "kshell.commands.";
-	cmd = section + strlen(pfx);
-	if (!config_get_bool(section, "enabled", 1)) {
+	if (!cmd) {
+		return (0);
+	}
+	if (strlen("Kshell.Commands.") + strlen(cmd) >= sizeof(key)) {
+		return (0);
+	}
+	strcpy(key, "Kshell.Commands.");
+	strcat(key, cmd);
+	if (!cm_get_bool_default("SYSTEM", key, "Enabled", 1)) {
 		return (0);
 	}
 	if (hc->first) {
@@ -468,8 +473,8 @@ kshell_help_list(void)
 	struct kshell_help_ctx	hc;
 
 	hc.first = 1;
-	config_foreach_section("kshell.commands.",
-	    kshell_help_list_cb, &hc);
+	cm_foreach_key("SYSTEM", "Kshell.Commands", kshell_help_list_cb,
+	    &hc);
 	if (hc.first) {
 		kshell_console_write("commands: <none>\n");
 	}
@@ -482,23 +487,33 @@ static void
 kshell_help_command(const char *cmd)
 {
 	char		section[128];
-	const char	*desc, *usage;
+	char		desc[256];
+	char		usage[128];
+	int		desc_ok, usage_ok;
 
-	strcpy(section, "kshell.commands.");
+	if (strlen("Kshell.Commands.") + strlen(cmd) >= sizeof(section)) {
+		kshell_console_write("help: unknown command: ");
+		kshell_console_write(cmd);
+		kshell_console_write("\n");
+		return;
+	}
+
+	strcpy(section, "Kshell.Commands.");
 	strcat(section, cmd);
 
-	if (!config_get_bool(section, "enabled", 1)) {
+	if (!cm_get_bool_default("SYSTEM", section, "Enabled", 1)) {
 		kshell_console_write("help: command disabled: ");
 		kshell_console_write(cmd);
 		kshell_console_write("\n");
 		return;
 	}
 
-	desc = config_get_string(section, "description",
-	    NULL);
-	usage = config_get_string(section, "usage", NULL);
+	desc_ok = (cm_get_string("SYSTEM", section, "Description",
+	    desc, sizeof(desc)) == 0);
+	usage_ok = (cm_get_string("SYSTEM", section, "Usage",
+	    usage, sizeof(usage)) == 0);
 
-	if (!desc && !usage) {
+	if (!desc_ok && !usage_ok) {
 		kshell_console_write("help: unknown command: ");
 		kshell_console_write(cmd);
 		kshell_console_write("\n");
@@ -507,12 +522,12 @@ kshell_help_command(const char *cmd)
 
 	kshell_console_write(cmd);
 	kshell_console_write("\n");
-	if (usage) {
+	if (usage_ok) {
 		kshell_console_write("  usage: ");
 		kshell_console_write(usage);
 		kshell_console_write("\n");
 	}
-	if (desc) {
+	if (desc_ok) {
 		kshell_console_write("  ");
 		kshell_console_write(desc);
 		kshell_console_write("\n");
@@ -666,10 +681,10 @@ kshell_run(void)
 	char		*argv[KSHELL_MAX_ARGS];
 	int		len, rc;
 	char		c;
-	const char	*prompt;
+	char		prompt[64];
 
-	prompt = config_get_string("kshell", "prompt",
-	    "kshell> ");
+	cm_get_string_default("SYSTEM", "Kshell", "Prompt",
+	    prompt, sizeof(prompt), "kshell> ");
 
 	kshell_set_visible(1);
 	kshell_console_clear();

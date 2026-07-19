@@ -1,134 +1,30 @@
-# ---------------------------------------------------------------------------
-# [os]  --  operating system identity
-#
-# The Makefile ask_version target bumps the version here.
-# The kernel reads these at runtime via config_get().
-# ---------------------------------------------------------------------------
+# Build-time configuration only.
+# Runtime configuration lives in ../config/hives/*.hive and cmseed.
+
 [os]
-sysname = "otsos2"
-nodename = "localhost"
 release = "2.3.3"
-version = "otsos2-kernel-rev2"
-machine = "x86_64"
-domainname = "localdomain"
 
-[timer]
-hz = 1000
-default_timer = "apic"
-timer_to_calibrate = "pit"
-apic_enabled = 1
-apic_quality = 1000
-
-[time]
-timezone_offset = 3
-
-[scheduler]
-strict_process_separation = true
-smart_migration = true
-migration_threshold = 2
-zkill = true
-
-[trace]
-enabled = true
-ring_records = 1024
-sample_every_ticks = 10
-stack_depth = 4
-
-[trace.sources]
-main = true
-pmu = true
-syscall = true
-handler = true
-scheduler = true
-event = true
-user = true
-
-[trace.pmu]
-enabled = true
-cycles = true
-instructions = true
-cache_references = true
-cache_misses = true
-branch_instructions = true
-branch_misses = true
-
-[kshell]
-enabled = true
-prompt = "kshell> "
-
-[disk.pata]
-enabled = false
-[log]
-enabled = true
-drivers = true
-
-[autoupdate]
-enabled = false
-seconds = 5
-autosave = false
-
-[net]
-enabled = true
-ip = "10.0.2.15"
-netmask = "255.255.255.0"
-gateway = "10.0.2.2"
 [libc]
 enabled = true
 type = "musl"
 
-[modules]
-init = "/bin/init"
-yes = "/bin/yes"
-fetch = "/bin/fetch"
-sh = "/bin/sh"
-ls = "/bin/ls"
-cat = "/bin/cat"
-touch = "/bin/touch"
-pwd = "/bin/pwd"
-whoami = "/bin/whoami"
-rm = "/bin/rm"
-mkdir = "/bin/mkdir"
-rmdir = "/bin/rmdir"
-cp = "/bin/cp"
-mv = "/bin/mv"
-unzip = "/bin/unzip"
-profile = "/bin/profile"
-oven = "/bin/oven"
-cursord = "/bin/cursord"
-# shmtest = "/bin/shmtest"
-udp_echo = "/bin/udp_echo"
-tcp_echo = "/bin/tcp_echo"
-send = "/bin/send"
-posix_hello = "/bin/posix_hello"
-musl_test = "/bin/musl_test"
-lua = "/bin/lua"
-python = "/bin/python"
-python-stdlib = "/usr/local/lib/python314.zip"
-ld-musl = "/lib/ld-musl-x86_64.so.1"
-drld = "/lib/drld"
-native-so = "/lib/native.so"
+[disk.pata]
+enabled = false
+
+[kshell]
+enabled = true
 
 [kshell.commands.help]
 enabled = true
-description = "show command list or detailed help for one command"
-usage = "help [command]"
 
 [kshell.commands.clear]
 enabled = true
-description = "clear kshell screen"
-usage = "clear"
 
 [kshell.commands.echo]
 enabled = true
-description = "prints text, evaluates math, or prints kernel value"
-usage = "echo <text> | echo &<math> | echo %videoM | %dkey | %prun | %uname | %drm | %timers"
 
 [kshell.commands.drm_switch]
 enabled = true
-description = "switch active DRM driver by list id from echo %drm"
-usage = "drm_switch <id>"
 
 [kshell.commands.exit]
 enabled = true
-description = "close kshell"
-usage = "exit"

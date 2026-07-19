@@ -138,8 +138,7 @@ module_cb(const bootpack_file_t *file, void *arg)
 	module_ctx_t	*ctx;
 
 	ctx = (module_ctx_t *)arg;
-	if (bl_strcmp(file->name, "kernel.bin") == 0 ||
-	    bl_strcmp(file->name, "config.toml") == 0) {
+	if (bl_strcmp(file->name, "kernel.bin") == 0) {
 		return (0);
 	}
 	return (load_module(file, file->name, ctx));
@@ -151,7 +150,6 @@ bios_main(void)
 	bios_layout_t		*layout;
 	bootpack_t		pack;
 	bootpack_file_t		kernel;
-	bootpack_file_t		config;
 	mb2_framebuffer_t	fb;
 	mb2_builder_t		mb;
 	module_ctx_t		mod_ctx;
@@ -216,13 +214,6 @@ bios_main(void)
 
 	mod_ctx.mb = &mb;
 	mod_ctx.failed = 0;
-	if (bootpack_find(&pack, "config.toml", &config) == 0) {
-		if (load_module(&config, "config", &mod_ctx) != 0) {
-			panic("config module failed");
-		}
-	} else {
-		panic("config.toml not found");
-	}
 	if (bootpack_foreach(&pack, module_cb, &mod_ctx) != 0 ||
 	    mod_ctx.failed) {
 		panic("module load failed");

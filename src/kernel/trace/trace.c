@@ -120,7 +120,7 @@ $space %export trace_session_read, trace_session_stats, trace_get_stats
 
 #include <kernel/trace/trace.h>
 #include <kernel/drivers/timer.h>
-#include <kernel/other/config.h>
+#include <kernel/cm/cm.h>
 #include <kernel/process.h>
 #include <kernel/smp/smp.h>
 #include <kernel/thread.h>
@@ -179,6 +179,16 @@ static const char *g_trace_source_names[TRACE_SOURCE_COUNT] = {
 	"scheduler",
 	"event",
 	"user"
+};
+
+static const char *g_trace_source_registry_names[TRACE_SOURCE_COUNT] = {
+	"Main",
+	"Pmu",
+	"Syscall",
+	"Handler",
+	"Scheduler",
+	"Event",
+	"User"
 };
 
 static const trace_field_desc_t trace_fields_pmu[] = {
@@ -484,17 +494,18 @@ trace_apply_config(void)
 	int		enabled;
 	u16		source;
 
-	g_trace_enabled = config_get_bool("trace", "enabled", 1);
+	g_trace_enabled = cm_get_bool_default("SYSTEM", "Trace",
+	    "Enabled", 1);
 	g_trace_ring_records = trace_round_ring_records(
-	    config_get_int("trace", "ring_records",
+	    (int)cm_get_u32_default("SYSTEM", "Trace", "RingRecords",
 	    TRACE_DEFAULT_RING_RECORDS));
-	g_trace_sample_period = (u32)config_get_int("trace",
-	    "sample_every_ticks", 10);
+	g_trace_sample_period = cm_get_u32_default("SYSTEM", "Trace",
+	    "SampleEveryTicks", 10);
 	if (g_trace_sample_period == 0) {
 		g_trace_sample_period = 1;
 	}
-	g_trace_stack_depth = (u32)config_get_int("trace",
-	    "stack_depth", 4);
+	g_trace_stack_depth = cm_get_u32_default("SYSTEM", "Trace",
+	    "StackDepth", 4);
 	if (g_trace_stack_depth > TRACE_RECORD_STACK) {
 		g_trace_stack_depth = TRACE_RECORD_STACK;
 	}
@@ -502,8 +513,9 @@ trace_apply_config(void)
 	memset(g_trace_enabled_events, 0, sizeof(g_trace_enabled_events));
 	g_trace_source_mask = 0;
 	for (source = 0; source < TRACE_SOURCE_COUNT; source++) {
-		name = trace_source_name(source);
-		enabled = config_get_bool("trace.sources", name, 1);
+		name = g_trace_source_registry_names[source];
+		enabled = cm_get_bool_default("SYSTEM", "Trace.Sources",
+		    name, 1);
 		trace_enable_source(source, enabled);
 	}
 }
@@ -565,7 +577,7 @@ trace_init(void)
 	g_trace_initialized = 1;
 
 	if (!g_trace_enabled) {
-		printk("[TRACE] disabled by config\n");
+		printk("[TRACE] disabled by registry\n");
 		return;
 	}
 

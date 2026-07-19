@@ -51,7 +51,7 @@ $space %export scheduler_tick
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <mm/vm/pmap.h>
-#include <kernel/other/config.h>
+#include <kernel/cm/cm.h>
 #include <kernel/process.h>
 #include <kernel/scheduler.h>
 #include <kernel/smp/smp.h>
@@ -139,16 +139,19 @@ void
 scheduler_init(void)
 {
 	sched_strict_process_separation =
-	    config_get_bool("scheduler", "strict_process_separation", 0);
+	    cm_get_bool_default("SYSTEM", "Scheduler",
+	    "StrictProcessSeparation", 0);
 	sched_smart_migration =
-	    config_get_bool("scheduler", "smart_migration", 1);
+	    cm_get_bool_default("SYSTEM", "Scheduler",
+	    "SmartMigration", 1);
 	sched_migration_threshold =
-	    config_get_int("scheduler", "migration_threshold", 0);
+	    (int)cm_get_u32_default("SYSTEM", "Scheduler",
+	    "MigrationThreshold", 0);
 	if (sched_migration_threshold < 0) {
 		sched_migration_threshold = 0;
 	}
 	sched_zkill =
-	    config_get_bool("scheduler", "zkill", 0);
+	    cm_get_bool_default("SYSTEM", "Scheduler", "Zkill", 0);
 	sched_next_cpu = 0;
 	printk("[SCHED] strict=%d smart=%d migration_threshold=%d zkill=%d\n",
 	    sched_strict_process_separation, sched_smart_migration,

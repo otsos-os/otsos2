@@ -25,24 +25,24 @@
  */
 
 #include <kernel/api/api.h>
-#include <kernel/other/config.h>
+#include <kernel/cm/cm.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
 
 void api_info_fill(struct api_sysinfo *buf) {
   memset(buf, 0, sizeof(struct api_sysinfo));
-  strcpy(buf->sysname,
-    config_get_string("os", "sysname", "otsos2"));
-  strcpy(buf->nodename,
-    config_get_string("os", "nodename", "localhost"));
-  strcpy(buf->release,
-    config_get_string("os", "release", "0.0.0"));
-  strcpy(buf->version,
-    config_get_string("os", "version", "unknown"));
-  strcpy(buf->machine,
-    config_get_string("os", "machine", "x86_64"));
-  strcpy(buf->domainname,
-    config_get_string("os", "domainname", "localdomain"));
+  cm_get_string_default("SYSTEM", "Os", "SysName",
+    buf->sysname, sizeof(buf->sysname), "otsos2");
+  cm_get_string_default("SYSTEM", "Os", "NodeName",
+    buf->nodename, sizeof(buf->nodename), "localhost");
+  cm_get_string_default("SYSTEM", "Os", "Release",
+    buf->release, sizeof(buf->release), "0.0.0");
+  cm_get_string_default("SYSTEM", "Os", "Version",
+    buf->version, sizeof(buf->version), "unknown");
+  cm_get_string_default("SYSTEM", "Os", "Machine",
+    buf->machine, sizeof(buf->machine), "x86_64");
+  cm_get_string_default("SYSTEM", "Os", "DomainName",
+    buf->domainname, sizeof(buf->domainname), "localdomain");
 }
 
 int api_info(struct api_sysinfo *buf) {

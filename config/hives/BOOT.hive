@@ -1,0 +1,119 @@
+# Initial boot registry hive.
+
+hive BOOT {
+	key Modules.init {
+		string Dest = "/bin/init"
+	}
+
+	key Modules.yes {
+		string Dest = "/bin/yes"
+	}
+
+	key Modules.fetch {
+		string Dest = "/bin/fetch"
+	}
+
+	key Modules.sh {
+		string Dest = "/bin/sh"
+	}
+
+	key Modules.ls {
+		string Dest = "/bin/ls"
+	}
+
+	key Modules.cat {
+		string Dest = "/bin/cat"
+	}
+
+	key Modules.touch {
+		string Dest = "/bin/touch"
+	}
+
+	key Modules.pwd {
+		string Dest = "/bin/pwd"
+	}
+
+	key Modules.whoami {
+		string Dest = "/bin/whoami"
+	}
+
+	key Modules.rm {
+		string Dest = "/bin/rm"
+	}
+
+	key Modules.mkdir {
+		string Dest = "/bin/mkdir"
+	}
+
+	key Modules.rmdir {
+		string Dest = "/bin/rmdir"
+	}
+
+	key Modules.cp {
+		string Dest = "/bin/cp"
+	}
+
+	key Modules.mv {
+		string Dest = "/bin/mv"
+	}
+
+	key Modules.unzip {
+		string Dest = "/bin/unzip"
+	}
+
+	key Modules.profile {
+		string Dest = "/bin/profile"
+	}
+
+	key Modules.oven {
+		string Dest = "/bin/oven"
+	}
+
+	key Modules.cursord {
+		string Dest = "/bin/cursord"
+	}
+
+	key Modules.udp_echo {
+		string Dest = "/bin/udp_echo"
+	}
+
+	key Modules.tcp_echo {
+		string Dest = "/bin/tcp_echo"
+	}
+
+	key Modules.send {
+		string Dest = "/bin/send"
+	}
+
+	key Modules.posix_hello {
+		string Dest = "/bin/posix_hello"
+	}
+
+	key Modules.musl_test {
+		string Dest = "/bin/musl_test"
+	}
+
+	key Modules.lua {
+		string Dest = "/bin/lua"
+	}
+
+	key Modules.python {
+		string Dest = "/bin/python"
+	}
+
+	key Modules.python-stdlib {
+		string Dest = "/usr/local/lib/python314.zip"
+	}
+
+	key Modules.ld-musl {
+		string Dest = "/lib/ld-musl-x86_64.so.1"
+	}
+
+	key Modules.drld {
+		string Dest = "/lib/drld"
+	}
+
+	key Modules.native-so {
+		string Dest = "/lib/native.so"
+	}
+}

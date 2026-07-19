@@ -61,7 +61,7 @@ $space %export lapic_get_id, lapic_is_enabled
 
 #include <kernel/interrupts/apic/lapic.h>
 #include <kernel/drivers/timer.h>
-#include <kernel/other/config.h>
+#include <kernel/cm/cm.h>
 #include <mm/vm/pmap.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -248,7 +248,7 @@ u64
 lapic_timer_calibrate(void)
 {
 	struct timer_calibrate	calib;
-	const char		*calib_name;
+	char			calib_name[16];
 	u64			freq;
 
 	if (!timer_is_initialized()) {
@@ -257,8 +257,8 @@ lapic_timer_calibrate(void)
 		return (0);
 	}
 
-	calib_name = config_get_string("timer", "timer_to_calibrate",
-	    "pit");
+	cm_get_string_default("SYSTEM", "Timer", "TimerToCalibrate",
+	    calib_name, sizeof(calib_name), "pit");
 	printk("[LAPIC] calibrating via %s timer...\n", calib_name);
 
 	lapic_write(LAPIC_TIMER_DCR, LAPIC_TIMER_DIV128);

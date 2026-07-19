@@ -69,7 +69,7 @@ sleep(u32 ms)
 	td = thread_current();
 
 	if (!td || (td->context.cs & 3) == 0) {
-	/*TODO: maybe we need to get HZ value from config in runtime*/
+	/*TODO: maybe get HZ from registry in runtime*/
 	deadline = timer_get_ticks() +
 	    (u64)ms * timer_get_frequency() / 1000;
 	while (timer_get_ticks() < deadline) {

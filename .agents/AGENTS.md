@@ -21,7 +21,9 @@ treated as independent projects and not as part of otsos2.
 - Custom Multiboot2-compatible BIOS/UEFI loaders + `tools/makeiso.py` and
   `xorriso` for ISO creation
 - QEMU for testing (UEFI via OVMF, optional virtio-gpu)
-- TOML for kernel configuration (`src/config.toml`)
+- TOML for build-time Makefile configuration (`src/config.toml`)
+- Registry hive DSL under `config/hives/`, compiled by `tools/hivec.py` into
+  the `cmseed` boot module consumed by the runtime configuration manager
 - musl libc (vendored, pre-configured for x86_64-linux-musl)
 
 ## Architecture
@@ -65,6 +67,8 @@ Monolithic kernel with the following rough layers:
   programming processor counters directly.
 - `drivers/fs/chainFS/` — custom filesystem used for root disk (512-byte blocks,
   superblock + file table + block map + chained data). Tooling in `chainfs.py`.
+- `drivers/fs/hivefs/` — read-only registry hive filesystem. It validates the
+  `cmseed` boot module and exposes hives/keys/values as VFS nodes.
 - `drivers/fs/vfs/` — tiny vnode-based VFS; used by POSIX personality and devfs.
 - `drivers/fs/devfs/` — device nodes: `/dev/null`, `/dev/zero`, `/dev/random`,
   `/dev/urandom`, `/dev/tty`, `/dev/console`, `/dev/fb0`, `/dev/ptmx`,
@@ -81,8 +85,9 @@ Monolithic kernel with the following rough layers:
   keyboard and mouse filters).
 - `trace/` — kernel observability core: event registry, per-CPU ring buffers,
   trace sessions, PMU samples from `drivers/pmu`, syscall/IRQ/scheduler/kqueue
-  tracepoints. Runtime toggles live under `[trace]` in `src/config.toml`.
-- `kshell/` — optional kernel debug shell configured via `config.toml`.
+  tracepoints. Runtime toggles live in the `SYSTEM` registry hive.
+- `kshell/` — optional kernel debug shell; runtime command metadata and prompt
+  live in the `SYSTEM` registry hive.
 - `crypto/` — SHA-256, HMAC-SHA256, PBKDF2, ChaCha20, RNG, plus `kusr`
   authentication.
 - `interrupts/`, `gdt.c`, `time.c`, `futex.c`, `syscall.c`, `process.c`,
@@ -102,7 +107,7 @@ Monolithic kernel with the following rough layers:
 ### Minimal C library (`src/mlibc/`)
 
 - Kernel-only C library: string, stdio, stdlib, hardware I/O, `kprintf`, `itoa`,
-  and a small TOML parser used by `config.c`.
+  and a small TOML parser still used by legacy kusr credential storage.
 - Simple mlibc routines may be written in Kato and compiled through
   `etc/kato/src/main.py` into generated C objects during the kernel build.
 
@@ -176,14 +181,17 @@ Monolithic kernel with the following rough layers:
 
 ### Configuration
 
-- `src/config.toml` — kernel identity, timer frequency, kshell, libc toggle, disk
-  options, and multiboot module list. `config.c` reads it at boot from the
-  `config` Multiboot module and can persist it to `/conf/boot/modules.toml`.
-- `[modules]` section in `config.toml` — maps multiboot module names to
-  filesystem destinations (e.g., `yes = "/bin/yes"`).  The kernel iterates this
-  section at boot to copy modules into ChainFS; the module named `init` is also
-  used to start the first userspace process.  The Makefile uses the same list
-  via `tools/modules.pl` when building the bootpack for the custom loaders.
+- `src/config.toml` — build-time Makefile input for feature toggles and the
+  version bump prompt. The kernel does not load it as runtime config.
+- `config/hives/*.hive` — source DSL for initial registry hives.  These files
+  are compiled by `tools/hivec.py` into `../bin/cmseed`, which is copied into
+  the bootpack as module `cmseed`.  The kernel loads this module into the
+  read-only `hivefs` backend. `kernel/cm/` mounts a kusr-only debug view at
+  `/conf/registry` and reads runtime settings through `hivefs` vnodes.
+- `BOOT.Modules.*.Dest` in `config/hives/BOOT.hive` maps Multiboot module
+  names to filesystem destinations. The Makefile asks `tools/hivec.py` for the
+  module names when building the bootpack, and the kernel reads the same keys
+  at runtime to install modules into ChainFS.
 - The `ld-musl` module in `[modules]` provides the musl dynamic linker at
   `/lib/ld-musl-x86_64.so.1` for dynamically linked programs.
 
@@ -193,15 +201,20 @@ Monolithic kernel with the following rough layers:
 - `add_copyright.sh` — prepends the BSD-2-Clause copyright header to `.c`,
   `.h`, `.s` files.
 - `tools/toml_get.sh` — helper used by Makefiles to read `config.toml` values.
-- `tools/modules.pl` — extracts module names from the `[modules]` section of
-  `config.toml`; used by the Makefile to build the bootpack consumed by both
-  custom bootloaders.
+- `tools/modules.pl` — legacy extractor for old `[modules]` TOML configs; do
+  not use it for new bootpack module wiring.
+- `tools/hivec.py` — compiles registry hive DSL files into the binary `cmseed`
+  hive pack.  The format is little-endian and table-based: HPK contains HIVE
+  blobs, and each HIVE contains node/value/string/data tables plus CRC32.
 - `tools/makeiso.py` — small `xorriso` wrapper that creates the hybrid
   BIOS+UEFI ISO from the BIOS disk image and EFI system partition image.
 
 ## Repository Structure
 
 - `src/` — kernel, bootloader, mlibc, userland ELF loader.
+- `src/kernel/cm/` — configuration manager over `hivefs`.
+- `config/hives/` — source registry hive DSL used to build the initial
+  `cmseed` boot module.
 - `init/` — first userspace process (`init`) and `hello` test.
 - `ports/` — additional userspace programs.
 - `libc/musl/` — vendored musl libc source + prebuilt objects.
@@ -297,9 +310,8 @@ User need to test, dont run test manually, ask user.
   VMA clipping/relocation helpers in `mm/vm/vm_map.c`; `MREMAP_DONTUNMAP`
   deliberately returns `EINVAL` because its Linux userfaultfd semantics are not
   modeled yet.
-- `src/config.toml` is parsed into a global TOML document; many compile-time
-  feature flags (`kshell`, `libc`, `pata`) are also read from it by the Makefile
-  via `tools/toml_get.sh`.
+- `src/config.toml` is build-time only. Runtime kernel settings must go through
+  `kernel/cm/` and the registry hives.
 - **Privilege model:** native `kusr_auth` and POSIX `euid == 0` are treated as
   the same root privilege inside the kernel (`proc_has_privilege()`).  Init and
   kernel processes start as root; children inherit credentials on fork/clone/
@@ -314,7 +326,7 @@ User need to test, dont run test manually, ask user.
 
 - `boot.s` → `kernel.c` (`kmain`)
 - `kernel.c` → memory (`mm/*`), interrupts (`idt`), timer, disk, ChainFS, VFS,
-  DRM, PCI, ACPI, power, userspace, kshell, config, crypto, syscalls.
+  DRM, PCI, ACPI, power, userspace, kshell, CM registry, crypto, syscalls.
 - `syscall.c` → `api/*` handlers; for `PERSONALITY_POSIX` it delegates to
   `posix_syscall_handler()`.
 - `process.c`/`thread.c`/`scheduler.c` → each other, `mm/vm/pmap.h`, `idt.h`.
@@ -323,7 +335,7 @@ User need to test, dont run test manually, ask user.
 - `api` layer → VFS/devfs/ChainFS, terminal/DRM, process/thread, memory, time.
 - `drivers/fs/vfs` → `drivers/fs/devfs` and `drivers/fs/chainFS`.
 - `drivers/video/drm` → `drivers/video/card/virtio-gpu`.
-- `kshell` → `console`, `terminal`, `keyboard`, `drm`, `config`.
+- `kshell` → `console`, `terminal`, `keyboard`, `drm`, `cm`.
 - `crypto` → `drivers/timer` for RNG entropy; `kusr` → `crypto` for
   PBKDF2/HMAC auth.
 
@@ -340,9 +352,12 @@ User need to test, dont run test manually, ask user.
   `posix_hello`, `send`, optional `musl_test`) into `/bin/` on the root
   filesystem before starting `init`. These are not on disk; they come from the
   ISO.
-- The `config.toml` is both a build-time config (read by Makefiles) and a
-  runtime config (read by the kernel `src/kernel/other/config.c`). Changing it can affect which modules are
-  built or which features are enabled.
+- The bootpack also carries `cmseed`, generated from `config/hives/*.hive`.
+  Kernel boot code validates it through `kernel/drivers/fs/hivefs/`, initializes
+  `kernel/cm/` early, and later mounts `/conf/registry` as read-only, noexec,
+  nodev, kusr-only.
+- `config.toml` changes can affect build-time feature flags, but not runtime
+  kernel settings or bootpack module destinations.
 - `libc/musl` is vendored and pre-built. Do not run its `configure` again unless
   you want to rebuild `config.mak` from scratch; instead edit `config.mak` if
   needed.

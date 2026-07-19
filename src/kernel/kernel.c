@@ -47,12 +47,12 @@ $define %func status_line as procedure with args const char *, int
 $define %func disk_has_type as function with args disk_type_t
 $define %func disk_find_type as function with args disk_type_t
 $define %func timer_sanity_check as function with args void
-$define %func parse_ipv4 as function with args const char *, u32 *
 $define %func net_apply_config as procedure with args net_iface_t *
 $define %func net_test as procedure with args void
 $define %func enable_sse as procedure with args void
 $define %func kernel_ensure_parent_dirs as function with args const char *
 $define %func kernel_install_module_cb as procedure with args const char *, const char *, void *
+$define %func kernel_install_registry_module_cb as function with args const char *, void *
 $define %func kmain as start with args u64, u64, u64, u64
 
 */
@@ -63,14 +63,16 @@ $space %internal debug_multiboot_info, debug_multiboot2_tags
 $space %internal mb2_find_module, mb2_total_modules_size, status_line
 $space %internal disk_has_type, disk_find_type
 $space %internal timer_sanity_check, net_test, enable_sse
-$space %internal parse_ipv4, net_apply_config
+$space %internal net_apply_config
 $space %internal kernel_ensure_parent_dirs, kernel_install_module_cb
+$space %internal kernel_install_registry_module_cb
 $space %export kmain
 
 */
 
 #include <kernel/interrupts/apic/lapic.h>
 #include <kernel/interrupts/apic/ioapic.h>
+#include <kernel/cm/cm.h>
 #include <kernel/drivers/acpi/acpi.h>
 #include <kernel/drivers/disk/disk.h>
 #ifdef CONFIG_DISK_PATA
@@ -79,8 +81,9 @@ $space %export kmain
 #include <kernel/drivers/disk/ramdisk/ramdisk.h>
 #include <kernel/drivers/eventtimer.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
-#include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
+#include <kernel/drivers/fs/hivefs/hivefs.h>
+#include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/mouse/mouse.h>
 #include <kernel/drivers/power/power.h>
@@ -112,7 +115,6 @@ $space %export kmain
 #include <kernel/crypto/crypto.h>
 #include <kernel/kshell/kshell.h>
 #include <kernel/other/kusr.h>
-#include <kernel/other/config.h>
 #include <kernel/syscall.h>
 #include <kernel/smp/smp.h>
 #include <kernel/trace/trace.h>
@@ -436,71 +438,61 @@ kernel_install_module_cb(const char *name, const char *dest, void *ctx)
 }
 
 static int
-parse_ipv4(const char *str, u32 *out)
+kernel_install_registry_module_cb(const char *name, void *ctx)
 {
-	u32	octets[4];
-	u32	value;
-	int	part, digits;
+	char	key[128];
+	char	dest[256];
+	int	ret;
 
-	if (!str || !out) {
-		return (-1);
+	if (!name || !ctx) {
+		return (0);
 	}
-	part = 0;
-	digits = 0;
-	value = 0;
-	while (*str) {
-		if (*str >= '0' && *str <= '9') {
-			value = value * 10 + (u32)(*str - '0');
-			if (value > 255) {
-				return (-1);
-			}
-			digits++;
-		} else if (*str == '.') {
-			if (digits == 0 || part >= 3) {
-				return (-1);
-			}
-			octets[part++] = value;
-			value = 0;
-			digits = 0;
-		} else {
-			return (-1);
-		}
-		str++;
+	if (strlen("Modules.") + strlen(name) >= sizeof(key)) {
+		printk("[KERNEL] Registry module key too long: %s\n",
+		    name);
+		return (0);
 	}
-	if (digits == 0 || part != 3) {
-		return (-1);
-	}
-	octets[3] = value;
 
-	*out = (octets[0] << 24) | (octets[1] << 16) |
-	    (octets[2] << 8) | octets[3];
+	strcpy(key, "Modules.");
+	strcat(key, name);
+	ret = cm_get_string("BOOT", key, "Dest", dest, sizeof(dest));
+	if (ret != 0 || dest[0] == '\0') {
+		printk("[KERNEL] Registry module '%s' has no Dest\n",
+		    name);
+		return (0);
+	}
+
+	kernel_install_module_cb(name, dest, ctx);
 	return (0);
 }
 
 static void
 net_apply_config(net_iface_t *iface)
 {
-	const char	*ip_str, *mask_str, *gw_str;
+	char		key[128];
 	u32		ip, mask, gw;
+	int		enabled;
 
 	if (!iface || iface->ip_addr != 0) {
 		return;
 	}
-	if (!config_get_bool("net", "enabled", 1)) {
+	if (strlen("Interfaces.") + strlen(iface->name) >= sizeof(key)) {
 		return;
 	}
-	ip_str = config_get_string("net", "ip", "");
-	if (!ip_str || ip_str[0] == '\0' || parse_ipv4(ip_str, &ip) != 0) {
+
+	strcpy(key, "Interfaces.");
+	strcat(key, iface->name);
+	enabled = cm_get_bool_default("NETWORK", key, "Enabled", 1);
+	if (!enabled) {
 		return;
 	}
-	mask_str = config_get_string("net", "netmask", "255.255.255.0");
-	gw_str = config_get_string("net", "gateway", "");
-	if (parse_ipv4(mask_str, &mask) != 0) {
-		mask = 0xFFFFFF00u;
+	if (cm_get_ipv4("NETWORK", key, "Address", &ip) != 0) {
+		return;
 	}
-	if (!gw_str || gw_str[0] == '\0' || parse_ipv4(gw_str, &gw) != 0) {
-		gw = 0;
-	}
+	mask = cm_get_ipv4_default("NETWORK", key, "Netmask",
+	    0xFFFFFF00u);
+	gw = cm_get_ipv4_default("NETWORK", key, "Gateway", 0);
+
 	iface->ip_addr = ip;
 	iface->netmask = mask;
 	iface->gw_addr = gw;
@@ -712,15 +704,23 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 #endif
 	int		ramdisk_ok, fb_ok, drm_atomic_ok, acpi_ok;
 	int		power_ok, pci_ok, watchdog_ok;
-	int		mouse_ok;
+	int		mouse_ok, cm_ok;
 	u32		format_blocks;
-	void		*config_mod;
-	u32		config_sz;
+	void		*cmseed_mod;
+	u32		cmseed_sz, timer_hz;
+	char		default_timer[16];
 	module_copy_ctx_t	mod_ctx;
 
 	safe_mode = (boot_option == 1);
 	debug_mode = (boot_option == 2);
 	disable_apic = ((boot_flags & BOOT_FLAG_DISABLE_APIC) != 0);
+	mboot2_ptr = NULL;
+	mboot1_ptr = NULL;
+	cmseed_mod = NULL;
+	cmseed_sz = 0;
+	timer_hz = 1000;
+	memset(default_timer, 0, sizeof(default_timer));
+	strcpy(default_timer, "apic");
 
 	uart_init();
 	bootmem_init(magic, addr, 0x100000,
@@ -729,17 +729,17 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 
 	if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
 		mboot2_ptr = (multiboot2_info_t *)addr;
-		mb2_find_module(mboot2_ptr, "config",
-		    &config_mod, &config_sz);
-		if (config_mod && config_sz > 0) {
-			config_init_from_data(
-			    (const char *)config_mod,
-			    config_sz);
-			stdio_init();
-			printk("loaded config from "
-			    "(%u bytes)\n", config_sz);
+		mb2_find_module(mboot2_ptr, "cmseed",
+		    &cmseed_mod, &cmseed_sz);
+		if (cmseed_mod && cmseed_sz > 0) {
+			if (hivefs_load_pack(cmseed_mod, cmseed_sz) != 0) {
+				printk("[HIVEFS] failed to load cmseed\n");
+			} else if (cm_init() != 0) {
+				printk("[CM] failed to initialize seed\n");
+			}
 		}
 	}
+	stdio_init();
 
 	init_idt();
 	pit_init();
@@ -780,7 +780,8 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	} else {
 		lapic_init();
 	}
-	timer_init(config_get_int("timer", "hz", 1000));
+	timer_hz = cm_get_u32_default("SYSTEM", "Timer", "Hz", 1000);
+	timer_init(timer_hz);
 	time_init();
 	et_clocksource_init();
 	vm_object_init();
@@ -789,8 +790,9 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	trace_init();
 	__asm__ volatile("sti");
 
-	if (!disable_apic && strcmp(config_get_string("timer", "default_timer",
-	    "apic"), "apic") == 0)
+	cm_get_string_default("SYSTEM", "Timer", "DefaultTimer",
+	    default_timer, sizeof(default_timer), "apic");
+	if (!disable_apic && strcmp(default_timer, "apic") == 0)
 		apic_timer_init();
 
 	syscall_init();
@@ -815,13 +817,6 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 
 		mboot2_ptr = (multiboot2_info_t *)addr;
 		debug_multiboot2_tags(mboot2_ptr);
-
-		if (config_is_initialized()) {
-			printk("config geted\n");
-		} else {
-			printk("config not "
-			    "found\n");
-		}
 
 		drm_boot_init_mb2(mboot2_ptr, 0);
 
@@ -1026,19 +1021,10 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	if (fs_ok) {
 		vfs_init();
 		status_line("vfs", vfs_is_initialized());
-		if (vfs_is_initialized() &&
-		    config_is_initialized()) {
-			vfs_mkdir("/conf");
-			vfs_mkdir("/conf/boot");
-			if (config_attach_file(CONFIG_PATH_BOOT) == 0) {
-				printk("loaded runtime config "
-				    "from %s\n",
-				    CONFIG_PATH_BOOT);
-			} else {
-				printk("fail attach config "
-				    "at %s\n",
-				    CONFIG_PATH_BOOT);
-			}
+		cm_ok = 0;
+		if (vfs_is_initialized()) {
+			cm_ok = (cm_init() == 0);
+			status_line("cm registry", cm_ok);
 		}
 	}
 	if (!fs_ok) {
@@ -1060,11 +1046,14 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 
 		api_init();
 
-		if (config_is_initialized()) {
-			config_foreach_in_section("modules",
-			    kernel_install_module_cb, &mod_ctx);
+		if (cm_is_initialized()) {
+			if (cm_foreach_key("BOOT", "Modules",
+			    kernel_install_registry_module_cb, &mod_ctx) != 0) {
+				printk("[KERNEL] Cannot read registry "
+				    "BOOT.Modules\n");
+			}
 		} else {
-			printk("[KERNEL] No config loaded, "
+			printk("[KERNEL] No registry loaded, "
 			    "cannot install multiboot modules\n");
 		}
 

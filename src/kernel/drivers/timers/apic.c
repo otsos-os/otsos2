@@ -47,7 +47,7 @@ $space %export apic_timer_init
 #include <kernel/interrupts/apic/lapic.h>
 #include <kernel/drivers/eventtimer.h>
 #include <kernel/drivers/timer.h>
-#include <kernel/other/config.h>
+#include <kernel/cm/cm.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -97,7 +97,8 @@ apic_timer_init(void)
 	u64	max_ns;
 	u32	timer_hz;
 
-	enabled = config_get_int("timer", "apic_enabled", 1);
+	enabled = cm_get_bool_default("SYSTEM", "Timer",
+	    "ApicEnabled", 1);
 	if (!enabled)
 		return;
 	if (!lapic_is_enabled())
@@ -110,7 +111,8 @@ apic_timer_init(void)
 		return;
 	}
 
-	quality = config_get_int("timer", "apic_quality", 1000);
+	quality = (int)cm_get_u32_default("SYSTEM", "Timer",
+	    "ApicQuality", 1000);
 	max_ns = 0xFFFFFFFFULL * 1000000000ULL / apic_freq;
 
 	apic_et.et_name = "LAPIC";
@@ -130,7 +132,7 @@ apic_timer_init(void)
 
 	et_register(&apic_et);
 
-	timer_hz = config_get_int("timer", "hz", 1000);
+	timer_hz = cm_get_u32_default("SYSTEM", "Timer", "Hz", 1000);
 	drivers_log("[APIC] switching to lapic timer %u with hz "
 	    " %d\n", timer_hz, quality);
 	timer_reinit(timer_hz);

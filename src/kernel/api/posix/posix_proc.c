@@ -34,7 +34,7 @@
 #include <kernel/drivers/timer.h>
 #include <kernel/event/event.h>
 #include <kernel/gdt.h>
-#include <kernel/other/config.h>
+#include <kernel/cm/cm.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/signal.h>
@@ -1233,19 +1233,18 @@ posix_uname(u64 buf_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	buf = (posix_utsname_t *)buf_u;
 	memset(buf, 0, sizeof(posix_utsname_t));
 
-	strcpy(buf->sysname,
-	    config_get_string("os", "sysname", "otsos2"));
-	strcpy(buf->nodename,
-	    config_get_string("os", "nodename", "localhost"));
-	strcpy(buf->release,
-	    config_get_string("os", "release", "0.0.0"));
-	strcpy(buf->version,
-	    config_get_string("os", "version", "unknown"));
-	strcpy(buf->machine,
-	    config_get_string("os", "machine", "x86_64"));
-	strcpy(buf->domainname,
-	    config_get_string("os", "domainname",
-	    "localdomain"));
+	cm_get_string_default("SYSTEM", "Os", "SysName",
+	    buf->sysname, sizeof(buf->sysname), "otsos2");
+	cm_get_string_default("SYSTEM", "Os", "NodeName",
+	    buf->nodename, sizeof(buf->nodename), "localhost");
+	cm_get_string_default("SYSTEM", "Os", "Release",
+	    buf->release, sizeof(buf->release), "0.0.0");
+	cm_get_string_default("SYSTEM", "Os", "Version",
+	    buf->version, sizeof(buf->version), "unknown");
+	cm_get_string_default("SYSTEM", "Os", "Machine",
+	    buf->machine, sizeof(buf->machine), "x86_64");
+	cm_get_string_default("SYSTEM", "Os", "DomainName",
+	    buf->domainname, sizeof(buf->domainname), "localdomain");
 
 	return (0);
 }

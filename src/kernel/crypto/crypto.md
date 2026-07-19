@@ -95,9 +95,8 @@ The kusr authentication system uses PBKDF2-HMAC-SHA256:
 
 - On first boot, `kusr_init()` generates a 16-byte random salt via the CSPRNG
   and derives a 32-byte key from the user's password with 10,000 iterations.
-- The derived key, salt, and iteration count are stored in `/conf/kernel.toml`
-  as hex strings under the `[kusr]` section (`password_hash`, `password_salt`,
-  `password_iterations`).
+- The derived key, salt, and iteration count are stored in the registry under
+  `SECURITY.Kusr` as `PasswordHash`, `PasswordSalt`, and `Iterations`.
 - `api_kusr_auth()` reads the stored parameters, re-derives the key from the
   supplied password, and compares in constant time.
 

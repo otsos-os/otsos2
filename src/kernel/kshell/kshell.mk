@@ -36,7 +36,7 @@ KSHELL_OBJ += ../bin/kshell_drm.o
 endif
 
 ../bin/kshell.o: kernel/kshell/kshell.c kernel/kshell/kshell.h \
-    kernel/drivers/console/kms_console.h kernel/other/config.h
+    kernel/drivers/console/kms_console.h kernel/cm/cm.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
