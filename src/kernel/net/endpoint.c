@@ -47,17 +47,22 @@ $define %func net_endpoint_match as function with args net_endpoint_t *, net_ifa
 $define %func net_endpoint_enqueue as function with args net_endpoint_t *, net_iface_t *, u32, u32, u16, u16, const u8 *, u16
 $define %func net_endpoint_seq_after as function with args u32, u32
 $define %func net_endpoint_seq_after_eq as function with args u32, u32
+$define %func net_endpoint_tcp_ticks as function with args void
+$define %func net_endpoint_tcp_set_state as procedure with args net_endpoint_t *, int
+$define %func net_endpoint_tcp_can_send as function with args net_endpoint_t *
 $define %func net_endpoint_tcp_window as function with args net_endpoint_t *
 $define %func net_endpoint_tcp_send as function with args net_endpoint_t *, u16, const u8 *, u16
 $define %func net_endpoint_tcp_send_ack as function with args net_endpoint_t *
 $define %func net_endpoint_tcp_send_pending as function with args net_endpoint_t *
 $define %func net_endpoint_tcp_ack_tx as procedure with args net_endpoint_t *, u32
+$define %func net_endpoint_tcp_begin_close as function with args net_endpoint_t *
 $define %func net_endpoint_tcp_rx_push as function with args net_endpoint_t *, const u8 *, u16
 $define %func net_endpoint_tcp_rx_pop as function with args net_endpoint_t *, u8 *, u32
 $define %func net_endpoint_tcp_find as function with args net_iface_t *, u32, u32, u16, u16
 $define %func net_endpoint_tcp_find_listener as function with args net_iface_t *, u32, u16
 $define %func net_endpoint_tcp_child as function with args net_endpoint_t *, net_iface_t *, u32, u32, u16, u16, u32, u16
 $define %func net_endpoint_tcp_queue_accept as function with args net_endpoint_t *
+$define %func net_endpoint_tcp_free as procedure with args net_endpoint_t *
 $define %func net_endpoint_tcp_drop_children as procedure with args net_endpoint_t *
 $define %func net_endpoint_tcp_drop as procedure with args net_endpoint_t *
 $define %func net_endpoint_init as procedure with args void
@@ -90,12 +95,16 @@ $space %internal net_endpoint_bind_conflict, net_endpoint_alloc_port
 $space %internal net_endpoint_valid_addr, net_endpoint_match
 $space %internal net_endpoint_enqueue
 $space %internal net_endpoint_seq_after, net_endpoint_seq_after_eq
+$space %internal net_endpoint_tcp_ticks, net_endpoint_tcp_set_state
+$space %internal net_endpoint_tcp_can_send
 $space %internal net_endpoint_tcp_window, net_endpoint_tcp_send
 $space %internal net_endpoint_tcp_send_ack
 $space %internal net_endpoint_tcp_send_pending, net_endpoint_tcp_ack_tx
+$space %internal net_endpoint_tcp_begin_close
 $space %internal net_endpoint_tcp_rx_push, net_endpoint_tcp_rx_pop
 $space %internal net_endpoint_tcp_find, net_endpoint_tcp_find_listener
 $space %internal net_endpoint_tcp_child, net_endpoint_tcp_queue_accept
+$space %internal net_endpoint_tcp_free
 $space %internal net_endpoint_tcp_drop_children, net_endpoint_tcp_drop
 $space %export net_endpoint_init, net_endpoint_open, net_endpoint_close
 $space %export net_endpoint_bind, net_endpoint_connect
@@ -138,6 +147,11 @@ $space %export net_endpoint_tick
 #define	TCP_STATE_SYN_RECEIVED		3
 #define	TCP_STATE_ESTABLISHED		4
 #define	TCP_STATE_CLOSE_WAIT		5
+#define	TCP_STATE_FIN_WAIT_1		6
+#define	TCP_STATE_FIN_WAIT_2		7
+#define	TCP_STATE_CLOSING		8
+#define	TCP_STATE_LAST_ACK		9
+#define	TCP_STATE_TIME_WAIT		10
 
 typedef struct {
 	u8	data[NET_ENDPOINT_DGRAM_MAX];
@@ -155,6 +169,7 @@ struct net_endpoint {
 	u8			tcp_tx[NET_ENDPOINT_TCP_TX_SIZE];
 	int			tcp_accept_queue[NET_ENDPOINT_TCP_ACCEPT_QUEUE];
 	u64			tcp_last_tx;
+	u64			tcp_deadline;
 	u32			flags;
 	u32			local_ip;
 	u32			peer_ip;
@@ -188,6 +203,8 @@ struct net_endpoint {
 	int			tcp_parent;
 	int			tcp_retries;
 	int			tcp_error;
+	int			tcp_close_pending;
+	int			tcp_orphan;
 	int			ifindex;
 	int			peer_ifindex;
 };
@@ -468,6 +485,47 @@ net_endpoint_seq_after_eq(u32 a, u32 b)
 	return ((s32)(a - b) >= 0);
 }
 
+static u64
+net_endpoint_tcp_ticks(void)
+{
+	if (!timer_is_initialized()) {
+		return (1);
+	}
+	return (timer_get_ticks());
+}
+
+static void
+net_endpoint_tcp_set_state(net_endpoint_t *ep, int state)
+{
+	u64	wait;
+	u32	freq;
+
+	if (!ep) {
+		return;
+	}
+
+	ep->tcp_state = state;
+	ep->tcp_deadline = 0;
+	if (state != TCP_STATE_TIME_WAIT &&
+	    !(state == TCP_STATE_FIN_WAIT_2 && ep->tcp_orphan)) {
+		return;
+	}
+
+	freq = timer_is_initialized() ? timer_get_frequency() : 0;
+	wait = freq == 0 ? 200 : (u64)freq * 2;
+	ep->tcp_deadline = net_endpoint_tcp_ticks() + wait;
+}
+
+static int
+net_endpoint_tcp_can_send(net_endpoint_t *ep)
+{
+	if (!ep || ep->proto != NET_ENDPOINT_PROTO_TCP) {
+		return (0);
+	}
+	return (ep->tcp_state == TCP_STATE_ESTABLISHED ||
+	    ep->tcp_state == TCP_STATE_CLOSE_WAIT);
+}
+
 static u16
 net_endpoint_tcp_window(net_endpoint_t *ep)
 {
@@ -559,10 +617,68 @@ net_endpoint_tcp_send_ack(net_endpoint_t *ep)
 	return (ret);
 }
 
+static int
+net_endpoint_tcp_begin_close(net_endpoint_t *ep)
+{
+	if (!ep || ep->proto != NET_ENDPOINT_PROTO_TCP) {
+		return (0);
+	}
+
+	ep->tcp_orphan = 1;
+	if (ep->tcp_state == TCP_STATE_CLOSED ||
+	    ep->tcp_state == TCP_STATE_LISTEN ||
+	    ep->peer_ip == 0 || ep->peer_port == 0) {
+		net_endpoint_tcp_set_state(ep, TCP_STATE_CLOSED);
+		return (0);
+	}
+
+	if (ep->tcp_state == TCP_STATE_SYN_SENT ||
+	    ep->tcp_state == TCP_STATE_SYN_RECEIVED) {
+		ep->tcp_tx_seq = ep->tcp_snd_nxt;
+		net_endpoint_tcp_send(ep, TCP_FLAG_RST | TCP_FLAG_ACK,
+		    NULL, 0);
+		net_endpoint_tcp_set_state(ep, TCP_STATE_CLOSED);
+		return (0);
+	}
+
+	if (ep->tcp_state == TCP_STATE_FIN_WAIT_1 ||
+	    ep->tcp_state == TCP_STATE_FIN_WAIT_2 ||
+	    ep->tcp_state == TCP_STATE_CLOSING ||
+	    ep->tcp_state == TCP_STATE_LAST_ACK ||
+	    ep->tcp_state == TCP_STATE_TIME_WAIT) {
+		return (1);
+	}
+
+	if (ep->tcp_tx_len != 0 || ep->tcp_tx_flags != 0) {
+		ep->tcp_close_pending = 1;
+		return (1);
+	}
+
+	ep->tcp_tx_seq = ep->tcp_snd_nxt;
+	ep->tcp_tx_len = 0;
+	ep->tcp_tx_flags = TCP_FLAG_FIN | TCP_FLAG_ACK;
+	ep->tcp_snd_nxt++;
+	ep->tcp_retries = 0;
+	ep->tcp_last_tx = 0;
+	ep->tcp_close_pending = 0;
+
+	if (ep->tcp_state == TCP_STATE_CLOSE_WAIT) {
+		net_endpoint_tcp_set_state(ep, TCP_STATE_LAST_ACK);
+	} else {
+		net_endpoint_tcp_set_state(ep, TCP_STATE_FIN_WAIT_1);
+	}
+	if (net_endpoint_tcp_send_pending(ep) != 0) {
+		net_endpoint_tcp_set_state(ep, TCP_STATE_CLOSED);
+		return (0);
+	}
+	return (1);
+}
+
 static void
 net_endpoint_tcp_ack_tx(net_endpoint_t *ep, u32 ack)
 {
 	u32	end;
+	u16	flags;
 
 	if (!ep || ep->proto != NET_ENDPOINT_PROTO_TCP) {
 		return;
@@ -580,13 +696,34 @@ net_endpoint_tcp_ack_tx(net_endpoint_t *ep, u32 ack)
 			ep->tcp_tx_len = 0;
 			ep->tcp_tx_flags = 0;
 			ep->tcp_retries = 0;
+			if (ep->tcp_close_pending) {
+				net_endpoint_tcp_begin_close(ep);
+				return;
+			}
 			proc_wakeup((void *)ep);
 			event_notify_net_change(ep);
 		}
 	} else if (ep->tcp_tx_flags != 0 &&
 	    net_endpoint_seq_after_eq(ack, ep->tcp_snd_nxt)) {
+		flags = ep->tcp_tx_flags;
 		ep->tcp_tx_flags = 0;
 		ep->tcp_retries = 0;
+		if (flags & TCP_FLAG_FIN) {
+			if (ep->tcp_state == TCP_STATE_FIN_WAIT_1) {
+				net_endpoint_tcp_set_state(ep,
+				    TCP_STATE_FIN_WAIT_2);
+			} else if (ep->tcp_state == TCP_STATE_CLOSING) {
+				net_endpoint_tcp_set_state(ep,
+				    TCP_STATE_TIME_WAIT);
+			} else if (ep->tcp_state == TCP_STATE_LAST_ACK) {
+				net_endpoint_tcp_set_state(ep,
+				    TCP_STATE_CLOSED);
+			}
+		}
+		if (ep->tcp_close_pending) {
+			net_endpoint_tcp_begin_close(ep);
+			return;
+		}
 		proc_wakeup((void *)ep);
 		event_notify_net_change(ep);
 	}
@@ -791,6 +928,17 @@ net_endpoint_tcp_queue_accept(net_endpoint_t *ep)
 }
 
 static void
+net_endpoint_tcp_free(net_endpoint_t *ep)
+{
+	if (!ep || !ep->used) {
+		return;
+	}
+	proc_wakeup((void *)ep);
+	event_notify_net_change(ep);
+	memset(ep, 0, sizeof(*ep));
+}
+
+static void
 net_endpoint_tcp_drop(net_endpoint_t *ep)
 {
 	if (!ep || !ep->used) {
@@ -803,9 +951,7 @@ net_endpoint_tcp_drop(net_endpoint_t *ep)
 		net_endpoint_tcp_send(ep, TCP_FLAG_RST | TCP_FLAG_ACK,
 		    NULL, 0);
 	}
-	proc_wakeup((void *)ep);
-	event_notify_net_change(ep);
-	memset(ep, 0, sizeof(*ep));
+	net_endpoint_tcp_free(ep);
 }
 
 static void
@@ -887,22 +1033,16 @@ net_endpoint_close(net_endpoint_t *ep)
 	if (ep->proto == NET_ENDPOINT_PROTO_TCP) {
 		if (ep->tcp_state == TCP_STATE_LISTEN) {
 			net_endpoint_tcp_drop_children(ep);
-		} else if ((ep->tcp_state == TCP_STATE_ESTABLISHED ||
-		    ep->tcp_state == TCP_STATE_CLOSE_WAIT) &&
-		    ep->peer_ip != 0 && ep->peer_port != 0) {
-			ep->tcp_tx_seq = ep->tcp_snd_nxt;
-			net_endpoint_tcp_send(ep, TCP_FLAG_FIN |
-			    TCP_FLAG_ACK, NULL, 0);
-		} else if (ep->tcp_state != TCP_STATE_CLOSED &&
-		    ep->peer_ip != 0 && ep->peer_port != 0) {
-			ep->tcp_tx_seq = ep->tcp_snd_nxt;
-			net_endpoint_tcp_send(ep, TCP_FLAG_RST |
-			    TCP_FLAG_ACK, NULL, 0);
+			net_endpoint_tcp_free(ep);
+			return;
+		}
+		if (net_endpoint_tcp_begin_close(ep)) {
+			proc_wakeup((void *)ep);
+			event_notify_net_change(ep);
+			return;
 		}
 	}
-	proc_wakeup((void *)ep);
-	event_notify_net_change(ep);
-	memset(ep, 0, sizeof(*ep));
+	net_endpoint_tcp_free(ep);
 }
 
 int
@@ -1160,7 +1300,7 @@ net_endpoint_send(net_endpoint_t *ep, const u8 *data, u32 len,
 		if (len == 0) {
 			return (0);
 		}
-		if (ep->tcp_state != TCP_STATE_ESTABLISHED) {
+		if (!net_endpoint_tcp_can_send(ep)) {
 			return (-API_ERR_PIPE_CLOSED);
 		}
 		while (ep->tcp_tx_len != 0 || ep->tcp_tx_flags != 0) {
@@ -1172,7 +1312,7 @@ net_endpoint_send(net_endpoint_t *ep, const u8 *data, u32 len,
 			if (!ep->used) {
 				return (-API_ERR_BAD_HANDLE);
 			}
-			if (ep->tcp_state != TCP_STATE_ESTABLISHED) {
+			if (!net_endpoint_tcp_can_send(ep)) {
 				return (-API_ERR_PIPE_CLOSED);
 			}
 		}
@@ -1388,7 +1528,7 @@ net_endpoint_writable(net_endpoint_t *ep)
 		return (0);
 	}
 	if (ep->proto == NET_ENDPOINT_PROTO_TCP) {
-		return (ep->tcp_state == TCP_STATE_ESTABLISHED &&
+		return (net_endpoint_tcp_can_send(ep) &&
 		    ep->tcp_tx_len == 0 && ep->tcp_tx_flags == 0);
 	}
 	return (1);
@@ -1489,16 +1629,17 @@ net_endpoint_tcp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
 
 	if (flags & TCP_FLAG_RST) {
 		ep->tcp_error = API_ERR_IO;
-		ep->tcp_state = TCP_STATE_CLOSED;
+		net_endpoint_tcp_set_state(ep, TCP_STATE_CLOSED);
+		if (ep->tcp_orphan) {
+			net_endpoint_tcp_free(ep);
+			return (1);
+		}
 		proc_wakeup((void *)ep);
 		event_notify_net_change(ep);
 		return (1);
 	}
 
 	ep->tcp_peer_win = window;
-	if (flags & TCP_FLAG_ACK) {
-		net_endpoint_tcp_ack_tx(ep, ack);
-	}
 
 	if (ep->tcp_state == TCP_STATE_SYN_SENT) {
 		if ((flags & (TCP_FLAG_SYN | TCP_FLAG_ACK)) ==
@@ -1506,7 +1647,8 @@ net_endpoint_tcp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
 		    ack == ep->tcp_snd_nxt) {
 			ep->tcp_irs = seq;
 			ep->tcp_rcv_nxt = seq + 1;
-			ep->tcp_state = TCP_STATE_ESTABLISHED;
+			ep->tcp_snd_una = ack;
+			net_endpoint_tcp_set_state(ep, TCP_STATE_ESTABLISHED);
 			ep->tcp_tx_flags = 0;
 			ep->tcp_retries = 0;
 			net_endpoint_tcp_send_ack(ep);
@@ -1520,7 +1662,8 @@ net_endpoint_tcp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
 	if (ep->tcp_state == TCP_STATE_SYN_RECEIVED) {
 		if ((flags & TCP_FLAG_ACK) &&
 		    net_endpoint_seq_after_eq(ack, ep->tcp_snd_nxt)) {
-			ep->tcp_state = TCP_STATE_ESTABLISHED;
+			ep->tcp_snd_una = ack;
+			net_endpoint_tcp_set_state(ep, TCP_STATE_ESTABLISHED);
 			ep->tcp_tx_flags = 0;
 			ep->tcp_retries = 0;
 			if (net_endpoint_tcp_queue_accept(ep) != 0) {
@@ -1537,14 +1680,29 @@ net_endpoint_tcp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
 		return (1);
 	}
 
+	if (flags & TCP_FLAG_ACK) {
+		net_endpoint_tcp_ack_tx(ep, ack);
+		if (ep->tcp_orphan && ep->tcp_state == TCP_STATE_CLOSED) {
+			net_endpoint_tcp_free(ep);
+			return (1);
+		}
+	}
+
 	if (ep->tcp_state != TCP_STATE_ESTABLISHED &&
-	    ep->tcp_state != TCP_STATE_CLOSE_WAIT) {
+	    ep->tcp_state != TCP_STATE_CLOSE_WAIT &&
+	    ep->tcp_state != TCP_STATE_FIN_WAIT_1 &&
+	    ep->tcp_state != TCP_STATE_FIN_WAIT_2 &&
+	    ep->tcp_state != TCP_STATE_CLOSING &&
+	    ep->tcp_state != TCP_STATE_TIME_WAIT) {
 		return (1);
 	}
 
 	end_seq = seq;
 	if (len != 0 && seq == ep->tcp_rcv_nxt) {
-		if (net_endpoint_tcp_rx_push(ep, data, len)) {
+		if (ep->tcp_orphan) {
+			ep->tcp_rcv_nxt += len;
+			end_seq = ep->tcp_rcv_nxt;
+		} else if (net_endpoint_tcp_rx_push(ep, data, len)) {
 			ep->tcp_rcv_nxt += len;
 			end_seq = ep->tcp_rcv_nxt;
 		}
@@ -1556,7 +1714,13 @@ net_endpoint_tcp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
 	if ((flags & TCP_FLAG_FIN) && end_seq == ep->tcp_rcv_nxt) {
 		ep->tcp_rcv_nxt++;
 		if (ep->tcp_state == TCP_STATE_ESTABLISHED) {
-			ep->tcp_state = TCP_STATE_CLOSE_WAIT;
+			net_endpoint_tcp_set_state(ep, TCP_STATE_CLOSE_WAIT);
+		} else if (ep->tcp_state == TCP_STATE_FIN_WAIT_1) {
+			net_endpoint_tcp_set_state(ep, TCP_STATE_CLOSING);
+		} else if (ep->tcp_state == TCP_STATE_FIN_WAIT_2) {
+			net_endpoint_tcp_set_state(ep, TCP_STATE_TIME_WAIT);
+		} else if (ep->tcp_state == TCP_STATE_TIME_WAIT) {
+			net_endpoint_tcp_set_state(ep, TCP_STATE_TIME_WAIT);
 		}
 		net_endpoint_tcp_send_ack(ep);
 		proc_wakeup((void *)ep);
@@ -1589,6 +1753,10 @@ net_endpoint_tick(void)
 		if (!ep->used || ep->proto != NET_ENDPOINT_PROTO_TCP) {
 			continue;
 		}
+		if (ep->tcp_deadline != 0 && now >= ep->tcp_deadline) {
+			net_endpoint_tcp_free(ep);
+			continue;
+		}
 		if (ep->tcp_tx_flags == 0 && ep->tcp_tx_len == 0) {
 			continue;
 		}
@@ -1597,10 +1765,10 @@ net_endpoint_tick(void)
 		}
 		if (ep->tcp_retries >= NET_ENDPOINT_TCP_MAX_RETRIES) {
 			ep->tcp_error = API_ERR_IO;
-			ep->tcp_state = TCP_STATE_CLOSED;
+			net_endpoint_tcp_set_state(ep, TCP_STATE_CLOSED);
 			proc_wakeup((void *)ep);
 			event_notify_net_change(ep);
-			if (ep->tcp_parent >= 0) {
+			if (ep->tcp_parent >= 0 || ep->tcp_orphan) {
 				net_endpoint_tcp_drop(ep);
 			}
 			continue;
