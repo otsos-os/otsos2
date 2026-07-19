@@ -1,6 +1,6 @@
 # Initial boot registry hive.
 
-hive BOOT {
+hive BOOT @access(read=user, add=kusr, edit=kusr) {
 	key Modules.init {
 		string Dest = "/bin/init"
 	}

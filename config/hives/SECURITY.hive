@@ -1,6 +1,6 @@
 # Initial security registry hive.
 
-hive SECURITY {
+hive SECURITY @access(read=kusr, add=kusr, edit=kusr) {
 	key Kusr @protected {
 		bool Configured = false
 		string Kdf = "pbkdf2-hmac-sha256"

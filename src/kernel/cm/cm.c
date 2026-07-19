@@ -49,6 +49,8 @@ $define %func cm_build_value_path as function with args hive, key, value, out
 $define %func cm_lookup_node as function with args hive, key, out
 $define %func cm_lookup_value as function with args hive, key, value, out
 $define %func cm_read_exact as function with args hive, key, value, buf
+$define %func cm_access_get as function with args flags, op
+$define %func cm_access_allowed as function with args level, is_kusr
 $define %func cm_mount_registry as function with args void
 $define %func cm_init as function with args void
 $define %func cm_is_initialized as function with args void
@@ -57,8 +59,10 @@ $define %func cm_foreach_key as function with args hive, key, cb, ctx
 $define %func cm_key_exists as function with args hive, key
 $define %func cm_value_info as function with args hive, key, value, type
 $define %func cm_enum_entry as function with args hive, key, index, entry
+$define %func cm_check_access as function with args hive, key, value, op
 $define %func cm_register_consumer as function with args id, name, update
 $define %func cm_update_consumer as function with args id, flags
+$define %func cm_update_consumer_user as function with args id, flags, kusr
 $define %func cm_read_value as function with args hive, key, value, buf
 $define %func cm_get_bool as function with args hive, key, value, out
 $define %func cm_get_i32 as function with args hive, key, value, out
@@ -89,10 +93,13 @@ $define %func cm_get_string_default as function with args hive, key, value, out
 $space %internal cm_str_copy, cm_path_put, cm_path_put_name
 $space %internal cm_path_put_key, cm_build_node_path
 $space %internal cm_build_value_path, cm_lookup_node, cm_lookup_value
-$space %internal cm_read_exact, cm_mount_registry
+$space %internal cm_read_exact, cm_access_get, cm_access_allowed
+$space %internal cm_mount_registry
 $space %export cm_init, cm_is_initialized, cm_mount_path
 $space %export cm_foreach_key, cm_key_exists, cm_value_info
-$space %export cm_enum_entry, cm_register_consumer, cm_update_consumer
+$space %export cm_enum_entry, cm_check_access
+$space %export cm_register_consumer, cm_update_consumer
+$space %export cm_update_consumer_user
 $space %export cm_read_value, cm_get_bool, cm_get_i32
 $space %export cm_get_u32, cm_get_u64, cm_get_ipv4, cm_get_string
 $space %export cm_create_key, cm_delete_key, cm_set_value
@@ -360,6 +367,39 @@ cm_read_exact(const char *hive, const char *key, const char *value,
 	return (0);
 }
 
+static u32
+cm_access_get(u32 flags, u32 op)
+{
+	u32	shift;
+
+	switch (op) {
+	case CM_ACCESS_READ:
+		shift = HIVEFS_ACCESS_READ_SHIFT;
+		break;
+	case CM_ACCESS_ADD:
+		shift = HIVEFS_ACCESS_ADD_SHIFT;
+		break;
+	case CM_ACCESS_EDIT:
+		shift = HIVEFS_ACCESS_EDIT_SHIFT;
+		break;
+	default:
+		return (HIVEFS_ACCESS_INHERIT);
+	}
+	return ((flags >> shift) & HIVEFS_ACCESS_MASK);
+}
+
+static int
+cm_access_allowed(u32 level, int is_kusr)
+{
+	if (level == HIVEFS_ACCESS_USER) {
+		return (1);
+	}
+	if (level == HIVEFS_ACCESS_KUSR && is_kusr) {
+		return (1);
+	}
+	return (0);
+}
+
 static int
 cm_mount_registry(void)
 {
@@ -518,6 +558,33 @@ cm_enum_entry(const char *hive, const char *key, u32 index,
 }
 
 int
+cm_check_access(const char *hive, const char *key, const char *value,
+    u32 op, int is_kusr)
+{
+	u32	flags, level;
+	int	ret;
+
+	if (!g_cm_initialized) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	if (op != CM_ACCESS_READ && op != CM_ACCESS_ADD &&
+	    op != CM_ACCESS_EDIT) {
+		return (-API_ERR_BAD_VALUE);
+	}
+
+	flags = 0;
+	ret = hivefs_access_info(hive, key, value, &flags);
+	if (ret != 0) {
+		return (ret);
+	}
+	level = cm_access_get(flags, op);
+	if (cm_access_allowed(level, is_kusr)) {
+		return (0);
+	}
+	return (-API_ERR_PERM);
+}
+
+int
 cm_register_consumer(u32 id, const char *name, cm_consumer_update_t update)
 {
 	cm_consumer_t	*consumer;
@@ -572,6 +639,15 @@ cm_update_consumer(u32 id, u32 flags)
 		return (consumer->update(flags));
 	}
 	return (-API_ERR_NOT_FOUND);
+}
+
+int
+cm_update_consumer_user(u32 id, u32 flags, int is_kusr)
+{
+	if (!is_kusr) {
+		return (-API_ERR_PERM);
+	}
+	return (cm_update_consumer(id, flags));
 }
 
 int

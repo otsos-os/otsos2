@@ -1,6 +1,6 @@
 # Initial network registry hive.
 
-hive NETWORK {
+hive NETWORK @access(read=user, add=kusr, edit=kusr) {
 	key Interfaces.eth0 {
 		bool Enabled = true
 		bool Dhcp = false

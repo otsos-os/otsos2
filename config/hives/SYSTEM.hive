@@ -1,6 +1,6 @@
 # Initial system registry hive.
 
-hive SYSTEM {
+hive SYSTEM @access(read=user, add=kusr, edit=kusr) {
 	key Os {
 		string SysName = "otsos2"
 		string NodeName = "localhost"

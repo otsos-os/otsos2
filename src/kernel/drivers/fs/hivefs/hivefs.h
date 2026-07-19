@@ -40,6 +40,7 @@ $define %func hivefs_delete_key as function with args hive, key
 $define %func hivefs_set_value as function with args hive, key, value, type
 $define %func hivefs_delete_value as function with args hive, key, value
 $define %func hivefs_value_info as function with args hive, key, value, type
+$define %func hivefs_access_info as function with args hive, key, value, flags
 $define %func hivefs_back_ops as function with args void
 
 */
@@ -51,7 +52,7 @@ $space %export hivefs_is_loaded, hivefs_set_store_path
 $space %export hivefs_load_store, hivefs_sync
 $space %export hivefs_create_key, hivefs_delete_key
 $space %export hivefs_set_value, hivefs_delete_value
-$space %export hivefs_value_info
+$space %export hivefs_value_info, hivefs_access_info
 $space %export hivefs_back_ops
 
 */
@@ -69,6 +70,18 @@ $space %export hivefs_back_ops
 #define	HIVEFS_TYPE_IPV4		6
 #define	HIVEFS_TYPE_BYTES		7
 #define	HIVEFS_TYPE_MULTI_STRING	8
+
+#define	HIVEFS_ACCESS_INHERIT	0
+#define	HIVEFS_ACCESS_USER	1
+#define	HIVEFS_ACCESS_KUSR	2
+#define	HIVEFS_ACCESS_MASK	0x3
+#define	HIVEFS_ACCESS_READ_SHIFT	16
+#define	HIVEFS_ACCESS_ADD_SHIFT	18
+#define	HIVEFS_ACCESS_EDIT_SHIFT	20
+#define	HIVEFS_ACCESS_DEFAULT					\
+	((HIVEFS_ACCESS_USER << HIVEFS_ACCESS_READ_SHIFT) |	\
+	(HIVEFS_ACCESS_KUSR << HIVEFS_ACCESS_ADD_SHIFT) |	\
+	(HIVEFS_ACCESS_KUSR << HIVEFS_ACCESS_EDIT_SHIFT))
 
 void				hivefs_reset(void);
 int				hivefs_load_pack(const void *data, u32 size);
@@ -88,6 +101,9 @@ int				hivefs_delete_value(const char *hive,
 int				hivefs_value_info(const char *hive,
 				    const char *key, const char *value,
 				    u32 *type, u32 *size);
+int				hivefs_access_info(const char *hive,
+				    const char *key, const char *value,
+				    u32 *flags);
 const vfs_back_ops_t		*hivefs_back_ops(void);
 
 #endif

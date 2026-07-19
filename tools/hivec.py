@@ -44,6 +44,25 @@ ATTR_FLAGS = {
     "boot": 0x00000008,
 }
 
+ACCESS_INHERIT = 0
+ACCESS_USER = 1
+ACCESS_KUSR = 2
+ACCESS_MASK = 0x3
+ACCESS_SHIFTS = {
+    "read": 16,
+    "add": 18,
+    "edit": 20,
+}
+ACCESS_SUBJECTS = {
+    "user": ACCESS_USER,
+    "kusr": ACCESS_KUSR,
+}
+ACCESS_DEFAULT = (
+    (ACCESS_USER << ACCESS_SHIFTS["read"]) |
+    (ACCESS_KUSR << ACCESS_SHIFTS["add"]) |
+    (ACCESS_KUSR << ACCESS_SHIFTS["edit"])
+)
+
 
 @dataclass
 class Token:
@@ -181,7 +200,7 @@ class Lexer:
                 continue
             line = self.line
             col = self.col
-            if ch in "{}=@[],":
+            if ch in "{}=@[],()":
                 self.add(ch, ch, line, col)
                 self.advance()
                 continue
@@ -236,10 +255,39 @@ class Parser:
         flags = 0
         while self.accept("@"):
             name = self.expect_id()
+            if name == "access":
+                flags = self.parse_access(flags)
+                continue
             if name not in ATTR_FLAGS:
                 raise self.error(self.cur(), f"unknown attr @{name}")
             flags |= ATTR_FLAGS[name]
         return flags
+
+    def parse_access(self, flags: int) -> int:
+        seen = set()
+        self.expect("(")
+        if self.accept(")"):
+            raise self.error(self.cur(), "@access needs at least one rule")
+        while True:
+            op = self.expect_id()
+            if op not in ACCESS_SHIFTS:
+                raise self.error(self.cur(), f"unknown access op {op}")
+            if op in seen:
+                raise self.error(self.cur(), f"duplicate access op {op}")
+            seen.add(op)
+            self.expect("=")
+            subject = self.expect_id()
+            if subject not in ACCESS_SUBJECTS:
+                raise self.error(
+                    self.cur(),
+                    f"unknown access subject {subject}",
+                )
+            shift = ACCESS_SHIFTS[op]
+            flags &= ~(ACCESS_MASK << shift)
+            flags |= ACCESS_SUBJECTS[subject] << shift
+            if self.accept(")"):
+                return flags
+            self.expect(",")
 
     def parse_string_list(self) -> list[str]:
         vals = []
@@ -340,6 +388,8 @@ class Parser:
         self.expect_id("hive")
         name = self.expect_id()
         flags = self.parse_attrs()
+        if not access_defined(flags):
+            flags |= ACCESS_DEFAULT
         hive = Hive(name, flags)
         seen = set()
         self.expect("{")
@@ -371,6 +421,13 @@ class StringTable:
 def align(buf: bytearray, n: int) -> None:
     while len(buf) % n != 0:
         buf.append(0)
+
+
+def access_defined(flags: int) -> bool:
+    for shift in ACCESS_SHIFTS.values():
+        if ((flags >> shift) & ACCESS_MASK) != ACCESS_INHERIT:
+            return True
+    return False
 
 
 def parse_file(path: str) -> Hive:

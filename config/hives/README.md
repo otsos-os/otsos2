@@ -13,7 +13,7 @@ opaque Multiboot module.  The future kernel `cm` subsystem will parse it.
 ## Syntax
 
 ```text
-hive SYSTEM {
+hive SYSTEM @access(read=user, add=kusr, edit=kusr) {
 	key Network.Interfaces.eth0 @boot {
 		bool Enabled = true
 		ipv4 Address = 10.0.2.15
@@ -42,7 +42,28 @@ Supported attributes:
 @volatile
 @readonly
 @boot
+@access(read=user, add=kusr, edit=kusr)
 ```
+
+`@access` supports only:
+
+```text
+read
+add
+edit
+```
+
+Subjects are only:
+
+```text
+user
+kusr
+```
+
+Access is inherited from value to key, parent keys and hive defaults.
+If a hive does not specify access explicitly, the default is
+`read=user, add=kusr, edit=kusr`.  `regUpd()` is not a hive permission; CM
+checks it separately.
 
 ## Binary Format
 

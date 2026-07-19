@@ -1,7 +1,10 @@
 # Initial software registry hive.
 
-hive SOFTWARE {
+hive SOFTWARE @access(read=user, add=kusr, edit=kusr) {
 	key Otsos {
 		string Vendor = "otsos team"
+	}
+
+	key User @access(read=user, add=user, edit=user) {
 	}
 }

@@ -64,6 +64,10 @@ $define %func hivefs_find_hive_name as function with args const char *
 $define %func hivefs_find_hive as function with args const char *, u32
 $define %func hivefs_find_child as function with args hive, parent, name, len
 $define %func hivefs_find_value as function with args hive, node, name, len
+$define %func hivefs_access_get as function with args flags, shift
+$define %func hivefs_access_merge_one as procedure with args flags, shift, level
+$define %func hivefs_access_merge as procedure with args flags, read, add, edit
+$define %func hivefs_access_pack as function with args read, add, edit
 $define %func hivefs_free_hive as procedure with args hive
 $define %func hivefs_reserve_nodes as function with args hive, needed
 $define %func hivefs_reserve_values as function with args hive, needed
@@ -107,6 +111,7 @@ $define %func hivefs_delete_key as function with args hive, key
 $define %func hivefs_set_value as function with args hive, key, value, type
 $define %func hivefs_delete_value as function with args hive, key, value
 $define %func hivefs_value_info as function with args hive, key, value, type
+$define %func hivefs_access_info as function with args hive, key, value, flags
 $define %func hivefs_back_ops as function with args void
 
 */
@@ -120,6 +125,8 @@ $space %internal hivefs_name_eq
 $space %internal hivefs_strip_prefix, hivefs_next_component
 $space %internal hivefs_next_key_component, hivefs_find_hive_name
 $space %internal hivefs_find_hive, hivefs_find_child, hivefs_find_value
+$space %internal hivefs_access_get, hivefs_access_merge_one
+$space %internal hivefs_access_merge, hivefs_access_pack
 $space %internal hivefs_free_hive, hivefs_reserve_nodes
 $space %internal hivefs_reserve_values, hivefs_import_hive
 $space %internal hivefs_find_node_path, hivefs_path_append_key
@@ -141,7 +148,7 @@ $space %export hivefs_is_loaded, hivefs_set_store_path
 $space %export hivefs_load_store, hivefs_sync
 $space %export hivefs_create_key, hivefs_delete_key
 $space %export hivefs_set_value, hivefs_delete_value
-$space %export hivefs_value_info
+$space %export hivefs_value_info, hivefs_access_info
 $space %export hivefs_back_ops
 
 */
@@ -661,6 +668,42 @@ hivefs_find_value(hivefs_hive_t *hive, u32 node, const char *part,
 		}
 	}
 	return (-1);
+}
+
+static u32
+hivefs_access_get(u32 flags, u32 shift)
+{
+	return ((flags >> shift) & HIVEFS_ACCESS_MASK);
+}
+
+static void
+hivefs_access_merge_one(u32 flags, u32 shift, u32 *level)
+{
+	u32	got;
+
+	if (!level || *level != HIVEFS_ACCESS_INHERIT) {
+		return;
+	}
+	got = hivefs_access_get(flags, shift);
+	if (got != HIVEFS_ACCESS_INHERIT) {
+		*level = got;
+	}
+}
+
+static void
+hivefs_access_merge(u32 flags, u32 *read, u32 *add, u32 *edit)
+{
+	hivefs_access_merge_one(flags, HIVEFS_ACCESS_READ_SHIFT, read);
+	hivefs_access_merge_one(flags, HIVEFS_ACCESS_ADD_SHIFT, add);
+	hivefs_access_merge_one(flags, HIVEFS_ACCESS_EDIT_SHIFT, edit);
+}
+
+static u32
+hivefs_access_pack(u32 read, u32 add, u32 edit)
+{
+	return ((read << HIVEFS_ACCESS_READ_SHIFT) |
+	    (add << HIVEFS_ACCESS_ADD_SHIFT) |
+	    (edit << HIVEFS_ACCESS_EDIT_SHIFT));
 }
 
 static void
@@ -2033,6 +2076,67 @@ hivefs_value_info(const char *hive_name, const char *key,
 	if (size) {
 		*size = value->size;
 	}
+	return (0);
+}
+
+int
+hivefs_access_info(const char *hive_name, const char *key,
+    const char *value_name, u32 *flags)
+{
+	hivefs_hive_t	*hive;
+	hivefs_value_t	*value;
+	u32		node_idx, name_len;
+	u32		read, add, edit;
+	int		idx, ret;
+
+	if (!g_hivefs.loaded || !flags) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	idx = hivefs_find_hive_name(hive_name);
+	if (idx < 0) {
+		return (-API_ERR_NOT_FOUND);
+	}
+
+	hive = &g_hivefs.hives[idx];
+	ret = hivefs_find_node_path(hive, key, 0, &node_idx);
+	if (ret != 0) {
+		return (ret);
+	}
+
+	read = HIVEFS_ACCESS_INHERIT;
+	add = HIVEFS_ACCESS_INHERIT;
+	edit = HIVEFS_ACCESS_INHERIT;
+
+	if (value_name && value_name[0] != '\0') {
+		name_len = (u32)strlen(value_name);
+		idx = hivefs_find_value(hive, node_idx, value_name,
+		    name_len);
+		if (idx < 0) {
+			return (-API_ERR_NOT_FOUND);
+		}
+		value = &hive->values[idx];
+		if (value->deleted) {
+			return (-API_ERR_NOT_FOUND);
+		}
+		hivefs_access_merge(value->flags, &read, &add, &edit);
+	}
+
+	while (1) {
+		if (node_idx >= hive->node_count ||
+		    hive->nodes[node_idx].deleted) {
+			return (-API_ERR_NOT_FOUND);
+		}
+		hivefs_access_merge(hive->nodes[node_idx].flags,
+		    &read, &add, &edit);
+		if (node_idx == 0) {
+			break;
+		}
+		node_idx = hive->nodes[node_idx].parent;
+	}
+
+	hivefs_access_merge(hive->flags, &read, &add, &edit);
+	hivefs_access_merge(HIVEFS_ACCESS_DEFAULT, &read, &add, &edit);
+	*flags = hivefs_access_pack(read, add, edit);
 	return (0);
 }
 

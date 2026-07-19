@@ -156,7 +156,7 @@ void proc_wakeup(void *channel);
 void proc_wakeup_one(void *channel);
 static inline int proc_has_privilege(const process_t *proc)
 {
-	return (proc != NULL && (proc->kusr_auth || proc->euid == 0));
+	return (proc != NULL && proc->kusr_auth);
 }
 
 /* Global process data */

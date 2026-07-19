@@ -43,8 +43,10 @@ $define %func cm_foreach_key as function with args hive, key, cb, ctx
 $define %func cm_key_exists as function with args hive, key
 $define %func cm_value_info as function with args hive, key, value, type
 $define %func cm_enum_entry as function with args hive, key, index, entry
+$define %func cm_check_access as function with args hive, key, value, op
 $define %func cm_register_consumer as function with args id, name, update
 $define %func cm_update_consumer as function with args id, flags
+$define %func cm_update_consumer_user as function with args id, flags, kusr
 $define %func cm_read_value as function with args hive, key, value, buf
 $define %func cm_get_bool as function with args hive, key, value, out
 $define %func cm_get_i32 as function with args hive, key, value, out
@@ -74,7 +76,9 @@ $define %func cm_get_string_default as function with args hive, key, value, out
 
 $space %export cm_init, cm_is_initialized, cm_mount_path
 $space %export cm_foreach_key, cm_key_exists, cm_value_info
-$space %export cm_enum_entry, cm_register_consumer, cm_update_consumer
+$space %export cm_enum_entry, cm_check_access
+$space %export cm_register_consumer, cm_update_consumer
+$space %export cm_update_consumer_user
 $space %export cm_read_value, cm_get_bool, cm_get_i32
 $space %export cm_get_u32, cm_get_u64, cm_get_ipv4, cm_get_string
 $space %export cm_create_key, cm_delete_key, cm_set_value
@@ -105,6 +109,13 @@ $space %export cm_get_string_default
 #define	CM_ENTRY_KEY		1
 #define	CM_ENTRY_VALUE		2
 
+#define	CM_ACCESS_READ		1
+#define	CM_ACCESS_ADD		2
+#define	CM_ACCESS_EDIT		3
+
+#define	CM_SUBJECT_USER		0
+#define	CM_SUBJECT_KUSR		1
+
 #define	CM_CONSUMER_NET		1
 #define	CM_CONSUMER_SCHEDULER	2
 #define	CM_CONSUMER_KUSR	3
@@ -129,9 +140,12 @@ int		cm_value_info(const char *hive, const char *key,
 		    const char *value, u32 *type, u32 *size);
 int		cm_enum_entry(const char *hive, const char *key,
 		    u32 index, cm_entry_t *entry);
+int		cm_check_access(const char *hive, const char *key,
+		    const char *value, u32 op, int is_kusr);
 int		cm_register_consumer(u32 id, const char *name,
 		    cm_consumer_update_t update);
 int		cm_update_consumer(u32 id, u32 flags);
+int		cm_update_consumer_user(u32 id, u32 flags, int is_kusr);
 int		cm_read_value(const char *hive, const char *key,
 		    const char *value, void *buf, u32 bufsize,
 		    u32 *bytes_read);
