@@ -37,8 +37,8 @@ Monolithic kernel with the following rough layers:
 4. Process/threading (`src/kernel/process.c`, `thread.c`, `scheduler.c`) —
    process table, threads, context switch, round-robin scheduler, signals, futex.
 5. Drivers (`src/kernel/drivers/*`) — disk (ramdisk, optional PATA), ChainFS,
-   VFS, devfs, keyboard, mouse, console, UART, timer, RTC, watchdog, ACPI,
-   PCI, virtio-gpu, DRM/KMS.
+   VFS, devfs, keyboard, mouse, console, UART, timer, RTC, watchdog, PMU,
+   ACPI, PCI, virtio-gpu, DRM/KMS.
 6. Syscalls (`src/kernel/syscall.c`, `src/kernel/api/*`) — native ABI plus
    optional Linux/POSIX personality layer.
 7. Userspace (`init/`, `ports/`) — small freestanding programs loaded as
@@ -57,8 +57,12 @@ Monolithic kernel with the following rough layers:
 - `mm/` — `bootmem.c`, `kmem.c`, `uma.c`, `vm/pmap.c`, `vm/vm_page.c`,
   `vm/vm_object.c`, `vm/vm_map.c`, `vm/vm_pager.c`.
 - `drivers/` — storage, filesystem, video, keyboard, timer, ACPI, power, PCI,
-  watchdog. UART init uses a scratch-register probe; do not bring back the old
-  loopback-only availability check.
+  watchdog, PMU. UART init uses a scratch-register probe; do not bring back
+  the old loopback-only availability check.
+- `drivers/pmu/` — CPU performance monitoring driver. Owns CPUID/MSR PMU
+  detection, counter programming, per-CPU counter state, and `drivers_log`
+  status lines. Trace code should consume it through the PMU API instead of
+  programming processor counters directly.
 - `drivers/fs/chainFS/` — custom filesystem used for root disk (512-byte blocks,
   superblock + file table + block map + chained data). Tooling in `chainfs.py`.
 - `drivers/fs/vfs/` — tiny vnode-based VFS; used by POSIX personality and devfs.
@@ -75,7 +79,7 @@ Monolithic kernel with the following rough layers:
 - `event/` — kqueue-style event system (read, write, timer, proc, signal, user,
   keyboard and mouse filters).
 - `trace/` — kernel observability core: event registry, per-CPU ring buffers,
-  trace sessions, PMU counter sampling, syscall/IRQ/scheduler/kqueue
+  trace sessions, PMU samples from `drivers/pmu`, syscall/IRQ/scheduler/kqueue
   tracepoints. Runtime toggles live under `[trace]` in `src/config.toml`.
 - `kshell/` — optional kernel debug shell configured via `config.toml`.
 - `crypto/` — SHA-256, HMAC-SHA256, PBKDF2, ChaCha20, RNG, plus `kusr`

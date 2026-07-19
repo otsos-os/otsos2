@@ -224,6 +224,7 @@ USERADDR_O = ../bin/useraddr.o
 SCHEDULER_O = ../bin/scheduler.o
 TRACE_O = ../bin/trace.o
 TRACE_PMU_O = ../bin/trace_pmu.o
+PMU_O = ../bin/pmu.o
 ACPI_O = ../bin/acpi.o
 ACPI_TABLES_O = ../bin/acpi_tables.o
 SMP_O = ../bin/smp.o
@@ -311,7 +312,7 @@ CMOS_RTC_O = ../bin/cmos_rtc.o
 OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDIO_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
       $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(API_NET_O) $(API_TRACE_O) $(PIPE_O) $(DATA_DIR_O) $(CLONE_O) $(SYSCALL_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(SESSION_O) $(THREAD_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(FS_META_O) $(MOUNT_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
-      $(TRACE_O) $(TRACE_PMU_O) \
+      $(TRACE_O) $(TRACE_PMU_O) $(PMU_O) \
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
@@ -331,7 +332,7 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(API_TIME_O) $(TERM_POWER_O) $(TERM_INFO_O) $(INPUT_O) \
       $(TIME_O) $(CLOCKSOURCE_O) $(ET_CLOCKSOURCE_O) $(CMOS_RTC_O)
 
-.PHONY: all ask_version check_build_tools check_run_tools check_bios_run_tools
+.PHONY: all ask_version check_build_tools check_run_tools check_bios_run_tools kvm
 
 all: check_build_tools ask_version $(ISO_IMAGE)
 
@@ -975,7 +976,11 @@ $(TRACE_O): kernel/trace/trace.c kernel/trace/trace.h kernel/other/config.h kern
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(TRACE_PMU_O): kernel/trace/trace_pmu.c kernel/trace/trace.h kernel/other/config.h
+$(TRACE_PMU_O): kernel/trace/trace_pmu.c kernel/trace/trace.h kernel/drivers/pmu/pmu.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(PMU_O): kernel/drivers/pmu/pmu.c kernel/drivers/pmu/pmu.h kernel/other/config.h kernel/smp/smp.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1351,6 +1356,10 @@ OVMF ?= /usr/share/ovmf/OVMF.fd
 run: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (UEFI)"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset -smp 2 -m 512
+
+kvm: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
+	@echo "  RUN     QEMU/KVM (UEFI)"
+	@$(QEMU) -enable-kvm -cpu host,pmu=on -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset -smp 2 -m 512
 
 run_nodis: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (UEFI, terminal)"

@@ -4,20 +4,19 @@ $define %type u32 as 32 bit unsigned
 $define %type u64 as 64 bit unsigned
 $define %type int as 32 bit signed
 
-$define %func trace_pmu_init as procedure with args void
-$define %func trace_pmu_cpu_online as procedure with args int
-$define %func trace_pmu_sample as procedure with args int, u64 *, u32
-$define %func trace_pmu_counter_count as function with args void
-$define %func trace_pmu_counter_name as function with args u32
-$define %func trace_pmu_counter_active as function with args u32
+$define %func pmu_init as procedure with args void
+$define %func pmu_cpu_online as procedure with args int
+$define %func pmu_sample as procedure with args int, u64 *, u32
+$define %func pmu_counter_count as function with args void
+$define %func pmu_counter_name as function with args u32
+$define %func pmu_counter_active as function with args u32
 
 */
 
 /* !SPACE!
 
-$space %export trace_pmu_init, trace_pmu_cpu_online
-$space %export trace_pmu_sample, trace_pmu_counter_count
-$space %export trace_pmu_counter_name, trace_pmu_counter_active
+$space %export pmu_init, pmu_cpu_online, pmu_sample
+$space %export pmu_counter_count, pmu_counter_name, pmu_counter_active
 
 */
 
@@ -47,41 +46,26 @@ $space %export trace_pmu_counter_name, trace_pmu_counter_active
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/drivers/pmu/pmu.h>
-#include <kernel/trace/trace.h>
+#ifndef KERNEL_DRIVERS_PMU_PMU_H
+#define KERNEL_DRIVERS_PMU_PMU_H
 
-void
-trace_pmu_init(void)
-{
-	pmu_init();
-}
+#include <mlibc/mlibc.h>
 
-void
-trace_pmu_cpu_online(int cpu)
-{
-	pmu_cpu_online(cpu);
-}
+enum pmu_counter_id {
+	PMU_COUNTER_CYCLES = 0,
+	PMU_COUNTER_INSTRUCTIONS,
+	PMU_COUNTER_CACHE_REFERENCES,
+	PMU_COUNTER_CACHE_MISSES,
+	PMU_COUNTER_BRANCH_INSTRUCTIONS,
+	PMU_COUNTER_BRANCH_MISSES,
+	PMU_COUNTER_COUNT
+};
 
-void
-trace_pmu_sample(int cpu, u64 *values, u32 max_values)
-{
-	pmu_sample(cpu, values, max_values);
-}
+void	pmu_init(void);
+void	pmu_cpu_online(int cpu);
+void	pmu_sample(int cpu, u64 *values, u32 max_values);
+u32	pmu_counter_count(void);
+const char *pmu_counter_name(u32 counter);
+int	pmu_counter_active(u32 counter);
 
-u32
-trace_pmu_counter_count(void)
-{
-	return (pmu_counter_count());
-}
-
-const char *
-trace_pmu_counter_name(u32 counter)
-{
-	return (pmu_counter_name(counter));
-}
-
-int
-trace_pmu_counter_active(u32 counter)
-{
-	return (pmu_counter_active(counter));
-}
+#endif

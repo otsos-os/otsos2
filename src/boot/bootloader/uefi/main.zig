@@ -16,6 +16,7 @@ const KERNEL_LOAD_ADDR: usize = 0x00100000;
 const MB2_INFO_CAP: usize = 0x00010000;
 const BOOTPACK_MAX_SIZE: usize = 0x04000000;
 const MMAP_BUF_SIZE: usize = 0x00010000;
+const MB2_MMAP_ENTRY_MAX: usize = 512;
 const LOW_MAX_ADDR: usize = 0xeffff000;
 
 const MB2_BOOTLOADER_MAGIC: u32 = 0x36d76289;
@@ -308,7 +309,7 @@ fn memoryInfo(mmap: MemoryMapSlice) struct { lower_kb: u32, upper_kb: u32 } {
 }
 
 fn addMmapTag(mb: *Mb2Builder, mmap: MemoryMapSlice) !void {
-	var entries: [128]Mb2MmapEntry = undefined;
+	var entries: [MB2_MMAP_ENTRY_MAX]Mb2MmapEntry = undefined;
 	var count: usize = 0;
 	var it = mmap.iterator();
 
