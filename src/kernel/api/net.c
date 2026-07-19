@@ -31,6 +31,7 @@ $define %type int as 32 bit signed
 $define %type api_handle_t as struct with process handle state
 $define %type api_object_t as struct with global API object state
 $define %type api_net_addr as native userspace network address
+$define %type api_net_iface as native userspace interface snapshot
 $define %type api_net_msg as native userspace network message descriptor
 $define %type net_endpoint_t as native network endpoint state
 $define %type net_endpoint_addr_t as endpoint IPv4 address tuple
@@ -40,6 +41,7 @@ $define %func api_net_get_endpoint as function with args int, net_endpoint_t **
 $define %func api_net_install_endpoint as function with args net_endpoint_t *
 $define %func api_net_from_user_addr as function with args const api_net_addr *, net_endpoint_addr_t *
 $define %func api_net_to_user_addr as function with args api_net_addr *, const net_endpoint_addr_t *
+$define %func api_net_iface_to_user as function with args api_net_iface *
 $define %func api_net_ctl_privileged as function with args int
 $define %func api_net_open as function with args int, int, u32
 $define %func api_net_bind as function with args int, const api_net_addr *
@@ -57,6 +59,7 @@ $define %func api_net_ctl as function with args int, int, void *
 $space %internal api_net_find_free_handle, api_net_get_endpoint
 $space %internal api_net_install_endpoint
 $space %internal api_net_from_user_addr, api_net_to_user_addr
+$space %internal api_net_iface_to_user
 $space %internal api_net_ctl_privileged
 $space %export api_net_open, api_net_bind, api_net_connect
 $space %export api_net_listen, api_net_accept
@@ -210,6 +213,66 @@ api_net_to_user_addr(struct api_net_addr *uaddr,
 	tmp.ifindex = addr->ifindex == NET_ENDPOINT_IF_AUTO ?
 	    0 : (u32)(addr->ifindex + 1);
 	memcpy(uaddr, &tmp, sizeof(tmp));
+	return (0);
+}
+
+static int
+api_net_iface_to_user(struct api_net_iface *uiface)
+{
+	struct api_net_iface	tmp;
+	net_iface_t		*iface;
+	netdev_t		*ndev;
+	int			i, count;
+
+	if (!uiface || !is_user_address(uiface, sizeof(*uiface)) ||
+	    !user_range_fault_in(uiface, sizeof(*uiface), 1)) {
+		return (-API_ERR_BAD_ADDR);
+	}
+
+	memcpy(&tmp, uiface, sizeof(tmp));
+	if (tmp.ifindex > 0x7FFFFFFFu) {
+		return (-API_ERR_BAD_VALUE);
+	}
+
+	iface = NULL;
+	if (tmp.ifindex != 0) {
+		iface = net_iface_get((int)tmp.ifindex - 1);
+		if (!iface) {
+			return (-API_ERR_NO_DEVICE);
+		}
+	} else {
+		count = net_iface_count();
+		for (i = 0; i < count; i++) {
+			iface = net_iface_get(i);
+			if (iface && (iface->flags & NET_IFF_UP) &&
+			    !(iface->flags & NET_IFF_LOOPBACK)) {
+				break;
+			}
+			iface = NULL;
+		}
+		if (!iface && count > 0) {
+			iface = net_iface_get(0);
+		}
+		if (!iface) {
+			return (-API_ERR_NO_DEVICE);
+		}
+	}
+
+	ndev = iface->ndev;
+	memset(&tmp, 0, sizeof(tmp));
+	tmp.ifindex = (u32)iface->index + 1;
+	tmp.flags = (u32)iface->flags;
+	tmp.ip = iface->ip_addr;
+	tmp.netmask = iface->netmask;
+	tmp.gateway = iface->gw_addr;
+	tmp.mtu = ndev ? ndev->mtu : 0;
+	if (ndev) {
+		memcpy(tmp.mac, ndev->mac, sizeof(tmp.mac));
+		memcpy(tmp.device, ndev->name, sizeof(tmp.device) - 1);
+	}
+	memcpy(tmp.name, iface->name, sizeof(tmp.name) - 1);
+
+	memcpy(uiface, &tmp, sizeof(tmp));
 	return (0);
 }
 
@@ -457,6 +520,8 @@ api_net_ctl(int handle, int op, void *arg)
 		}
 		return (api_net_to_user_addr(
 		    (struct api_net_addr *)arg, &addr));
+	case API_NET_CTL_GET_IFACE:
+		return (api_net_iface_to_user((struct api_net_iface *)arg));
 	default:
 		return (-API_ERR_NOT_SUPPORTED);
 	}

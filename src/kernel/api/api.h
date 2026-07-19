@@ -240,12 +240,26 @@ struct api_kmeminfo {
 #define	API_NET_CTL_PRIV_BASE		0x8000
 #define	API_NET_CTL_GET_LOCAL		(API_NET_CTL_COMMON_BASE + 1)
 #define	API_NET_CTL_GET_PEER		(API_NET_CTL_COMMON_BASE + 2)
+#define	API_NET_CTL_GET_IFACE		(API_NET_CTL_COMMON_BASE + 3)
 
 struct api_net_addr {
 	u32	family;
 	u32	port;
 	u32	ip;
 	u32	ifindex;
+};
+
+struct api_net_iface {
+	u32	ifindex;
+	u32	flags;
+	u32	ip;
+	u32	netmask;
+	u32	gateway;
+	u32	mtu;
+	u8	mac[6];
+	u8	pad[2];
+	char	name[16];
+	char	device[16];
 };
 
 struct api_net_msg {

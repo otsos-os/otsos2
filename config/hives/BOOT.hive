@@ -84,6 +84,14 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 	key Modules.send {
 		string Dest = "/bin/send"
 	}
+	
+	key Modules.dhcpc {
+		string Dest = "/bin/dhcpc"
+	}
+
+	key Modules.dhcpd {
+		string Dest = "/bin/dhcpd"
+	}
 
 	key Modules.posix_hello {
 		string Dest = "/bin/posix_hello"

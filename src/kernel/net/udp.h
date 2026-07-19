@@ -36,6 +36,7 @@ $define %type udp_binding_t as struct with bound port and receive handler
 
 $define %func udp_init as procedure with args void
 $define %func udp_input as function with args net_iface_t *, u32, u32, const u8 *, u16, const u8 *, u16
+$define %func udp_output_src as function with args net_iface_t *, u32, u32, u16, u16, const u8 *, u16
 $define %func udp_output as function with args net_iface_t *, u32, u16, u16, const u8 *, u16
 $define %func udp_bind as function with args u16, udp_rx_handler_t, void *
 $define %func udp_unbind as procedure with args u16
@@ -45,7 +46,8 @@ $define %func udp_checksum as function with args u32, u32, const u8 *, u16
 
 /* !SPACE!
 
-$space %export udp_init, udp_input, udp_output, udp_bind, udp_unbind, udp_checksum
+$space %export udp_init, udp_input, udp_output_src, udp_output
+$space %export udp_bind, udp_unbind, udp_checksum
 
 */
 
@@ -77,6 +79,8 @@ typedef struct {
 void	udp_init(void);
 int	udp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
     const u8 *data, u16 len, const u8 *ip_packet, u16 ip_len);
+int	udp_output_src(net_iface_t *iface, u32 src_ip, u32 dst_ip,
+    u16 src_port, u16 dst_port, const u8 *data, u16 len);
 int	udp_output(net_iface_t *iface, u32 dst_ip, u16 src_port,
     u16 dst_port, const u8 *data, u16 len);
 int	udp_bind(u16 port, udp_rx_handler_t handler, void *ctx);

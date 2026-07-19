@@ -38,6 +38,7 @@ $define %func net_endpoint_iface_up as function with args net_iface_t *
 $define %func net_endpoint_ip_local as function with args u32
 $define %func net_endpoint_find_iface_by_ip as function with args u32
 $define %func net_endpoint_find_loopback as function with args void
+$define %func net_endpoint_find_broadcast_iface as function with args void
 $define %func net_endpoint_route as function with args u32, u32, int
 $define %func net_endpoint_bind_conflict as function with args net_endpoint_t *, u32, u16
 $define %func net_endpoint_alloc_port as function with args net_endpoint_t *, u32
@@ -69,7 +70,8 @@ $define %func net_endpoint_tick as procedure with args void
 
 $space %internal net_endpoint_iface_up, net_endpoint_ip_local
 $space %internal net_endpoint_find_iface_by_ip
-$space %internal net_endpoint_find_loopback, net_endpoint_route
+$space %internal net_endpoint_find_loopback
+$space %internal net_endpoint_find_broadcast_iface, net_endpoint_route
 $space %internal net_endpoint_bind_conflict, net_endpoint_alloc_port
 $space %internal net_endpoint_valid_addr, net_endpoint_match
 $space %internal net_endpoint_enqueue
@@ -169,6 +171,23 @@ net_endpoint_find_loopback(void)
 	return (NULL);
 }
 
+static net_iface_t *
+net_endpoint_find_broadcast_iface(void)
+{
+	net_iface_t	*iface;
+	int		i, count;
+
+	count = net_iface_count();
+	for (i = 0; i < count; i++) {
+		iface = net_iface_get(i);
+		if (net_endpoint_iface_up(iface) &&
+		    !(iface->flags & NET_IFF_LOOPBACK)) {
+			return (iface);
+		}
+	}
+	return (NULL);
+}
+
 net_iface_t *
 net_endpoint_route(u32 dst_ip, u32 local_ip, int ifindex)
 {
@@ -192,6 +211,9 @@ net_endpoint_route(u32 dst_ip, u32 local_ip, int ifindex)
 
 	if ((dst_ip & 0xFF000000u) == 0x7F000000u) {
 		return (net_endpoint_find_loopback());
+	}
+	if (dst_ip == 0xFFFFFFFF) {
+		return (net_endpoint_find_broadcast_iface());
 	}
 
 	count = net_iface_count();
@@ -549,6 +571,7 @@ net_endpoint_send(net_endpoint_t *ep, const u8 *data, u32 len,
 	net_iface_t		*iface;
 	const u8		*payload;
 	u8			empty;
+	u32			src_ip;
 	int			ifindex;
 	int			ret, port;
 
@@ -608,8 +631,13 @@ net_endpoint_send(net_endpoint_t *ep, const u8 *data, u32 len,
 
 	empty = 0;
 	payload = len == 0 ? &empty : data;
-	ret = udp_output(iface, dst.ip, ep->local_port, dst.port,
-	    payload, (u16)len);
+	src_ip = ep->local_ip != 0 ? ep->local_ip : iface->ip_addr;
+	if (dst.ip == 0xFFFFFFFF && ep->local_ip == 0 &&
+	    ep->local_port == 68) {
+		src_ip = 0;
+	}
+	ret = udp_output_src(iface, src_ip, dst.ip, ep->local_port,
+	    dst.port, payload, (u16)len);
 	if (ret == 0 || ret == NET_TX_PENDING) {
 		return ((int)len);
 	}

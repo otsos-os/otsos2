@@ -42,6 +42,8 @@ SHMTEST_BIN = $(PORTS_DIR)/shmtest
 UDP_ECHO_BIN = $(PORTS_DIR)/udp_echo
 TCP_ECHO_BIN = $(PORTS_DIR)/tcp_echo
 SEND_BIN = $(PORTS_DIR)/send
+DHCPC_BIN = $(PORTS_DIR)/dhcpc
+DHCPD_BIN = $(PORTS_DIR)/demons/dhcpd
 POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
 MUSL_TEST_BIN = $(PORTS_DIR)/musl_test
 LUA_BIN = $(PORTS_DIR)/lua/lua/lua
@@ -472,6 +474,16 @@ $(SEND_BIN): $(NATIVE_CRT0) $(NATIVE_LIBC)
 	@echo "  MAKE    ports/send"
 	@$(MAKE) -C $(PORTS_DIR) send LIBC_ENABLED=$(LIBC_ENABLED)
 
+.PHONY: $(DHCPC_BIN)
+$(DHCPC_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
+	@echo "  MAKE    ports/dhcpc"
+	@$(MAKE) -C $(PORTS_DIR) dhcpc LIBC_ENABLED=$(LIBC_ENABLED)
+
+.PHONY: $(DHCPD_BIN)
+$(DHCPD_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
+	@echo "  MAKE    ports/demons/dhcpd"
+	@$(MAKE) -C $(PORTS_DIR) demons/dhcpd LIBC_ENABLED=$(LIBC_ENABLED)
+
 .PHONY: $(YABOX_BINS)
 $(YABOX_BINS): $(NATIVE_CRT0) $(NATIVE_SO)
 	@echo "  MAKE    ports/yabox"
@@ -601,7 +613,7 @@ $(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BU
 		exit 1; \
 	fi
 
-$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(POSIX_HELLO_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
+$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
 	@rm -rf $(BIOS_PAYLOAD_DIR)
 	@mkdir -p $(BIOS_PAYLOAD_DIR)
 	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
@@ -620,6 +632,8 @@ $(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $
 			udp_echo) src=$(UDP_ECHO_BIN);; \
 			tcp_echo) src=$(TCP_ECHO_BIN);; \
 			send) src=$(SEND_BIN);; \
+			dhcpc) src=$(DHCPC_BIN);; \
+			dhcpd) src=$(DHCPD_BIN);; \
 			posix_hello) src=$(POSIX_HELLO_BIN);; \
 			musl_test) src=$(MUSL_TEST_BIN);; \
 			lua) src=$(LUA_BIN);; \

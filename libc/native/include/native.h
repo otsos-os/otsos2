@@ -4,6 +4,7 @@ $define %type api_sysinfo as struct with kernel identity strings
 $define %type api_kmeminfo as struct with native kernel memory data
 $define %type api_fs_stat as struct with native file metadata
 $define %type api_net_addr as native IPv4 endpoint address
+$define %type api_net_iface as native interface snapshot
 $define %type api_net_msg as native network message descriptor
 $define %type api_reg_value as native registry value IO descriptor
 $define %type api_reg_entry as native registry enumeration entry
@@ -187,6 +188,7 @@ $space %export traceMark
 #define API_NET_CTL_PRIV_BASE	0x8000
 #define API_NET_CTL_GET_LOCAL	(API_NET_CTL_COMMON_BASE + 1)
 #define API_NET_CTL_GET_PEER	(API_NET_CTL_COMMON_BASE + 2)
+#define API_NET_CTL_GET_IFACE	(API_NET_CTL_COMMON_BASE + 3)
 
 #define API_REG_OPEN_READ	API_OPEN_READ
 #define API_REG_OPEN_WRITE	API_OPEN_WRITE
@@ -566,6 +568,19 @@ struct api_net_addr {
 	uint32_t	port;
 	uint32_t	ip;
 	uint32_t	ifindex;
+};
+
+struct api_net_iface {
+	uint32_t	ifindex;
+	uint32_t	flags;
+	uint32_t	ip;
+	uint32_t	netmask;
+	uint32_t	gateway;
+	uint32_t	mtu;
+	uint8_t		mac[6];
+	uint8_t		pad[2];
+	char		name[16];
+	char		device[16];
 };
 
 struct api_net_msg {
