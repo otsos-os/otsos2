@@ -41,8 +41,8 @@ CURSORD_BIN = $(PORTS_DIR)/demons/cursord
 SHMTEST_BIN = $(PORTS_DIR)/shmtest
 UDP_ECHO_BIN = $(PORTS_DIR)/udp_echo
 TCP_ECHO_BIN = $(PORTS_DIR)/tcp_echo
+SEND_BIN = $(PORTS_DIR)/send
 POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
-KBDTEST_BIN = $(PORTS_DIR)/kbdtest
 MUSL_TEST_BIN = $(PORTS_DIR)/musl_test
 LUA_BIN = $(PORTS_DIR)/lua/lua/lua
 CPYTHON_DIR = $(PORTS_DIR)/cpython/cpython
@@ -459,6 +459,11 @@ $(TCP_ECHO_BIN): $(NATIVE_CRT0) $(NATIVE_LIBC)
 	@echo "  MAKE    ports/tcp_echo"
 	@$(MAKE) -C $(PORTS_DIR) tcp_echo LIBC_ENABLED=$(LIBC_ENABLED)
 
+.PHONY: $(SEND_BIN)
+$(SEND_BIN): $(NATIVE_CRT0) $(NATIVE_LIBC)
+	@echo "  MAKE    ports/send"
+	@$(MAKE) -C $(PORTS_DIR) send LIBC_ENABLED=$(LIBC_ENABLED)
+
 .PHONY: $(YABOX_BINS)
 $(YABOX_BINS): $(NATIVE_CRT0) $(NATIVE_SO)
 	@echo "  MAKE    ports/yabox"
@@ -468,11 +473,6 @@ $(YABOX_BINS): $(NATIVE_CRT0) $(NATIVE_SO)
 $(POSIX_HELLO_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/posix_hello"
 	@$(MAKE) -C $(PORTS_DIR) posix_hello LIBC_ENABLED=$(LIBC_ENABLED)
-
-.PHONY: $(KBDTEST_BIN)
-$(KBDTEST_BIN): $(LIBC_DEPS)
-	@echo "  MAKE    ports/kbdtest"
-	@$(MAKE) -C $(PORTS_DIR) kbdtest LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(MUSL_TEST_BIN)
 $(MUSL_TEST_BIN): $(LIBC_DEPS)
@@ -589,7 +589,7 @@ $(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BU
 		exit 1; \
 	fi
 
-$(BIOS_BOOTPACK): Makefile config.toml $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
+$(BIOS_BOOTPACK): Makefile config.toml $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(POSIX_HELLO_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
 	@rm -rf $(BIOS_PAYLOAD_DIR)
 	@mkdir -p $(BIOS_PAYLOAD_DIR)
 	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
@@ -607,8 +607,8 @@ $(BIOS_BOOTPACK): Makefile config.toml $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FE
 			shmtest) src=$(SHMTEST_BIN);; \
 			udp_echo) src=$(UDP_ECHO_BIN);; \
 			tcp_echo) src=$(TCP_ECHO_BIN);; \
+			send) src=$(SEND_BIN);; \
 			posix_hello) src=$(POSIX_HELLO_BIN);; \
-			kbdtest) src=$(KBDTEST_BIN);; \
 			musl_test) src=$(MUSL_TEST_BIN);; \
 			lua) src=$(LUA_BIN);; \
 			python) src=$(CPYTHON_BIN);; \

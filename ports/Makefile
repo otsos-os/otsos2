@@ -31,12 +31,12 @@ UDP_ECHO_BIN = udp_echo
 UDP_ECHO_OBJS = udp_echo.o
 TCP_ECHO_BIN = tcp_echo
 TCP_ECHO_OBJS = tcp_echo.o
+SEND_BIN = send
+SEND_OBJS = send.o
 
 POSIX_HELLO_BIN = posix_hello
 POSIX_HELLO_OBJS = posix_hello.o
 
-KBDTEST_BIN = kbdtest
-KBDTEST_OBJS = kbdtest.o
 YABOX_DIR = yabox
 
 MUSL_DIR = ../libc/musl
@@ -62,9 +62,9 @@ CPYTHON_SETUP = cpython/setup.sh
 LIBC_ENABLED ?= true
 
 ifeq ($(LIBC_ENABLED),true)
-ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) yabox $(MUSL_TEST_BIN) $(LUA_BIN) $(CPYTHON_BIN)
+ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(POSIX_HELLO_BIN) yabox $(MUSL_TEST_BIN) $(LUA_BIN) $(CPYTHON_BIN)
 else
-ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(POSIX_HELLO_BIN) $(KBDTEST_BIN) yabox
+ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(POSIX_HELLO_BIN) yabox
 endif
 
 all: $(ALL_TARGETS)
@@ -124,15 +124,16 @@ $(TCP_ECHO_BIN): $(NATIVE_CRT0) $(TCP_ECHO_OBJS) $(NATIVE_LIBC)
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
-$(POSIX_HELLO_BIN): $(POSIX_HELLO_OBJS)
+$(SEND_BIN): $(NATIVE_CRT0) $(SEND_OBJS) $(NATIVE_LIBC)
 	@echo "  LLD      $@"
-	@$(LD) $(LDFLAGS) $(POSIX_HELLO_OBJS) -o $@
+	@$(LD) $(LDFLAGS) $(NATIVE_CRT0) $(SEND_OBJS) \
+	    $(NATIVE_LIBC) -o $@
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
-$(KBDTEST_BIN): $(KBDTEST_OBJS)
+$(POSIX_HELLO_BIN): $(POSIX_HELLO_OBJS)
 	@echo "  LLD      $@"
-	@$(LD) $(LDFLAGS) $(KBDTEST_OBJS) -o $@
+	@$(LD) $(LDFLAGS) $(POSIX_HELLO_OBJS) -o $@
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
@@ -183,6 +184,10 @@ tcp_echo.o: tcp_echo.c
 	@echo "  CC      $< (native libc)"
 	@$(CC) $(CFLAGS) -I$(NATIVE_DIR)/include -c $< -o $@
 
+send.o: send.c
+	@echo "  CC      $< (native libc)"
+	@$(CC) $(CFLAGS) -I$(NATIVE_DIR)/include -c $< -o $@
+
 musl_test.o: musl_test.c
 	@echo "  CC      $< (musl)"
 	@$(CC) $(TARGET_CFLAGS) -O2 -g -fno-pic -fno-stack-protector \
@@ -190,7 +195,7 @@ musl_test.o: musl_test.c
 	    -I$(MUSL_DIR)/obj/include -I$(MUSL_DIR)/include -c $< -o $@
 
 clean:
-	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN) $(OVEN_OBJS) $(OVEN_BIN) $(CURSORD_OBJS) $(CURSORD_BIN) $(SHMTEST_OBJS) $(SHMTEST_BIN) $(UDP_ECHO_OBJS) $(UDP_ECHO_BIN) $(TCP_ECHO_OBJS) $(TCP_ECHO_BIN) $(POSIX_HELLO_OBJS) $(POSIX_HELLO_BIN) $(KBDTEST_OBJS) $(KBDTEST_BIN) $(MUSL_TEST_OBJS) $(MUSL_TEST_BIN) $(LUA_BIN) $(CPYTHON_BIN)
+	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN) $(OVEN_OBJS) $(OVEN_BIN) $(CURSORD_OBJS) $(CURSORD_BIN) $(SHMTEST_OBJS) $(SHMTEST_BIN) $(UDP_ECHO_OBJS) $(UDP_ECHO_BIN) $(TCP_ECHO_OBJS) $(TCP_ECHO_BIN) $(SEND_OBJS) $(SEND_BIN) $(POSIX_HELLO_OBJS) $(POSIX_HELLO_BIN) $(MUSL_TEST_OBJS) $(MUSL_TEST_BIN) $(LUA_BIN) $(CPYTHON_BIN)
 	$(MAKE) -C $(YABOX_DIR) clean
 	$(MAKE) -C $(LUA_DIR) clean
 	-$(MAKE) -C $(CPYTHON_DIR) clean 2>/dev/null || true

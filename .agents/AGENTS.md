@@ -117,11 +117,11 @@ Monolithic kernel with the following rough layers:
 
 - `init/init.c` — first userspace process, event-driven program spawner via
   `procSpawn` and `procWait`.
-- `ports/yes.c`, `fetch.c`, `shell.c`, `kbdtest.c`, `posix_hello.c`,
-  `musl_test.c`, `demons/cursord.c` — small test/utility binaries and
-  daemons.
-- `ports/posix_hello.c` and `kbdtest.c` use Linux x86-64 syscall numbers and
-  expect the POSIX personality.
+- `ports/yes.c`, `fetch.c`, `shell.c`, `udp_echo.c`, `tcp_echo.c`, `send.c`,
+  `posix_hello.c`, `musl_test.c`, `demons/cursord.c` — small test/utility
+  binaries and daemons.
+- `ports/posix_hello.c` uses Linux x86-64 syscall numbers and expects the
+  POSIX personality.
 - `ports/musl_test.c` uses real musl headers and is statically linked against
   vendored musl.
 - `ports/lua/` — Lua interpreter port, uses musl's `Scrt1.o` and is dynamically
@@ -337,7 +337,7 @@ User need to test, dont run test manually, ask user.
 - Userspace programs are loaded at `0x400000` and use a stack at
   `0x00007FFFFFFFFFF0`. See `init/linker.ld`.
 - The kernel.c copies Multiboot modules (`init`, `yes`, `sh`, `fetch`,
-  `posix_hello`, `kbdtest`, optional `musl_test`) into `/bin/` on the root
+  `posix_hello`, `send`, optional `musl_test`) into `/bin/` on the root
   filesystem before starting `init`. These are not on disk; they come from the
   ISO.
 - The `config.toml` is both a build-time config (read by Makefiles) and a
