@@ -5,6 +5,8 @@ $define %type api_kmeminfo as struct with native kernel memory data
 $define %type api_fs_stat as struct with native file metadata
 $define %type api_net_addr as native IPv4 endpoint address
 $define %type api_net_msg as native network message descriptor
+$define %type api_reg_value as native registry value IO descriptor
+$define %type api_reg_entry as native registry enumeration entry
 $define %type api_trace_record as native trace record
 $define %type api_trace_filter as native trace session filter
 $define %type kevent as struct with native event data
@@ -17,6 +19,9 @@ $define %func procSpawn as function with args spawn tuple
 $define %func procSpawnAbi as function with args spawn tuple, uint32_t
 $define %func netListen as function with args int, int
 $define %func netAccept as function with args int, api_net_addr *, uint32_t
+$define %func regOpen as function with args const char *, const char *, uint32_t
+$define %func regGet as function with args int, api_reg_value *
+$define %func regUpd as function with args uint32_t
 $define %func traceOpen as function with args uint32_t
 $define %func traceRead as function with args int, api_trace_read *
 $define %func traceMark as function with args uint32_t, five uint64_t
@@ -35,6 +40,10 @@ $space %export procRun, procExit, procKill
 $space %export memMap, memUnmap, eventKqueue, eventWait, eventClose
 $space %export netOpen, netBind, netConnect, netListen, netAccept
 $space %export netSend, netRecv, netCtl
+$space %export regOpen, regClose, regGet, regSet, regCreateKey
+$space %export regDeleteKey, regDeleteValue, regEnum, regUpd
+$space %export regGetBool, regSetBool, regGetU32, regSetU32
+$space %export regGetIpv4, regSetIpv4, regGetString, regSetString
 $space %export drmCall, drmInfo, drmGemCreate, drmGemClose, drmGemMapInfo
 $space %export drmGemMmap, drmFbCreate, drmFbDestroy, drmGetObjects
 $space %export drmAtomicCommit, drmRapiClear, drmRapiPutPixel
@@ -124,6 +133,15 @@ $space %export traceMark
 #define CALL_TRACE_CTL		0x903
 #define CALL_TRACE_INFO		0x904
 #define CALL_TRACE_MARK		0x905
+#define CALL_REG_OPEN		0xA00
+#define CALL_REG_CLOSE		0xA01
+#define CALL_REG_GET		0xA02
+#define CALL_REG_SET		0xA03
+#define CALL_REG_CREATE_KEY	0xA04
+#define CALL_REG_DELETE_KEY	0xA05
+#define CALL_REG_DELETE_VALUE	0xA06
+#define CALL_REG_ENUM		0xA07
+#define CALL_REG_UPD		0xA08
 #define CALL_PERSONALITY	0xFFFF
 
 #define API_OPEN_READ		0x0001
@@ -169,6 +187,27 @@ $space %export traceMark
 #define API_NET_CTL_PRIV_BASE	0x8000
 #define API_NET_CTL_GET_LOCAL	(API_NET_CTL_COMMON_BASE + 1)
 #define API_NET_CTL_GET_PEER	(API_NET_CTL_COMMON_BASE + 2)
+
+#define API_REG_OPEN_READ	API_OPEN_READ
+#define API_REG_OPEN_WRITE	API_OPEN_WRITE
+#define API_REG_OPEN_RW		API_OPEN_RW
+#define API_REG_OPEN_CREATE	API_OPEN_CREATE
+
+#define API_REG_TYPE_STRING		1
+#define API_REG_TYPE_BOOL		2
+#define API_REG_TYPE_I32		3
+#define API_REG_TYPE_U32		4
+#define API_REG_TYPE_U64		5
+#define API_REG_TYPE_IPV4		6
+#define API_REG_TYPE_BYTES		7
+#define API_REG_TYPE_MULTI_STRING	8
+
+#define API_REG_KIND_KEY	1
+#define API_REG_KIND_VALUE	2
+
+#define API_REG_CONSUMER_NET		1
+#define API_REG_CONSUMER_SCHEDULER	2
+#define API_REG_CONSUMER_KUSR		3
 
 #define API_TRACE_MAX_CPUS		32
 #define API_TRACE_MAX_EVENTS		128
@@ -536,6 +575,23 @@ struct api_net_msg {
 	uint32_t		flags;
 };
 
+struct api_reg_value {
+	const char	*name;
+	void		*data;
+	uint32_t	size;
+	uint32_t	type;
+	uint32_t	flags;
+	uint32_t	bytes;
+};
+
+struct api_reg_entry {
+	uint32_t	index;
+	uint32_t	kind;
+	uint32_t	type;
+	uint32_t	size;
+	char		name[32];
+};
+
 struct api_key_event {
 	uint64_t	timestamp;
 	uint16_t	key;
@@ -816,6 +872,24 @@ int	netAccept(int handle, struct api_net_addr *addr, uint32_t flags);
 ssize_t	netSend(int handle, const struct api_net_msg *msg);
 ssize_t	netRecv(int handle, struct api_net_msg *msg);
 int	netCtl(int handle, int op, void *arg);
+
+int	regOpen(const char *hive, const char *key, uint32_t flags);
+int	regClose(int reg);
+ssize_t	regGet(int reg, struct api_reg_value *value);
+int	regSet(int reg, const struct api_reg_value *value);
+int	regCreateKey(int reg, const char *name);
+int	regDeleteKey(int reg, const char *name);
+int	regDeleteValue(int reg, const char *name);
+int	regEnum(int reg, struct api_reg_entry *entry);
+int	regUpd(uint32_t consumer);
+int	regGetBool(int reg, const char *name, int *out);
+int	regSetBool(int reg, const char *name, int value);
+int	regGetU32(int reg, const char *name, uint32_t *out);
+int	regSetU32(int reg, const char *name, uint32_t value);
+int	regGetIpv4(int reg, const char *name, uint32_t *out);
+int	regSetIpv4(int reg, const char *name, uint32_t value);
+int	regGetString(int reg, const char *name, char *buf, size_t size);
+int	regSetString(int reg, const char *name, const char *value);
 
 long	personality(long mode);
 

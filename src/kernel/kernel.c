@@ -47,7 +47,6 @@ $define %func status_line as procedure with args const char *, int
 $define %func disk_has_type as function with args disk_type_t
 $define %func disk_find_type as function with args disk_type_t
 $define %func timer_sanity_check as function with args void
-$define %func net_apply_config as procedure with args net_iface_t *
 $define %func net_test as procedure with args void
 $define %func enable_sse as procedure with args void
 $define %func kernel_ensure_parent_dirs as function with args const char *
@@ -63,7 +62,6 @@ $space %internal debug_multiboot_info, debug_multiboot2_tags
 $space %internal mb2_find_module, mb2_total_modules_size, status_line
 $space %internal disk_has_type, disk_find_type
 $space %internal timer_sanity_check, net_test, enable_sse
-$space %internal net_apply_config
 $space %internal kernel_ensure_parent_dirs, kernel_install_module_cb
 $space %internal kernel_install_registry_module_cb
 $space %export kmain
@@ -467,46 +465,6 @@ kernel_install_registry_module_cb(const char *name, void *ctx)
 }
 
 static void
-net_apply_config(net_iface_t *iface)
-{
-	char		key[128];
-	u32		ip, mask, gw;
-	int		enabled;
-
-	if (!iface || iface->ip_addr != 0) {
-		return;
-	}
-	if (strlen("Interfaces.") + strlen(iface->name) >= sizeof(key)) {
-		return;
-	}
-
-	strcpy(key, "Interfaces.");
-	strcat(key, iface->name);
-	enabled = cm_get_bool_default("NETWORK", key, "Enabled", 1);
-	if (!enabled) {
-		return;
-	}
-	if (cm_get_ipv4("NETWORK", key, "Address", &ip) != 0) {
-		return;
-	}
-	mask = cm_get_ipv4_default("NETWORK", key, "Netmask",
-	    0xFFFFFF00u);
-	gw = cm_get_ipv4_default("NETWORK", key, "Gateway", 0);
-
-	iface->ip_addr = ip;
-	iface->netmask = mask;
-	iface->gw_addr = gw;
-	printk("[NET] %s configured %d.%d.%d.%d/%d.%d.%d.%d gw "
-	    "%d.%d.%d.%d\n", iface->name,
-	    (ip >> 24) & 0xFF, (ip >> 16) & 0xFF,
-	    (ip >> 8) & 0xFF, ip & 0xFF,
-	    (mask >> 24) & 0xFF, (mask >> 16) & 0xFF,
-	    (mask >> 8) & 0xFF, mask & 0xFF,
-	    (gw >> 24) & 0xFF, (gw >> 16) & 0xFF,
-	    (gw >> 8) & 0xFF, gw & 0xFF);
-}
-
-static void
 net_test(void)
 {
 	net_iface_t		*iface;
@@ -552,7 +510,7 @@ net_test(void)
 			continue;
 		}
 		if (iface->ip_addr == 0) {
-			net_apply_config(iface);
+			net_cm_update(0);
 		}
 		if (iface->ip_addr == 0) {
 			printk("[NET_TEST] %s: no IP, "

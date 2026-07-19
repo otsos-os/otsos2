@@ -90,6 +90,7 @@ typedef struct {
 #define API_OBJECT_PIPE 1
 #define API_OBJECT_VNODE 2
 #define API_OBJECT_NET 3
+#define API_OBJECT_REG 4
 #define MMAP_BASE 0x0000001000000000ULL
 #define MMAP_LIMIT 0x00007FFF00000000ULL
 
@@ -252,6 +253,44 @@ struct api_net_msg {
 	struct api_net_addr	*addr;
 	u32			length;
 	u32			flags;
+};
+
+#define	API_REG_OPEN_READ	API_OPEN_READ
+#define	API_REG_OPEN_WRITE	API_OPEN_WRITE
+#define	API_REG_OPEN_RW		API_OPEN_RW
+#define	API_REG_OPEN_CREATE	API_OPEN_CREATE
+
+#define	API_REG_TYPE_STRING		1
+#define	API_REG_TYPE_BOOL		2
+#define	API_REG_TYPE_I32		3
+#define	API_REG_TYPE_U32		4
+#define	API_REG_TYPE_U64		5
+#define	API_REG_TYPE_IPV4		6
+#define	API_REG_TYPE_BYTES		7
+#define	API_REG_TYPE_MULTI_STRING	8
+
+#define	API_REG_KIND_KEY	1
+#define	API_REG_KIND_VALUE	2
+
+#define	API_REG_CONSUMER_NET		1
+#define	API_REG_CONSUMER_SCHEDULER	2
+#define	API_REG_CONSUMER_KUSR		3
+
+struct api_reg_value {
+	const char	*name;
+	void		*data;
+	u32		size;
+	u32		type;
+	u32		flags;
+	u32		bytes;
+};
+
+struct api_reg_entry {
+	u32	index;
+	u32	kind;
+	u32	type;
+	u32	size;
+	char	name[32];
 };
 
 #define API_CPUINFO_MAX_CPUS 32
@@ -735,6 +774,15 @@ int api_net_accept(int handle, struct api_net_addr *uaddr, u32 flags);
 int api_net_send(int handle, const struct api_net_msg *umsg);
 int api_net_recv(int handle, struct api_net_msg *umsg);
 int api_net_ctl(int handle, int op, void *arg);
+int api_reg_open(const char *hive, const char *key, u32 flags);
+int api_reg_close(int handle);
+int api_reg_get(int handle, struct api_reg_value *uvalue);
+int api_reg_set(int handle, const struct api_reg_value *uvalue);
+int api_reg_create_key(int handle, const char *name);
+int api_reg_delete_key(int handle, const char *name);
+int api_reg_delete_value(int handle, const char *name);
+int api_reg_enum(int handle, struct api_reg_entry *uentry);
+int api_reg_upd(u32 consumer);
 int api_trace_open(u32 flags);
 int api_trace_close(int trace);
 int api_trace_read(int trace, struct api_trace_read *args);

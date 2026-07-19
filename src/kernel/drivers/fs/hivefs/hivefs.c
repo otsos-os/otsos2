@@ -106,6 +106,7 @@ $define %func hivefs_create_key as function with args hive, key
 $define %func hivefs_delete_key as function with args hive, key
 $define %func hivefs_set_value as function with args hive, key, value, type
 $define %func hivefs_delete_value as function with args hive, key, value
+$define %func hivefs_value_info as function with args hive, key, value, type
 $define %func hivefs_back_ops as function with args void
 
 */
@@ -140,6 +141,7 @@ $space %export hivefs_is_loaded, hivefs_set_store_path
 $space %export hivefs_load_store, hivefs_sync
 $space %export hivefs_create_key, hivefs_delete_key
 $space %export hivefs_set_value, hivefs_delete_value
+$space %export hivefs_value_info
 $space %export hivefs_back_ops
 
 */
@@ -1990,6 +1992,47 @@ hivefs_delete_value(const char *hive_name, const char *key,
 		hive->values[value_idx].data = NULL;
 	}
 	hive->values[value_idx].size = 0;
+	return (0);
+}
+
+int
+hivefs_value_info(const char *hive_name, const char *key,
+    const char *value_name, u32 *type, u32 *size)
+{
+	hivefs_hive_t	*hive;
+	hivefs_value_t	*value;
+	u32		node_idx, name_len;
+	int		idx, ret;
+
+	if (!g_hivefs.loaded || !value_name || value_name[0] == '\0' ||
+	    (!type && !size)) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	idx = hivefs_find_hive_name(hive_name);
+	if (idx < 0) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	name_len = (u32)strlen(value_name);
+	hive = &g_hivefs.hives[idx];
+	ret = hivefs_find_node_path(hive, key, 0, &node_idx);
+	if (ret != 0) {
+		return (ret);
+	}
+	idx = hivefs_find_value(hive, node_idx, value_name, name_len);
+	if (idx < 0) {
+		return (-API_ERR_NOT_FOUND);
+	}
+
+	value = &hive->values[idx];
+	if (value->deleted) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	if (type) {
+		*type = value->type;
+	}
+	if (size) {
+		*size = value->size;
+	}
 	return (0);
 }
 

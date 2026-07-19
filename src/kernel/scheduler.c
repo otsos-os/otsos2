@@ -33,19 +33,22 @@ $define %type thread_t as struct with per-thread CPU context and state
 $define %type process_t as struct with process control block
 $define %type registers_t as struct with CPU register snapshot
 
+$define %func scheduler_load_config as procedure with args void
 $define %func pick_next_thread as function with args thread_t *
 $define %func pick_any_runnable_thread as function with args thread_t *
 $define %func scheduler_retire_zombies as procedure with args thread_t *
 $define %func scheduler_reap_orphans as procedure with args thread_t *
+$define %func scheduler_cm_update as function with args u32
 $define %func scheduler_tick as procedure with args registers_t *
 
 */
 
 /* !SPACE!
 
+$space %internal scheduler_load_config
 $space %internal pick_next_thread, pick_any_runnable_thread
 $space %internal scheduler_retire_zombies, scheduler_reap_orphans
-$space %export scheduler_tick
+$space %export scheduler_cm_update, scheduler_tick
 
 */
 
@@ -64,6 +67,25 @@ static int	sched_smart_migration = 1;
 static int	sched_migration_threshold = 2;
 static int	sched_next_cpu;
 static int	sched_zkill;
+
+static void
+scheduler_load_config(void)
+{
+	sched_strict_process_separation =
+	    cm_get_bool_default("SYSTEM", "Scheduler",
+	    "StrictProcessSeparation", 0);
+	sched_smart_migration =
+	    cm_get_bool_default("SYSTEM", "Scheduler",
+	    "SmartMigration", 1);
+	sched_migration_threshold =
+	    (int)cm_get_u32_default("SYSTEM", "Scheduler",
+	    "MigrationThreshold", 0);
+	if (sched_migration_threshold < 0) {
+		sched_migration_threshold = 0;
+	}
+	sched_zkill =
+	    cm_get_bool_default("SYSTEM", "Scheduler", "Zkill", 0);
+}
 static int
 scheduler_cpu_runnable_count(int cpu)
 {
@@ -138,24 +160,25 @@ scheduler_thread_can_run_on(thread_t *td, int cpu)
 void
 scheduler_init(void)
 {
-	sched_strict_process_separation =
-	    cm_get_bool_default("SYSTEM", "Scheduler",
-	    "StrictProcessSeparation", 0);
-	sched_smart_migration =
-	    cm_get_bool_default("SYSTEM", "Scheduler",
-	    "SmartMigration", 1);
-	sched_migration_threshold =
-	    (int)cm_get_u32_default("SYSTEM", "Scheduler",
-	    "MigrationThreshold", 0);
-	if (sched_migration_threshold < 0) {
-		sched_migration_threshold = 0;
-	}
-	sched_zkill =
-	    cm_get_bool_default("SYSTEM", "Scheduler", "Zkill", 0);
+	scheduler_load_config();
+	cm_register_consumer(CM_CONSUMER_SCHEDULER, "scheduler",
+	    scheduler_cm_update);
 	sched_next_cpu = 0;
 	printk("[SCHED] strict=%d smart=%d migration_threshold=%d zkill=%d\n",
 	    sched_strict_process_separation, sched_smart_migration,
 	    sched_migration_threshold, sched_zkill);
+}
+
+int
+scheduler_cm_update(u32 flags)
+{
+	(void)flags;
+	scheduler_load_config();
+	printk("[SCHED] updated strict=%d smart=%d migration_threshold=%d "
+	    "zkill=%d\n", sched_strict_process_separation,
+	    sched_smart_migration, sched_migration_threshold,
+	    sched_zkill);
+	return (0);
 }
 
 void

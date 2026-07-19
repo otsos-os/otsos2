@@ -38,6 +38,7 @@ $define %func kusr_save_credentials as function with args hash, salt
 $define %func kusr_read_password as function with args buf, max, prompt
 $define %func kusr_first_boot_setup as function with args void
 $define %func kusr_init as procedure with args void
+$define %func kusr_cm_update as function with args u32
 $define %func kusr_is_authenticated as function with args void
 $define %func kusr_set_authenticated as procedure with args int
 
@@ -48,7 +49,8 @@ $define %func kusr_set_authenticated as procedure with args int
 $space %internal kusr_flush, kusr_hash_password, kusr_generate_salt
 $space %internal kusr_save_credentials, kusr_read_password
 $space %internal kusr_first_boot_setup
-$space %export kusr_init, kusr_is_authenticated, kusr_set_authenticated
+$space %export kusr_init, kusr_cm_update
+$space %export kusr_is_authenticated, kusr_set_authenticated
 
 */
 
@@ -264,6 +266,7 @@ kusr_init(void)
 		printk("[KUSR] registry unavailable\n");
 		return;
 	}
+	cm_register_consumer(CM_CONSUMER_KUSR, "kusr", kusr_cm_update);
 
 	configured = 0;
 	ret = cm_get_bool(KUSR_REG_HIVE, KUSR_REG_KEY,
@@ -275,4 +278,27 @@ kusr_init(void)
 	}
 
 	kusr_first_boot_setup();
+}
+
+int
+kusr_cm_update(u32 flags)
+{
+	int	configured, ret;
+
+	(void)flags;
+	if (!cm_is_initialized()) {
+		return (-API_ERR_NOT_FOUND);
+	}
+
+	configured = 0;
+	ret = cm_get_bool(KUSR_REG_HIVE, KUSR_REG_KEY,
+	    "Configured", &configured);
+	if (ret != 0 || !configured) {
+		g_kusr_authenticated = 0;
+		printk("[KUSR] registry update: not configured\n");
+		return (0);
+	}
+
+	printk("[KUSR] registry update: configured\n");
+	return (0);
 }

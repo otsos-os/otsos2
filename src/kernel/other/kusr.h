@@ -27,7 +27,10 @@
 #ifndef KUSR_H
 #define KUSR_H
 
+#include <mlibc/mlibc.h>
+
 void kusr_init(void);
+int kusr_cm_update(u32 flags);
 int kusr_is_authenticated(void);
 void kusr_set_authenticated(int auth);
 

@@ -36,6 +36,9 @@ $define %type vnode_t as VFS vnode
 $define %type posix_stat_t as POSIX stat record
 $define %type vfs_back_ops_t as backend operation table
 $define %type cm_key_cb as function pointer with args const char *, void *
+$define %type cm_consumer_update_t as function pointer with args u32
+$define %type cm_consumer_t as registered registry consumer
+$define %type cm_entry_t as registry key or value enumeration record
 
 $define %func cm_str_copy as procedure with args dst, size, src
 $define %func cm_path_put as function with args path, pos, size, char
@@ -51,6 +54,11 @@ $define %func cm_init as function with args void
 $define %func cm_is_initialized as function with args void
 $define %func cm_mount_path as function with args void
 $define %func cm_foreach_key as function with args hive, key, cb, ctx
+$define %func cm_key_exists as function with args hive, key
+$define %func cm_value_info as function with args hive, key, value, type
+$define %func cm_enum_entry as function with args hive, key, index, entry
+$define %func cm_register_consumer as function with args id, name, update
+$define %func cm_update_consumer as function with args id, flags
 $define %func cm_read_value as function with args hive, key, value, buf
 $define %func cm_get_bool as function with args hive, key, value, out
 $define %func cm_get_i32 as function with args hive, key, value, out
@@ -83,7 +91,9 @@ $space %internal cm_path_put_key, cm_build_node_path
 $space %internal cm_build_value_path, cm_lookup_node, cm_lookup_value
 $space %internal cm_read_exact, cm_mount_registry
 $space %export cm_init, cm_is_initialized, cm_mount_path
-$space %export cm_foreach_key, cm_read_value, cm_get_bool, cm_get_i32
+$space %export cm_foreach_key, cm_key_exists, cm_value_info
+$space %export cm_enum_entry, cm_register_consumer, cm_update_consumer
+$space %export cm_read_value, cm_get_bool, cm_get_i32
 $space %export cm_get_u32, cm_get_u64, cm_get_ipv4, cm_get_string
 $space %export cm_create_key, cm_delete_key, cm_set_value
 $space %export cm_delete_value, cm_set_bool, cm_set_i32
@@ -103,9 +113,18 @@ $space %export cm_get_string_default
 
 #define	CM_MAX_PATH	256
 #define	CM_STORE_PATH	"/conf/registry.hpk"
+#define	CM_MAX_CONSUMERS	16
+
+typedef struct cm_consumer {
+	int			used;
+	u32			id;
+	cm_consumer_update_t	update;
+	char			name[32];
+} cm_consumer_t;
 
 static int	g_cm_initialized;
 static int	g_cm_mounted;
+static cm_consumer_t	g_cm_consumers[CM_MAX_CONSUMERS];
 
 static void
 cm_str_copy(char *dst, u32 size, const char *src)
@@ -418,6 +437,141 @@ const char *
 cm_mount_path(void)
 {
 	return (CM_MOUNT_PATH);
+}
+
+int
+cm_key_exists(const char *hive, const char *key)
+{
+	vnode_t	*vn;
+	int	ret;
+
+	if (!g_cm_initialized) {
+		return (-API_ERR_NOT_FOUND);
+	}
+
+	ret = cm_lookup_node(hive, key, &vn);
+	if (ret != 0) {
+		return (ret);
+	}
+	vnode_release(vn);
+	return (0);
+}
+
+int
+cm_value_info(const char *hive, const char *key, const char *value,
+    u32 *type, u32 *size)
+{
+	if (!g_cm_initialized) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	return (hivefs_value_info(hive, key, value, type, size));
+}
+
+int
+cm_enum_entry(const char *hive, const char *key, u32 index,
+    cm_entry_t *entry)
+{
+	vnode_t	*vn;
+	char	name[32];
+	u32	type, size;
+	int	vtype, ret;
+
+	if (!g_cm_initialized) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	if (!entry) {
+		return (-API_ERR_BAD_VALUE);
+	}
+
+	ret = cm_lookup_node(hive, key, &vn);
+	if (ret != 0) {
+		return (ret);
+	}
+	memset(name, 0, sizeof(name));
+	vtype = 0;
+	ret = vnode_readdir(vn, index, name, &vtype);
+	vnode_release(vn);
+	if (ret <= 0) {
+		return (ret);
+	}
+
+	memset(entry, 0, sizeof(*entry));
+	cm_str_copy(entry->name, sizeof(entry->name), name);
+	if (vtype == VDIR) {
+		entry->kind = CM_ENTRY_KEY;
+		return (1);
+	}
+	if (vtype != VREG) {
+		return (-API_ERR_BAD_VALUE);
+	}
+
+	type = 0;
+	size = 0;
+	ret = cm_value_info(hive, key, name, &type, &size);
+	if (ret != 0) {
+		return (ret);
+	}
+	entry->kind = CM_ENTRY_VALUE;
+	entry->type = type;
+	entry->size = size;
+	return (1);
+}
+
+int
+cm_register_consumer(u32 id, const char *name, cm_consumer_update_t update)
+{
+	cm_consumer_t	*consumer;
+	int		i;
+
+	if (id == 0 || !update) {
+		return (-API_ERR_BAD_VALUE);
+	}
+
+	for (i = 0; i < CM_MAX_CONSUMERS; i++) {
+		consumer = &g_cm_consumers[i];
+		if (consumer->used && consumer->id == id) {
+			consumer->update = update;
+			cm_str_copy(consumer->name,
+			    sizeof(consumer->name), name);
+			return (0);
+		}
+	}
+
+	for (i = 0; i < CM_MAX_CONSUMERS; i++) {
+		consumer = &g_cm_consumers[i];
+		if (!consumer->used) {
+			memset(consumer, 0, sizeof(*consumer));
+			consumer->used = 1;
+			consumer->id = id;
+			consumer->update = update;
+			cm_str_copy(consumer->name,
+			    sizeof(consumer->name), name);
+			return (0);
+		}
+	}
+	return (-API_ERR_NO_SPACE);
+}
+
+int
+cm_update_consumer(u32 id, u32 flags)
+{
+	cm_consumer_t	*consumer;
+	int		i;
+
+	if (id == 0) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	for (i = 0; i < CM_MAX_CONSUMERS; i++) {
+		consumer = &g_cm_consumers[i];
+		if (!consumer->used || consumer->id != id) {
+			continue;
+		}
+		if (!consumer->update) {
+			return (-API_ERR_BAD_VALUE);
+		}
+		return (consumer->update(flags));
+	}
+	return (-API_ERR_NOT_FOUND);
 }
 
 int

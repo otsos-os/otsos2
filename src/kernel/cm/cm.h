@@ -33,11 +33,18 @@ $define %type s32 as 32 bit signed
 $define %type int as 32 bit signed
 $define %type char as 8 bit signed
 $define %type cm_key_cb as function pointer with args const char *, void *
+$define %type cm_consumer_update_t as function pointer with args u32
+$define %type cm_entry as registry key or value enumeration record
 
 $define %func cm_init as function with args void
 $define %func cm_is_initialized as function with args void
 $define %func cm_mount_path as function with args void
 $define %func cm_foreach_key as function with args hive, key, cb, ctx
+$define %func cm_key_exists as function with args hive, key
+$define %func cm_value_info as function with args hive, key, value, type
+$define %func cm_enum_entry as function with args hive, key, index, entry
+$define %func cm_register_consumer as function with args id, name, update
+$define %func cm_update_consumer as function with args id, flags
 $define %func cm_read_value as function with args hive, key, value, buf
 $define %func cm_get_bool as function with args hive, key, value, out
 $define %func cm_get_i32 as function with args hive, key, value, out
@@ -66,7 +73,9 @@ $define %func cm_get_string_default as function with args hive, key, value, out
 /* !SPACE!
 
 $space %export cm_init, cm_is_initialized, cm_mount_path
-$space %export cm_foreach_key, cm_read_value, cm_get_bool, cm_get_i32
+$space %export cm_foreach_key, cm_key_exists, cm_value_info
+$space %export cm_enum_entry, cm_register_consumer, cm_update_consumer
+$space %export cm_read_value, cm_get_bool, cm_get_i32
 $space %export cm_get_u32, cm_get_u64, cm_get_ipv4, cm_get_string
 $space %export cm_create_key, cm_delete_key, cm_set_value
 $space %export cm_delete_value, cm_set_bool, cm_set_i32
@@ -93,13 +102,36 @@ $space %export cm_get_string_default
 #define	CM_TYPE_BYTES		7
 #define	CM_TYPE_MULTI_STRING	8
 
+#define	CM_ENTRY_KEY		1
+#define	CM_ENTRY_VALUE		2
+
+#define	CM_CONSUMER_NET		1
+#define	CM_CONSUMER_SCHEDULER	2
+#define	CM_CONSUMER_KUSR	3
+
 typedef int (*cm_key_cb)(const char *name, void *ctx);
+typedef int (*cm_consumer_update_t)(u32 flags);
+
+typedef struct cm_entry {
+	u32	kind;
+	u32	type;
+	u32	size;
+	char	name[32];
+} cm_entry_t;
 
 int		cm_init(void);
 int		cm_is_initialized(void);
 const char	*cm_mount_path(void);
 int		cm_foreach_key(const char *hive, const char *key,
 		    cm_key_cb cb, void *ctx);
+int		cm_key_exists(const char *hive, const char *key);
+int		cm_value_info(const char *hive, const char *key,
+		    const char *value, u32 *type, u32 *size);
+int		cm_enum_entry(const char *hive, const char *key,
+		    u32 index, cm_entry_t *entry);
+int		cm_register_consumer(u32 id, const char *name,
+		    cm_consumer_update_t update);
+int		cm_update_consumer(u32 id, u32 flags);
 int		cm_read_value(const char *hive, const char *key,
 		    const char *value, void *buf, u32 bufsize,
 		    u32 *bytes_read);

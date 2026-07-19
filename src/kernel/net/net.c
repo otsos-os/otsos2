@@ -32,6 +32,7 @@ $define %type int as 32 bit signed
 $define %type net_iface_t as struct with logical network interface state
 $define %type netdev_t as struct with physical network device state
 
+$define %func net_apply_config as function with args net_iface_t *
 $define %func net_init as function with args void
 $define %func net_is_initialized as function with args void
 $define %func net_iface_register as function with args net_iface_t *, netdev_t *
@@ -44,6 +45,7 @@ $define %func net_poll_all as procedure with args void
 $define %func net_tick as procedure with args void
 $define %func net_request_poll as procedure with args void
 $define %func net_dump_ifaces as procedure with args void
+$define %func net_cm_update as function with args u32
 $define %func net_iface_set_ip as procedure with args net_iface_t *, u32
 $define %func net_iface_set_netmask as procedure with args net_iface_t *, u32
 $define %func net_iface_set_gw as procedure with args net_iface_t *, u32
@@ -52,11 +54,13 @@ $define %func net_iface_set_gw as procedure with args net_iface_t *, u32
 
 /* !SPACE!
 
+$space %internal net_apply_config
 $space %export net_init, net_is_initialized
 $space %export net_iface_register, net_iface_unregister, net_iface_count
 $space %export net_iface_get, net_iface_by_name
 $space %export net_iface_find_by_ndev
 $space %export net_poll_all, net_tick, net_request_poll, net_dump_ifaces
+$space %export net_cm_update
 $space %export net_iface_set_ip, net_iface_set_netmask, net_iface_set_gw
 
 */
@@ -68,6 +72,8 @@ $space %export net_iface_set_ip, net_iface_set_netmask, net_iface_set_gw
 #include <kernel/net/endpoint.h>
 #include <kernel/net/loopback.h>
 #include <kernel/drivers/timer.h>
+#include <kernel/cm/cm.h>
+#include <kernel/api/errno.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -77,6 +83,51 @@ static int		g_initialized;
 static int		g_polling;
 static u64		g_last_poll_tick;
 static int		g_poll_requested;
+
+static int
+net_apply_config(net_iface_t *iface)
+{
+	char	key[128];
+	u32	ip, mask, gw;
+	int	enabled;
+
+	if (!iface) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (strlen("Interfaces.") + strlen(iface->name) >= sizeof(key)) {
+		return (-API_ERR_TOO_BIG);
+	}
+
+	strcpy(key, "Interfaces.");
+	strcat(key, iface->name);
+
+	enabled = cm_get_bool_default("NETWORK", key, "Enabled", 1);
+	if (!enabled) {
+		iface->ip_addr = 0;
+		iface->netmask = 0;
+		iface->gw_addr = 0;
+		return (0);
+	}
+	if (cm_get_ipv4("NETWORK", key, "Address", &ip) != 0) {
+		return (0);
+	}
+	mask = cm_get_ipv4_default("NETWORK", key, "Netmask",
+	    0xFFFFFF00u);
+	gw = cm_get_ipv4_default("NETWORK", key, "Gateway", 0);
+
+	iface->ip_addr = ip;
+	iface->netmask = mask;
+	iface->gw_addr = gw;
+	drivers_log("[NET] %s configured %d.%d.%d.%d/%d.%d.%d.%d gw "
+	    "%d.%d.%d.%d\n", iface->name,
+	    (ip >> 24) & 0xFF, (ip >> 16) & 0xFF,
+	    (ip >> 8) & 0xFF, ip & 0xFF,
+	    (mask >> 24) & 0xFF, (mask >> 16) & 0xFF,
+	    (mask >> 8) & 0xFF, mask & 0xFF,
+	    (gw >> 24) & 0xFF, (gw >> 16) & 0xFF,
+	    (gw >> 8) & 0xFF, gw & 0xFF);
+	return (0);
+}
 
 int
 net_init(void)
@@ -98,6 +149,7 @@ net_init(void)
 	arp_cache_init();
 	udp_init();
 	net_endpoint_init();
+	cm_register_consumer(CM_CONSUMER_NET, "net", net_cm_update);
 	g_initialized = 1;
 
 	loopback_init();
@@ -316,6 +368,26 @@ net_dump_ifaces(void)
 			    iface->netmask & 0xFF);
 		}
 	}
+}
+
+int
+net_cm_update(u32 flags)
+{
+	int	i, ret, last_ret;
+
+	(void)flags;
+	if (!g_initialized) {
+		return (-API_ERR_NOT_FOUND);
+	}
+
+	last_ret = 0;
+	for (i = 0; i < g_iface_count; i++) {
+		ret = net_apply_config(g_ifaces[i]);
+		if (ret != 0) {
+			last_ret = ret;
+		}
+	}
+	return (last_ret);
 }
 
 void

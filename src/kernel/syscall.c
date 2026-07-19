@@ -340,6 +340,40 @@ void syscall_handler(registers_t *regs) {
     regs->rax = (u64)api_net_accept((int)arg1,
         (struct api_net_addr *)arg2, (u32)arg3);
     break;
+  case CALL_REG_OPEN:
+    regs->rax = (u64)api_reg_open((const char *)arg1,
+        (const char *)arg2, (u32)arg3);
+    break;
+  case CALL_REG_CLOSE:
+    regs->rax = (u64)api_reg_close((int)arg1);
+    break;
+  case CALL_REG_GET:
+    regs->rax = (u64)api_reg_get((int)arg1,
+        (struct api_reg_value *)arg2);
+    break;
+  case CALL_REG_SET:
+    regs->rax = (u64)api_reg_set((int)arg1,
+        (const struct api_reg_value *)arg2);
+    break;
+  case CALL_REG_CREATE_KEY:
+    regs->rax = (u64)api_reg_create_key((int)arg1,
+        (const char *)arg2);
+    break;
+  case CALL_REG_DELETE_KEY:
+    regs->rax = (u64)api_reg_delete_key((int)arg1,
+        (const char *)arg2);
+    break;
+  case CALL_REG_DELETE_VALUE:
+    regs->rax = (u64)api_reg_delete_value((int)arg1,
+        (const char *)arg2);
+    break;
+  case CALL_REG_ENUM:
+    regs->rax = (u64)api_reg_enum((int)arg1,
+        (struct api_reg_entry *)arg2);
+    break;
+  case CALL_REG_UPD:
+    regs->rax = (u64)api_reg_upd((u32)arg1);
+    break;
   case CALL_TRACE_OPEN:
     regs->rax = (u64)api_trace_open((u32)arg1);
     break;

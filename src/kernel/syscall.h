@@ -110,6 +110,16 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_TRACE_INFO		0x904
 #define	CALL_TRACE_MARK		0x905
 
+#define	CALL_REG_OPEN		0xA00
+#define	CALL_REG_CLOSE		0xA01
+#define	CALL_REG_GET		0xA02
+#define	CALL_REG_SET		0xA03
+#define	CALL_REG_CREATE_KEY	0xA04
+#define	CALL_REG_DELETE_KEY	0xA05
+#define	CALL_REG_DELETE_VALUE	0xA06
+#define	CALL_REG_ENUM		0xA07
+#define	CALL_REG_UPD		0xA08
+
 #define	CALL_PROC_GETPID	0x408
 #define	CALL_PROC_GETPPID	0x409
 #define	CALL_PROC_THREAD_EXIT	0x40A
