@@ -50,6 +50,7 @@ $space %export ipv4_get_icmp_unreach_sent, ipv4_get_frag_dropped
 #include <kernel/net/ipv4.h>
 #include <kernel/net/icmp.h>
 #include <kernel/net/udp.h>
+#include <kernel/net/tcp.h>
 #include <kernel/net/arp.h>
 #include <kernel/net/ethernet.h>
 #include <mlibc/stdio.h>
@@ -144,11 +145,8 @@ ipv4_input(net_iface_t *iface, const u8 *src_mac,
 		break;
 
 	case IPV4_PROTO_TCP:
-		if (dst_ip == iface->ip_addr) {
-			icmp_send_unreachable(iface, src_ip,
-			    ICMP_CODE_PROT_UNREACH, data, total_len);
-		}
-		ret = 0;
+		ret = tcp_input(iface, src_ip, dst_ip, data + header_len,
+		    (u16)(total_len - header_len));
 		break;
 
 	default:

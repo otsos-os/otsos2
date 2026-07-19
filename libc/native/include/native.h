@@ -4,7 +4,7 @@ $define %type api_sysinfo as struct with kernel identity strings
 $define %type api_kmeminfo as struct with native kernel memory data
 $define %type api_fs_stat as struct with native file metadata
 $define %type api_net_addr as native IPv4 endpoint address
-$define %type api_net_msg as native datagram descriptor
+$define %type api_net_msg as native network message descriptor
 $define %type api_trace_record as native trace record
 $define %type api_trace_filter as native trace session filter
 $define %type kevent as struct with native event data
@@ -15,6 +15,8 @@ $define %func fsMnt as function with args mount tuple
 $define %func fsUmnt as function with args const char *, uint64_t
 $define %func procSpawn as function with args spawn tuple
 $define %func procSpawnAbi as function with args spawn tuple, uint32_t
+$define %func netListen as function with args int, int
+$define %func netAccept as function with args int, api_net_addr *, uint32_t
 $define %func traceOpen as function with args uint32_t
 $define %func traceRead as function with args int, api_trace_read *
 $define %func traceMark as function with args uint32_t, five uint64_t
@@ -31,7 +33,8 @@ $space %export fsMnt, fsUmnt
 $space %export procSpawn, procSpawnAbi, procSpawnNative, procWait
 $space %export procRun, procExit, procKill
 $space %export memMap, memUnmap, eventKqueue, eventWait, eventClose
-$space %export netOpen, netBind, netConnect, netSend, netRecv, netCtl
+$space %export netOpen, netBind, netConnect, netListen, netAccept
+$space %export netSend, netRecv, netCtl
 $space %export drmCall, drmInfo, drmGemCreate, drmGemClose, drmGemMapInfo
 $space %export drmGemMmap, drmFbCreate, drmFbDestroy, drmGetObjects
 $space %export drmAtomicCommit, drmRapiClear, drmRapiPutPixel
@@ -113,6 +116,8 @@ $space %export traceMark
 #define CALL_NET_SEND		0x803
 #define CALL_NET_RECV		0x804
 #define CALL_NET_CTL		0x805
+#define CALL_NET_LISTEN		0x806
+#define CALL_NET_ACCEPT		0x807
 #define CALL_TRACE_OPEN		0x900
 #define CALL_TRACE_CLOSE	0x901
 #define CALL_TRACE_READ		0x902
@@ -153,7 +158,9 @@ $space %export traceMark
 
 #define API_NET_ADDR_IP4	1
 #define API_NET_PROTO_UDP	1
+#define API_NET_PROTO_TCP	2
 #define API_NET_MODE_DGRAM	1
+#define API_NET_MODE_STREAM	2
 #define API_NET_OPEN_NONBLOCK	0x00000001
 #define API_NET_MSG_NONBLOCK	0x00000001
 #define API_NET_MSG_TRUNC	0x00000002
@@ -801,6 +808,8 @@ int	eventWait(int kq, struct kevent *changes, int nchanges,
 int	netOpen(int proto, int mode, uint32_t flags);
 int	netBind(int handle, const struct api_net_addr *addr);
 int	netConnect(int handle, const struct api_net_addr *addr);
+int	netListen(int handle, int backlog);
+int	netAccept(int handle, struct api_net_addr *addr, uint32_t flags);
 ssize_t	netSend(int handle, const struct api_net_msg *msg);
 ssize_t	netRecv(int handle, struct api_net_msg *msg);
 int	netCtl(int handle, int op, void *arg);

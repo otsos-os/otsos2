@@ -337,6 +337,13 @@ void syscall_handler(registers_t *regs) {
     regs->rax = (u64)api_net_ctl((int)arg1, (int)arg2,
         (void *)arg3);
     break;
+  case CALL_NET_LISTEN:
+    regs->rax = (u64)api_net_listen((int)arg1, (int)arg2);
+    break;
+  case CALL_NET_ACCEPT:
+    regs->rax = (u64)api_net_accept((int)arg1,
+        (struct api_net_addr *)arg2, (u32)arg3);
+    break;
   case CALL_TRACE_OPEN:
     regs->rax = (u64)api_trace_open((u32)arg1);
     break;

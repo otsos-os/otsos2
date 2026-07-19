@@ -234,6 +234,7 @@ net_poll_all(void)
 	}
 	g_polling = 1;
 	arp_tick();
+	net_endpoint_tick();
 	for (i = 0; i < g_iface_count; i++) {
 		netdev_t	*ndev;
 

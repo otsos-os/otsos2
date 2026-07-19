@@ -31,17 +31,20 @@ $define %type int as 32 bit signed
 $define %type api_handle_t as struct with process handle state
 $define %type api_object_t as struct with global API object state
 $define %type api_net_addr as native userspace network address
-$define %type api_net_msg as native userspace datagram descriptor
+$define %type api_net_msg as native userspace network message descriptor
 $define %type net_endpoint_t as native network endpoint state
 $define %type net_endpoint_addr_t as endpoint IPv4 address tuple
 
 $define %func api_net_find_free_handle as function with args void
 $define %func api_net_get_endpoint as function with args int, net_endpoint_t **
+$define %func api_net_install_endpoint as function with args net_endpoint_t *
 $define %func api_net_from_user_addr as function with args const api_net_addr *, net_endpoint_addr_t *
 $define %func api_net_to_user_addr as function with args api_net_addr *, const net_endpoint_addr_t *
 $define %func api_net_open as function with args int, int, u32
 $define %func api_net_bind as function with args int, const api_net_addr *
 $define %func api_net_connect as function with args int, const api_net_addr *
+$define %func api_net_listen as function with args int, int
+$define %func api_net_accept as function with args int, api_net_addr *, u32
 $define %func api_net_send as function with args int, const api_net_msg *
 $define %func api_net_recv as function with args int, api_net_msg *
 $define %func api_net_ctl as function with args int, int, void *
@@ -51,8 +54,10 @@ $define %func api_net_ctl as function with args int, int, void *
 /* !SPACE!
 
 $space %internal api_net_find_free_handle, api_net_get_endpoint
+$space %internal api_net_install_endpoint
 $space %internal api_net_from_user_addr, api_net_to_user_addr
 $space %export api_net_open, api_net_bind, api_net_connect
+$space %export api_net_listen, api_net_accept
 $space %export api_net_send, api_net_recv, api_net_ctl
 
 */
@@ -116,6 +121,40 @@ api_net_get_endpoint(int handle, net_endpoint_t **out_ep)
 }
 
 static int
+api_net_install_endpoint(net_endpoint_t *ep)
+{
+	api_handle_t	*handles;
+	api_object_t	*objects;
+	int		handle, object_index;
+
+	if (!ep) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+
+	handle = api_net_find_free_handle();
+	if (handle < 0) {
+		return (handle);
+	}
+
+	object_index = api_alloc_object();
+	if (object_index < 0) {
+		return (object_index);
+	}
+
+	handles = api_get_handle_table();
+	objects = api_get_object_table();
+
+	objects[object_index].type = API_OBJECT_NET;
+	objects[object_index].flags = API_OPEN_RW;
+	objects[object_index].net = ep;
+
+	handles[handle].used = 1;
+	handles[handle].flags = API_OPEN_RW;
+	handles[handle].object_index = object_index;
+	return (handle);
+}
+
+static int
 api_net_from_user_addr(const struct api_net_addr *uaddr,
     net_endpoint_addr_t *addr)
 {
@@ -174,45 +213,36 @@ api_net_to_user_addr(struct api_net_addr *uaddr,
 int
 api_net_open(int proto, int mode, u32 flags)
 {
-	api_handle_t	*handles;
-	api_object_t	*objects;
 	net_endpoint_t	*ep;
-	int		handle, object_index;
+	int		handle, kproto, kmode;
 
-	if (proto != API_NET_PROTO_UDP || mode != API_NET_MODE_DGRAM) {
+	if (!((proto == API_NET_PROTO_UDP &&
+	    mode == API_NET_MODE_DGRAM) ||
+	    (proto == API_NET_PROTO_TCP &&
+	    mode == API_NET_MODE_STREAM))) {
 		return (-API_ERR_NOT_SUPPORTED);
 	}
 	if (flags & ~API_NET_OPEN_NONBLOCK) {
 		return (-API_ERR_BAD_VALUE);
 	}
 
-	handle = api_net_find_free_handle();
-	if (handle < 0) {
-		return (handle);
+	kproto = NET_ENDPOINT_PROTO_UDP;
+	kmode = NET_ENDPOINT_MODE_DGRAM;
+	if (proto == API_NET_PROTO_TCP) {
+		kproto = NET_ENDPOINT_PROTO_TCP;
+		kmode = NET_ENDPOINT_MODE_STREAM;
 	}
 
-	object_index = api_alloc_object();
-	if (object_index < 0) {
-		return (object_index);
-	}
-
-	ep = net_endpoint_open(NET_ENDPOINT_PROTO_UDP,
-	    NET_ENDPOINT_MODE_DGRAM, flags);
+	ep = net_endpoint_open(kproto, kmode, flags);
 	if (!ep) {
-		api_release_object(object_index);
 		return (-API_ERR_NO_MEMORY);
 	}
 
-	handles = api_get_handle_table();
-	objects = api_get_object_table();
-
-	objects[object_index].type = API_OBJECT_NET;
-	objects[object_index].flags = API_OPEN_RW;
-	objects[object_index].net = ep;
-
-	handles[handle].used = 1;
-	handles[handle].flags = API_OPEN_RW;
-	handles[handle].object_index = object_index;
+	handle = api_net_install_endpoint(ep);
+	if (handle < 0) {
+		net_endpoint_close(ep);
+		return (handle);
+	}
 	return (handle);
 }
 
@@ -250,6 +280,61 @@ api_net_connect(int handle, const struct api_net_addr *uaddr)
 		return (ret);
 	}
 	return (net_endpoint_connect(ep, &addr));
+}
+
+int
+api_net_listen(int handle, int backlog)
+{
+	net_endpoint_t	*ep;
+	int		ret;
+
+	ret = api_net_get_endpoint(handle, &ep);
+	if (ret != 0) {
+		return (ret);
+	}
+	return (net_endpoint_listen(ep, backlog));
+}
+
+int
+api_net_accept(int handle, struct api_net_addr *uaddr, u32 flags)
+{
+	net_endpoint_t		*ep;
+	net_endpoint_t		*child;
+	net_endpoint_addr_t	addr;
+	int			ret, child_handle;
+
+	ret = api_net_get_endpoint(handle, &ep);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (flags & ~API_NET_MSG_NONBLOCK) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (uaddr && (!is_user_address(uaddr, sizeof(*uaddr)) ||
+	    !user_range_fault_in(uaddr, sizeof(*uaddr), 1))) {
+		return (-API_ERR_BAD_ADDR);
+	}
+
+	child = NULL;
+	ret = net_endpoint_accept(ep, &child, uaddr ? &addr : NULL,
+	    flags);
+	if (ret != 0) {
+		return (ret);
+	}
+
+	child_handle = api_net_install_endpoint(child);
+	if (child_handle < 0) {
+		net_endpoint_close(child);
+		return (child_handle);
+	}
+	if (uaddr) {
+		ret = api_net_to_user_addr(uaddr, &addr);
+		if (ret != 0) {
+			api_data_close(child_handle);
+			return (ret);
+		}
+	}
+	return (child_handle);
 }
 
 int

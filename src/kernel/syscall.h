@@ -100,6 +100,8 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_NET_SEND		0x803
 #define	CALL_NET_RECV		0x804
 #define	CALL_NET_CTL		0x805
+#define	CALL_NET_LISTEN		0x806
+#define	CALL_NET_ACCEPT		0x807
 
 #define	CALL_TRACE_OPEN		0x900
 #define	CALL_TRACE_CLOSE	0x901

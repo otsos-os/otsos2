@@ -38,6 +38,8 @@ $define %func net_endpoint_open as function with args int, int, u32
 $define %func net_endpoint_close as procedure with args net_endpoint_t *
 $define %func net_endpoint_bind as function with args net_endpoint_t *, const net_endpoint_addr_t *
 $define %func net_endpoint_connect as function with args net_endpoint_t *, const net_endpoint_addr_t *
+$define %func net_endpoint_listen as function with args net_endpoint_t *, int
+$define %func net_endpoint_accept as function with args net_endpoint_t *, net_endpoint_t **, net_endpoint_addr_t *, u32
 $define %func net_endpoint_send as function with args net_endpoint_t *, const u8 *, u32, const net_endpoint_addr_t *, u32
 $define %func net_endpoint_recv as function with args net_endpoint_t *, u8 *, u32, net_endpoint_addr_t *, u32, u32 *
 $define %func net_endpoint_get_local as procedure with args net_endpoint_t *, net_endpoint_addr_t *
@@ -47,6 +49,8 @@ $define %func net_endpoint_writable as function with args net_endpoint_t *
 $define %func net_endpoint_pending_bytes as function with args net_endpoint_t *
 $define %func net_endpoint_write_space as function with args net_endpoint_t *
 $define %func net_endpoint_udp_input as function with args net_iface_t *, u32, u32, u16, u16, const u8 *, u16
+$define %func net_endpoint_tcp_input as function with args net_iface_t *, u32, u32, u16, u16, u32, u32, u16, u16, const u8 *, u16
+$define %func net_endpoint_tick as procedure with args void
 
 */
 
@@ -54,11 +58,13 @@ $define %func net_endpoint_udp_input as function with args net_iface_t *, u32, u
 
 $space %export net_endpoint_init, net_endpoint_open, net_endpoint_close
 $space %export net_endpoint_bind, net_endpoint_connect
+$space %export net_endpoint_listen, net_endpoint_accept
 $space %export net_endpoint_send, net_endpoint_recv
 $space %export net_endpoint_get_local, net_endpoint_get_peer
 $space %export net_endpoint_readable, net_endpoint_writable
 $space %export net_endpoint_pending_bytes, net_endpoint_write_space
-$space %export net_endpoint_udp_input
+$space %export net_endpoint_udp_input, net_endpoint_tcp_input
+$space %export net_endpoint_tick
 
 */
 
@@ -70,7 +76,9 @@ $space %export net_endpoint_udp_input
 
 #define	NET_ENDPOINT_ADDR_IP4		1
 #define	NET_ENDPOINT_PROTO_UDP		1
+#define	NET_ENDPOINT_PROTO_TCP		2
 #define	NET_ENDPOINT_MODE_DGRAM		1
+#define	NET_ENDPOINT_MODE_STREAM		2
 #define	NET_ENDPOINT_FLAG_NONBLOCK	0x00000001
 #define	NET_ENDPOINT_MSG_NONBLOCK	0x00000001
 #define	NET_ENDPOINT_MSG_TRUNC		0x00000002
@@ -92,6 +100,9 @@ int	net_endpoint_bind(net_endpoint_t *ep,
     const net_endpoint_addr_t *addr);
 int	net_endpoint_connect(net_endpoint_t *ep,
     const net_endpoint_addr_t *addr);
+int	net_endpoint_listen(net_endpoint_t *ep, int backlog);
+int	net_endpoint_accept(net_endpoint_t *ep, net_endpoint_t **out_ep,
+    net_endpoint_addr_t *addr, u32 flags);
 int	net_endpoint_send(net_endpoint_t *ep, const u8 *data, u32 len,
     const net_endpoint_addr_t *addr, u32 flags);
 int	net_endpoint_recv(net_endpoint_t *ep, u8 *buf, u32 len,
@@ -106,5 +117,9 @@ u32	net_endpoint_pending_bytes(net_endpoint_t *ep);
 u32	net_endpoint_write_space(net_endpoint_t *ep);
 int	net_endpoint_udp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
     u16 src_port, u16 dst_port, const u8 *data, u16 len);
+int	net_endpoint_tcp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
+    u16 src_port, u16 dst_port, u32 seq, u32 ack, u16 flags,
+    u16 window, const u8 *data, u16 len);
+void	net_endpoint_tick(void);
 
 #endif

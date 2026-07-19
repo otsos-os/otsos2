@@ -228,7 +228,9 @@ struct api_kmeminfo {
 
 #define	API_NET_ADDR_IP4		1
 #define	API_NET_PROTO_UDP		1
+#define	API_NET_PROTO_TCP		2
 #define	API_NET_MODE_DGRAM		1
+#define	API_NET_MODE_STREAM		2
 #define	API_NET_OPEN_NONBLOCK		0x00000001
 #define	API_NET_MSG_NONBLOCK		0x00000001
 #define	API_NET_MSG_TRUNC		0x00000002
@@ -725,6 +727,8 @@ int api_input_flush(void);
 int api_net_open(int proto, int mode, u32 flags);
 int api_net_bind(int handle, const struct api_net_addr *uaddr);
 int api_net_connect(int handle, const struct api_net_addr *uaddr);
+int api_net_listen(int handle, int backlog);
+int api_net_accept(int handle, struct api_net_addr *uaddr, u32 flags);
 int api_net_send(int handle, const struct api_net_msg *umsg);
 int api_net_recv(int handle, struct api_net_msg *umsg);
 int api_net_ctl(int handle, int op, void *arg);

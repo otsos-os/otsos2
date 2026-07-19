@@ -73,8 +73,9 @@ Monolithic kernel with the following rough layers:
 - `drivers/video/drm/` — minimal DRM: GEM buffers, KMS objects, primary/cursor
   planes, atomic commit, fbdev, render helpers (`rapi`), and a virtio-gpu
   backend.
-- `net/` — polling Ethernet/ARP/IPv4/ICMP stack; virtio-net RX is polled from
-  timer IRQs after the network subsystem has initialized.
+- `net/` — polling Ethernet/ARP/IPv4/ICMP/UDP stack with a native TCP stream
+  MVP; virtio-net RX is polled from timer IRQs after the network subsystem has
+  initialized.
 - `console/` — kernel terminal, pty, and console rendering.
 - `event/` — kqueue-style event system (read, write, timer, proc, signal, user,
   keyboard and mouse filters).
