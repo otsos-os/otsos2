@@ -142,6 +142,8 @@ p3_table_high:
     .skip 4096
 p2_table_high:
     .skip 4096
+p2_table_high_1:
+    .skip 4096
 
 stack_guard:
     .skip 16384
@@ -1546,12 +1548,16 @@ setup_page_tables:
     or eax, 0b11
     mov [p4_table + 511 * 8], eax
 
-    /* p3_table_high[510] -> p2_table_high, covers VA 0xFFFFFFFF80000000+ */
+    /* p3_table_high[510] -> p2_table_high: VA 0xFFFFFFFF80000000+ -> PA 0-1GB */
     mov eax, offset p2_table_high
     or eax, 0b11
     mov [p3_table_high + 510 * 8], eax
 
-    /* Fill p2_table_high: 2MB huge pages mapping VA 0xFFFFFFFF80000000+ -> PA 0+ */
+    /* p3_table_high[511] -> p2_table_high_1*/
+    mov eax, offset p2_table_high_1
+    or eax, 0b11
+    mov [p3_table_high + 511 * 8], eax
+    /* Fill p2_table_high: 2MB huge pages PA 0-1GB */
     mov ecx, 0
 .Lmap_p2_high:
     mov eax, 0x200000
@@ -1561,6 +1567,16 @@ setup_page_tables:
     inc ecx
     cmp ecx, 512
     jne .Lmap_p2_high
+    mov ecx, 0
+.Lmap_p2_high_1:
+    mov eax, 0x200000
+    mul ecx
+    add eax, 0x40000000
+    or eax, 0b10000011
+    mov [p2_table_high_1 + ecx * 8], eax
+    inc ecx
+    cmp ecx, 512
+    jne .Lmap_p2_high_1
     
     ret
 
