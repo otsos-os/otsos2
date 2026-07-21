@@ -34,6 +34,7 @@ $define %type virtio_pci_cap_t as packed struct with PCI capability layout
 $define %type virtio_pci_notify_cap_t as packed struct extending cap with notify multiplier
 $define %type virtio_pci_common_cfg_t as packed struct with common config registers
 $define %type virtio_gpu_config_t as packed struct with GPU device config
+$define %type virtio_transport_t as enum with PCI transport kind
 $define %type virtio_hw_t as struct with resolved transport state
 
 $define %func virtio_hw_init as function with args virtio_hw_t *, pci_device_t *
@@ -107,6 +108,19 @@ $space %export virtio_hw_read_isr, virtio_hw_read_gpu_config
 
 #define	VIRTIO_F_VERSION_1		32
 
+#define	VIRTIO_PCI_LEGACY_DEVICE_MIN	0x1000
+#define	VIRTIO_PCI_LEGACY_DEVICE_MAX	0x103F
+
+#define	VIRTIO_PCI_LEGACY_HOST_FEATURES	0
+#define	VIRTIO_PCI_LEGACY_GUEST_FEATURES	4
+#define	VIRTIO_PCI_LEGACY_QUEUE_PFN	8
+#define	VIRTIO_PCI_LEGACY_QUEUE_SIZE	12
+#define	VIRTIO_PCI_LEGACY_QUEUE_SELECT	14
+#define	VIRTIO_PCI_LEGACY_QUEUE_NOTIFY	16
+#define	VIRTIO_PCI_LEGACY_STATUS	18
+#define	VIRTIO_PCI_LEGACY_ISR		19
+#define	VIRTIO_PCI_LEGACY_DEVICE_CONFIG	20
+
 #define	VIRTIO_VENDOR_ID		0x1AF4
 #define	VIRTIO_GPU_DEVICE_ID		0x1050
 
@@ -163,8 +177,16 @@ typedef struct {
 #define	VIRTIO_GPU_CONTROLQ	0
 #define	VIRTIO_GPU_CURSORQ	1
 
+typedef enum {
+	VIRTIO_TRANSPORT_MODERN = 0,
+	VIRTIO_TRANSPORT_LEGACY = 1,
+} virtio_transport_t;
+
 typedef struct {
 	pci_device_t		*pci_dev;
+	virtio_transport_t	transport;
+	u64			legacy_io_base;
+	u64			legacy_queue_desc;
 	u8			common_is_io;
 	u64			common_base;
 	u32			common_offset;

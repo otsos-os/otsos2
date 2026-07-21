@@ -86,6 +86,7 @@ $space %export virtio_net_pci_register, virtio_net_irq
 extern void	pic_unmask_irq(unsigned char irq);
 
 #define	VIRTIO_NET_DEVICE_ID		0x1041
+#define	VIRTIO_NET_LEGACY_DEVICE_ID	0x1000
 #define	VIRTIO_NET_QUEUE_SIZE		64
 #define	VIRTIO_NET_RX_QUEUE		0
 #define	VIRTIO_NET_TX_QUEUE		1
@@ -463,7 +464,7 @@ virtio_net_pci_probe(pci_device_t *dev, const pci_match_t *match)
 	u16			i;
 
 	(void)match;
-	st = kmem_alloc_aligned(sizeof(*st), 64);
+	st = kmem_alloc(sizeof(*st));
 	if (!st) {
 		drivers_log("[VIRTIO_NET] state alloc failed\n");
 		return (-1);
@@ -590,12 +591,19 @@ static pci_match_t virtio_net_matches[] = {
 		.subclass	= PCI_ANY_SUBCLASS,
 		.prog_if	= PCI_ANY_PROGIF,
 	},
+	{
+		.vendor_id	= VIRTIO_PCI_VENDOR_ID,
+		.device_id	= VIRTIO_NET_LEGACY_DEVICE_ID,
+		.class_code	= PCI_ANY_CLASS,
+		.subclass	= PCI_ANY_SUBCLASS,
+		.prog_if	= PCI_ANY_PROGIF,
+	},
 };
 
 static pci_driver_t virtio_net_pci_driver = {
 	.name		= "virtio-net",
 	.matches	= virtio_net_matches,
-	.match_count	= 1,
+	.match_count	= 2,
 	.probe		= virtio_net_pci_probe,
 	.remove		= virtio_net_pci_remove,
 };

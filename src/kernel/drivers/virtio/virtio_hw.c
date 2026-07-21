@@ -51,6 +51,7 @@ $define %func io_write16 as procedure with args u64, u32, u16
 $define %func io_write32 as procedure with args u64, u32, u32
 $define %func parse_capability as procedure with args virtio_hw_t *, u8, u8, u32, u32, u32
 $define %func walk_capabilities as procedure with args virtio_hw_t *
+$define %func legacy_init as function with args virtio_hw_t *
 $define %func common_reg as function with args virtio_hw_t *, u32
 $define %func common_read32 as function with args virtio_hw_t *, u32
 $define %func common_write32 as procedure with args virtio_hw_t *, u32, u32
@@ -88,7 +89,7 @@ $space %internal mmio_remap, mmio_read8, mmio_read16, mmio_read32
 $space %internal mmio_read64, mmio_write8, mmio_write16, mmio_write32
 $space %internal mmio_write64, io_read8, io_read16, io_read32
 $space %internal io_write8, io_write16, io_write32
-$space %internal parse_capability, walk_capabilities
+$space %internal parse_capability, walk_capabilities, legacy_init
 $space %internal common_reg, common_read32, common_write32
 $space %internal common_read16, common_write16, common_read8
 $space %internal common_write8, common_write64
@@ -449,15 +450,8 @@ common_write8(virtio_hw_t *hw, u32 off, u8 val)
 static void
 common_write64(virtio_hw_t *hw, u32 off, u64 val)
 {
-	if (hw->common_is_io) {
-		io_write32(hw->common_base,
-		    hw->common_offset + off, (u32)val);
-		io_write32(hw->common_base,
-		    hw->common_offset + off + 4,
-		    (u32)(val >> 32));
-	} else {
-		mmio_write64(common_reg(hw, off), val);
-	}
+	common_write32(hw, off, (u32)val);
+	common_write32(hw, off + 4, (u32)(val >> 32));
 }
 
 #define	OFF_DEVICE_FEATURE_SELECT	0
@@ -476,6 +470,30 @@ common_write64(virtio_hw_t *hw, u32 off, u64 val)
 #define	OFF_QUEUE_DESC			32
 #define	OFF_QUEUE_DRIVER		40
 #define	OFF_QUEUE_DEVICE		48
+
+static int
+legacy_init(virtio_hw_t *hw)
+{
+	pci_bar_t	bar;
+
+	if (hw->pci_dev->device_id < VIRTIO_PCI_LEGACY_DEVICE_MIN ||
+	    hw->pci_dev->device_id > VIRTIO_PCI_LEGACY_DEVICE_MAX ||
+	    pci_read_bar(hw->pci_dev, 0, &bar) != 0 || !bar.is_io ||
+	    bar.base == 0 || bar.size < VIRTIO_PCI_LEGACY_DEVICE_CONFIG) {
+		return (-1);
+	}
+
+	hw->transport = VIRTIO_TRANSPORT_LEGACY;
+	hw->legacy_io_base = bar.base;
+	hw->dev_is_io = 1;
+	hw->dev_base = bar.base;
+	hw->dev_offset = VIRTIO_PCI_LEGACY_DEVICE_CONFIG;
+	hw->dev_length = (u32)(bar.size - VIRTIO_PCI_LEGACY_DEVICE_CONFIG);
+
+	drivers_log("[VIRTIO] legacy PCI I/O transport at %p\n",
+	    (void *)bar.base);
+	return (0);
+}
 
 int
 virtio_hw_init(virtio_hw_t *hw, pci_device_t *dev)
@@ -496,9 +514,11 @@ virtio_hw_init(virtio_hw_t *hw, pci_device_t *dev)
 
 	if (hw->common_base == 0 || hw->notify_base == 0 ||
 	    hw->isr_base == 0 || hw->dev_base == 0) {
-		drivers_log("[VIRTIO] missing required "
-		    "capabilities\n");
-		return (-1);
+		if (legacy_init(hw) != 0) {
+			drivers_log("[VIRTIO] missing required "
+			    "capabilities\n");
+			return (-1);
+		}
 	}
 
 	virtio_hw_set_status(hw, VIRTIO_STATUS_RESET);
@@ -506,14 +526,15 @@ virtio_hw_init(virtio_hw_t *hw, pci_device_t *dev)
 	virtio_hw_set_status(hw, VIRTIO_STATUS_ACKNOWLEDGE |
 	    VIRTIO_STATUS_DRIVER);
 
-	drivers_log("[VIRTIO] transport discovered\n");
+	drivers_log("[VIRTIO] %s transport discovered\n",
+	    hw->transport == VIRTIO_TRANSPORT_LEGACY ? "legacy" : "modern");
 	return (0);
 }
 
 void
 virtio_hw_shutdown(virtio_hw_t *hw)
 {
-	if (!hw || hw->common_base == 0) {
+	if (!hw || (hw->common_base == 0 && hw->legacy_io_base == 0)) {
 		return;
 	}
 	virtio_hw_set_status(hw, VIRTIO_STATUS_RESET);
@@ -523,18 +544,32 @@ virtio_hw_shutdown(virtio_hw_t *hw)
 void
 virtio_hw_set_status(virtio_hw_t *hw, u8 status)
 {
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		status &= ~VIRTIO_STATUS_FEATURES_OK;
+		io_write8(hw->legacy_io_base,
+		    VIRTIO_PCI_LEGACY_STATUS, status);
+		return;
+	}
 	common_write8(hw, OFF_DEVICE_STATUS, status);
 }
 
 u8
 virtio_hw_get_status(virtio_hw_t *hw)
 {
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		return (io_read8(hw->legacy_io_base,
+		    VIRTIO_PCI_LEGACY_STATUS));
+	}
 	return (common_read8(hw, OFF_DEVICE_STATUS));
 }
 
 u32
 virtio_hw_get_features(virtio_hw_t *hw)
 {
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		return (io_read32(hw->legacy_io_base,
+		    VIRTIO_PCI_LEGACY_HOST_FEATURES));
+	}
 	common_write32(hw, OFF_DEVICE_FEATURE_SELECT, 0);
 	return (common_read32(hw, OFF_DEVICE_FEATURE));
 }
@@ -542,6 +577,9 @@ virtio_hw_get_features(virtio_hw_t *hw)
 u32
 virtio_hw_get_features_hi(virtio_hw_t *hw)
 {
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		return (0);
+	}
 	common_write32(hw, OFF_DEVICE_FEATURE_SELECT, 1);
 	return (common_read32(hw, OFF_DEVICE_FEATURE));
 }
@@ -549,6 +587,11 @@ virtio_hw_get_features_hi(virtio_hw_t *hw)
 void
 virtio_hw_set_features(virtio_hw_t *hw, u32 features)
 {
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		io_write32(hw->legacy_io_base,
+		    VIRTIO_PCI_LEGACY_GUEST_FEATURES, features);
+		return;
+	}
 	common_write32(hw, OFF_DRIVER_FEATURE_SELECT, 0);
 	common_write32(hw, OFF_DRIVER_FEATURE, features);
 }
@@ -556,6 +599,9 @@ virtio_hw_set_features(virtio_hw_t *hw, u32 features)
 void
 virtio_hw_set_features_hi(virtio_hw_t *hw, u32 features)
 {
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		return;
+	}
 	common_write32(hw, OFF_DRIVER_FEATURE_SELECT, 1);
 	common_write32(hw, OFF_DRIVER_FEATURE, features);
 }
@@ -563,54 +609,88 @@ virtio_hw_set_features_hi(virtio_hw_t *hw, u32 features)
 u16
 virtio_hw_get_num_queues(virtio_hw_t *hw)
 {
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		return (0);
+	}
 	return (common_read16(hw, OFF_NUM_QUEUES));
 }
 
 void
 virtio_hw_select_queue(virtio_hw_t *hw, u16 index)
 {
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		io_write16(hw->legacy_io_base,
+		    VIRTIO_PCI_LEGACY_QUEUE_SELECT, index);
+		return;
+	}
 	common_write16(hw, OFF_QUEUE_SELECT, index);
 }
 
 u16
 virtio_hw_get_queue_size(virtio_hw_t *hw)
 {
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		return (io_read16(hw->legacy_io_base,
+		    VIRTIO_PCI_LEGACY_QUEUE_SIZE));
+	}
 	return (common_read16(hw, OFF_QUEUE_SIZE));
 }
 
 void
 virtio_hw_set_queue_size(virtio_hw_t *hw, u16 size)
 {
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		return;
+	}
 	common_write16(hw, OFF_QUEUE_SIZE, size);
 }
 
 void
 virtio_hw_set_queue_desc(virtio_hw_t *hw, u64 addr)
 {
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		hw->legacy_queue_desc = addr;
+		return;
+	}
 	common_write64(hw, OFF_QUEUE_DESC, addr);
 }
 
 void
 virtio_hw_set_queue_driver(virtio_hw_t *hw, u64 addr)
 {
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		return;
+	}
 	common_write64(hw, OFF_QUEUE_DRIVER, addr);
 }
 
 void
 virtio_hw_set_queue_device(virtio_hw_t *hw, u64 addr)
 {
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		return;
+	}
 	common_write64(hw, OFF_QUEUE_DEVICE, addr);
 }
 
 u16
 virtio_hw_get_queue_notify_off(virtio_hw_t *hw)
 {
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		return (0);
+	}
 	return (common_read16(hw, OFF_QUEUE_NOTIFY_OFF));
 }
 
 void
 virtio_hw_enable_queue(virtio_hw_t *hw)
 {
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		io_write32(hw->legacy_io_base,
+		    VIRTIO_PCI_LEGACY_QUEUE_PFN,
+		    (u32)(hw->legacy_queue_desc >> 12));
+		return;
+	}
 	common_write16(hw, OFF_QUEUE_ENABLE, 1);
 }
 
@@ -619,6 +699,12 @@ virtio_hw_notify_queue(virtio_hw_t *hw, u16 queue_index)
 {
 	u16	notify_off;
 	u64	addr;
+
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		io_write16(hw->legacy_io_base,
+		    VIRTIO_PCI_LEGACY_QUEUE_NOTIFY, queue_index);
+		return;
+	}
 
 	virtio_hw_select_queue(hw, queue_index);
 	notify_off = virtio_hw_get_queue_notify_off(hw);
@@ -639,6 +725,11 @@ virtio_hw_read_isr(virtio_hw_t *hw)
 {
 	u64	addr;
 
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		return (io_read8(hw->legacy_io_base,
+		    VIRTIO_PCI_LEGACY_ISR));
+	}
+
 	addr = hw->isr_base + hw->isr_offset;
 	if (hw->isr_is_io) {
 		return (io_read8(addr, 0));
@@ -649,6 +740,9 @@ virtio_hw_read_isr(virtio_hw_t *hw)
 u8
 virtio_hw_get_config_generation(virtio_hw_t *hw)
 {
+	if (hw->transport == VIRTIO_TRANSPORT_LEGACY) {
+		return (0);
+	}
 	return (common_read8(hw, OFF_CONFIG_GENERATION));
 }
 

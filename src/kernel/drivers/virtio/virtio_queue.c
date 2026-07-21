@@ -140,7 +140,7 @@ virtio_vq_create(virtio_vq_t *vq, u16 queue_size)
 
 	vq->avail = (virtq_avail_t *)((u8 *)mem + offset);
 	vq->phys_avail = mem_phys + offset;
-	offset += (avail_sz + PAGE_SIZE - 1) &
+	offset = (offset + avail_sz + PAGE_SIZE - 1) &
 	    ~((u32)PAGE_SIZE - 1);
 
 	vq->used = (virtq_used_t *)((u8 *)mem + offset);

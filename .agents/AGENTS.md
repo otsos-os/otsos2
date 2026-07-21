@@ -78,7 +78,8 @@ Monolithic kernel with the following rough layers:
   planes, atomic commit, fbdev, render helpers (`rapi`), and a virtio-gpu
   backend.
 - `net/` — polling Ethernet/ARP/IPv4/ICMP/UDP stack with a native TCP stream
-  MVP; virtio-net RX is polled from timer IRQs after the network subsystem has
+  MVP; virtio-net supports modern PCI and legacy/transitional PCI I/O
+  transports. RX is polled from timer IRQs after the network subsystem has
   initialized.
 - `console/` — kernel terminal, pty, and console rendering.
 - `event/` — kqueue-style event system (read, write, timer, proc, signal, user,
@@ -300,6 +301,9 @@ User need to test, dont run test manually, ask user.
 
 ### Critical invariants
 
+- Virtio PCI common configuration 64-bit queue addresses are written as two
+  32-bit accesses. VirtualBox rejects or mishandles a single 64-bit MMIO store
+  even though QEMU accepts it.
 - Do not touch `kernel.c` boot order without understanding the memory-map and
   Multiboot module layout.
 - ChainFS is a flat, single-chain filesystem; it is not POSIX-safe for hard

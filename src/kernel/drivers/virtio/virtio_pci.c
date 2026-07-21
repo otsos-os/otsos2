@@ -39,7 +39,8 @@ virtio_pci_init(virtio_hw_t *hw, pci_device_t *dev,
 
 	device_features = virtio_hw_get_features(hw);
 	device_features_hi = virtio_hw_get_features_hi(hw);
-	if ((device_features_hi &
+	if (hw->transport == VIRTIO_TRANSPORT_MODERN &&
+	    (device_features_hi &
 	    (1u << (VIRTIO_F_VERSION_1 - 32))) == 0) {
 		drivers_log("[VIRTIO] VERSION_1 not offered\n");
 		virtio_hw_set_status(hw, VIRTIO_STATUS_FAILED);
@@ -48,15 +49,17 @@ virtio_pci_init(virtio_hw_t *hw, pci_device_t *dev,
 
 	accepted_features &= device_features;
 	virtio_hw_set_features(hw, accepted_features);
-	virtio_hw_set_features_hi(hw,
-	    1u << (VIRTIO_F_VERSION_1 - 32));
-	virtio_hw_set_status(hw, VIRTIO_STATUS_ACKNOWLEDGE |
-	    VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK);
-	status = virtio_hw_get_status(hw);
-	if ((status & VIRTIO_STATUS_FEATURES_OK) == 0) {
-		drivers_log("[VIRTIO] feature negotiation failed\n");
-		virtio_hw_set_status(hw, VIRTIO_STATUS_FAILED);
-		return (-1);
+	if (hw->transport == VIRTIO_TRANSPORT_MODERN) {
+		virtio_hw_set_features_hi(hw,
+		    1u << (VIRTIO_F_VERSION_1 - 32));
+		virtio_hw_set_status(hw, VIRTIO_STATUS_ACKNOWLEDGE |
+		    VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK);
+		status = virtio_hw_get_status(hw);
+		if ((status & VIRTIO_STATUS_FEATURES_OK) == 0) {
+			drivers_log("[VIRTIO] feature negotiation failed\n");
+			virtio_hw_set_status(hw, VIRTIO_STATUS_FAILED);
+			return (-1);
+		}
 	}
 
 	hw->features = accepted_features;
