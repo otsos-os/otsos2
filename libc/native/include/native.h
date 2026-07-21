@@ -20,6 +20,8 @@ $define %func procSpawn as function with args spawn tuple
 $define %func procSpawnAbi as function with args spawn tuple, uint32_t
 $define %func netListen as function with args int, int
 $define %func netAccept as function with args int, api_net_addr *, uint32_t
+$define %func ipcCreate as function with args const char *, uint32_t, uint32_t
+$define %func ipcCall as function with args int, api_ipc_call *
 $define %func regOpen as function with args const char *, const char *, uint32_t
 $define %func regGet as function with args int, api_reg_value *
 $define %func regUpd as function with args uint32_t
@@ -41,6 +43,7 @@ $space %export procRun, procExit, procKill
 $space %export memMap, memUnmap, eventKqueue, eventWait, eventClose
 $space %export netOpen, netBind, netConnect, netListen, netAccept
 $space %export netSend, netRecv, netCtl
+$space %export ipcCreate, ipcConnect, ipcSend, ipcRecv, ipcCall, ipcCtl
 $space %export regOpen, regClose, regGet, regSet, regCreateKey
 $space %export regDeleteKey, regDeleteValue, regEnum, regUpd
 $space %export regGetBool, regSetBool, regGetU32, regSetU32
@@ -128,6 +131,12 @@ $space %export traceMark
 #define CALL_NET_CTL		0x805
 #define CALL_NET_LISTEN		0x806
 #define CALL_NET_ACCEPT		0x807
+#define CALL_IPC_CREATE	0xB00
+#define CALL_IPC_CONNECT	0xB01
+#define CALL_IPC_SEND		0xB02
+#define CALL_IPC_RECV		0xB03
+#define CALL_IPC_CALL		0xB04
+#define CALL_IPC_CTL		0xB05
 #define CALL_TRACE_OPEN		0x900
 #define CALL_TRACE_CLOSE	0x901
 #define CALL_TRACE_READ		0x902
@@ -311,6 +320,7 @@ $space %export traceMark
 #define EVFILT_SIGNAL		(-5)
 #define EVFILT_USER		(-6)
 #define EVFILT_KBD		(-7)
+#define EVFILT_IPC	(-9)
 #define EVFILT_MOUSE		(-8)
 
 #define EV_ADD			0x0001
@@ -641,6 +651,12 @@ struct mem_map_args {
 	uint64_t	offset;
 } __attribute__((packed));
 
+#define NOTE_IPC_READ	0x00000001
+#define NOTE_IPC_WRITE	0x00000002
+#define NOTE_IPC_HUP	0x00000004
+#define NOTE_IPC_PEER	0x00000008
+#define NOTE_IPC_ALL	0x0000000F
+
 struct kevent {
 	uint64_t	ident;
 	int16_t		filter;
@@ -756,6 +772,67 @@ struct api_drm_driver_entry {
 	uint32_t	id;
 	char		name[32];
 	uint32_t	active;
+};
+
+
+#define IPC_NAME_MAX		48
+#define IPC_MAX_PAYLOAD	1024
+
+#define IPC_MSG_REQUEST	0x00000001
+#define IPC_MSG_REPLY		0x00000002
+#define IPC_MSG_EVENT		0x00000004
+#define IPC_MSG_NONBLOCK	0x00000008
+#define IPC_MSG_TRUNC		0x00000010
+
+#define IPC_OPEN_NONBLOCK	0x00000001
+#define IPC_OPEN_EXCLUSIVE	0x00000002
+
+#define IPC_CTL_GET_INFO	1
+#define IPC_CTL_SET_MODE	2
+#define IPC_CTL_DISCONNECT	3
+
+#define IPC_STATE_READABLE	0x00000001
+#define IPC_STATE_WRITABLE	0x00000002
+#define IPC_STATE_HUP		0x00000004
+#define IPC_STATE_SERVER	0x00000008
+#define IPC_STATE_CLIENT	0x00000010
+
+struct api_ipc_cred {
+	uint32_t	pid;
+	uint32_t	uid;
+	uint32_t	gid;
+	uint32_t	reserved;
+};
+
+struct api_ipc_message {
+	uint64_t	id;
+	uint64_t	reply_to;
+	uint64_t	peer;
+	uint32_t	opcode;
+	uint32_t	flags;
+	uint32_t	length;
+	uint32_t	capacity;
+	void		*data;
+	struct api_ipc_cred cred;
+};
+
+struct api_ipc_call {
+	struct api_ipc_message	request;
+	struct api_ipc_message	reply;
+	int64_t		timeout_ms;
+};
+
+struct api_ipc_info {
+	uint32_t	state;
+	uint32_t	mode;
+	uint32_t	pending_messages;
+	uint32_t	pending_bytes;
+	uint32_t	owner_pid;
+	uint32_t	owner_uid;
+	uint32_t	owner_gid;
+	uint32_t	peer_count;
+	uint64_t	peer;
+	char		name[IPC_NAME_MAX];
 };
 
 struct api_drm_driver_list {
@@ -887,6 +964,12 @@ int	netAccept(int handle, struct api_net_addr *addr, uint32_t flags);
 ssize_t	netSend(int handle, const struct api_net_msg *msg);
 ssize_t	netRecv(int handle, struct api_net_msg *msg);
 int	netCtl(int handle, int op, void *arg);
+int	ipcCreate(const char *name, uint32_t flags, uint32_t mode);
+int	ipcConnect(const char *name, uint32_t flags);
+ssize_t	ipcSend(int handle, const struct api_ipc_message *message);
+ssize_t	ipcRecv(int handle, struct api_ipc_message *message, uint32_t flags);
+ssize_t	ipcCall(int handle, struct api_ipc_call *call);
+int	ipcCtl(int handle, uint32_t op, void *arg);
 
 int	regOpen(const char *hive, const char *key, uint32_t flags);
 int	regClose(int reg);

@@ -83,7 +83,10 @@ Monolithic kernel with the following rough layers:
   initialized.
 - `console/` — kernel terminal, pty, and console rendering.
 - `event/` — kqueue-style event system (read, write, timer, proc, signal, user,
-  keyboard and mouse filters).
+  keyboard, mouse, and native IPC filters).
+- `ipc/` — named native IPC services and connected sessions with atomic
+  messages, credentials, correlation IDs, bounded queues, backpressure, timed
+  calls, handle lifecycle integration, and `EVFILT_IPC` readiness.
 - `trace/` — kernel observability core: event registry, per-CPU ring buffers,
   trace sessions, PMU samples from `drivers/pmu`, syscall/IRQ/scheduler/kqueue
   tracepoints. Runtime toggles live in the `SYSTEM` registry hive.
@@ -125,7 +128,8 @@ Monolithic kernel with the following rough layers:
   `procSpawn` and `procWait`.
 - `ports/yes.c`, `fetch.c`, `shell.c`, `udp_echo.c`, `tcp_echo.c`, `send.c`,
   `posix_hello.c`, `musl_test.c`, `demons/cursord.c` — small test/utility
-  binaries and daemons.
+  binaries and daemons. `dhcpc` is an IPC control client; `dhcpd` owns the
+  DHCP lease lifecycle and publishes `system.network.dhcpd`.
 - `ports/posix_hello.c` uses Linux x86-64 syscall numbers and expects the
   POSIX personality.
 - `ports/musl_test.c` uses real musl headers and is statically linked against

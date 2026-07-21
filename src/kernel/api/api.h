@@ -39,6 +39,8 @@
 #define MAX_DATA_OBJECTS 64
 
 struct process;
+struct api_ipc_message;
+struct api_ipc_call;
 
 typedef struct {
   int used;
@@ -55,6 +57,7 @@ typedef struct {
   int flags;
   void *pipe;
   void *net;
+  void *ipc;
   vnode_t *vn;
 } api_object_t;
 
@@ -91,6 +94,7 @@ typedef struct {
 #define API_OBJECT_VNODE 2
 #define API_OBJECT_NET 3
 #define API_OBJECT_REG 4
+#define API_OBJECT_IPC 5
 #define MMAP_BASE 0x0000001000000000ULL
 #define MMAP_LIMIT 0x00007FFF00000000ULL
 
@@ -788,6 +792,12 @@ int api_net_accept(int handle, struct api_net_addr *uaddr, u32 flags);
 int api_net_send(int handle, const struct api_net_msg *umsg);
 int api_net_recv(int handle, struct api_net_msg *umsg);
 int api_net_ctl(int handle, int op, void *arg);
+int api_ipc_create(const char *name, u32 flags, u32 mode);
+int api_ipc_connect(const char *name, u32 flags);
+int api_ipc_send(int handle, const struct api_ipc_message *message);
+int api_ipc_recv(int handle, struct api_ipc_message *message, u32 flags);
+int api_ipc_call(int handle, struct api_ipc_call *call);
+int api_ipc_ctl(int handle, u32 op, void *arg);
 int api_reg_open(const char *hive, const char *key, u32 flags);
 int api_reg_close(int handle);
 int api_reg_get(int handle, struct api_reg_value *uvalue);

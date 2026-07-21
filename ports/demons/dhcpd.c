@@ -1,3 +1,29 @@
+/*
+ * Copyright (c) 2026, otsos team
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
 /* !DEFINES!
 
 $define %type api_net_addr as native IPv4 endpoint address
@@ -31,12 +57,19 @@ $define %func dhcp_attach_read as function with args int, int
 $define %func dhcp_send as function with args int, const api_net_iface *, uint32_t, const uint8_t *, size_t
 $define %func dhcp_wait as function with args int, int, const api_net_iface *, uint32_t, int, int, uint32_t, dhcp_lease *
 $define %func dhcp_drain as procedure with args int
-$define %func dhcp_sleep as procedure with args int, int, uint32_t
 $define %func dhcp_set_dns as function with args const dhcp_lease *
 $define %func dhcp_write_registry as function with args const api_net_iface *, const dhcp_lease *
 $define %func dhcp_discover as function with args int, int, const api_net_iface *, const dhcp_config *, dhcp_lease *
 $define %func dhcp_renew as function with args int, int, const api_net_iface *, const dhcp_config *, const dhcp_lease *, dhcp_lease *
 $define %func daemonize as function with args void
+$define %func dhcpd_attach_ipc as function with args int, int
+$define %func dhcpd_lease_defaults as procedure with args dhcp_lease *
+$define %func dhcpd_status_fill as procedure with args dhcpd_status *, const api_net_iface *, const dhcp_lease *, uint32_t, int
+$define %func dhcpd_clear_registry as function with args const api_net_iface *
+$define %func dhcpd_reply as function with args int, const api_ipc_message *, const dhcpd_status *
+$define %func dhcpd_acquire as function with args int, int, const api_net_iface *, const dhcp_config *, dhcp_lease *
+$define %func dhcpd_renew_lease as function with args int, int, const api_net_iface *, const dhcp_config *, dhcp_lease *
+$define %func dhcpd_handle_request as function with args IPC service state
 $define %func has_arg as function with args int, char **, const char *
 $define %func serve as function with args void
 $define %func main as start with args int, char **, char **
@@ -52,9 +85,13 @@ $space %internal dhcp_put_common, dhcp_base, dhcp_finish
 $space %internal dhcp_build_discover, dhcp_build_request, dhcp_parse
 $space %internal dhcp_merge, dhcp_read_config, dhcp_get_iface
 $space %internal dhcp_open_socket, dhcp_attach_read, dhcp_send
-$space %internal dhcp_wait, dhcp_drain, dhcp_sleep, dhcp_set_dns
+$space %internal dhcp_wait, dhcp_drain, dhcp_set_dns
 $space %internal dhcp_write_registry, dhcp_discover, dhcp_renew
-$space %internal daemonize, has_arg, serve
+$space %internal daemonize, has_arg, dhcpd_attach_ipc
+$space %internal dhcpd_lease_defaults, dhcpd_status_fill
+$space %internal dhcpd_clear_registry, dhcpd_reply
+$space %internal dhcpd_acquire, dhcpd_renew_lease
+$space %internal dhcpd_handle_request, serve
 $space %export main
 
 */
@@ -64,6 +101,8 @@ $space %export main
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+#include "../dhcp_ipc.h"
 
 #define	DHCP_CLIENT_PORT	68
 #define	DHCP_SERVER_PORT	67
@@ -711,30 +750,6 @@ dhcp_drain(int fd)
 	}
 }
 
-static void
-dhcp_sleep(int fd, int kq, uint32_t ms)
-{
-	struct kevent	event;
-	uint64_t	end, now;
-	int		ret;
-
-	end = now_ms() + ms;
-	for (;;) {
-		now = now_ms();
-		if (now >= end) {
-			return;
-		}
-		ret = eventWait(kq, NULL, 0, &event, 1,
-		    (int64_t)(end - now));
-		if (ret <= 0) {
-			continue;
-		}
-		if (event.filter == EVFILT_READ) {
-			dhcp_drain(fd);
-		}
-	}
-}
-
 static int
 dhcp_set_dns(const dhcp_lease_t *lease)
 {
@@ -953,12 +968,10 @@ daemonize(void)
 	if (pid > 0) {
 		procExit(0);
 	}
-
 	if (procSetsid() < 0) {
 		printf("dhcpd: setsid failed: %d\n", errno);
 		return (-1);
 	}
-
 	pid = procCopy();
 	if (pid < 0) {
 		printf("dhcpd: second fork failed: %d\n", errno);
@@ -967,7 +980,6 @@ daemonize(void)
 	if (pid > 0) {
 		procExit(0);
 	}
-
 	return (0);
 }
 
@@ -985,116 +997,338 @@ has_arg(int argc, char **argv, const char *needle)
 }
 
 static int
+dhcpd_attach_ipc(int kq, int handle)
+{
+	struct kevent	change;
+
+	memset(&change, 0, sizeof(change));
+	change.ident = (uint64_t)handle;
+	change.filter = EVFILT_IPC;
+	change.flags = EV_ADD | EV_CLEAR;
+	change.fflags = NOTE_IPC_READ | NOTE_IPC_HUP;
+	if (eventWait(kq, &change, 1, NULL, 0, -1) < 0) {
+		printf("dhcpd: EVFILT_IPC add failed: %d\n", errno);
+		return (-1);
+	}
+	return (0);
+}
+
+static void
+dhcpd_lease_defaults(dhcp_lease_t *lease)
+{
+	if (lease->netmask == 0) {
+		lease->netmask = 0xFFFFFF00u;
+	}
+	if (lease->lease_seconds == 0) {
+		lease->lease_seconds = DHCP_DEFAULT_LEASE;
+	}
+	if (lease->t1_seconds == 0) {
+		lease->t1_seconds = lease->lease_seconds / 2;
+	}
+	if (lease->t2_seconds == 0) {
+		lease->t2_seconds = (lease->lease_seconds * 7) / 8;
+	}
+}
+
+static void
+dhcpd_status_fill(struct dhcpd_status *status,
+    const struct api_net_iface *iface, const dhcp_lease_t *lease,
+    uint32_t state, int error)
+{
+	uint32_t	i;
+
+	memset(status, 0, sizeof(*status));
+	status->version = DHCPD_IPC_VERSION;
+	status->state = state;
+	status->error = error;
+	status->ifindex = iface->ifindex;
+	strncpy(status->ifname, iface->name, sizeof(status->ifname) - 1);
+	if (!lease) {
+		return;
+	}
+	status->address = lease->address;
+	status->netmask = lease->netmask;
+	status->gateway = lease->router;
+	status->server = lease->server;
+	status->lease_seconds = lease->lease_seconds;
+	status->renew_seconds = lease->t1_seconds;
+	status->rebind_seconds = lease->t2_seconds;
+	status->dns_count = lease->dns_count;
+	for (i = 0; i < lease->dns_count && i < DHCP_MAX_DNS; i++) {
+		status->dns[i] = lease->dns[i];
+	}
+}
+
+static int
+dhcpd_clear_registry(const struct api_net_iface *iface)
+{
+	char	key[64];
+	int	reg, err;
+
+	err = 0;
+	snprintf(key, sizeof(key), "Interfaces.%s", iface->name);
+	reg = regOpen("NETWORK", key, API_REG_OPEN_RW |
+	    API_REG_OPEN_CREATE);
+	if (reg < 0) {
+		return (-1);
+	}
+	if (regSetIpv4(reg, "Address", 0) != 0 && err == 0) {
+		err = errno;
+	}
+	if (regSetIpv4(reg, "Netmask", 0) != 0 && err == 0) {
+		err = errno;
+	}
+	if (regSetIpv4(reg, "Gateway", 0) != 0 && err == 0) {
+		err = errno;
+	}
+	regClose(reg);
+	if (err != 0) {
+		errno = err;
+		return (-1);
+	}
+	return (regUpd(API_REG_CONSUMER_NET));
+}
+
+static int
+dhcpd_reply(int ipc, const struct api_ipc_message *request,
+    const struct dhcpd_status *status)
+{
+	struct api_ipc_message	reply;
+
+	memset(&reply, 0, sizeof(reply));
+	reply.reply_to = request->id;
+	reply.peer = request->peer;
+	reply.opcode = request->opcode;
+	reply.flags = IPC_MSG_REPLY;
+	reply.length = sizeof(*status);
+	reply.data = (void *)status;
+	if (ipcSend(ipc, &reply) < 0) {
+		printf("dhcpd: IPC reply failed: %d\n", errno);
+		return (-1);
+	}
+	return (0);
+}
+
+static int
+dhcpd_acquire(int fd, int kq, const struct api_net_iface *iface,
+    const dhcp_config_t *cfg, dhcp_lease_t *lease)
+{
+	memset(lease, 0, sizeof(*lease));
+	if (dhcp_discover(fd, kq, iface, cfg, lease) != 0) {
+		return (-1);
+	}
+	dhcpd_lease_defaults(lease);
+	if (dhcp_write_registry(iface, lease) != 0) {
+		return (-1);
+	}
+	return (0);
+}
+
+static int
+dhcpd_renew_lease(int fd, int kq,
+    const struct api_net_iface *iface, const dhcp_config_t *cfg,
+    dhcp_lease_t *lease)
+{
+	dhcp_lease_t	next;
+
+	memset(&next, 0, sizeof(next));
+	if (dhcp_renew(fd, kq, iface, cfg, lease, &next) != 0) {
+		return (-1);
+	}
+	dhcpd_lease_defaults(&next);
+	if (dhcp_write_registry(iface, &next) != 0) {
+		return (-1);
+	}
+	*lease = next;
+	return (0);
+}
+
+static int
+dhcpd_handle_request(int ipc, int fd, int kq,
+    const struct api_net_iface *iface, const dhcp_config_t *cfg,
+    dhcp_lease_t *lease, int *bound, uint32_t *state,
+    uint64_t *renew_at)
+{
+	struct dhcpd_request	request_data;
+	struct dhcpd_status	status;
+	struct api_ipc_message	request;
+	int			command;
+	int			error;
+	ssize_t			ret;
+
+	memset(&request_data, 0, sizeof(request_data));
+	memset(&request, 0, sizeof(request));
+	request.flags = IPC_MSG_NONBLOCK;
+	request.capacity = sizeof(request_data);
+	request.data = &request_data;
+	ret = ipcRecv(ipc, &request, IPC_MSG_NONBLOCK);
+	if (ret < 0) {
+		if (errno == EAGAIN) {
+			return (0);
+		}
+		printf("dhcpd: IPC receive failed: %d\n", errno);
+		return (-1);
+	}
+	if ((size_t)ret != sizeof(request_data) ||
+	    request_data.version != DHCPD_IPC_VERSION) {
+		dhcpd_status_fill(&status, iface,
+		    *bound ? lease : NULL, *state, EINVAL);
+		(void)dhcpd_reply(ipc, &request, &status);
+		return (1);
+	}
+	command = (int)request_data.command;
+	error = 0;
+	switch (command) {
+	case DHCPD_CMD_ACQUIRE:
+		*state = DHCPD_STATE_ACQUIRING;
+		if (dhcpd_acquire(fd, kq, iface, cfg, lease) != 0) {
+			error = errno != 0 ? errno : EIO;
+			*state = DHCPD_STATE_FAILED;
+			*bound = 0;
+		} else {
+			*state = DHCPD_STATE_BOUND;
+			*bound = 1;
+			*renew_at = now_ms() +
+			    (uint64_t)lease->t1_seconds * 1000ULL;
+		}
+		break;
+	case DHCPD_CMD_STATUS:
+		break;
+	case DHCPD_CMD_RENEW:
+		if (!*bound) {
+			error = ENOENT;
+			break;
+		}
+		*state = DHCPD_STATE_RENEWING;
+		if (dhcpd_renew_lease(fd, kq, iface, cfg, lease) != 0) {
+			error = errno != 0 ? errno : EIO;
+			*state = DHCPD_STATE_FAILED;
+			*bound = 0;
+		} else {
+			*state = DHCPD_STATE_BOUND;
+			*renew_at = now_ms() +
+			    (uint64_t)lease->t1_seconds * 1000ULL;
+		}
+		break;
+	case DHCPD_CMD_RELEASE:
+		if (dhcpd_clear_registry(iface) != 0) {
+			error = errno;
+		}
+		memset(lease, 0, sizeof(*lease));
+		*bound = 0;
+		*state = error == 0 ? DHCPD_STATE_IDLE :
+		    DHCPD_STATE_FAILED;
+		*renew_at = 0;
+		break;
+	case DHCPD_CMD_STOP:
+		*state = DHCPD_STATE_STOPPING;
+		break;
+	default:
+		error = EINVAL;
+		break;
+	}
+	dhcpd_status_fill(&status, iface, *bound ? lease : NULL,
+	    *state, error);
+	(void)dhcpd_reply(ipc, &request, &status);
+	return (command == DHCPD_CMD_STOP ? 2 : 1);
+}
+
+static int
 serve(void)
 {
 	struct api_net_iface	iface;
+	struct kevent		event;
 	dhcp_config_t		cfg;
 	dhcp_lease_t		lease;
-	dhcp_lease_t		next;
-	char			addr[16];
-	char			server[16];
-	uint32_t		wait_ms;
-	int			fd, kq;
+	uint64_t		renew_at;
+	uint64_t		now;
+	int64_t			timeout;
+	uint32_t		state;
+	int			bound;
+	int			fd, ipc, kq, ret;
 
 	dhcp_read_config(&cfg);
 	if (dhcp_get_iface(&iface) != 0) {
 		return (1);
 	}
-
 	fd = dhcp_open_socket(&iface);
 	if (fd < 0) {
+		return (1);
+	}
+	ipc = ipcCreate(DHCPD_IPC_SERVICE, IPC_OPEN_EXCLUSIVE, 0600);
+	if (ipc < 0) {
+		printf("dhcpd: IPC service create failed: %d\n", errno);
+		dataClose(fd);
 		return (1);
 	}
 	kq = eventKqueue();
 	if (kq < 0) {
 		printf("dhcpd: eventKqueue failed: %d\n", errno);
+		dataClose(ipc);
 		dataClose(fd);
 		return (1);
 	}
-	if (dhcp_attach_read(kq, fd) != 0) {
+	if (dhcp_attach_read(kq, fd) != 0 ||
+	    dhcpd_attach_ipc(kq, ipc) != 0) {
 		eventClose(kq);
+		dataClose(ipc);
 		dataClose(fd);
 		return (1);
 	}
-
-	printf("dhcpd: using %s ifindex=%u "
-	    "%02x:%02x:%02x:%02x:%02x:%02x\n",
-	    iface.name, (unsigned int)iface.ifindex,
-	    iface.mac[0], iface.mac[1], iface.mac[2], iface.mac[3],
-	    iface.mac[4], iface.mac[5]);
+	printf("dhcpd: service ready on %s using %s ifindex=%u\n",
+	    DHCPD_IPC_SERVICE, iface.name, (unsigned int)iface.ifindex);
 	if (procPerm((uint32_t)procGetpid()) != API_PROC_PERM_KUSR) {
 		printf("dhcpd: warning: not kusr, registry writes will fail\n");
 	}
-
+	memset(&lease, 0, sizeof(lease));
+	bound = 0;
+	state = DHCPD_STATE_IDLE;
+	renew_at = 0;
 	for (;;) {
-		memset(&lease, 0, sizeof(lease));
-		if (dhcp_discover(fd, kq, &iface, &cfg, &lease) != 0) {
-			printf("dhcpd: lease discovery failed\n");
-			dhcp_sleep(fd, kq, DHCP_BACKOFF_MS);
+		timeout = -1;
+		if (bound && renew_at != 0) {
+			now = now_ms();
+			timeout = renew_at > now ? (int64_t)(renew_at - now) : 0;
+		}
+		ret = eventWait(kq, NULL, 0, &event, 1, timeout);
+		if (ret < 0) {
+			printf("dhcpd: eventWait failed: %d\n", errno);
 			continue;
 		}
-
-		if (lease.netmask == 0) {
-			lease.netmask = 0xFFFFFF00u;
-		}
-		if (lease.lease_seconds == 0) {
-			lease.lease_seconds = DHCP_DEFAULT_LEASE;
-		}
-		if (lease.t1_seconds == 0) {
-			lease.t1_seconds = lease.lease_seconds / 2;
-		}
-		if (lease.t2_seconds == 0) {
-			lease.t2_seconds = (lease.lease_seconds * 7) / 8;
-		}
-
-		ip_text(addr, sizeof(addr), lease.address);
-		ip_text(server, sizeof(server), lease.server);
-		printf("dhcpd: lease %s server %s lease=%u t1=%u\n",
-		    addr, server, (unsigned int)lease.lease_seconds,
-		    (unsigned int)lease.t1_seconds);
-
-		if (dhcp_write_registry(&iface, &lease) != 0) {
-			printf("dhcpd: registry update failed: %d\n", errno);
-			dhcp_sleep(fd, kq, DHCP_BACKOFF_MS);
+		if (ret == 0 && bound) {
+			state = DHCPD_STATE_RENEWING;
+			if (dhcpd_renew_lease(fd, kq, &iface, &cfg,
+			    &lease) != 0) {
+				printf("dhcpd: automatic renew failed\n");
+				state = DHCPD_STATE_FAILED;
+				bound = 0;
+				renew_at = 0;
+			} else {
+				state = DHCPD_STATE_BOUND;
+				renew_at = now_ms() +
+				    (uint64_t)lease.t1_seconds * 1000ULL;
+			}
 			continue;
 		}
-
-		for (;;) {
-			wait_ms = lease.t1_seconds * 1000u;
-			if (wait_ms < 1000u) {
-				wait_ms = 1000u;
+		if (event.filter == EVFILT_READ) {
+			dhcp_drain(fd);
+			continue;
+		}
+		if (event.filter == EVFILT_IPC) {
+			for (;;) {
+				ret = dhcpd_handle_request(ipc, fd, kq,
+				    &iface, &cfg, &lease, &bound, &state,
+				    &renew_at);
+				if (ret <= 0) {
+					break;
+				}
+				if (ret == 2) {
+					eventClose(kq);
+					dataClose(ipc);
+					dataClose(fd);
+					return (0);
+				}
 			}
-			dhcp_sleep(fd, kq, wait_ms);
-
-			memset(&next, 0, sizeof(next));
-			if (dhcp_renew(fd, kq, &iface, &cfg, &lease,
-			    &next) != 0) {
-				printf("dhcpd: renew failed, rediscovering\n");
-				break;
-			}
-			lease = next;
-			if (lease.netmask == 0) {
-				lease.netmask = 0xFFFFFF00u;
-			}
-			if (lease.lease_seconds == 0) {
-				lease.lease_seconds = DHCP_DEFAULT_LEASE;
-			}
-			if (lease.t1_seconds == 0) {
-				lease.t1_seconds = lease.lease_seconds / 2;
-			}
-			if (lease.t2_seconds == 0) {
-				lease.t2_seconds =
-				    (lease.lease_seconds * 7) / 8;
-			}
-			if (dhcp_write_registry(&iface, &lease) != 0) {
-				printf("dhcpd: registry renew write failed: %d\n",
-				    errno);
-				break;
-			}
-			ip_text(addr, sizeof(addr), lease.address);
-			printf("dhcpd: renewed %s lease=%u t1=%u\n",
-			    addr, (unsigned int)lease.lease_seconds,
-			    (unsigned int)lease.t1_seconds);
 		}
 	}
 }
@@ -1106,7 +1340,6 @@ main(int argc, char **argv, char **envp)
 
 	(void)envp;
 	personality(0);
-
 	foreground = has_arg(argc, argv, "--foreground");
 	if (!foreground && daemonize() != 0) {
 		return (1);

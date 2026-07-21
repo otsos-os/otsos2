@@ -120,6 +120,13 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_REG_ENUM		0xA07
 #define	CALL_REG_UPD		0xA08
 
+#define	CALL_IPC_CREATE	0xB00
+#define	CALL_IPC_CONNECT	0xB01
+#define	CALL_IPC_SEND		0xB02
+#define	CALL_IPC_RECV		0xB03
+#define	CALL_IPC_CALL		0xB04
+#define	CALL_IPC_CTL		0xB05
+
 #define	CALL_PROC_GETPID	0x408
 #define	CALL_PROC_GETPPID	0x409
 #define	CALL_PROC_THREAD_EXIT	0x40A

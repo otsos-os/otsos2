@@ -27,6 +27,7 @@
 #include <kernel/console/terminal.h>
 #include <kernel/api/api.h>
 #include <kernel/net/endpoint.h>
+#include <kernel/ipc/ipc.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
@@ -68,6 +69,7 @@ api_alloc_object(void)
 			api_objects[i].type = API_OBJECT_FILE;
 			api_objects[i].pipe = NULL;
 			api_objects[i].net = NULL;
+			api_objects[i].ipc = NULL;
 			api_objects[i].vn = NULL;
 			memset(api_objects[i].path, 0,
 			    sizeof(api_objects[i].path));
@@ -114,6 +116,12 @@ api_release_object(int index)
 			    (net_endpoint_t *)api_objects[index].net);
 			api_objects[index].net = NULL;
 		}
+		if (api_objects[index].type == API_OBJECT_IPC &&
+		    api_objects[index].ipc) {
+			ipc_endpoint_release(
+			    (ipc_endpoint_t *)api_objects[index].ipc);
+			api_objects[index].ipc = NULL;
+		}
 
 		if (api_objects[index].vn) {
 			vnode_release(api_objects[index].vn);
@@ -131,6 +139,7 @@ api_init(void)
 	    kernel_handles);
 	memset(kernel_handles, 0, sizeof(kernel_handles));
 	memset(api_objects, 0, sizeof(api_objects));
+	ipc_init();
 }
 
 void

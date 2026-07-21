@@ -40,6 +40,7 @@ $define %type kqueue_t as struct with event queue, knote pool, ready list
 $define %type process as struct with process control block
 $define %type pipe as struct with pipe ring buffer
 $define %type net_endpoint_t as native network endpoint state
+$define %type ipc_endpoint_t as native IPC endpoint state
 
 $define %func event_init as procedure with args void
 $define %func kqueue_create as function with args void
@@ -59,6 +60,7 @@ $define %func event_notify_proc_fork as procedure with args u32, u32
 $define %func event_notify_signal as procedure with args u32, int
 $define %func event_notify_pipe_change as procedure with args struct pipe *
 $define %func event_notify_net_change as procedure with args net_endpoint_t *
+$define %func event_notify_ipc_change as procedure with args ipc_endpoint_t *
 
 */
 
@@ -72,7 +74,7 @@ $space %export event_timer_tick, event_cleanup_process
 $space %export event_fork_process
 $space %export event_notify_proc_exit, event_notify_proc_fork
 $space %export event_notify_signal, event_notify_pipe_change
-$space %export event_notify_net_change
+$space %export event_notify_net_change, event_notify_ipc_change
 
 */
 
@@ -90,8 +92,9 @@ $space %export event_notify_net_change
 #define	EVFILT_USER	(-6)
 #define	EVFILT_KBD	(-7)
 #define	EVFILT_MOUSE	(-8)
+#define	EVFILT_IPC	(-9)
 
-#define	EVFILT_SYSCOUNT	8
+#define	EVFILT_SYSCOUNT	9
 
 #define	EV_ADD		0x0001
 #define	EV_DELETE	0x0002
@@ -127,6 +130,12 @@ $space %export event_notify_net_change
 
 #define	NOTE_LOWAT	0x00000001
 
+#define	NOTE_IPC_READ	0x00000001
+#define	NOTE_IPC_WRITE	0x00000002
+#define	NOTE_IPC_HUP	0x00000004
+#define	NOTE_IPC_PEER	0x00000008
+#define	NOTE_IPC_ALL	0x0000000F
+
 #define	MAX_KQUEUES	32
 #define	MAX_KNOTES	64
 #define	MAX_KEVENTS	64
@@ -156,6 +165,7 @@ struct process;
 struct thread;
 struct pipe;
 struct net_endpoint;
+struct ipc_endpoint;
 
 typedef int	(*filter_attach_fn)(struct knote *kn);
 typedef void	(*filter_detach_fn)(struct knote *kn);
@@ -220,6 +230,7 @@ void	event_notify_proc_fork(u32 parent_pid, u32 child_pid);
 void	event_notify_signal(u32 pid, int sig);
 void	event_notify_pipe_change(struct pipe *p);
 void	event_notify_net_change(struct net_endpoint *ep);
+void	event_notify_ipc_change(struct ipc_endpoint *endpoint);
 
 void	proc_sleep(void *channel);
 void	proc_wakeup(void *channel);

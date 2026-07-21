@@ -32,6 +32,7 @@
 #include <kernel/api/posix/posix.h>
 #include <kernel/api/signal.h>
 #include <kernel/event/event.h>
+#include <kernel/ipc/ipc.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/syscall.h>
@@ -373,6 +374,29 @@ void syscall_handler(registers_t *regs) {
     break;
   case CALL_REG_UPD:
     regs->rax = (u64)api_reg_upd((u32)arg1);
+    break;
+  case CALL_IPC_CREATE:
+    regs->rax = (u64)api_ipc_create((const char *)arg1,
+                                    (u32)arg2, (u32)arg3);
+    break;
+  case CALL_IPC_CONNECT:
+    regs->rax = (u64)api_ipc_connect((const char *)arg1, (u32)arg2);
+    break;
+  case CALL_IPC_SEND:
+    regs->rax = (u64)api_ipc_send((int)arg1,
+                                  (const struct api_ipc_message *)arg2);
+    break;
+  case CALL_IPC_RECV:
+    regs->rax = (u64)api_ipc_recv((int)arg1,
+                                  (struct api_ipc_message *)arg2,
+                                  (u32)arg3);
+    break;
+  case CALL_IPC_CALL:
+    regs->rax = (u64)api_ipc_call((int)arg1,
+                                  (struct api_ipc_call *)arg2);
+    break;
+  case CALL_IPC_CTL:
+    regs->rax = (u64)api_ipc_ctl((int)arg1, (u32)arg2, (void *)arg3);
     break;
   case CALL_TRACE_OPEN:
     regs->rax = (u64)api_trace_open((u32)arg1);

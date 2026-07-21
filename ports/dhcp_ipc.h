@@ -5,7 +5,7 @@
  * modification, are permitted provided that the following conditions are met:
  *
  * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
+ *    this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
@@ -24,44 +24,60 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef API_ERRNO_H
-#define API_ERRNO_H
+/* !DEFINES!
 
-#define API_ERR_PERM 1
-#define API_ERR_NOT_FOUND 2
-#define API_ERR_NO_PROC 3
-#define API_ERR_INTR 4
-#define API_ERR_IO 5
-#define API_ERR_NO_DEVICE_ADDR 6
-#define API_ERR_TOO_BIG 7
-#define API_ERR_BAD_IMAGE 8
-#define API_ERR_BAD_HANDLE 9
-#define API_ERR_NO_CHILD 10
-#define API_ERR_RETRY 11
-#define API_ERR_NO_MEMORY 12
-#define API_ERR_ACCESS 13
-#define API_ERR_BAD_ADDR 14
-#define API_ERR_INVAL 15
-#define API_ERR_BUSY 16
-#define API_ERR_EXISTS 17
-#define API_ERR_CROSS_DEVICE 18
-#define API_ERR_NO_DEVICE 19
-#define API_ERR_NODEV 19
-#define API_ERR_NOT_DIR 20
-#define API_ERR_IS_DIR 21
-#define API_ERR_BAD_VALUE 22
-#define API_ERR_OBJECTS_FULL 23
-#define API_ERR_HANDLES_FULL 24
-#define API_ERR_NOT_TERM 25
-#define API_ERR_NOMEM 26
-#define API_ERR_FILE_TOO_BIG 27
-#define API_ERR_NO_SPACE 28
-#define API_ERR_NOT_SEEKABLE 29
-#define API_ERR_READ_ONLY 30
-#define API_ERR_PIPE_CLOSED 32
-#define API_ERR_NO_CALL 38
-#define API_ERR_NOT_EMPTY 39
-#define API_ERR_NOT_SUPPORTED 95
-#define API_ERR_TIMED_OUT 110
+$define %type dhcpd_request as DHCP client daemon IPC request
+$define %type dhcpd_status as DHCP client daemon IPC status
+
+*/
+
+/* !SPACE!
+
+$space %export dhcpd_request, dhcpd_status
+
+*/
+
+#ifndef PORTS_DHCP_IPC_H
+#define PORTS_DHCP_IPC_H
+
+#include <stdint.h>
+
+#define	DHCPD_IPC_SERVICE	"system.network.dhcpd"
+#define	DHCPD_IPC_VERSION	1
+#define	DHCPD_CMD_ACQUIRE	1
+#define	DHCPD_CMD_STATUS	2
+#define	DHCPD_CMD_RENEW	3
+#define	DHCPD_CMD_RELEASE	4
+#define	DHCPD_CMD_STOP		5
+#define	DHCPD_STATE_IDLE	0
+#define	DHCPD_STATE_ACQUIRING	1
+#define	DHCPD_STATE_BOUND	2
+#define	DHCPD_STATE_RENEWING	3
+#define	DHCPD_STATE_FAILED	4
+#define	DHCPD_STATE_STOPPING	5
+
+struct dhcpd_request {
+	uint32_t	version;
+	uint32_t	command;
+	uint32_t	flags;
+	uint32_t	reserved;
+};
+
+struct dhcpd_status {
+	uint32_t	version;
+	uint32_t	state;
+	int32_t		error;
+	uint32_t	ifindex;
+	uint32_t	address;
+	uint32_t	netmask;
+	uint32_t	gateway;
+	uint32_t	server;
+	uint32_t	lease_seconds;
+	uint32_t	renew_seconds;
+	uint32_t	rebind_seconds;
+	uint32_t	dns_count;
+	uint32_t	dns[4];
+	char		ifname[16];
+};
 
 #endif
