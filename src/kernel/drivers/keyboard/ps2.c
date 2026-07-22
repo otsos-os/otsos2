@@ -32,12 +32,6 @@ $define %type int as 32 bit signed
 $define %type char as 8 bit signed
 
 $define %func ps2_debug_status as procedure with args const char *, u8, u8
-$define %func ps2_wait_input_clear as function with args void
-$define %func ps2_wait_output_full as function with args void
-$define %func ps2_flush_output as procedure with args void
-$define %func ps2_write_cmd as function with args u8
-$define %func ps2_write_data as function with args u8
-$define %func ps2_read_data as function with args u8 *
 $define %func ps2_update_leds as function with args void
 $define %func ps2_keyboard_init as function with args void
 $define %func buffer_write as procedure with args char
@@ -57,10 +51,8 @@ $define %func ps2Scanf as function with args const char *, ...
 
 /* !SPACE!
 
-$space %internal ps2_debug_status, ps2_wait_input_clear
-$space %internal ps2_wait_output_full, ps2_flush_output
-$space %internal ps2_write_cmd, ps2_write_data, ps2_read_data
-$space %internal ps2_update_leds, buffer_write, ps2_mods
+$space %internal ps2_debug_status, ps2_update_leds
+$space %internal buffer_write, ps2_mods
 $space %internal ps2_update_modifier, ps2_process_scancode
 $space %internal ps2_handle_input, ps2_read_char_blocking
 $space %export ps2_keyboard_init, ps2_keyboard_handler
@@ -69,6 +61,7 @@ $space %export ps2_keyboard_reset_state, ps2_keyboard_flush, ps2Scanf
 
 */
 
+#include <kernel/drivers/input/i8042.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/keyboard/keymap.h>
 #include <kernel/drivers/keyboard/ps2.h>
@@ -77,8 +70,6 @@ $space %export ps2_keyboard_reset_state, ps2_keyboard_flush, ps2Scanf
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
-#define	KBD_DATA_PORT		0x60
-#define	KBD_STATUS_PORT		0x64
 #define	PS2_KBD_CMD_SET_LEDS	0xED
 #define	PS2_KBD_ACK		0xFA
 #define	PS2_KBD_RESEND		0xFE
@@ -115,70 +106,6 @@ ps2_debug_status(const char *tag, u8 status, u8 data)
 }
 
 static int
-ps2_wait_input_clear(void)
-{
-	u32	i;
-
-	for (i = 0; i < 100000; i++) {
-		if ((inb(KBD_STATUS_PORT) & 0x02) == 0) {
-			return (0);
-		}
-	}
-	return (-1);
-}
-
-static int
-ps2_wait_output_full(void)
-{
-	u32	i;
-
-	for (i = 0; i < 100000; i++) {
-		if (inb(KBD_STATUS_PORT) & 0x01) {
-			return (0);
-		}
-	}
-	return (-1);
-}
-
-static void
-ps2_flush_output(void)
-{
-	while (inb(KBD_STATUS_PORT) & 0x01) {
-		(void)inb(KBD_DATA_PORT);
-	}
-}
-
-static int
-ps2_write_cmd(u8 cmd)
-{
-	if (ps2_wait_input_clear() != 0) {
-		return (-1);
-	}
-	outb(KBD_STATUS_PORT, cmd);
-	return (0);
-}
-
-static int
-ps2_write_data(u8 data)
-{
-	if (ps2_wait_input_clear() != 0) {
-		return (-1);
-	}
-	outb(KBD_DATA_PORT, data);
-	return (0);
-}
-
-static int
-ps2_read_data(u8 *data)
-{
-	if (ps2_wait_output_full() != 0) {
-		return (-1);
-	}
-	*data = inb(KBD_DATA_PORT);
-	return (0);
-}
-
-static int
 ps2_update_leds(void)
 {
 	u8	led_mask;
@@ -192,10 +119,10 @@ ps2_update_leds(void)
 	for (attempt = 0; attempt < 3; attempt++) {
 		u8	resp;
 
-		if (ps2_write_data(PS2_KBD_CMD_SET_LEDS) != 0) {
+		if (i8042_write_data(PS2_KBD_CMD_SET_LEDS) != 0) {
 			return (-1);
 		}
-		if (ps2_read_data(&resp) != 0) {
+		if (i8042_read_data(&resp) != 0) {
 			return (-1);
 		}
 		if (resp == PS2_KBD_RESEND) {
@@ -205,10 +132,10 @@ ps2_update_leds(void)
 			return (-1);
 		}
 
-		if (ps2_write_data(led_mask) != 0) {
+		if (i8042_write_data(led_mask) != 0) {
 			return (-1);
 		}
-		if (ps2_read_data(&resp) != 0) {
+		if (i8042_read_data(&resp) != 0) {
 			return (-1);
 		}
 		if (resp == PS2_KBD_RESEND) {
@@ -241,20 +168,15 @@ ps2_keyboard_init(void)
 	ps2_ready = 0;
 	scancode_extended = 0;
 
-	if (ps2_write_cmd(0xAD) != 0) {
+	if (i8042_write_cmd(I8042_CMD_DISABLE_PORT1) != 0) {
 		drivers_log("[PS2] timeout disabling port1\n");
 		return (-1);
 	}
-	ps2_write_cmd(0xA7);
-	ps2_flush_output();
-
-	if (ps2_write_cmd(0x20) != 0) {
-		drivers_log("[PS2] timeout reading config\n");
-		return (-1);
-	}
+	i8042_write_cmd(I8042_CMD_DISABLE_PORT2);
+	i8042_flush_output();
 
 	config = 0;
-	if (ps2_read_data(&config) != 0) {
+	if (i8042_read_config(&config) != 0) {
 		drivers_log("[PS2] timeout waiting config\n");
 		return (-1);
 	}
@@ -266,52 +188,51 @@ ps2_keyboard_init(void)
 	config &= ~0x10;
 	config |= 0x40;
 
-	if (ps2_write_cmd(0x60) != 0 || ps2_write_data(config) != 0) {
+	if (i8042_write_config(config) != 0) {
 		drivers_log("[PS2] timeout writing config\n");
 		return (-1);
 	}
 
-	if (ps2_write_cmd(0x20) == 0) {
+	if (i8042_read_config(&config) == 0) {
 		u8	verify;
 
-		verify = 0;
-		if (ps2_read_data(&verify) == 0 && ps2_debug) {
-			drivers_log("[PS2] config after: 0x%x\n",
-			    verify);
+		verify = config;
+		if (ps2_debug) {
+			drivers_log("[PS2] config after: 0x%x\n", verify);
 		}
 	}
 
-	if (ps2_write_cmd(0xAA) == 0) {
+	if (i8042_write_cmd(I8042_CMD_SELF_TEST) == 0) {
 		u8	self_test;
 
 		self_test = 0;
-		if (ps2_read_data(&self_test) == 0 &&
+		if (i8042_read_data(&self_test) == 0 &&
 		    self_test != 0x55) {
 			drivers_log("[PS2] controller self-test "
 			    "failed: 0x%x\n", self_test);
 		}
 	}
 
-	if (ps2_write_cmd(0xAE) != 0) {
+	if (i8042_write_cmd(I8042_CMD_ENABLE_PORT1) != 0) {
 		drivers_log("[PS2] timeout enabling "
 		    "port1\n");
 		return (-1);
 	}
 
-	if (ps2_write_data(0xFF) == 0) {
+	if (i8042_write_data(0xFF) == 0) {
 		u8	resp;
 
 		resp = 0;
-		if (ps2_read_data(&resp) == 0) {
+		if (i8042_read_data(&resp) == 0) {
 			if (resp != 0xFA) {
 				drivers_log("[PS2] reset ack "
 				    "unexpected: 0x%x\n", resp);
 			}
 		} else {
-			drivers_log("[PS2] reset ack "
-			    "timeout\n");
-		}
-		if (ps2_read_data(&resp) == 0) {
+				drivers_log("[PS2] reset ack "
+				    "timeout\n");
+			}
+		if (i8042_read_data(&resp) == 0) {
 			if (resp != 0xAA) {
 				drivers_log("[PS2] reset self-test "
 				    "failed: 0x%x\n", resp);
@@ -322,11 +243,11 @@ ps2_keyboard_init(void)
 		}
 	}
 
-	if (ps2_write_data(0xF4) == 0) {
+	if (i8042_write_data(0xF4) == 0) {
 		u8	resp;
 
 		resp = 0;
-		if (ps2_read_data(&resp) == 0) {
+		if (i8042_read_data(&resp) == 0) {
 			if (resp != 0xFA) {
 				drivers_log("[PS2] enable scan ack "
 				    "unexpected: 0x%x\n", resp);
@@ -526,12 +447,14 @@ ps2_handle_input(const char *tag)
 {
 	u8	status, scancode;
 
-	while (inb(KBD_STATUS_PORT) & 0x01) {
-		status = inb(KBD_STATUS_PORT);
-		if (status & 0x20) {
+	while (i8042_status() & I8042_STATUS_OBF) {
+		status = i8042_status();
+		if (status & I8042_STATUS_AUX) {
 			return;
 		}
-		scancode = inb(KBD_DATA_PORT);
+		if (i8042_read_data(&scancode) != 0) {
+			return;
+		}
 		ps2_debug_status(tag, status, scancode);
 		ps2_process_scancode(scancode);
 	}
@@ -555,8 +478,9 @@ ps2_keyboard_poll(void)
 		return;
 	}
 
-	status = inb(KBD_STATUS_PORT);
-	if (status & 0x01) {
+	status = i8042_status();
+	if ((status & (I8042_STATUS_OBF | I8042_STATUS_AUX)) ==
+	    I8042_STATUS_OBF) {
 		ps2_handle_input("poll");
 	}
 }

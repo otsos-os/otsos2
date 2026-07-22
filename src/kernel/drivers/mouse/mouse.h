@@ -38,6 +38,9 @@ $define %func ps2_mouse_poll as procedure with args void
 $define %func ps2_mouse_is_ready as function with args void
 $define %func mouse_event_get as function with args struct mouse_event *
 $define %func mouse_event_count as function with args void
+$define %func mouse_event_next_seq as function with args void
+$define %func mouse_event_pending as function with args u64
+$define %func mouse_event_get_after as function with args u64 *, struct mouse_event *
 $define %func mouse_event_reset as procedure with args void
 
 */
@@ -46,7 +49,8 @@ $define %func mouse_event_reset as procedure with args void
 
 $space %export ps2_mouse_init, ps2_mouse_handler, ps2_mouse_poll
 $space %export ps2_mouse_is_ready
-$space %export mouse_event_get, mouse_event_count, mouse_event_reset
+$space %export mouse_event_get, mouse_event_count, mouse_event_next_seq
+$space %export mouse_event_pending, mouse_event_get_after, mouse_event_reset
 
 */
 
@@ -65,6 +69,7 @@ $space %export mouse_event_get, mouse_event_count, mouse_event_reset
 #define	MOUSE_EVENT_BUTTON	0x00000002
 #define	MOUSE_EVENT_WHEEL	0x00000004
 #define	MOUSE_EVENT_OVERFLOW	0x00000008
+#define	MOUSE_EVENT_DROPPED	0x00000010
 
 #define	MOUSE_EVENT_RING_SIZE	256
 
@@ -86,6 +91,9 @@ int	ps2_mouse_is_ready(void);
 
 int	mouse_event_get(struct mouse_event *out);
 int	mouse_event_count(void);
+u64	mouse_event_next_seq(void);
+int	mouse_event_pending(u64 cursor);
+int	mouse_event_get_after(u64 *cursor, struct mouse_event *out);
 void	mouse_event_reset(void);
 
 #endif

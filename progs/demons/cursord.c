@@ -1,230 +1,96 @@
-/* native mouse cursor daemon for otsos2*/
+/*
+ * Copyright (c) 2026, otsos team
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
-#define	CALL_TERM_WRITE		0x101
-#define	CALL_PROC_EXIT		0x403
-#define	CALL_PROC_COPY		0x401
-#define	CALL_PROC_SETSID		0x411
-#define	CALL_DRM_CALL		0x600
-#define	CALL_EVENT_KQUEUE		0x700
-#define	CALL_EVENT_KEVENT		0x701
-#define	CALL_PERSONALITY		0xFFFF
+/* !DEFINES!
 
-#define	EVFILT_MOUSE		(-8)
-#define	EV_ADD			0x0001
-#define	EV_CLEAR		0x0020
+$define %func daemonize as function with args void
+$define %func cursor_shape as function with args int, int
+$define %func cursor_outline as function with args int, int
+$define %func put_cursor_pixel as procedure with args uint32_t, uint32_t, uint32_t, uint32_t
+$define %func draw_cursor as procedure with args uint32_t
+$define %func commit_cursor as function with args uint32_t, uint32_t, int, int
+$define %func main as start with args int, char **, char **
 
-#define	DRM_OP_INFO		1
-#define	DRM_OP_GEM_CREATE	2
-#define	DRM_OP_FB_CREATE	5
-#define	DRM_OP_GET_OBJECTS	7
-#define	DRM_OP_ATOMIC_COMMIT	8
-#define	DRM_OP_RAPI_CLEAR	9
-#define	DRM_OP_RAPI_PUT_PIXEL	10
+*/
 
-#define	DRM_PROP_PLANE_FB_ID	1
-#define	DRM_PROP_PLANE_SRC_X	3
-#define	DRM_PROP_PLANE_SRC_Y	4
-#define	DRM_PROP_PLANE_SRC_W	5
-#define	DRM_PROP_PLANE_SRC_H	6
-#define	DRM_PROP_PLANE_CRTC_X	7
-#define	DRM_PROP_PLANE_CRTC_Y	8
-#define	DRM_PROP_PLANE_CRTC_W	9
-#define	DRM_PROP_PLANE_CRTC_H	10
+/* !SPACE!
+
+$space %internal daemonize, cursor_shape, cursor_outline
+$space %internal put_cursor_pixel, draw_cursor, commit_cursor
+$space %export main
+
+*/
+
+#include <native.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define	CURSOR_W		24
 #define	CURSOR_H		32
 #define	CURSOR_PITCH		(CURSOR_W * 4)
 #define	CURSOR_EVENT_BATCH	32
 
-#define	MOUSE_DATA_DX(v)	((s16)((u64)(v) & 0xFFFF))
-#define	MOUSE_DATA_DY(v)	((s16)(((u64)(v) >> 16) & 0xFFFF))
-
-typedef unsigned long long	u64;
-typedef unsigned int		u32;
-typedef unsigned short		u16;
-typedef unsigned char		u8;
-typedef long long		s64;
-typedef signed short		s16;
-
-struct kevent {
-	u64	ident;
-	short	filter;
-	u16	flags;
-	u32	fflags;
-	s64	data;
-	u64	udata;
-};
-
-struct kevent_args {
-	int		kq_idx;
-	struct kevent	*changelist;
-	int		nchanges;
-	struct kevent	*eventlist;
-	int		nevents;
-	s64		timeout_ms;
-};
-
-struct api_drm_info {
-	u32	available;
-	u32	width;
-	u32	height;
-	u32	pitch;
-	u32	bpp;
-	char	driver_name[32];
-};
-
-struct api_drm_gem_create {
-	u64	size;
-	u32	handle;
-};
-
-struct api_drm_fb_create {
-	u32	gem_handle;
-	u32	width;
-	u32	height;
-	u32	pitch;
-	u8	bpp;
-	u32	fb_id;
-};
-
-struct api_drm_objects {
-	u32	primary_plane_id;
-	u32	cursor_plane_id;
-	u32	crtc_id;
-	u32	connector_id;
-};
-
-struct api_drm_atomic_req {
-	u32	obj_id;
-	u32	prop_id;
-	u64	value;
-};
-
-struct api_drm_atomic_commit {
-	struct api_drm_atomic_req	*reqs;
-	u32				count;
-	u32				flags;
-};
-
-struct api_drm_rapi_pixel {
-	u32	handle;
-	u32	pitch;
-	u8	bpp;
-	u32	x;
-	u32	y;
-	u32	color;
-};
-
-struct api_drm_rapi_rect {
-	u32	handle;
-	u32	pitch;
-	u8	bpp;
-	u32	x;
-	u32	y;
-	u32	width;
-	u32	height;
-	u32	color;
-};
-
-static long
-syscall0(long num)
-{
-	long	ret;
-
-	__asm__ volatile("syscall"
-	    : "=a"(ret)
-	    : "a"(num)
-	    : "rcx", "r11", "memory");
-	return (ret);
-}
-
-static long
-syscall1(long num, long a1)
-{
-	long	ret;
-
-	__asm__ volatile("syscall"
-	    : "=a"(ret)
-	    : "a"(num), "D"(a1)
-	    : "rcx", "r11", "memory");
-	return (ret);
-}
-
-static long
-syscall3(long num, long a1, long a2, long a3)
-{
-	long	ret;
-
-	__asm__ volatile("syscall"
-	    : "=a"(ret)
-	    : "a"(num), "D"(a1), "S"(a2), "d"(a3)
-	    : "rcx", "r11", "memory");
-	return (ret);
-}
-
-static long
-proc_copy(void)
-{
-	return (syscall0(CALL_PROC_COPY));
-}
-
-static long
-proc_setsid(void)
-{
-	return (syscall0(CALL_PROC_SETSID));
-}
-
-static unsigned long
-strlen_s(const char *s)
-{
-	unsigned long	n;
-
-	n = 0;
-	while (s[n]) {
-		n++;
-	}
-	return (n);
-}
-
 static void
-print(const char *s)
+log_msg(const char *msg)
 {
-	syscall3(CALL_TERM_WRITE, (long)s, (long)strlen_s(s), 0);
-}
-
-static void
-exit_now(int code)
-{
-	syscall1(CALL_PROC_EXIT, code);
-	for (;;) {
+	if (msg) {
+		termPrint(msg);
 	}
 }
 
-static long
-drm_call(u64 op, void *arg)
-{
-	return (syscall3(CALL_DRM_CALL, (long)op, (long)arg, 0));
-}
-
 static int
-kqueue_create(void)
+daemonize(void)
 {
-	return ((int)syscall1(CALL_EVENT_KQUEUE, 0));
-}
+	int	pid;
 
-static int
-kevent_wait(int kq, struct kevent *changes, int nchanges,
-    struct kevent *events, int nevents, s64 timeout_ms)
-{
-	struct kevent_args	args;
+	pid = procCopy();
+	if (pid < 0) {
+		log_msg("cursord: first fork failed\n");
+		return (-1);
+	}
+	if (pid > 0) {
+		procExit(0);
+	}
 
-	args.kq_idx = kq;
-	args.changelist = changes;
-	args.nchanges = nchanges;
-	args.eventlist = events;
-	args.nevents = nevents;
-	args.timeout_ms = timeout_ms;
-	return ((int)syscall3(CALL_EVENT_KEVENT, 0, (long)&args, 0));
+	if (procSetsid() < 0) {
+		log_msg("cursord: setsid failed\n");
+		return (-1);
+	}
+
+	pid = procCopy();
+	if (pid < 0) {
+		log_msg("cursord: second fork failed\n");
+		return (-1);
+	}
+	if (pid > 0) {
+		procExit(0);
+	}
+
+	return (0);
 }
 
 static int
@@ -259,34 +125,17 @@ cursor_outline(int x, int y)
 }
 
 static void
-put_cursor_pixel(u32 gem, u32 x, u32 y, u32 color)
+put_cursor_pixel(uint32_t gem, uint32_t x, uint32_t y, uint32_t color)
 {
-	struct api_drm_rapi_pixel	p;
-
-	p.handle = gem;
-	p.pitch = CURSOR_PITCH;
-	p.bpp = 32;
-	p.x = x;
-	p.y = y;
-	p.color = color;
-	drm_call(DRM_OP_RAPI_PUT_PIXEL, &p);
+	(void)drmRapiPutPixel(gem, CURSOR_PITCH, 32, x, y, color);
 }
 
 static void
-draw_cursor(u32 gem)
+draw_cursor(uint32_t gem)
 {
-	struct api_drm_rapi_rect	r;
-	u32			x, y;
+	uint32_t	x, y;
 
-	r.handle = gem;
-	r.pitch = CURSOR_PITCH;
-	r.bpp = 32;
-	r.x = 0;
-	r.y = 0;
-	r.width = CURSOR_W;
-	r.height = CURSOR_H;
-	r.color = 0x00000000;
-	drm_call(DRM_OP_RAPI_CLEAR, &r);
+	(void)drmRapiClear(gem, CURSOR_PITCH, 32, 0x00000000);
 
 	for (y = 0; y < CURSOR_H; y++) {
 		for (x = 0; x < CURSOR_W; x++) {
@@ -303,20 +152,20 @@ draw_cursor(u32 gem)
 }
 
 static int
-commit_cursor(u32 plane, u32 fb, int x, int y)
+commit_cursor(uint32_t plane, uint32_t fb, int x, int y)
 {
 	struct api_drm_atomic_req	reqs[9];
-	struct api_drm_atomic_commit	commit;
 
+	memset(reqs, 0, sizeof(reqs));
 	reqs[0].obj_id = plane;
 	reqs[0].prop_id = DRM_PROP_PLANE_FB_ID;
 	reqs[0].value = fb;
 	reqs[1].obj_id = plane;
 	reqs[1].prop_id = DRM_PROP_PLANE_CRTC_X;
-	reqs[1].value = (u64)x;
+	reqs[1].value = (uint64_t)x;
 	reqs[2].obj_id = plane;
 	reqs[2].prop_id = DRM_PROP_PLANE_CRTC_Y;
-	reqs[2].value = (u64)y;
+	reqs[2].value = (uint64_t)y;
 	reqs[3].obj_id = plane;
 	reqs[3].prop_id = DRM_PROP_PLANE_CRTC_W;
 	reqs[3].value = CURSOR_W;
@@ -336,109 +185,80 @@ commit_cursor(u32 plane, u32 fb, int x, int y)
 	reqs[8].prop_id = DRM_PROP_PLANE_SRC_H;
 	reqs[8].value = CURSOR_H;
 
-	commit.reqs = reqs;
-	commit.count = 9;
-	commit.flags = 0;
-	return ((int)drm_call(DRM_OP_ATOMIC_COMMIT, &commit));
+	return (drmAtomicCommit(reqs, 9, 0));
 }
 
-void
-_start(long argc, char **argv, char **envp)
+int
+main(int argc, char **argv, char **envp)
 {
-	struct api_drm_gem_create	gem;
-	struct api_drm_fb_create	fb;
 	struct api_drm_objects	objects;
 	struct api_drm_info	info;
 	struct kevent		change;
 	struct kevent		events[CURSOR_EVENT_BATCH];
+	uint32_t		gem, fb;
 	int			i, kq, n, x, y, dx, dy, max_x, max_y;
-	long			pid;
 
 	(void)argc;
 	(void)argv;
 	(void)envp;
 
-	syscall1(CALL_PERSONALITY, 0);
-	pid = proc_copy();
-	if (pid < 0) {
-		print("cursord: first fork failed\n");
-		exit_now(1);
-	}
-	if (pid > 0) {
-		exit_now(0);
+	(void)personality(API_PERSONALITY_NATIVE);
+	if (daemonize() != 0) {
+		return (1);
 	}
 
-	if (proc_setsid() < 0) {
-		print("cursord: setsid failed\n");
-		exit_now(1);
+	memset(&info, 0, sizeof(info));
+	if (drmInfo(&info) != 0 || !info.available) {
+		log_msg("cursord: drm not available\n");
+		return (1);
 	}
 
-	pid = proc_copy();
-	if (pid < 0) {
-		print("cursord: second fork failed\n");
-		exit_now(1);
-	}
-	if (pid > 0) {
-		exit_now(0);
+	memset(&objects, 0, sizeof(objects));
+	if (drmGetObjects(&objects) != 0 || objects.cursor_plane_id == 0) {
+		log_msg("cursord: cursor plane not available\n");
+		return (1);
 	}
 
-	if (drm_call(DRM_OP_INFO, &info) != 0 || !info.available) {
-		print("cursord: drm not available\n");
-		exit_now(1);
-	}
-	if (drm_call(DRM_OP_GET_OBJECTS, &objects) != 0 ||
-	    objects.cursor_plane_id == 0) {
-		print("cursord: cursor plane not available\n");
-		exit_now(1);
+	gem = 0;
+	if (drmGemCreate(CURSOR_PITCH * CURSOR_H, &gem) != 0 || gem == 0) {
+		log_msg("cursord: gem create failed\n");
+		return (1);
 	}
 
-	gem.size = CURSOR_PITCH * CURSOR_H;
-	gem.handle = 0;
-	if (drm_call(DRM_OP_GEM_CREATE, &gem) != 0 || gem.handle == 0) {
-		print("cursord: gem create failed\n");
-		exit_now(1);
+	fb = 0;
+	if (drmFbCreate(gem, CURSOR_W, CURSOR_H, CURSOR_PITCH, 32, &fb) != 0 ||
+	    fb == 0) {
+		log_msg("cursord: fb create failed\n");
+		return (1);
 	}
 
-	fb.gem_handle = gem.handle;
-	fb.width = CURSOR_W;
-	fb.height = CURSOR_H;
-	fb.pitch = CURSOR_PITCH;
-	fb.bpp = 32;
-	fb.fb_id = 0;
-	if (drm_call(DRM_OP_FB_CREATE, &fb) != 0 || fb.fb_id == 0) {
-		print("cursord: fb create failed\n");
-		exit_now(1);
-	}
-
-	draw_cursor(gem.handle);
+	draw_cursor(gem);
 
 	x = (int)(info.width / 2);
 	y = (int)(info.height / 2);
 	max_x = info.width > 0 ? (int)info.width - 1 : 0;
 	max_y = info.height > 0 ? (int)info.height - 1 : 0;
-	commit_cursor(objects.cursor_plane_id, fb.fb_id, x, y);
+	(void)commit_cursor(objects.cursor_plane_id, fb, x, y);
 
-	kq = kqueue_create();
+	kq = eventKqueue();
 	if (kq < 0) {
-		print("cursord: kqueue failed\n");
-		exit_now(1);
+		log_msg("cursord: kqueue failed\n");
+		return (1);
 	}
 
+	memset(&change, 0, sizeof(change));
 	change.ident = 0;
 	change.filter = EVFILT_MOUSE;
 	change.flags = EV_ADD | EV_CLEAR;
-	change.fflags = 0;
-	change.data = 0;
-	change.udata = 0;
-	if (kevent_wait(kq, &change, 1, 0, 0, -1) < 0) {
-		print("cursord: mouse event attach failed\n");
-		exit_now(1);
+	if (eventWait(kq, &change, 1, NULL, 0, -1) < 0) {
+		log_msg("cursord: mouse event attach failed\n");
+		return (1);
 	}
 
-	print("cursord: started\n");
+	log_msg("cursord: started\n");
 
 	for (;;) {
-		n = kevent_wait(kq, 0, 0, events, CURSOR_EVENT_BATCH, -1);
+		n = eventWait(kq, NULL, 0, events, CURSOR_EVENT_BATCH, -1);
 		if (n <= 0) {
 			continue;
 		}
@@ -468,6 +288,8 @@ _start(long argc, char **argv, char **envp)
 		if (y > max_y) {
 			y = max_y;
 		}
-		commit_cursor(objects.cursor_plane_id, fb.fb_id, x, y);
+		(void)commit_cursor(objects.cursor_plane_id, fb, x, y);
 	}
+
+	return (0);
 }

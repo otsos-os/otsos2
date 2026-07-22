@@ -33,16 +33,6 @@ $define %type s32 as 32 bit signed
 $define %type int as 32 bit signed
 $define %type mouse_event as struct with normalized mouse input event
 
-$define %func ps2_wait_input_clear as function with args void
-$define %func ps2_wait_output_full as function with args void
-$define %func ps2_irq_save as function with args void
-$define %func ps2_irq_restore as procedure with args u64
-$define %func ps2_flush_output as procedure with args void
-$define %func ps2_read_data as function with args u8 *
-$define %func ps2_read_aux as function with args u8 *
-$define %func ps2_write_cmd as function with args u8
-$define %func ps2_write_data as function with args u8
-$define %func ps2_write_aux as function with args u8
 $define %func ps2_aux_command as function with args u8
 $define %func ps2_aux_command_arg as function with args u8, u8
 $define %func ps2_aux_get_id as function with args u8 *
@@ -57,54 +47,32 @@ $define %func ps2_mouse_poll as procedure with args void
 $define %func ps2_mouse_is_ready as function with args void
 $define %func mouse_event_get as function with args struct mouse_event *
 $define %func mouse_event_count as function with args void
+$define %func mouse_event_next_seq as function with args void
+$define %func mouse_event_pending as function with args u64
+$define %func mouse_event_get_after as function with args u64 *, struct mouse_event *
 $define %func mouse_event_reset as procedure with args void
 
 */
 
 /* !SPACE!
 
-$space %internal ps2_wait_input_clear, ps2_wait_output_full
-$space %internal ps2_irq_save, ps2_irq_restore, ps2_flush_output
-$space %internal ps2_read_data, ps2_read_aux, ps2_write_cmd
-$space %internal ps2_write_data, ps2_write_aux, ps2_aux_command
-$space %internal ps2_aux_command_arg, ps2_aux_get_id
+$space %internal ps2_aux_command, ps2_aux_command_arg, ps2_aux_get_id
 $space %internal ps2_aux_enable_wheel, mouse_event_put
 $space %internal ps2_mouse_process_packet, ps2_mouse_process_byte
 $space %internal ps2_mouse_drain
 $space %export ps2_mouse_init, ps2_mouse_handler, ps2_mouse_poll
 $space %export ps2_mouse_is_ready
-$space %export mouse_event_get, mouse_event_count, mouse_event_reset
+$space %export mouse_event_get, mouse_event_count, mouse_event_next_seq
+$space %export mouse_event_pending, mouse_event_get_after, mouse_event_reset
 
 */
 
+#include <kernel/drivers/input/i8042.h>
 #include <kernel/drivers/mouse/mouse.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/event/event.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
-
-#define	PS2_DATA_PORT		0x60
-#define	PS2_STATUS_PORT		0x64
-#define	PS2_CMD_PORT		0x64
-
-#define	PS2_STATUS_OBF		0x01
-#define	PS2_STATUS_IBF		0x02
-#define	PS2_STATUS_AUX		0x20
-
-#define	PS2_CMD_READ_CONFIG	0x20
-#define	PS2_CMD_WRITE_CONFIG	0x60
-#define	PS2_CMD_DISABLE_PORT1	0xAD
-#define	PS2_CMD_ENABLE_PORT1	0xAE
-#define	PS2_CMD_ENABLE_PORT2	0xA8
-#define	PS2_CMD_TEST_PORT2	0xA9
-#define	PS2_CMD_WRITE_AUX	0xD4
-
-#define	PS2_CONFIG_PORT1_IRQ	0x01
-#define	PS2_CONFIG_PORT2_IRQ	0x02
-#define	PS2_CONFIG_PORT1_CLOCK	0x10
-#define	PS2_CONFIG_PORT2_CLOCK	0x20
-#define	PS2_CONFIG_TRANSLATION	0x40
-#define	PS2_RFLAGS_IF		0x200
 
 #define	PS2_MOUSE_ACK		0xFA
 #define	PS2_MOUSE_RESEND	0xFE
@@ -116,8 +84,8 @@ $space %export mouse_event_get, mouse_event_count, mouse_event_reset
 #define	PS2_MOUSE_GET_ID	0xF2
 
 static struct mouse_event	mouse_event_ring[MOUSE_EVENT_RING_SIZE];
-static int			mouse_event_head;
-static int			mouse_event_tail;
+static u64			mouse_event_seq;
+static u64			mouse_legacy_cursor;
 static int			mouse_ready;
 static int			mouse_packet_index;
 static int			mouse_packet_size;
@@ -127,135 +95,16 @@ static s32			mouse_y;
 static u32			mouse_buttons;
 
 static int
-ps2_wait_input_clear(void)
-{
-	u32	i;
-
-	for (i = 0; i < 100000; i++) {
-		if ((inb(PS2_STATUS_PORT) & PS2_STATUS_IBF) == 0) {
-			return (0);
-		}
-	}
-	return (-1);
-}
-
-static int
-ps2_wait_output_full(void)
-{
-	u32	i;
-
-	for (i = 0; i < 100000; i++) {
-		if (inb(PS2_STATUS_PORT) & PS2_STATUS_OBF) {
-			return (0);
-		}
-	}
-	return (-1);
-}
-
-static u64
-ps2_irq_save(void)
-{
-	u64	flags;
-
-	__asm__ volatile("pushfq; popq %0; cli"
-	    : "=r"(flags)
-	    :
-	    : "memory");
-	return (flags);
-}
-
-static void
-ps2_irq_restore(u64 flags)
-{
-	if (flags & PS2_RFLAGS_IF) {
-		__asm__ volatile("sti" ::: "memory");
-	}
-}
-
-static void
-ps2_flush_output(void)
-{
-	u32	i;
-
-	for (i = 0; i < 1024; i++) {
-		if ((inb(PS2_STATUS_PORT) & PS2_STATUS_OBF) == 0) {
-			return;
-		}
-		(void)inb(PS2_DATA_PORT);
-	}
-}
-
-static int
-ps2_read_data(u8 *data)
-{
-	if (ps2_wait_output_full() != 0) {
-		return (-1);
-	}
-	*data = inb(PS2_DATA_PORT);
-	return (0);
-}
-
-static int
-ps2_read_aux(u8 *data)
-{
-	u32	i;
-	u8	status;
-
-	for (i = 0; i < 100000; i++) {
-		status = inb(PS2_STATUS_PORT);
-		if ((status & PS2_STATUS_OBF) == 0) {
-			continue;
-		}
-		if ((status & PS2_STATUS_AUX) == 0) {
-			(void)inb(PS2_DATA_PORT);
-			continue;
-		}
-		*data = inb(PS2_DATA_PORT);
-		return (0);
-	}
-	return (-1);
-}
-
-static int
-ps2_write_cmd(u8 cmd)
-{
-	if (ps2_wait_input_clear() != 0) {
-		return (-1);
-	}
-	outb(PS2_CMD_PORT, cmd);
-	return (0);
-}
-
-static int
-ps2_write_data(u8 data)
-{
-	if (ps2_wait_input_clear() != 0) {
-		return (-1);
-	}
-	outb(PS2_DATA_PORT, data);
-	return (0);
-}
-
-static int
-ps2_write_aux(u8 data)
-{
-	if (ps2_write_cmd(PS2_CMD_WRITE_AUX) != 0) {
-		return (-1);
-	}
-	return (ps2_write_data(data));
-}
-
-static int
 ps2_aux_command(u8 cmd)
 {
 	u8	resp;
 	int	attempt;
 
 	for (attempt = 0; attempt < 3; attempt++) {
-		if (ps2_write_aux(cmd) != 0) {
+		if (i8042_write_aux(cmd) != 0) {
 			return (-1);
 		}
-		if (ps2_read_aux(&resp) != 0) {
+		if (i8042_read_aux(&resp) != 0) {
 			return (-1);
 		}
 		if (resp == PS2_MOUSE_RESEND) {
@@ -284,7 +133,7 @@ ps2_aux_get_id(u8 *id)
 	if (ps2_aux_command(PS2_MOUSE_GET_ID) != 0) {
 		return (-1);
 	}
-	return (ps2_read_aux(id));
+	return (i8042_read_aux(id));
 }
 
 static void
@@ -319,17 +168,15 @@ static void
 mouse_event_put(s32 dx, s32 dy, s32 dz, u32 buttons, u32 flags)
 {
 	struct mouse_event	*ev;
-	int			next;
+	u64			irq_flags;
+	u64			seq;
 
+	irq_flags = i8042_irq_save();
 	mouse_x += dx;
 	mouse_y += dy;
+	seq = mouse_event_seq++;
 
-	next = (mouse_event_head + 1) % MOUSE_EVENT_RING_SIZE;
-	if (next == mouse_event_tail) {
-		return;
-	}
-
-	ev = &mouse_event_ring[mouse_event_head];
+	ev = &mouse_event_ring[seq % MOUSE_EVENT_RING_SIZE];
 	ev->timestamp = timer_get_ticks();
 	ev->x = mouse_x;
 	ev->y = mouse_y;
@@ -338,8 +185,8 @@ mouse_event_put(s32 dx, s32 dy, s32 dz, u32 buttons, u32 flags)
 	ev->dz = dz;
 	ev->buttons = buttons;
 	ev->flags = flags;
+	i8042_irq_restore(irq_flags);
 
-	mouse_event_head = next;
 	knote_notify_all(EVFILT_MOUSE, 0, 0, 1);
 }
 
@@ -431,12 +278,14 @@ ps2_mouse_drain(const char *tag)
 	u8	status, data;
 
 	(void)tag;
-	while (inb(PS2_STATUS_PORT) & PS2_STATUS_OBF) {
-		status = inb(PS2_STATUS_PORT);
-		if ((status & PS2_STATUS_AUX) == 0) {
+	while (i8042_status() & I8042_STATUS_OBF) {
+		status = i8042_status();
+		if ((status & I8042_STATUS_AUX) == 0) {
 			return;
 		}
-		data = inb(PS2_DATA_PORT);
+		if (i8042_read_data(&data) != 0) {
+			return;
+		}
 		ps2_mouse_process_byte(data);
 	}
 }
@@ -457,27 +306,26 @@ ps2_mouse_init(void)
 	mouse_y = 0;
 	mouse_buttons = 0;
 
-	if (inb(PS2_STATUS_PORT) == 0xFF) {
+	if (i8042_status() == 0xFF) {
 		return (-1);
 	}
 
 	ret = -1;
 	port1_disabled = 0;
-	irq_flags = ps2_irq_save();
+	irq_flags = i8042_irq_save();
 
-	if (ps2_write_cmd(PS2_CMD_DISABLE_PORT1) == 0) {
+	if (i8042_write_cmd(I8042_CMD_DISABLE_PORT1) == 0) {
 		port1_disabled = 1;
 	}
-	ps2_flush_output();
-	if (ps2_write_cmd(PS2_CMD_ENABLE_PORT2) != 0) {
+	i8042_flush_output();
+	if (i8042_write_cmd(I8042_CMD_ENABLE_PORT2) != 0) {
 		drivers_log("[MOUSE] timeout enabling ps/2 port2\n");
 		goto out;
 	}
 
-	ps2_flush_output();
+	i8042_flush_output();
 	resp = 0xFF;
-	if (ps2_write_cmd(PS2_CMD_TEST_PORT2) != 0 ||
-	    ps2_read_data(&resp) != 0) {
+	if (i8042_test_port2(&resp) != 0) {
 		drivers_log("[MOUSE] ps/2 port2 test timeout, "
 		    "probing aux\n");
 	} else if (resp != 0x00) {
@@ -486,27 +334,25 @@ ps2_mouse_init(void)
 		goto out;
 	}
 
-	ps2_flush_output();
-	if (ps2_write_cmd(PS2_CMD_READ_CONFIG) != 0 ||
-	    ps2_read_data(&config) != 0) {
+	i8042_flush_output();
+	if (i8042_read_config(&config) != 0) {
 		drivers_log("[MOUSE] timeout reading ps/2 config\n");
 		goto out;
 	}
-	config |= PS2_CONFIG_PORT1_IRQ;
-	config |= PS2_CONFIG_PORT2_IRQ;
-	config |= PS2_CONFIG_TRANSLATION;
-	config &= ~PS2_CONFIG_PORT1_CLOCK;
-	config &= ~PS2_CONFIG_PORT2_CLOCK;
-	if (ps2_write_cmd(PS2_CMD_WRITE_CONFIG) != 0 ||
-	    ps2_write_data(config) != 0) {
+	config |= I8042_CONFIG_PORT1_IRQ;
+	config |= I8042_CONFIG_PORT2_IRQ;
+	config |= I8042_CONFIG_TRANSLATION;
+	config &= ~I8042_CONFIG_PORT1_CLOCK;
+	config &= ~I8042_CONFIG_PORT2_CLOCK;
+	if (i8042_write_config(config) != 0) {
 		drivers_log("[MOUSE] timeout writing ps/2 config\n");
 		goto out;
 	}
 
-	ps2_flush_output();
+	i8042_flush_output();
 	if (ps2_aux_command(PS2_MOUSE_RESET) != 0 ||
-	    ps2_read_aux(&resp) != 0 || resp != 0xAA ||
-	    ps2_read_aux(&resp) != 0) {
+	    i8042_read_aux(&resp) != 0 || resp != 0xAA ||
+	    i8042_read_aux(&resp) != 0) {
 		drivers_log("[MOUSE] ps/2 mouse reset failed\n");
 		goto out;
 	}
@@ -531,9 +377,9 @@ ps2_mouse_init(void)
 
 out:
 	if (port1_disabled) {
-		(void)ps2_write_cmd(PS2_CMD_ENABLE_PORT1);
+		(void)i8042_write_cmd(I8042_CMD_ENABLE_PORT1);
 	}
-	ps2_irq_restore(irq_flags);
+	i8042_irq_restore(irq_flags);
 	return (ret);
 }
 
@@ -555,9 +401,9 @@ ps2_mouse_poll(void)
 		return;
 	}
 
-	status = inb(PS2_STATUS_PORT);
-	if ((status & (PS2_STATUS_OBF | PS2_STATUS_AUX)) ==
-	    (PS2_STATUS_OBF | PS2_STATUS_AUX)) {
+	status = i8042_status();
+	if ((status & (I8042_STATUS_OBF | I8042_STATUS_AUX)) ==
+	    (I8042_STATUS_OBF | I8042_STATUS_AUX)) {
 		ps2_mouse_drain("poll");
 	}
 }
@@ -571,37 +417,101 @@ ps2_mouse_is_ready(void)
 int
 mouse_event_get(struct mouse_event *out)
 {
-	struct mouse_event	*ev;
-
-	if (mouse_event_head == mouse_event_tail) {
-		return (0);
-	}
-
-	ev = &mouse_event_ring[mouse_event_tail];
-	if (out) {
-		*out = *ev;
-	}
-	mouse_event_tail = (mouse_event_tail + 1) %
-	    MOUSE_EVENT_RING_SIZE;
-	return (1);
+	return (mouse_event_get_after(&mouse_legacy_cursor, out));
 }
 
 int
 mouse_event_count(void)
 {
-	int	delta;
+	return (mouse_event_pending(mouse_legacy_cursor));
+}
 
-	delta = mouse_event_head - mouse_event_tail;
-	if (delta < 0) {
-		delta += MOUSE_EVENT_RING_SIZE;
+u64
+mouse_event_next_seq(void)
+{
+	u64	irq_flags;
+	u64	seq;
+
+	irq_flags = i8042_irq_save();
+	seq = mouse_event_seq;
+	i8042_irq_restore(irq_flags);
+	return (seq);
+}
+
+int
+mouse_event_pending(u64 cursor)
+{
+	u64	irq_flags;
+	u64	oldest, seq;
+	u64	count;
+
+	irq_flags = i8042_irq_save();
+	seq = mouse_event_seq;
+	oldest = 0;
+	if (seq > MOUSE_EVENT_RING_SIZE) {
+		oldest = seq - MOUSE_EVENT_RING_SIZE;
 	}
-	return (delta);
+	if (cursor < oldest) {
+		cursor = oldest;
+	}
+	count = cursor < seq ? seq - cursor : 0;
+	i8042_irq_restore(irq_flags);
+	if (count > MOUSE_EVENT_RING_SIZE) {
+		count = MOUSE_EVENT_RING_SIZE;
+	}
+	return ((int)count);
+}
+
+int
+mouse_event_get_after(u64 *cursor, struct mouse_event *out)
+{
+	struct mouse_event	ev;
+	u64			irq_flags;
+	u64			oldest, seq;
+	int			dropped;
+
+	if (!cursor) {
+		return (0);
+	}
+
+	irq_flags = i8042_irq_save();
+	seq = mouse_event_seq;
+	oldest = 0;
+	if (seq > MOUSE_EVENT_RING_SIZE) {
+		oldest = seq - MOUSE_EVENT_RING_SIZE;
+	}
+
+	dropped = 0;
+	if (*cursor < oldest) {
+		*cursor = oldest;
+		dropped = 1;
+	}
+	if (*cursor >= seq) {
+		i8042_irq_restore(irq_flags);
+		return (0);
+	}
+
+	ev = mouse_event_ring[*cursor % MOUSE_EVENT_RING_SIZE];
+	(*cursor)++;
+	i8042_irq_restore(irq_flags);
+
+	if (dropped) {
+		ev.flags |= MOUSE_EVENT_DROPPED;
+	}
+	if (out) {
+		*out = ev;
+	}
+	return (1);
 }
 
 void
 mouse_event_reset(void)
 {
-	mouse_event_head = 0;
-	mouse_event_tail = 0;
+	u64	irq_flags;
+
+	irq_flags = i8042_irq_save();
+	mouse_event_seq = 0;
+	mouse_legacy_cursor = 0;
 	memset(mouse_event_ring, 0, sizeof(mouse_event_ring));
+	i8042_irq_restore(irq_flags);
 }

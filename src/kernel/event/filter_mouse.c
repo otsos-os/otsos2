@@ -61,7 +61,7 @@ $space %export filter_mouse_ops
 static int
 filt_mouse_attach(knote_t *kn)
 {
-	(void)kn;
+	kn->fpriv = mouse_event_next_seq();
 	return (0);
 }
 
@@ -78,10 +78,10 @@ filt_mouse_event(knote_t *kn, u32 nevents)
 	u64			data;
 
 	if (nevents == 0) {
-		return (mouse_event_count() > 0);
+		return (mouse_event_pending(kn->fpriv) > 0);
 	}
 
-	if (mouse_event_get(&ev) == 0) {
+	if (mouse_event_get_after(&kn->fpriv, &ev) == 0) {
 		return (0);
 	}
 
@@ -94,7 +94,7 @@ filt_mouse_event(knote_t *kn, u32 nevents)
 	kn->data = (s64)data;
 	kn->fflags = ev.flags | (ev.buttons << 16);
 
-	return (mouse_event_count() > 0 ? 2 : 1);
+	return (mouse_event_pending(kn->fpriv) > 0 ? 2 : 1);
 }
 
 static void

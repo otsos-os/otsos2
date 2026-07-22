@@ -180,6 +180,7 @@ struct api_fs_stat {
 #define	MOUSE_EVENT_BUTTON	0x00000002
 #define	MOUSE_EVENT_WHEEL	0x00000004
 #define	MOUSE_EVENT_OVERFLOW	0x00000008
+#define	MOUSE_EVENT_DROPPED	0x00000010
 
 /* Decoding helpers for EVFILT_MOUSE kevent data. */
 #define	MOUSE_DATA_DX(v)	((s16)((u64)(v) & 0xFFFF))
@@ -376,7 +377,7 @@ struct api_proc_spawn_args {
  *   - DRIVER_LIST: available to all processes.
  *   - DRIVER_SWITCH: kusr only.
  *
- * Property IDs for atomic requests are defined in
+ * Plane property IDs for atomic requests are exported below and mirror
  * <kernel/drivers/video/drm/kms/property.h>.
  */
 
@@ -406,6 +407,21 @@ struct api_proc_spawn_args {
 
 #define DRM_OP_DRIVER_SWITCH   15
 #define DRM_OP_DRIVER_LIST     16 
+
+#define DRM_PROP_PLANE_FB_ID      1
+#define DRM_PROP_PLANE_CRTC_ID    2
+#define DRM_PROP_PLANE_SRC_X      3
+#define DRM_PROP_PLANE_SRC_Y      4
+#define DRM_PROP_PLANE_SRC_W      5
+#define DRM_PROP_PLANE_SRC_H      6
+#define DRM_PROP_PLANE_CRTC_X     7
+#define DRM_PROP_PLANE_CRTC_Y     8
+#define DRM_PROP_PLANE_CRTC_W     9
+#define DRM_PROP_PLANE_CRTC_H     10
+#define DRM_PROP_PLANE_DIRTY_X    11
+#define DRM_PROP_PLANE_DIRTY_Y    12
+#define DRM_PROP_PLANE_DIRTY_W    13
+#define DRM_PROP_PLANE_DIRTY_H    14
 
 struct api_drm_info {
   u32 available;     /* 1 if DRM is ready                     */

@@ -281,12 +281,13 @@ kqueue_create(void)
 	return (-1);
 }
 
-int
-kqueue_destroy(int kq_idx)
+static int
+kqueue_destroy_internal(int kq_idx, int force)
 {
 	kqueue_t		*kq;
 	int			i;
 	const filter_ops_t	*ops;
+	process_t		*owner;
 
 	if (kq_idx < 0 || kq_idx >= MAX_KQUEUES) {
 		return (-1);
@@ -295,6 +296,10 @@ kqueue_destroy(int kq_idx)
 	kq = &kqueue_pool[kq_idx];
 	if (!kq->used) {
 		return (-1);
+	}
+	owner = process_current();
+	if (!force && owner && kq->owner != owner) {
+		return (-API_ERR_PERM);
 	}
 
 	for (i = 0; i < MAX_KNOTES; i++) {
@@ -318,6 +323,12 @@ kqueue_destroy(int kq_idx)
 	memset(kq, 0, sizeof(kqueue_t));
 	printk("[EVENT] Destroyed kqueue idx=%d\n", kq_idx);
 	return (0);
+}
+
+int
+kqueue_destroy(int kq_idx)
+{
+	return (kqueue_destroy_internal(kq_idx, 0));
 }
 
 kqueue_t *
@@ -664,6 +675,7 @@ kevent_process(int kq_idx, struct kevent *changelist,
     s64 timeout_ms)
 {
 	kqueue_t	*kq;
+	process_t	*owner;
 	int		i, count, ret;
 	u64		start_ticks, timeout_ticks, elapsed;
 
@@ -674,6 +686,10 @@ kevent_process(int kq_idx, struct kevent *changelist,
 	kq = kqueue_get(kq_idx);
 	if (!kq) {
 		return (-API_ERR_BAD_HANDLE);
+	}
+	owner = process_current();
+	if (owner && kq->owner != owner) {
+		return (-API_ERR_PERM);
 	}
 	trace_kevent_wait(kq_idx, nchanges, nevents, timeout_ms);
 
@@ -778,7 +794,7 @@ event_cleanup_process(struct process *proc)
 	for (i = 0; i < MAX_KQUEUES; i++) {
 		kq = &kqueue_pool[i];
 		if (kq->used && kq->owner == proc) {
-			kqueue_destroy(i);
+			kqueue_destroy_internal(i, 1);
 		}
 	}
 

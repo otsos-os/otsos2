@@ -350,10 +350,37 @@ $space %export traceMark
 #define DRM_OP_DRIVER_SWITCH	15
 #define DRM_OP_DRIVER_LIST	16
 
+#define DRM_PROP_PLANE_FB_ID	1
+#define DRM_PROP_PLANE_CRTC_ID	2
+#define DRM_PROP_PLANE_SRC_X	3
+#define DRM_PROP_PLANE_SRC_Y	4
+#define DRM_PROP_PLANE_SRC_W	5
+#define DRM_PROP_PLANE_SRC_H	6
+#define DRM_PROP_PLANE_CRTC_X	7
+#define DRM_PROP_PLANE_CRTC_Y	8
+#define DRM_PROP_PLANE_CRTC_W	9
+#define DRM_PROP_PLANE_CRTC_H	10
+#define DRM_PROP_PLANE_DIRTY_X	11
+#define DRM_PROP_PLANE_DIRTY_Y	12
+#define DRM_PROP_PLANE_DIRTY_W	13
+#define DRM_PROP_PLANE_DIRTY_H	14
+
 #define KBD_DATA_KEY(v)		((uint16_t)((uint64_t)(v) & 0xFFFF))
 #define KBD_DATA_RELEASED(v)	(((uint64_t)(v) >> 16) & 1)
 #define KBD_DATA_EXTENDED(v)	(((uint64_t)(v) >> 17) & 1)
 #define KBD_DATA_ASCII(v)	((char)(((uint64_t)(v) >> 24) & 0xFF))
+
+#define MOUSE_BUTTON_LEFT	0x00000001
+#define MOUSE_BUTTON_RIGHT	0x00000002
+#define MOUSE_BUTTON_MIDDLE	0x00000004
+#define MOUSE_BUTTON_X1	0x00000008
+#define MOUSE_BUTTON_X2	0x00000010
+
+#define MOUSE_EVENT_MOVE	0x00000001
+#define MOUSE_EVENT_BUTTON	0x00000002
+#define MOUSE_EVENT_WHEEL	0x00000004
+#define MOUSE_EVENT_OVERFLOW	0x00000008
+#define MOUSE_EVENT_DROPPED	0x00000010
 
 #define MOUSE_DATA_DX(v)	((int16_t)((uint64_t)(v) & 0xFFFF))
 #define MOUSE_DATA_DY(v)	((int16_t)(((uint64_t)(v) >> 16) & 0xFFFF))

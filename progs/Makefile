@@ -98,9 +98,10 @@ $(OVEN_BIN): $(OVEN_OBJS)
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
-$(CURSORD_BIN): $(CURSORD_OBJS)
+$(CURSORD_BIN): $(NATIVE_CRT0) $(CURSORD_OBJS) $(NATIVE_SO)
 	@echo "  LLD      $@"
-	@$(LD) $(LDFLAGS) $(CURSORD_OBJS) -o $@
+	@$(LD) $(NATIVE_DYN_LDFLAGS) $(NATIVE_CRT0) $(CURSORD_OBJS) \
+	    $(NATIVE_SO) -o $@
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
@@ -203,6 +204,10 @@ dhcpc.o: dhcpc.c
 	@$(CC) $(CFLAGS) -fPIE -I$(NATIVE_DIR)/include -c $< -o $@
 
 demons/dhcpd.o: demons/dhcpd.c
+	@echo "  CC      $< (native libc)"
+	@$(CC) $(CFLAGS) -fPIE -I$(NATIVE_DIR)/include -c $< -o $@
+
+demons/cursord.o: demons/cursord.c
 	@echo "  CC      $< (native libc)"
 	@$(CC) $(CFLAGS) -fPIE -I$(NATIVE_DIR)/include -c $< -o $@
 
