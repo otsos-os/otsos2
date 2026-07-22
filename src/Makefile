@@ -1327,7 +1327,9 @@ $(POSIX_MEM_O): kernel/api/posix/posix_mem.c kernel/api/posix/posix.h kernel/api
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(POSIX_SOCKET_O): kernel/api/posix/posix_socket.c kernel/api/posix/posix_socket.h kernel/api/posix/posix.h kernel/drivers/fs/vfs/vfs.h
+$(POSIX_SOCKET_O): kernel/api/posix/posix_socket.c \
+    kernel/api/posix/posix_socket.h kernel/api/posix/posix.h \
+    kernel/drivers/fs/vfs/vfs.h kernel/net/endpoint.h kernel/api/errno.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 $(POSIX_SIGNAL_O): kernel/api/posix/posix_signal.c kernel/api/posix/posix.h

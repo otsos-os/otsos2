@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 echo "  SETUP    ports/cpython"
 MUSL_DIR="../../../libc/musl"
 SRC_DIR="$SCRIPT_DIR/cpython"
+SETUP_LOCAL="$SRC_DIR/Modules/Setup.local"
 SUBMODULE_PATH="ports/cpython/cpython"
 SUBMODULE_URL="https://github.com/python/cpython.git"
 SUBMODULE_BRANCH="3.14"
@@ -52,6 +53,11 @@ fi
 if [ ! -f "$SRC_DIR/config.site" ] || ! cmp -s "$SCRIPT_DIR/config.site" "$SRC_DIR/config.site"; then
 	cp "$SCRIPT_DIR/config.site" "$SRC_DIR/config.site"
 	echo "  CONFIG   config.site copied"
+fi
+if [ ! -f "$SETUP_LOCAL" ] || \
+	! cmp -s "$SCRIPT_DIR/Setup.local" "$SETUP_LOCAL"; then
+	cp "$SCRIPT_DIR/Setup.local" "$SETUP_LOCAL"
+	echo "  CONFIG   Modules/Setup.local copied"
 fi
 if [ ! -f "$SRC_DIR/Makefile" ]; then
 	echo "  CONFIG   running configure"

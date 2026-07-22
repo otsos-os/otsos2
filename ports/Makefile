@@ -63,6 +63,7 @@ LUA_SETUP = lua/setup.sh
 CPYTHON_BIN = cpython/cpython/python
 CPYTHON_DIR = cpython/cpython
 CPYTHON_SETUP = cpython/setup.sh
+CPYTHON_SETUP_LOCAL = cpython/Setup.local
 LIBC_ENABLED ?= true
 
 ifeq ($(LIBC_ENABLED),true)
@@ -179,8 +180,10 @@ $(LUA_BIN): $(MUSL_SCRT1) $(MUSL_LDSO)
 	@echo "  MAKE    ports/lua"
 	@$(MAKE) -C $(LUA_DIR)
 
+.PHONY: cpython
 cpython: $(CPYTHON_BIN)
-$(CPYTHON_BIN): $(MUSL_SCRT1) $(MUSL_LDSO)
+$(CPYTHON_BIN): $(MUSL_SCRT1) $(MUSL_LDSO) $(CPYTHON_SETUP) \
+    $(CPYTHON_SETUP_LOCAL)
 	@echo "  SETUP   ports/cpython"
 	@$(SHELL) $(CPYTHON_SETUP)
 	@echo "  MAKE    ports/cpython"

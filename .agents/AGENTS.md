@@ -55,7 +55,9 @@ Monolithic kernel with the following rough layers:
 - `api/` — native syscall implementations (`term_*`, `data_*`, `proc_*`,
   `fs_*`, `mem_*`, `sys_*`, `drm_*`, `event_*`, `kusr_*`, `posix/*`).
 - `api/posix/` — Linux-compatible syscall personality when process
-  `personality == PERSONALITY_POSIX`.  Syscall numbers track Linux x86-64
+  `personality == PERSONALITY_POSIX`.  Syscall numbers track Linux x86-64.
+  POSIX sockets support AF_UNIX and AF_INET TCP/UDP; AF_INET routes through the
+  native `net_endpoint_*` stack rather than a separate socket stack.
 - `mm/` — `bootmem.c`, `kmem.c`, `uma.c`, `vm/pmap.c`, `vm/vm_page.c`,
   `vm/vm_object.c`, `vm/vm_map.c`, `vm/vm_pager.c`.
 - `drivers/` — storage, filesystem, video, keyboard, timer, ACPI, power, PCI,

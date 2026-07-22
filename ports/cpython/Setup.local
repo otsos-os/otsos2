@@ -1,0 +1,10 @@
+# otsos2 keeps the Python stdlib as python314.zip.  Native extension modules
+# cannot be imported directly from that zip, so the small set needed for the
+# interactive shell and POSIX socket tests is linked into /bin/python.
+
+*static*
+
+_socket socketmodule.c
+select selectmodule.c
+fcntl fcntlmodule.c
+unicodedata unicodedata.c

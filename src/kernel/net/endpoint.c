@@ -49,6 +49,7 @@ $define %func net_endpoint_free as procedure with args net_endpoint_t *
 $define %func net_endpoint_init as procedure with args void
 $define %func net_endpoint_open as function with args int, int, u32
 $define %func net_endpoint_close as procedure with args net_endpoint_t *
+$define %func net_endpoint_set_nonblock as procedure with args endpoint, int
 $define %func net_endpoint_bind as function with args net_endpoint_t *, const net_endpoint_addr_t *
 $define %func net_endpoint_connect as function with args net_endpoint_t *, const net_endpoint_addr_t *
 $define %func net_endpoint_listen as function with args net_endpoint_t *, int
@@ -77,6 +78,7 @@ $space %internal net_endpoint_valid_addr, net_endpoint_match
 $space %internal net_endpoint_enqueue
 $space %export net_endpoint_free
 $space %export net_endpoint_init, net_endpoint_open, net_endpoint_close
+$space %export net_endpoint_set_nonblock
 $space %export net_endpoint_bind, net_endpoint_connect
 $space %export net_endpoint_listen, net_endpoint_accept
 $space %export net_endpoint_send, net_endpoint_recv
@@ -453,6 +455,21 @@ net_endpoint_close(net_endpoint_t *ep)
 		}
 	}
 	net_endpoint_free(ep);
+}
+
+void
+net_endpoint_set_nonblock(net_endpoint_t *ep, int nonblock)
+{
+	if (!ep || !ep->used) {
+		return;
+	}
+	if (nonblock) {
+		ep->flags |= NET_ENDPOINT_FLAG_NONBLOCK;
+	} else {
+		ep->flags &= ~NET_ENDPOINT_FLAG_NONBLOCK;
+	}
+	proc_wakeup((void *)ep);
+	event_notify_net_change(ep);
 }
 
 int

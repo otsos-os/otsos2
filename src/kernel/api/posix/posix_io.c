@@ -825,56 +825,11 @@ posix_poll_pipe_writable(pipe_t *p)
 	return (p->readers > 0 && p->size < PIPE_BUF_SIZE);
 }
 
-static int
-posix_poll_socket_readable(unix_sock_t *s)
-{
-	if (!s || s->state == UNIX_SOCK_FREE) {
-		return (0);
-	}
-	if (s->state == UNIX_SOCK_LISTENING) {
-		return (s->accept_count > 0);
-	}
-	if (s->shut_rd || s->state == UNIX_SOCK_CLOSED) {
-		return (1);
-	}
-	if (s->type == SOCK_DGRAM) {
-		return (s->msg_count > 0);
-	}
-	if (s->stream_count > 0) {
-		return (1);
-	}
-	if (!s->peer || s->peer->state == UNIX_SOCK_FREE ||
-	    s->peer->state == UNIX_SOCK_CLOSED || s->peer->shut_wr) {
-		return (1);
-	}
-	return (0);
-}
-
-static int
-posix_poll_socket_writable(unix_sock_t *s)
-{
-	int	next;
-
-	if (!s || s->state == UNIX_SOCK_FREE || s->shut_wr) {
-		return (0);
-	}
-	if (s->type == SOCK_DGRAM) {
-		return (s->state != UNIX_SOCK_CLOSED);
-	}
-	if (!s->peer || s->peer->state == UNIX_SOCK_FREE ||
-	    s->peer->state == UNIX_SOCK_CLOSED) {
-		return (0);
-	}
-	next = (s->peer->stream_head + 1) % UNIX_SOCK_BUF_SIZE;
-	return (next != s->peer->stream_tail);
-}
-
 static short
 posix_poll_fd_status(posix_fd_t *pfd)
 {
 	vnode_t		*vn;
 	pipe_t		*p;
-	unix_sock_t	*s;
 	short		 status;
 
 	status = 0;
@@ -898,21 +853,7 @@ posix_poll_fd_status(posix_fd_t *pfd)
 	}
 
 	if (vn->type == VSOCK) {
-		s = (unix_sock_t *)vn->data;
-		if (!s || s->state == UNIX_SOCK_FREE) {
-			return (POSIX_POLLNVAL);
-		}
-		if (s->error != 0) {
-			status |= POSIX_POLLERR;
-		}
-		if (s->state == UNIX_SOCK_CLOSED) {
-			status |= POSIX_POLLHUP;
-		}
-		if (s->type == SOCK_STREAM && s->peer &&
-		    s->peer->state == UNIX_SOCK_CLOSED) {
-			status |= POSIX_POLLHUP;
-		}
-		return (status);
+		return (posix_socket_fd_status(vn));
 	}
 
 	return (0);
@@ -923,7 +864,6 @@ posix_poll_fd_readable(posix_fd_t *pfd)
 {
 	vnode_t		*vn;
 	pipe_t		*p;
-	unix_sock_t	*s;
 
 	vn = pfd->vnode;
 	if (!vn) {
@@ -941,8 +881,7 @@ posix_poll_fd_readable(posix_fd_t *pfd)
 		return (posix_poll_pipe_readable(p));
 	}
 	if (vn->type == VSOCK) {
-		s = (unix_sock_t *)vn->data;
-		return (posix_poll_socket_readable(s));
+		return (posix_socket_fd_readable(vn));
 	}
 	if (vn->type == VREG || vn->type == VDIR || vn->read_fn) {
 		return (1);
@@ -955,7 +894,6 @@ posix_poll_fd_writable(posix_fd_t *pfd)
 {
 	vnode_t		*vn;
 	pipe_t		*p;
-	unix_sock_t	*s;
 
 	vn = pfd->vnode;
 	if (!vn) {
@@ -973,8 +911,7 @@ posix_poll_fd_writable(posix_fd_t *pfd)
 		return (posix_poll_pipe_writable(p));
 	}
 	if (vn->type == VSOCK) {
-		s = (unix_sock_t *)vn->data;
-		return (posix_poll_socket_writable(s));
+		return (posix_socket_fd_writable(vn));
 	}
 	if (vn->type == VREG || vn->write_fn) {
 		return (1);
@@ -2150,6 +2087,10 @@ posix_fcntl(u64 fd_u, u64 cmd_u, u64 arg_u, u64 a4, u64 a5, u64 a6,
 		pfd->flags = (pfd->flags & ~(POSIX_O_NONBLOCK |
 		    POSIX_O_APPEND)) | (arg & (POSIX_O_NONBLOCK |
 		    POSIX_O_APPEND));
+		if (pfd->vnode && pfd->vnode->type == VSOCK) {
+			posix_socket_set_nonblock(pfd->vnode,
+			    (pfd->flags & POSIX_O_NONBLOCK) ? 1 : 0);
+		}
 		return (0);
 
 	default:
