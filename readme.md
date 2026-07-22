@@ -37,10 +37,10 @@ Source roadmap:
 | Directory | Description |
 | --------- | ----------- |
 | src | Source code for kernel bootloader and klib (see [src/README.md](src/README.md)) |
-| ports | Programs and ports for otsos |
+| progs | Native OTSOS userspace programs |
+| ports | Third-party ports for OTSOS |
 | libc | musl libc port |
 | init | init binary for otsos |
 | tools | some tools for build |
-
 
 

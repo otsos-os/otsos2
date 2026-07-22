@@ -14,7 +14,7 @@ treated as independent projects and not as part of otsos2.
 
 ## Tech Stack
 
-- C (kernel, userspace, ports)
+- C (kernel, userspace, native programs, ports)
 - Zig (ELF loader: `src/userland/elf.zig`, panic helper: `src/kernel/panic.zig`)
 - GAS/NASM assembly (boot, interrupts, GDT, context switch, syscalls)
 - Clang / LLVM toolchain (`clang`, `ld.lld`, `nasm`, `llvm-size`)
@@ -43,7 +43,7 @@ Monolithic kernel with the following rough layers:
    ACPI, PCI, virtio-gpu, DRM/KMS.
 6. Syscalls (`src/kernel/syscall.c`, `src/kernel/api/*`) — native ABI plus
    optional Linux/POSIX personality layer.
-7. Userspace (`init/`, `ports/`) — small freestanding programs loaded as
+7. Userspace (`init/`, `progs/`, `ports/`) — small freestanding programs loaded as
    Multiboot modules and copied into `/bin` by the kernel.
 
 ## Main Subsystems
@@ -124,18 +124,22 @@ Monolithic kernel with the following rough layers:
   creation.
 - `userspace.asm` — assembly to enter Ring 3.
 
-### Userspace programs (`init/`, `ports/`)
+### Userspace programs (`init/`, `progs/`, `ports/`)
 
 - `init/init.c` — first userspace process, event-driven program spawner via
   `procSpawn` and `procWait`.
-- `ports/yes.c`, `fetch.c`, `shell.c`, `udp_echo.c`, `tcp_echo.c`, `send.c`,
+- `progs/yes.c`, `fetch.c`, `shell.c`, `udp_echo.c`, `tcp_echo.c`, `send.c`,
   `posix_hello.c`, `musl_test.c`, `demons/cursord.c` — small test/utility
   binaries and daemons. `dhcpc` is an IPC control client; `dhcpd` owns the
   DHCP lease lifecycle and publishes `system.network.dhcpd`.
-- `ports/posix_hello.c` uses Linux x86-64 syscall numbers and expects the
+- `progs/posix_hello.c` uses Linux x86-64 syscall numbers and expects the
   POSIX personality.
-- `ports/musl_test.c` uses real musl headers and is statically linked against
+- `progs/musl_test.c` uses real musl headers and is statically linked against
   vendored musl.
+- `progs/yabox/` contains native small utility programs such as `ls`, `cat`,
+  `cp`, `mv`, `rm`, `mkdir`, `unzip`, and `profile`.
+- `progs/toolchain/` contains native OTSOS toolchain programs such as `as` and
+  `ld`.
 - `ports/lua/` — Lua interpreter port, uses musl's `Scrt1.o` and is dynamically
   linked as a PIE against shared `libc.so` (via `-pie -dynamic-linker /lib/ld-musl-x86_64.so.1`).
   Patched via `ports/lua/diff.patch`, set up by `ports/lua/setup.sh`.
@@ -146,7 +150,7 @@ Monolithic kernel with the following rough layers:
 - Builds both `lib/libc.a` (static) and `lib/libc.so` (shared + dynamic linker).
 - The dynamic linker (`ld-musl-x86_64.so.1`) is `libc.so` itself (musl unified model).
 - `lib/Scrt1.o` — PIE startup crt, used by dynamically linked programs.
-- The kernel build optionally links `ports/musl_test` statically against it.
+- The kernel build optionally links `progs/musl_test` statically against it.
   Do not modify upstream musl unless you know what you are doing.
 
 ### Native libc (`libc/native/`)
@@ -223,7 +227,8 @@ Monolithic kernel with the following rough layers:
 - `config/hives/` — source registry hive DSL used to build the initial
   `cmseed` boot module.
 - `init/` — first userspace process (`init`) and `hello` test.
-- `ports/` — additional userspace programs.
+- `progs/` — native OTSOS userspace programs and native toolchain utilities.
+- `ports/` — third-party ports such as Lua and CPython.
 - `libc/musl/` — vendored musl libc source + prebuilt objects.
 - `bin/` — build artifacts (objects, `kernel.bin`, `disk.img`, `.map`).
 - `tools/` — helper scripts for the build.
@@ -272,7 +277,7 @@ The Makefile expects: `clang`, `ld.lld`, `nasm`, `zig`, `xorriso`, `mtools`,
 `python3`, `llvm-size`, `qemu-system-x86_64`, and OVMF at
 `/usr/share/ovmf/OVMF.fd`.
 
-User need to test, dont run test manually, ask user. 
+User need to test, dont run test manually, ask user.
 
 ## Conventions
 

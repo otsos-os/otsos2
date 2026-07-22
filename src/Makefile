@@ -29,25 +29,26 @@ ISO_IMAGE = ../otsos.iso
 MAKEISO = ../tools/makeiso.py
 DISK_IMG = ../bin/disk.img
 PORTS_DIR = ../ports
+PROGS_DIR = ../progs
 MUSL_DIR = ../libc/musl
 NATIVE_DIR = ../libc/native
 MUSL_LIBC = $(MUSL_DIR)/lib/libc.a
 MUSL_CRT1 = $(MUSL_DIR)/lib/crt1.o
-YES_BIN = $(PORTS_DIR)/yes
-FETCH_BIN = $(PORTS_DIR)/fetch
-SHELL_BIN = $(PORTS_DIR)/sh
-OVEN_BIN = $(PORTS_DIR)/oven
-CURSORD_BIN = $(PORTS_DIR)/demons/cursord
-SHMTEST_BIN = $(PORTS_DIR)/shmtest
-UDP_ECHO_BIN = $(PORTS_DIR)/udp_echo
-TCP_ECHO_BIN = $(PORTS_DIR)/tcp_echo
-SEND_BIN = $(PORTS_DIR)/send
-DHCPC_BIN = $(PORTS_DIR)/dhcpc
-DHCPD_BIN = $(PORTS_DIR)/demons/dhcpd
-POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
-MUSL_TEST_BIN = $(PORTS_DIR)/musl_test
-TOOLCHAIN_AS_BIN = $(PORTS_DIR)/toolchain/as/as
-TOOLCHAIN_LD_BIN = $(PORTS_DIR)/toolchain/ld/ld
+YES_BIN = $(PROGS_DIR)/yes
+FETCH_BIN = $(PROGS_DIR)/fetch
+SHELL_BIN = $(PROGS_DIR)/sh
+OVEN_BIN = $(PROGS_DIR)/oven
+CURSORD_BIN = $(PROGS_DIR)/demons/cursord
+SHMTEST_BIN = $(PROGS_DIR)/shmtest
+UDP_ECHO_BIN = $(PROGS_DIR)/udp_echo
+TCP_ECHO_BIN = $(PROGS_DIR)/tcp_echo
+SEND_BIN = $(PROGS_DIR)/send
+DHCPC_BIN = $(PROGS_DIR)/dhcpc
+DHCPD_BIN = $(PROGS_DIR)/demons/dhcpd
+POSIX_HELLO_BIN = $(PROGS_DIR)/posix_hello
+MUSL_TEST_BIN = $(PROGS_DIR)/musl_test
+TOOLCHAIN_AS_BIN = $(PROGS_DIR)/toolchain/as/as
+TOOLCHAIN_LD_BIN = $(PROGS_DIR)/toolchain/ld/ld
 LUA_BIN = $(PORTS_DIR)/lua/lua/lua
 CPYTHON_DIR = $(PORTS_DIR)/cpython/cpython
 CPYTHON_BIN = $(PORTS_DIR)/cpython/cpython/python
@@ -58,7 +59,7 @@ NATIVE_LIBC = $(NATIVE_DIR)/lib/libc.a
 NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
 NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 DLD_BIN = ../libc/LibExec/dld/drld
-YABOX_DIR = $(PORTS_DIR)/yabox
+YABOX_DIR = $(PROGS_DIR)/yabox
 YABOX_TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv unzip profile
 CMSEED_BIN = ../bin/cmseed
 BOOT_HIVE = ../config/hives/BOOT.hive
@@ -436,83 +437,83 @@ $(INIT_BIN):
 
 .PHONY: $(YES_BIN)
 $(YES_BIN): $(LIBC_DEPS)
-	@echo "  MAKE    ports/yes"
-	@$(MAKE) -C $(PORTS_DIR) yes LIBC_ENABLED=$(LIBC_ENABLED)
+	@echo "  MAKE    progs/yes"
+	@$(MAKE) -C $(PROGS_DIR) yes LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(FETCH_BIN)
 $(FETCH_BIN): $(LIBC_DEPS)
-	@echo "  MAKE    ports/fetch"
-	@$(MAKE) -C $(PORTS_DIR) fetch LIBC_ENABLED=$(LIBC_ENABLED)
+	@echo "  MAKE    progs/fetch"
+	@$(MAKE) -C $(PROGS_DIR) fetch LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(SHELL_BIN)
 $(SHELL_BIN): $(LIBC_DEPS)
-	@echo "  MAKE    ports/sh"
-	@$(MAKE) -C $(PORTS_DIR) sh LIBC_ENABLED=$(LIBC_ENABLED)
+	@echo "  MAKE    progs/sh"
+	@$(MAKE) -C $(PROGS_DIR) sh LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(OVEN_BIN)
 $(OVEN_BIN): $(LIBC_DEPS)
-	@echo "  MAKE    ports/oven"
-	@$(MAKE) -C $(PORTS_DIR) oven LIBC_ENABLED=$(LIBC_ENABLED)
+	@echo "  MAKE    progs/oven"
+	@$(MAKE) -C $(PROGS_DIR) oven LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(CURSORD_BIN)
 $(CURSORD_BIN): $(LIBC_DEPS)
-	@echo "  MAKE    ports/demons/cursord"
-	@$(MAKE) -C $(PORTS_DIR) demons/cursord LIBC_ENABLED=$(LIBC_ENABLED)
+	@echo "  MAKE    progs/demons/cursord"
+	@$(MAKE) -C $(PROGS_DIR) demons/cursord LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(SHMTEST_BIN)
 $(SHMTEST_BIN): $(LIBC_DEPS)
-	@echo "  MAKE    ports/shmtest"
-	@$(MAKE) -C $(PORTS_DIR) shmtest LIBC_ENABLED=$(LIBC_ENABLED)
+	@echo "  MAKE    progs/shmtest"
+	@$(MAKE) -C $(PROGS_DIR) shmtest LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(UDP_ECHO_BIN)
 $(UDP_ECHO_BIN): $(NATIVE_CRT0) $(NATIVE_LIBC)
-	@echo "  MAKE    ports/udp_echo"
-	@$(MAKE) -C $(PORTS_DIR) udp_echo LIBC_ENABLED=$(LIBC_ENABLED)
+	@echo "  MAKE    progs/udp_echo"
+	@$(MAKE) -C $(PROGS_DIR) udp_echo LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(TCP_ECHO_BIN)
 $(TCP_ECHO_BIN): $(NATIVE_CRT0) $(NATIVE_LIBC)
-	@echo "  MAKE    ports/tcp_echo"
-	@$(MAKE) -C $(PORTS_DIR) tcp_echo LIBC_ENABLED=$(LIBC_ENABLED)
+	@echo "  MAKE    progs/tcp_echo"
+	@$(MAKE) -C $(PROGS_DIR) tcp_echo LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(SEND_BIN)
 $(SEND_BIN): $(NATIVE_CRT0) $(NATIVE_LIBC)
-	@echo "  MAKE    ports/send"
-	@$(MAKE) -C $(PORTS_DIR) send LIBC_ENABLED=$(LIBC_ENABLED)
+	@echo "  MAKE    progs/send"
+	@$(MAKE) -C $(PROGS_DIR) send LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(DHCPC_BIN)
 $(DHCPC_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
-	@echo "  MAKE    ports/dhcpc"
-	@$(MAKE) -C $(PORTS_DIR) dhcpc LIBC_ENABLED=$(LIBC_ENABLED)
+	@echo "  MAKE    progs/dhcpc"
+	@$(MAKE) -C $(PROGS_DIR) dhcpc LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(DHCPD_BIN)
 $(DHCPD_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
-	@echo "  MAKE    ports/demons/dhcpd"
-	@$(MAKE) -C $(PORTS_DIR) demons/dhcpd LIBC_ENABLED=$(LIBC_ENABLED)
+	@echo "  MAKE    progs/demons/dhcpd"
+	@$(MAKE) -C $(PROGS_DIR) demons/dhcpd LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(YABOX_BINS)
 $(YABOX_BINS): $(NATIVE_CRT0) $(NATIVE_SO)
-	@echo "  MAKE    ports/yabox"
+	@echo "  MAKE    progs/yabox"
 	@$(MAKE) -C $(YABOX_DIR) $(notdir $@)
 
 .PHONY: $(POSIX_HELLO_BIN)
 $(POSIX_HELLO_BIN): $(LIBC_DEPS)
-	@echo "  MAKE    ports/posix_hello"
-	@$(MAKE) -C $(PORTS_DIR) posix_hello LIBC_ENABLED=$(LIBC_ENABLED)
+	@echo "  MAKE    progs/posix_hello"
+	@$(MAKE) -C $(PROGS_DIR) posix_hello LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(TOOLCHAIN_AS_BIN)
 $(TOOLCHAIN_AS_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
-	@echo "  MAKE    ports/toolchain/as"
-	@$(MAKE) -C $(PORTS_DIR) toolchain/as/as LIBC_ENABLED=$(LIBC_ENABLED)
+	@echo "  MAKE    progs/toolchain/as"
+	@$(MAKE) -C $(PROGS_DIR) toolchain/as/as LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(TOOLCHAIN_LD_BIN)
 $(TOOLCHAIN_LD_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
-	@echo "  MAKE    ports/toolchain/ld"
-	@$(MAKE) -C $(PORTS_DIR) toolchain/ld/ld LIBC_ENABLED=$(LIBC_ENABLED)
+	@echo "  MAKE    progs/toolchain/ld"
+	@$(MAKE) -C $(PROGS_DIR) toolchain/ld/ld LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(MUSL_TEST_BIN)
 $(MUSL_TEST_BIN): $(LIBC_DEPS)
-	@echo "  MAKE    ports/musl_test"
-	@$(MAKE) -C $(PORTS_DIR) musl_test LIBC_ENABLED=$(LIBC_ENABLED)
+	@echo "  MAKE    progs/musl_test"
+	@$(MAKE) -C $(PROGS_DIR) musl_test LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(LUA_BIN)
 $(LUA_BIN): $(LIBC_DEPS)

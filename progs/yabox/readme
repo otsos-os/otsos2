@@ -21,7 +21,7 @@ Tools:
 - whoami - print current process permission class
 
 Build:
-- make -C ports/yabox
+- make -C progs/yabox
 
 Native API used by directory tools:
 - dataDir(API_DATA_DIR_MKDIR, path, NULL)
