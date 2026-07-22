@@ -5,7 +5,7 @@
  * modification, are permitted provided that the following conditions are met:
  *
  * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
+ *    this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
@@ -24,44 +24,21 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* !DEFINES!
+#ifndef KERNEL_DRIVERS_INPUT_INPUT_H
+#define KERNEL_DRIVERS_INPUT_INPUT_H
 
-$define %type u32 as 32 bit unsigned
-$define %type int as 32 bit signed
-
-$define %func ps2_mouse_init as function with args void
-$define %func ps2_mouse_handler as procedure with args void
-$define %func ps2_mouse_poll as procedure with args void
-$define %func ps2_mouse_is_ready as function with args void
-
-*/
-
-/* !SPACE!
-
-$space %export ps2_mouse_init, ps2_mouse_handler, ps2_mouse_poll
-$space %export ps2_mouse_is_ready
-
-*/
-
-#ifndef KERNEL_DRIVERS_MOUSE_MOUSE_H
-#define KERNEL_DRIVERS_MOUSE_MOUSE_H
-
+#include <kernel/api/input_abi.h>
 #include <mlibc/mlibc.h>
 
-#define	MOUSE_BUTTON_LEFT	0x00000001
-#define	MOUSE_BUTTON_RIGHT	0x00000002
-#define	MOUSE_BUTTON_MIDDLE	0x00000004
-#define	MOUSE_BUTTON_X1		0x00000008
-#define	MOUSE_BUTTON_X2		0x00000010
+#define	INPUT_EVENT_RING_SIZE	512
 
-#define	MOUSE_EVENT_MOVE	0x00000001
-#define	MOUSE_EVENT_BUTTON	0x00000002
-#define	MOUSE_EVENT_WHEEL	0x00000004
-#define	MOUSE_EVENT_OVERFLOW	0x00000008
-
-int	ps2_mouse_init(void);
-void	ps2_mouse_handler(void);
-void	ps2_mouse_poll(void);
-int	ps2_mouse_is_ready(void);
+void	input_event_keyboard(u64 timestamp, u16 key, u16 raw, u32 flags,
+	    u32 mods, u32 ch);
+void	input_event_mouse(u64 timestamp, s32 x, s32 y, s32 dx, s32 dy,
+	    s32 dz, u32 buttons, u32 flags);
+u64	input_event_next_seq(void);
+int	input_event_pending(u64 cursor);
+int	input_event_get_after(u64 *cursor, struct api_input_event *out);
+void	input_event_reset(void);
 
 #endif

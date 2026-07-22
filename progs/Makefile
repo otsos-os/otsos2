@@ -54,6 +54,7 @@ NATIVE_DIR = ../libc/native
 NATIVE_LIBC = $(NATIVE_DIR)/lib/libc.a
 NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
+NATIVE_HDR = $(NATIVE_DIR)/include/native.h
 NATIVE_DYN_LDFLAGS = -m elf_x86_64 -pie --oformat=elf64-x86-64 \
                      -nostdlib -dynamic-linker /lib/drld \
                      --export-dynamic
@@ -183,31 +184,31 @@ $(MUSL_TEST_BIN): $(MUSL_CRT1) $(MUSL_TEST_OBJS) $(MUSL_LIBC)
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-shell.o: shell.c
+shell.o: shell.c $(NATIVE_HDR)
 	@echo "  CC      $< (native libc)"
 	@$(CC) $(CFLAGS) -fPIE -I$(NATIVE_DIR)/include -c $< -o $@
 
-udp_echo.o: udp_echo.c
+udp_echo.o: udp_echo.c $(NATIVE_HDR)
 	@echo "  CC      $< (native libc)"
 	@$(CC) $(CFLAGS) -I$(NATIVE_DIR)/include -c $< -o $@
 
-tcp_echo.o: tcp_echo.c
+tcp_echo.o: tcp_echo.c $(NATIVE_HDR)
 	@echo "  CC      $< (native libc)"
 	@$(CC) $(CFLAGS) -I$(NATIVE_DIR)/include -c $< -o $@
 
-send.o: send.c
+send.o: send.c $(NATIVE_HDR)
 	@echo "  CC      $< (native libc)"
 	@$(CC) $(CFLAGS) -I$(NATIVE_DIR)/include -c $< -o $@
 
-dhcpc.o: dhcpc.c
+dhcpc.o: dhcpc.c $(NATIVE_HDR)
 	@echo "  CC      $< (native libc)"
 	@$(CC) $(CFLAGS) -fPIE -I$(NATIVE_DIR)/include -c $< -o $@
 
-demons/dhcpd.o: demons/dhcpd.c
+demons/dhcpd.o: demons/dhcpd.c $(NATIVE_HDR)
 	@echo "  CC      $< (native libc)"
 	@$(CC) $(CFLAGS) -fPIE -I$(NATIVE_DIR)/include -c $< -o $@
 
-demons/cursord.o: demons/cursord.c
+demons/cursord.o: demons/cursord.c $(NATIVE_HDR)
 	@echo "  CC      $< (native libc)"
 	@$(CC) $(CFLAGS) -fPIE -I$(NATIVE_DIR)/include -c $< -o $@
 

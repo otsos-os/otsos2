@@ -5,7 +5,7 @@
  * modification, are permitted provided that the following conditions are met:
  *
  * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
+ *    this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
@@ -26,89 +26,75 @@
 
 /* !DEFINES!
 
-$define %type u8 as 8 bit unsigned
-$define %type u16 as 16 bit unsigned
-$define %type u32 as 32 bit unsigned
-$define %type u64 as 64 bit unsigned
-$define %type s8 as 8 bit signed
-$define %type s16 as 16 bit signed
-$define %type s64 as 64 bit signed
-$define %type int as 32 bit signed
 $define %type knote_t as struct with registered event state
 $define %type kevent as struct with event ident, filter, flags, fflags, data, udata
 $define %type filter_ops_t as struct with filter callbacks vtable
-$define %type mouse_event as struct with normalized mouse input event
+$define %type api_input_event as struct with normalized input event
 
-$define %func filt_mouse_attach as function with args knote_t *
-$define %func filt_mouse_detach as procedure with args knote_t *
-$define %func filt_mouse_event as function with args knote_t *, u32
-$define %func filt_mouse_touch as procedure with args knote_t *, struct kevent *
+$define %func filt_input_attach as function with args knote_t *
+$define %func filt_input_detach as procedure with args knote_t *
+$define %func filt_input_event as function with args knote_t *, u32
+$define %func filt_input_touch as procedure with args knote_t *, struct kevent *
 
 */
 
 /* !SPACE!
 
-$space %internal filt_mouse_attach, filt_mouse_detach
-$space %internal filt_mouse_event, filt_mouse_touch
-$space %export filter_mouse_ops
+$space %internal filt_input_attach, filt_input_detach
+$space %internal filt_input_event, filt_input_touch
+$space %export filter_input_ops
 
 */
 
+#include <kernel/drivers/input/input.h>
 #include <kernel/event/event.h>
-#include <kernel/drivers/mouse/mouse.h>
 #include <mlibc/mlibc.h>
 
 static int
-filt_mouse_attach(knote_t *kn)
+filt_input_attach(knote_t *kn)
 {
-	kn->fpriv = mouse_event_next_seq();
+	kn->fpriv = input_event_next_seq();
 	return (0);
 }
 
 static void
-filt_mouse_detach(knote_t *kn)
+filt_input_detach(knote_t *kn)
 {
 	(void)kn;
 }
 
 static int
-filt_mouse_event(knote_t *kn, u32 nevents)
+filt_input_event(knote_t *kn, u32 nevents)
 {
-	struct mouse_event	ev;
-	u64			data;
+	struct api_input_event	event;
 
 	if (nevents == 0) {
-		return (mouse_event_pending(kn->fpriv) > 0);
+		return (input_event_pending(kn->fpriv) > 0);
 	}
 
-	if (mouse_event_get_after(&kn->fpriv, &ev) == 0) {
+	if (input_event_get_after(&kn->fpriv, &event) == 0) {
 		return (0);
 	}
 
-	data = (u64)(u16)(s16)ev.dx;
-	data |= (u64)(u16)(s16)ev.dy << 16;
-	data |= (u64)(u8)(s8)ev.dz << 32;
-	data |= (u64)(u8)ev.buttons << 40;
-	data |= (u64)(u16)ev.flags << 48;
+	kn->data = (s64)event.seq;
+	kn->fflags = event.flags;
+	kn->input = event;
 
-	kn->data = (s64)data;
-	kn->fflags = ev.flags | (ev.buttons << 16);
-
-	return (mouse_event_pending(kn->fpriv) > 0 ? 2 : 1);
+	return (input_event_pending(kn->fpriv) > 0 ? 2 : 1);
 }
 
 static void
-filt_mouse_touch(knote_t *kn, struct kevent *kev)
+filt_input_touch(knote_t *kn, struct kevent *kev)
 {
 	(void)kn;
 	(void)kev;
 }
 
-const filter_ops_t filter_mouse_ops = {
-	.filter	= EVFILT_MOUSE,
-	.name	= "mouse",
-	.attach	= filt_mouse_attach,
-	.detach	= filt_mouse_detach,
-	.event	= filt_mouse_event,
-	.touch	= filt_mouse_touch,
+const filter_ops_t filter_input_ops = {
+	.filter	= EVFILT_INPUT,
+	.name	= "input",
+	.attach	= filt_input_attach,
+	.detach	= filt_input_detach,
+	.event	= filt_input_event,
+	.touch	= filt_input_touch,
 };

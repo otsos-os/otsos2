@@ -31,13 +31,12 @@ $define %type u32 as 32 bit unsigned
 $define %type u64 as 64 bit unsigned
 $define %type s32 as 32 bit signed
 $define %type int as 32 bit signed
-$define %type mouse_event as struct with normalized mouse input event
 
 $define %func ps2_aux_command as function with args u8
 $define %func ps2_aux_command_arg as function with args u8, u8
 $define %func ps2_aux_get_id as function with args u8 *
 $define %func ps2_aux_enable_wheel as procedure with args void
-$define %func mouse_event_put as procedure with args s32, s32, s32, u32, u32
+$define %func mouse_input_put as procedure with args s32, s32, s32, u32, u32
 $define %func ps2_mouse_process_packet as procedure with args void
 $define %func ps2_mouse_process_byte as procedure with args u8
 $define %func ps2_mouse_drain as procedure with args const char *
@@ -45,32 +44,24 @@ $define %func ps2_mouse_init as function with args void
 $define %func ps2_mouse_handler as procedure with args void
 $define %func ps2_mouse_poll as procedure with args void
 $define %func ps2_mouse_is_ready as function with args void
-$define %func mouse_event_get as function with args struct mouse_event *
-$define %func mouse_event_count as function with args void
-$define %func mouse_event_next_seq as function with args void
-$define %func mouse_event_pending as function with args u64
-$define %func mouse_event_get_after as function with args u64 *, struct mouse_event *
-$define %func mouse_event_reset as procedure with args void
 
 */
 
 /* !SPACE!
 
 $space %internal ps2_aux_command, ps2_aux_command_arg, ps2_aux_get_id
-$space %internal ps2_aux_enable_wheel, mouse_event_put
+$space %internal ps2_aux_enable_wheel, mouse_input_put
 $space %internal ps2_mouse_process_packet, ps2_mouse_process_byte
 $space %internal ps2_mouse_drain
 $space %export ps2_mouse_init, ps2_mouse_handler, ps2_mouse_poll
 $space %export ps2_mouse_is_ready
-$space %export mouse_event_get, mouse_event_count, mouse_event_next_seq
-$space %export mouse_event_pending, mouse_event_get_after, mouse_event_reset
 
 */
 
 #include <kernel/drivers/input/i8042.h>
+#include <kernel/drivers/input/input.h>
 #include <kernel/drivers/mouse/mouse.h>
 #include <kernel/drivers/timer.h>
-#include <kernel/event/event.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -83,9 +74,6 @@ $space %export mouse_event_pending, mouse_event_get_after, mouse_event_reset
 #define	PS2_MOUSE_SAMPLE_RATE	0xF3
 #define	PS2_MOUSE_GET_ID	0xF2
 
-static struct mouse_event	mouse_event_ring[MOUSE_EVENT_RING_SIZE];
-static u64			mouse_event_seq;
-static u64			mouse_legacy_cursor;
 static int			mouse_ready;
 static int			mouse_packet_index;
 static int			mouse_packet_size;
@@ -165,29 +153,21 @@ ps2_aux_enable_wheel(void)
 }
 
 static void
-mouse_event_put(s32 dx, s32 dy, s32 dz, u32 buttons, u32 flags)
+mouse_input_put(s32 dx, s32 dy, s32 dz, u32 buttons, u32 flags)
 {
-	struct mouse_event	*ev;
 	u64			irq_flags;
-	u64			seq;
+	u64			timestamp;
+	s32			x, y;
 
 	irq_flags = i8042_irq_save();
 	mouse_x += dx;
 	mouse_y += dy;
-	seq = mouse_event_seq++;
-
-	ev = &mouse_event_ring[seq % MOUSE_EVENT_RING_SIZE];
-	ev->timestamp = timer_get_ticks();
-	ev->x = mouse_x;
-	ev->y = mouse_y;
-	ev->dx = dx;
-	ev->dy = dy;
-	ev->dz = dz;
-	ev->buttons = buttons;
-	ev->flags = flags;
+	x = mouse_x;
+	y = mouse_y;
+	timestamp = timer_get_ticks();
 	i8042_irq_restore(irq_flags);
 
-	knote_notify_all(EVFILT_MOUSE, 0, 0, 1);
+	input_event_mouse(timestamp, x, y, dx, dy, dz, buttons, flags);
 }
 
 static void
@@ -252,7 +232,7 @@ ps2_mouse_process_packet(void)
 	mouse_buttons = buttons;
 
 	if (flags != 0) {
-		mouse_event_put(dx, dy, dz, buttons, flags);
+		mouse_input_put(dx, dy, dz, buttons, flags);
 	}
 }
 
@@ -298,7 +278,6 @@ ps2_mouse_init(void)
 	int	port1_disabled;
 	int	ret;
 
-	mouse_event_reset();
 	mouse_ready = 0;
 	mouse_packet_index = 0;
 	mouse_packet_size = 3;
@@ -412,106 +391,4 @@ int
 ps2_mouse_is_ready(void)
 {
 	return (mouse_ready);
-}
-
-int
-mouse_event_get(struct mouse_event *out)
-{
-	return (mouse_event_get_after(&mouse_legacy_cursor, out));
-}
-
-int
-mouse_event_count(void)
-{
-	return (mouse_event_pending(mouse_legacy_cursor));
-}
-
-u64
-mouse_event_next_seq(void)
-{
-	u64	irq_flags;
-	u64	seq;
-
-	irq_flags = i8042_irq_save();
-	seq = mouse_event_seq;
-	i8042_irq_restore(irq_flags);
-	return (seq);
-}
-
-int
-mouse_event_pending(u64 cursor)
-{
-	u64	irq_flags;
-	u64	oldest, seq;
-	u64	count;
-
-	irq_flags = i8042_irq_save();
-	seq = mouse_event_seq;
-	oldest = 0;
-	if (seq > MOUSE_EVENT_RING_SIZE) {
-		oldest = seq - MOUSE_EVENT_RING_SIZE;
-	}
-	if (cursor < oldest) {
-		cursor = oldest;
-	}
-	count = cursor < seq ? seq - cursor : 0;
-	i8042_irq_restore(irq_flags);
-	if (count > MOUSE_EVENT_RING_SIZE) {
-		count = MOUSE_EVENT_RING_SIZE;
-	}
-	return ((int)count);
-}
-
-int
-mouse_event_get_after(u64 *cursor, struct mouse_event *out)
-{
-	struct mouse_event	ev;
-	u64			irq_flags;
-	u64			oldest, seq;
-	int			dropped;
-
-	if (!cursor) {
-		return (0);
-	}
-
-	irq_flags = i8042_irq_save();
-	seq = mouse_event_seq;
-	oldest = 0;
-	if (seq > MOUSE_EVENT_RING_SIZE) {
-		oldest = seq - MOUSE_EVENT_RING_SIZE;
-	}
-
-	dropped = 0;
-	if (*cursor < oldest) {
-		*cursor = oldest;
-		dropped = 1;
-	}
-	if (*cursor >= seq) {
-		i8042_irq_restore(irq_flags);
-		return (0);
-	}
-
-	ev = mouse_event_ring[*cursor % MOUSE_EVENT_RING_SIZE];
-	(*cursor)++;
-	i8042_irq_restore(irq_flags);
-
-	if (dropped) {
-		ev.flags |= MOUSE_EVENT_DROPPED;
-	}
-	if (out) {
-		*out = ev;
-	}
-	return (1);
-}
-
-void
-mouse_event_reset(void)
-{
-	u64	irq_flags;
-
-	irq_flags = i8042_irq_save();
-	mouse_event_seq = 0;
-	mouse_legacy_cursor = 0;
-	memset(mouse_event_ring, 0, sizeof(mouse_event_ring));
-	i8042_irq_restore(irq_flags);
 }

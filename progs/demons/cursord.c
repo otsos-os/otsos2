@@ -197,6 +197,7 @@ main(int argc, char **argv, char **envp)
 	struct kevent		events[CURSOR_EVENT_BATCH];
 	uint32_t		gem, fb;
 	int			i, kq, n, x, y, dx, dy, max_x, max_y;
+	int			raw_x, raw_y, have_raw;
 
 	(void)argc;
 	(void)argv;
@@ -238,6 +239,9 @@ main(int argc, char **argv, char **envp)
 	y = (int)(info.height / 2);
 	max_x = info.width > 0 ? (int)info.width - 1 : 0;
 	max_y = info.height > 0 ? (int)info.height - 1 : 0;
+	raw_x = 0;
+	raw_y = 0;
+	have_raw = 0;
 	(void)commit_cursor(objects.cursor_plane_id, fb, x, y);
 
 	kq = eventKqueue();
@@ -248,10 +252,10 @@ main(int argc, char **argv, char **envp)
 
 	memset(&change, 0, sizeof(change));
 	change.ident = 0;
-	change.filter = EVFILT_MOUSE;
+	change.filter = EVFILT_INPUT;
 	change.flags = EV_ADD | EV_CLEAR;
 	if (eventWait(kq, &change, 1, NULL, 0, -1) < 0) {
-		log_msg("cursord: mouse event attach failed\n");
+		log_msg("cursord: input event attach failed\n");
 		return (1);
 	}
 
@@ -265,11 +269,25 @@ main(int argc, char **argv, char **envp)
 		dx = 0;
 		dy = 0;
 		for (i = 0; i < n; i++) {
-			if (events[i].filter != EVFILT_MOUSE) {
+			struct api_input_event	*input;
+
+			if (events[i].filter != EVFILT_INPUT) {
 				continue;
 			}
-			dx += (int)MOUSE_DATA_DX(events[i].data);
-			dy += (int)MOUSE_DATA_DY(events[i].data);
+			input = &events[i].input;
+			if (input->type != API_INPUT_TYPE_MOUSE) {
+				continue;
+			}
+			if (have_raw) {
+				dx += input->x - raw_x;
+				dy += input->y - raw_y;
+			} else {
+				dx += input->dx;
+				dy += input->dy;
+				have_raw = 1;
+			}
+			raw_x = input->x;
+			raw_y = input->y;
 		}
 		if (dx == 0 && dy == 0) {
 			continue;

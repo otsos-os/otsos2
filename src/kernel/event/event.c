@@ -230,8 +230,8 @@ event_init(void)
 		extern const filter_ops_t filter_signal_ops;
 		extern const filter_ops_t filter_user_ops;
 		extern const filter_ops_t filter_kbd_ops;
-		extern const filter_ops_t filter_mouse_ops;
 		extern const filter_ops_t filter_ipc_ops;
+		extern const filter_ops_t filter_input_ops;
 
 		filter_register(&filter_read_ops);
 		filter_register(&filter_write_ops);
@@ -240,8 +240,8 @@ event_init(void)
 		filter_register(&filter_signal_ops);
 		filter_register(&filter_user_ops);
 		filter_register(&filter_kbd_ops);
-		filter_register(&filter_mouse_ops);
 		filter_register(&filter_ipc_ops);
+		filter_register(&filter_input_ops);
 	}
 
 	event_initialized = 1;
@@ -634,8 +634,9 @@ collect_events(kqueue_t *kq, struct kevent *eventlist, int nevents)
 		eventlist[count].fflags = kn->fflags;
 		eventlist[count].data = kn->data;
 		eventlist[count].udata = kn->udata;
+		eventlist[count].input = kn->input;
 
-		if (kn->fflags & 0x80000000) {
+		if (kn->filter == EVFILT_PROC && (kn->fflags & NOTE_EXIT)) {
 			eventlist[count].flags |= EV_EOF;
 		}
 
@@ -653,6 +654,7 @@ collect_events(kqueue_t *kq, struct kevent *eventlist, int nevents)
 		if (kn->flags & EV_CLEAR) {
 			kn->fflags = 0;
 			kn->data = 0;
+			memset(&kn->input, 0, sizeof(kn->input));
 		}
 
 		if (kn->flags & EV_DISPATCH) {

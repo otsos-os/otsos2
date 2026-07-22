@@ -320,8 +320,8 @@ $space %export traceMark
 #define EVFILT_SIGNAL		(-5)
 #define EVFILT_USER		(-6)
 #define EVFILT_KBD		(-7)
-#define EVFILT_IPC	(-9)
-#define EVFILT_MOUSE		(-8)
+#define EVFILT_IPC		(-9)
+#define EVFILT_INPUT		(-10)
 
 #define EV_ADD			0x0001
 #define EV_DELETE		0x0002
@@ -373,20 +373,22 @@ $space %export traceMark
 #define MOUSE_BUTTON_LEFT	0x00000001
 #define MOUSE_BUTTON_RIGHT	0x00000002
 #define MOUSE_BUTTON_MIDDLE	0x00000004
-#define MOUSE_BUTTON_X1	0x00000008
-#define MOUSE_BUTTON_X2	0x00000010
+#define MOUSE_BUTTON_X1		0x00000008
+#define MOUSE_BUTTON_X2		0x00000010
 
 #define MOUSE_EVENT_MOVE	0x00000001
 #define MOUSE_EVENT_BUTTON	0x00000002
 #define MOUSE_EVENT_WHEEL	0x00000004
 #define MOUSE_EVENT_OVERFLOW	0x00000008
-#define MOUSE_EVENT_DROPPED	0x00000010
 
-#define MOUSE_DATA_DX(v)	((int16_t)((uint64_t)(v) & 0xFFFF))
-#define MOUSE_DATA_DY(v)	((int16_t)(((uint64_t)(v) >> 16) & 0xFFFF))
-#define MOUSE_DATA_DZ(v)	((int8_t)(((uint64_t)(v) >> 32) & 0xFF))
-#define MOUSE_DATA_BUTTONS(v)	((uint8_t)(((uint64_t)(v) >> 40) & 0xFF))
-#define MOUSE_DATA_FLAGS(v)	((uint16_t)(((uint64_t)(v) >> 48) & 0xFFFF))
+#define API_INPUT_TYPE_NONE		0
+#define API_INPUT_TYPE_KEYBOARD		1
+#define API_INPUT_TYPE_MOUSE		2
+
+#define API_INPUT_DEVICE_KEYBOARD0	1
+#define API_INPUT_DEVICE_MOUSE0	2
+
+#define API_INPUT_FLAG_DROPPED	0x80000000
 
 struct api_sysinfo {
 	char	sysname[65];
@@ -653,6 +655,25 @@ struct api_key_event {
 	uint32_t	ch;
 };
 
+struct api_input_event {
+	uint64_t	timestamp;
+	uint64_t	seq;
+	uint32_t	type;
+	uint32_t	device;
+	uint32_t	flags;
+	uint32_t	lost;
+	int32_t		x;
+	int32_t		y;
+	int32_t		dx;
+	int32_t		dy;
+	int32_t		dz;
+	uint32_t	buttons;
+	uint32_t	key;
+	uint32_t	raw;
+	uint32_t	mods;
+	uint32_t	ch;
+};
+
 struct api_term_info {
 	int	tty;
 	int	state;
@@ -691,6 +712,7 @@ struct kevent {
 	uint32_t	fflags;
 	int64_t		data;
 	uint64_t	udata;
+	struct api_input_event	input;
 };
 
 struct api_drm_info {

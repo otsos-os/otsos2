@@ -81,6 +81,7 @@ $space %export event_notify_net_change, event_notify_ipc_change
 #ifndef KERNEL_EVENT_H
 #define KERNEL_EVENT_H
 
+#include <kernel/api/input_abi.h>
 #include <kernel/interrupts/idt.h>
 #include <mlibc/mlibc.h>
 
@@ -91,10 +92,10 @@ $space %export event_notify_net_change, event_notify_ipc_change
 #define	EVFILT_SIGNAL	(-5)
 #define	EVFILT_USER	(-6)
 #define	EVFILT_KBD	(-7)
-#define	EVFILT_MOUSE	(-8)
 #define	EVFILT_IPC	(-9)
+#define	EVFILT_INPUT	(-10)
 
-#define	EVFILT_SYSCOUNT	9
+#define	EVFILT_SYSCOUNT	10
 
 #define	EV_ADD		0x0001
 #define	EV_DELETE	0x0002
@@ -147,6 +148,7 @@ struct kevent {
 	u32	fflags;
 	s64	data;
 	u64	udata;
+	struct api_input_event input;
 };
 
 #define	EV_SET(kevp, id, filt, fl, ffl, d, ud)			\
@@ -193,6 +195,7 @@ typedef struct knote {
 	s64			data;
 	u64			udata;
 	u64			fpriv;
+	struct api_input_event	input;
 	struct kqueue		*kq;
 	struct knote		*next;
 } knote_t;

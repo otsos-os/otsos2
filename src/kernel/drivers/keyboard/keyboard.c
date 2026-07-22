@@ -71,6 +71,7 @@ $space %export kbd_event_put, kbd_event_get, kbd_event_count, kbd_event_reset
 
 #include <kernel/api/posix/posix.h>
 #include <kernel/console/terminal.h>
+#include <kernel/drivers/input/input.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/keyboard/ps2.h>
 #include <kernel/drivers/timer.h>
@@ -295,6 +296,7 @@ kbd_event_put(u16 key, u16 raw, u32 flags, u32 mods, u32 ch)
 	ev->ch = ch;
 
 	kbd_event_head = next;
+	input_event_keyboard(ev->timestamp, key, raw, flags, mods, ch);
 
 	extern void knote_notify_all(s16 filter, u64 ident, u32 fflags,
 	    s64 data);

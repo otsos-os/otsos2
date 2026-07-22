@@ -29,6 +29,7 @@
 
 #include <kernel/interrupts/idt.h>
 #include <kernel/api/errno.h>
+#include <kernel/api/input_abi.h>
 #include <kernel/api/session.h>
 #include <kernel/drivers/keyboard/keycodes.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
@@ -180,14 +181,6 @@ struct api_fs_stat {
 #define	MOUSE_EVENT_BUTTON	0x00000002
 #define	MOUSE_EVENT_WHEEL	0x00000004
 #define	MOUSE_EVENT_OVERFLOW	0x00000008
-#define	MOUSE_EVENT_DROPPED	0x00000010
-
-/* Decoding helpers for EVFILT_MOUSE kevent data. */
-#define	MOUSE_DATA_DX(v)	((s16)((u64)(v) & 0xFFFF))
-#define	MOUSE_DATA_DY(v)	((s16)(((u64)(v) >> 16) & 0xFFFF))
-#define	MOUSE_DATA_DZ(v)	((s8)(((u64)(v) >> 32) & 0xFF))
-#define	MOUSE_DATA_BUTTONS(v)	((u8)(((u64)(v) >> 40) & 0xFF))
-#define	MOUSE_DATA_FLAGS(v)	((u16)(((u64)(v) >> 48) & 0xFFFF))
 
 #define PIPE_BUF_SIZE 4096
 
