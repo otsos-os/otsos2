@@ -50,6 +50,7 @@ $define %func kqueue_close as function with args int
 $define %func kevent as function with args int, struct kevent *, int, struct kevent *, int, long long
 $define %func strlen as function with args const char *
 $define %func print as procedure with args const char *
+$define %func print_long as procedure with args long
 $define %func trim_newline as procedure with args char *
 
 */
@@ -60,7 +61,7 @@ $space %export _start
 $space %internal syscall1, syscall3, termWrite, termRead
 $space %internal procSpawnAbi
 $space %internal procWait, kqueue_create, kqueue_close, kevent
-$space %internal strlen, print, trim_newline
+$space %internal strlen, print, print_long, trim_newline
 
 */
 
@@ -240,6 +241,33 @@ print(const char *s)
 }
 
 static void
+print_long(long value)
+{
+	char	buf[32];
+	long	n;
+	int	i, neg;
+
+	i = 0;
+	neg = 0;
+	if (value < 0) {
+		neg = 1;
+		value = -value;
+	}
+	do {
+		n = value % 10;
+		buf[i++] = (char)('0' + n);
+		value /= 10;
+	} while (value > 0 && i < (int)sizeof(buf) - 1);
+	if (neg && i < (int)sizeof(buf) - 1) {
+		buf[i++] = '-';
+	}
+	while (i > 0) {
+		i--;
+		termWrite(&buf[i], 1);
+	}
+}
+
+static void
 trim_newline(char *s)
 {
 	unsigned long	i;
@@ -312,7 +340,9 @@ _start(void)
 
 		pid = procSpawnAbi(path, argv, 0, API_PROC_SPAWN_ABI_POSIX);
 		if (pid < 0) {
-			print("procSpawn failed\n");
+			print("procSpawn failed: ");
+			print_long(pid);
+			print("\n");
 			continue;
 		}
 

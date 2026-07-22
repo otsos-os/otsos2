@@ -284,6 +284,7 @@ void userspace_jump(process_t *proc) {
 
   /* Set as current process */
   process_set_current(proc);
+  thread_load_fpu_context(td);
   pmap_load(proc->cr3);
 
   /* Enter userspace via iretq */

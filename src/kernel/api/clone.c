@@ -65,6 +65,7 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
     /* Copy parent's context, set return value to 0 */
     thread_save_context(parent_td, regs);
     new_td->context = parent_td->context;
+    thread_copy_fpu_context(new_td, parent_td);
     new_td->context.rax = 0;
     new_td->context.rsp = child_stack & ~0xFULL;
 
@@ -137,6 +138,7 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
   /* Copy parent's context, set return value to 0 */
   thread_save_context(parent_td, regs);
   td->context = parent_td->context;
+  thread_copy_fpu_context(td, parent_td);
   td->context.rax = 0;
 
   if (child_stack) {

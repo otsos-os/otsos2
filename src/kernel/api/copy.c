@@ -96,6 +96,7 @@ int api_proc_copy(registers_t *regs) {
   /* Copy parent's context, set return value to 0 */
   process_save_context(parent, regs);
   td->context = parent->cur_thread->context;
+  thread_copy_fpu_context(td, parent->cur_thread);
   td->context.rax = 0;
 
   return (int)child->pid;

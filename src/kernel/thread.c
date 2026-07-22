@@ -33,6 +33,8 @@ $define %type thread_t as struct with per-thread CPU context, stack, state
 $define %type process_t as struct with process control block
 $define %type registers_t as struct with CPU register snapshot
 $define %type cpu_context_t as struct with saved CPU registers
+$define %type fpu_context_t as aligned 512 byte FXSAVE image
+$define %type u8 as 8 bit unsigned
 
 $define %func thread_init as procedure with args void
 $define %func thread_alloc as function with args void
@@ -41,6 +43,8 @@ $define %func thread_current as function with args void
 $define %func thread_set_current as procedure with args thread_t *
 $define %func thread_save_context as procedure with args thread_t *, registers_t *
 $define %func thread_load_context as procedure with args thread_t *, registers_t *
+$define %func thread_load_fpu_context as procedure with args thread_t *
+$define %func thread_copy_fpu_context as procedure with args thread_t *, thread_t *
 $define %func thread_get_by_proc as function with args process_t *
 $define %func thread_get as function with args u32
 $define %func thread_destroy as procedure with args thread_t *
@@ -49,6 +53,8 @@ $define %func thread_exit as procedure with args int
 $define %func thread_join as function with args u32, int *
 $define %func thread_count_alive as function with args process_t *
 $define %func thread_kill_all as procedure with args process_t *
+$define %func thread_fpu_init_context as procedure with args fpu_context_t *
+$define %func thread_fpu_save as procedure with args thread_t *
 $define %func thread_link as procedure with args process_t *, thread_t *
 $define %func thread_unlink as procedure with args thread_t *
 
@@ -60,10 +66,12 @@ $space %internal thread_init, thread_alloc
 $space %internal thread_link, thread_unlink
 $space %export thread_create, thread_current, thread_set_current
 $space %export thread_save_context, thread_load_context
+$space %export thread_load_fpu_context, thread_copy_fpu_context
 $space %export thread_get_by_proc, thread_get, thread_destroy
 $space %export thread_is_initialized
 $space %export thread_exit, thread_join
 $space %export thread_count_alive, thread_kill_all
+$space %internal thread_fpu_init_context, thread_fpu_save
 
 */
 
@@ -79,6 +87,9 @@ $space %export thread_count_alive, thread_kill_all
 extern void	futex_wake_all(u64 uaddr);
 
 #define	MSR_FS_BASE	0xC0000100
+#define	FPU_FCW_DEFAULT	0x037F
+#define	FPU_MXCSR_DEFAULT	0x1F80
+#define	FPU_MXCSR_MASK_DEFAULT	0xFFFF
 
 static inline u64
 thread_rdmsr(u32 msr)
@@ -105,6 +116,35 @@ static int	thread_initialized = 0;
 
 static void	thread_link(process_t *proc, thread_t *td);
 static void	thread_unlink(thread_t *td);
+static void	thread_fpu_init_context(fpu_context_t *ctx);
+static void	thread_fpu_save(thread_t *td);
+
+static void
+thread_fpu_init_context(fpu_context_t *ctx)
+{
+	if (!ctx) {
+		return;
+	}
+
+	memset(ctx, 0, sizeof(*ctx));
+	ctx->bytes[0] = (u8)(FPU_FCW_DEFAULT & 0xff);
+	ctx->bytes[1] = (u8)(FPU_FCW_DEFAULT >> 8);
+	ctx->bytes[24] = (u8)(FPU_MXCSR_DEFAULT & 0xff);
+	ctx->bytes[25] = (u8)((FPU_MXCSR_DEFAULT >> 8) & 0xff);
+	ctx->bytes[26] = (u8)((FPU_MXCSR_DEFAULT >> 16) & 0xff);
+	ctx->bytes[27] = (u8)(FPU_MXCSR_DEFAULT >> 24);
+	ctx->bytes[28] = (u8)(FPU_MXCSR_MASK_DEFAULT & 0xff);
+	ctx->bytes[29] = (u8)((FPU_MXCSR_MASK_DEFAULT >> 8) & 0xff);
+	ctx->bytes[30] = (u8)((FPU_MXCSR_MASK_DEFAULT >> 16) & 0xff);
+	ctx->bytes[31] = (u8)(FPU_MXCSR_MASK_DEFAULT >> 24);
+}
+
+static void
+thread_fpu_save(thread_t *td)
+{
+	__asm__ volatile("fxsave64 %0" : "=m"(td->fpu_context) :: "memory");
+	td->fpu_valid = 1;
+}
 
 void
 thread_init(void)
@@ -190,6 +230,8 @@ thread_create(process_t *proc, u64 rip, u64 rsp, u64 cs, u64 ss)
 	td->trace_runtime_cycles = 0;
 	td->trace_switches = 0;
 	td->running_cpu = -1;
+	td->fpu_valid = 0;
+	thread_fpu_init_context(&td->fpu_context);
 
 	td->state = PROC_STATE_RUNNABLE;
 
@@ -292,6 +334,7 @@ thread_save_context(thread_t *td, registers_t *regs)
 	td->context.rsp = regs->rsp;
 	td->context.ss = regs->ss;
 	td->fs_base = thread_rdmsr(MSR_FS_BASE);
+	thread_fpu_save(td);
 }
 
 void
@@ -322,6 +365,40 @@ thread_load_context(thread_t *td, registers_t *regs)
 	regs->rsp = td->context.rsp;
 	regs->ss = td->context.ss;
 	thread_wrmsr(MSR_FS_BASE, td->fs_base);
+	thread_load_fpu_context(td);
+}
+
+void
+thread_load_fpu_context(thread_t *td)
+{
+	if (!td) {
+		return;
+	}
+
+	if (!td->fpu_valid) {
+		thread_fpu_init_context(&td->fpu_context);
+		td->fpu_valid = 1;
+	}
+	__asm__ volatile("fxrstor64 %0" :: "m"(td->fpu_context) : "memory");
+}
+
+void
+thread_copy_fpu_context(thread_t *dst, thread_t *src)
+{
+	if (!dst || !src) {
+		return;
+	}
+
+	if (src == thread_current()) {
+		thread_fpu_save(src);
+	}
+	if (!src->fpu_valid) {
+		thread_fpu_init_context(&dst->fpu_context);
+		dst->fpu_valid = 0;
+		return;
+	}
+	memcpy(&dst->fpu_context, &src->fpu_context, sizeof(dst->fpu_context));
+	dst->fpu_valid = src->fpu_valid;
 }
 
 thread_t *

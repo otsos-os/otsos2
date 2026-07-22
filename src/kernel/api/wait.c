@@ -36,79 +36,78 @@
 
 extern void pmap_destroy_page_tables_only(u64 cr3);
 
-int api_proc_wait(int *status) {
-  process_t *current = process_current();
-  if (!current) {
-    return -API_ERR_NO_CHILD;
-  }
+int
+api_proc_wait(int *status)
+{
+	process_t	*current;
+	process_t	*child;
+	thread_t	*child_td;
+	u64		old_cr3;
+	int		attempt, pid, i;
 
-  /* Try to reap a zombie child first (non-blocking) */
-  for (int attempt = 0; attempt < 2; attempt++) {
-    for (int i = 0; i < MAX_PROCESSES; i++) {
-      process_t *child = &process_table[i];
-      if (child->pid == 0) {
-        continue;
-      }
-      thread_t *child_td = child->main_thread;
-      if (!child_td || child_td->state != PROC_STATE_ZOMBIE) {
-        continue;
-      }
-      if (child->ppid != current->pid) {
-        continue;
-      }
+	current = process_current();
+	if (!current) {
+		return (-API_ERR_NO_CHILD);
+	}
 
-      if (status && is_user_address(status, sizeof(int))) {
-        *status = child->exit_code;
-      }
+	for (attempt = 0; attempt < 2; attempt++) {
+		for (i = 0; i < MAX_PROCESSES; i++) {
+			child = &process_table[i];
+			if (child->pid == 0) {
+				continue;
+			}
+			child_td = child->main_thread;
+			if (!child_td ||
+			    child_td->state != PROC_STATE_ZOMBIE) {
+				continue;
+			}
+			if (child->ppid != current->pid) {
+				continue;
+			}
 
-      if (child_td->running_cpu >= 0) {
-        int pid = (int)child->pid;
+			if (status && is_user_address(status, sizeof(int))) {
+				*status = child->exit_code;
+			}
 
-        if (current->controlling_tty >= 0) {
-          terminal_set_pgrp(current->controlling_tty, current->pgid);
-        }
-        terminal_set_pgrp(terminal_get_active(), current->pgid);
-        child->ppid = 0;
-        return pid;
-      }
+			if (child_td->running_cpu >= 0) {
+				pid = (int)child->pid;
+				if (current->controlling_tty >= 0) {
+					terminal_set_pgrp(current->controlling_tty,
+					    current->pgid);
+				}
+				terminal_set_pgrp(terminal_get_active(),
+				    current->pgid);
+				child->ppid = 0;
+				return (pid);
+			}
 
-      if (child->owns_address_space && child->cr3) {
-        u64 old_cr3 = pmap_get_cr3();
-        pmap_load(child->cr3);
-        vm_map_free_all(child);
-        pmap_load(old_cr3);
-        pmap_destroy(child->cr3);
-        child->cr3 = 0;
-        child->owns_address_space = 0;
-      }
 
-      if (child_td) {
-        thread_destroy(child_td);
-      }
+			if (child->owns_address_space && child->cr3) {
+				old_cr3 = pmap_get_cr3();
+				pmap_load(child->cr3);
+				vm_map_free_all(child);
+				pmap_load(old_cr3);
+				pmap_destroy(child->cr3);
+				child->cr3 = 0;
+				child->owns_address_space = 0;
+			}
 
-      int pid = (int)child->pid;
-      memset(child, 0, sizeof(process_t));
-      if (current->controlling_tty >= 0) {
-        terminal_set_pgrp(current->controlling_tty, current->pgid);
-      }
-      terminal_set_pgrp(terminal_get_active(), current->pgid);
-      return pid;
-    }
+			thread_destroy(child_td);
+			pid = (int)child->pid;
+			memset(child, 0, sizeof(process_t));
+			if (current->controlling_tty >= 0) {
+				terminal_set_pgrp(current->controlling_tty,
+				    current->pgid);
+			}
+			terminal_set_pgrp(terminal_get_active(),
+			    current->pgid);
+			return (pid);
+		}
 
-    /* No zombie child found — sleep and wait for a child to exit */
-    if (attempt == 0) {
-      /* Use the current process's PID as the wait channel.
-       * process_exit() calls event_notify_proc_exit which calls
-       * knote_notify_all, but we also need a direct wakeup.
-       * The simplest approach: sleep on a global "child wait" channel
-       * that process_exit wakes up. */
-      extern void proc_sleep(void *channel);
-      extern void proc_wakeup(void *channel);
+		if (attempt == 0) {
+			proc_sleep((void *)current);
+		}
+	}
 
-      /* Use the parent's process structure as the wait channel */
-      proc_sleep((void *)current);
-    }
-  }
-
-  return -API_ERR_NO_CHILD;
+	return (-API_ERR_NO_CHILD);
 }

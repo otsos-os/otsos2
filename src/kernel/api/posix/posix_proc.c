@@ -679,8 +679,11 @@ posix_wait4(u64 pid_u, u64 status_u, u64 options, u64 rusage_u,
     u64 a5, u64 a6, registers_t *regs)
 {
 	struct process	*current;
+	process_t	*child;
+	thread_t	*child_td;
+	u64		old_cr3;
 	int		*status;
-	int		i, attempt;
+	int		attempt, i, reaped_pid;
 
 	(void)pid_u; (void)options; (void)rusage_u; (void)a5; (void)a6;
 	(void)regs;
@@ -694,9 +697,6 @@ posix_wait4(u64 pid_u, u64 status_u, u64 options, u64 rusage_u,
 
 	for (attempt = 0; attempt < 2; attempt++) {
 		for (i = 0; i < MAX_PROCESSES; i++) {
-			process_t	*child;
-			thread_t	*child_td;
-
 			child = &process_table[i];
 			if (child->pid == 0) {
 				continue;
@@ -716,8 +716,6 @@ posix_wait4(u64 pid_u, u64 status_u, u64 options, u64 rusage_u,
 			}
 
 			if (child_td->running_cpu >= 0) {
-				int	reaped_pid;
-
 				reaped_pid = (int)child->pid;
 				if (current->controlling_tty >= 0) {
 					terminal_set_pgrp(current->controlling_tty,
@@ -730,7 +728,6 @@ posix_wait4(u64 pid_u, u64 status_u, u64 options, u64 rusage_u,
 			}
 
 			if (child->owns_address_space && child->cr3) {
-				u64	old_cr3;
 				old_cr3 = pmap_get_cr3();
 				pmap_load(child->cr3);
 				vm_map_free_all(child);
@@ -740,26 +737,20 @@ posix_wait4(u64 pid_u, u64 status_u, u64 options, u64 rusage_u,
 				child->owns_address_space = 0;
 			}
 
-			if (child_td) {
-				thread_destroy(child_td);
-			}
+			thread_destroy(child_td);
 
-			{
-				int	reaped_pid;
-				reaped_pid = (int)child->pid;
-				memset(child, 0, sizeof(process_t));
-				if (current->controlling_tty >= 0) {
-					terminal_set_pgrp(current->controlling_tty,
-					    current->pgid);
-				}
-				terminal_set_pgrp(terminal_get_active(),
+			reaped_pid = (int)child->pid;
+			memset(child, 0, sizeof(process_t));
+			if (current->controlling_tty >= 0) {
+				terminal_set_pgrp(current->controlling_tty,
 				    current->pgid);
-				return ((s64)reaped_pid);
 			}
+			terminal_set_pgrp(terminal_get_active(),
+			    current->pgid);
+			return ((s64)reaped_pid);
 		}
 
 		if (attempt == 0) {
-			extern void proc_sleep(void *channel);
 			proc_sleep((void *)current);
 		}
 	}
@@ -852,6 +843,7 @@ posix_fork(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	/* Copy parent's context, set return value to 0 */
 	process_save_context(parent, regs);
 	child_td->context = parent_td->context;
+	thread_copy_fpu_context(child_td, parent_td);
 	child_td->context.rax = 0;
 	child_td->fs_base = parent_td->fs_base;
 
@@ -1300,6 +1292,7 @@ posix_clone(u64 flags_u, u64 stack, u64 ptid, u64 ctid, u64 tls,
 
 		thread_save_context(parent_td, regs);
 		new_td->context = parent_td->context;
+		thread_copy_fpu_context(new_td, parent_td);
 		new_td->context.rax = 0;
 		new_td->context.rsp = stack & ~0xFULL;
 

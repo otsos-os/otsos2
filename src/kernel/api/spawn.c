@@ -350,6 +350,8 @@ static void free_spawn_cr3(u64 cr3) {
 
 int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
   struct api_proc_spawn_args args;
+  u64 current_cr3;
+  u64 args_phys;
   int child_personality;
 
   process_t *parent = process_current();
@@ -364,8 +366,14 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
     return -API_ERR_BAD_ADDR;
   }
 
+  current_cr3 = pmap_get_cr3();
+  args_phys = pmap_extract((u64)uargs);
   memcpy(&args, uargs, sizeof(args));
   if (args.size < sizeof(args) || args.flags != 0) {
+    printk("[SPAWN] Error: bad args size=%u flags=0x%x abi=%u "
+        "pid=%d uargs=%p phys=%p cr3=%p parent_cr3=%p\n",
+        args.size, args.flags, args.abi, parent->pid, (void *)uargs,
+        (void *)args_phys, (void *)current_cr3, (void *)parent->cr3);
     return -API_ERR_BAD_VALUE;
   }
 
@@ -377,6 +385,7 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
     child_personality = PERSONALITY_OTSOS;
     break;
   default:
+    printk("[SPAWN] Error: bad abi %u\n", args.abi);
     return -API_ERR_BAD_VALUE;
   }
 
@@ -421,6 +430,7 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
 
   process_t *child = alloc_process();
   if (!child) {
+    printk("[SPAWN] Error: no free process slots\n");
     kmem_free(elf_buf);
     free_string_array(kargv);
     free_string_array(kenvp);

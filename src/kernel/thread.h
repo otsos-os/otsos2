@@ -28,8 +28,10 @@
 
 $define %type u64 as 64 bit unsigned
 $define %type u32 as 32 bit unsigned
+$define %type u8 as 8 bit unsigned
 $define %type int as 32 bit signed
 $define %type cpu_context_t as struct with saved CPU registers for context switch
+$define %type fpu_context_t as aligned 512 byte FXSAVE image
 $define %type process_state_t as enum with thread scheduling states
 $define %type thread_t as struct with per-thread CPU context, kernel stack, state, wait channel
 $define %type registers_t as struct with CPU register snapshot from interrupt
@@ -41,6 +43,8 @@ $define %func thread_current as function with args void
 $define %func thread_set_current as procedure with args thread_t *
 $define %func thread_save_context as procedure with args thread_t *, registers_t *
 $define %func thread_load_context as procedure with args thread_t *, registers_t *
+$define %func thread_load_fpu_context as procedure with args thread_t *
+$define %func thread_copy_fpu_context as procedure with args thread_t *, thread_t *
 $define %func thread_get_by_proc as function with args process_t *
 $define %func thread_destroy as procedure with args thread_t *
 $define %func thread_is_initialized as function with args void
@@ -57,6 +61,7 @@ $define %func thread_kill_all as procedure with args process_t *
 $space %export thread_init, thread_alloc, thread_create
 $space %export thread_current, thread_set_current
 $space %export thread_save_context, thread_load_context
+$space %export thread_load_fpu_context, thread_copy_fpu_context
 $space %export thread_get_by_proc, thread_destroy
 $space %export thread_is_initialized, thread_get
 $space %export thread_exit, thread_join
@@ -71,6 +76,7 @@ $space %export thread_count_alive, thread_kill_all
 #include <mlibc/mlibc.h>
 
 #define MAX_THREADS 128
+#define FPU_FXSAVE_SIZE 512
 
 struct process;
 
@@ -84,6 +90,10 @@ typedef struct {
 	u64	rsp;
 	u64	ss;
 } __attribute__((packed)) cpu_context_t;
+
+typedef struct {
+	u8	bytes[FPU_FXSAVE_SIZE];
+} __attribute__((aligned(16))) fpu_context_t;
 
 /* Thread scheduling states */
 typedef enum {
@@ -101,6 +111,7 @@ typedef struct thread {
 	struct process		*proc;
 	process_state_t		state;
 	cpu_context_t		context;
+	fpu_context_t		fpu_context;
 	u64			kernel_stack;
 	void			*wait_channel;
 	cpu_context_t		saved_context;
@@ -113,6 +124,7 @@ typedef struct thread {
 	u64			trace_runtime_cycles;
 	u64			trace_switches;
 	int			running_cpu;	/* -1 when not running on any CPU */
+	int			fpu_valid;
 	struct thread		*next;
 	struct thread		*prev;
 } thread_t;
@@ -126,6 +138,8 @@ thread_t	*thread_current(void);
 void		thread_set_current(thread_t *td);
 void		thread_save_context(thread_t *td, registers_t *regs);
 void		thread_load_context(thread_t *td, registers_t *regs);
+void		thread_load_fpu_context(thread_t *td);
+void		thread_copy_fpu_context(thread_t *dst, thread_t *src);
 thread_t	*thread_get_by_proc(struct process *proc);
 thread_t	*thread_get(u32 tid);
 void		thread_destroy(thread_t *td);

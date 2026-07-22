@@ -157,7 +157,12 @@ proc_sleep(void *channel)
 	had_lock = smp_lock_held();
 	td->wait_channel = channel;
 	td->state = PROC_STATE_SLEEPING;
-	td->running_cpu = -1;
+
+	/*
+	 * The thread still executes on this CPU until the scheduler saves its
+	 * context.  Clearing running_cpu here lets another CPU run the same
+	 * kernel/user stack while this CPU is only halted in the loop below.
+	 */
 
 	if (had_lock) {
 		smp_unlock();
