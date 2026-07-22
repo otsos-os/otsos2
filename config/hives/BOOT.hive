@@ -97,6 +97,14 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 		string Dest = "/bin/posix_hello"
 	}
 
+	key Modules.as {
+		string Dest = "/bin/as"
+	}
+
+	key Modules.ld {
+		string Dest = "/bin/ld"
+	}
+
 	key Modules.musl_test {
 		string Dest = "/bin/musl_test"
 	}

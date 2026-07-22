@@ -46,6 +46,8 @@ DHCPC_BIN = $(PORTS_DIR)/dhcpc
 DHCPD_BIN = $(PORTS_DIR)/demons/dhcpd
 POSIX_HELLO_BIN = $(PORTS_DIR)/posix_hello
 MUSL_TEST_BIN = $(PORTS_DIR)/musl_test
+TOOLCHAIN_AS_BIN = $(PORTS_DIR)/toolchain/as/as
+TOOLCHAIN_LD_BIN = $(PORTS_DIR)/toolchain/ld/ld
 LUA_BIN = $(PORTS_DIR)/lua/lua/lua
 CPYTHON_DIR = $(PORTS_DIR)/cpython/cpython
 CPYTHON_BIN = $(PORTS_DIR)/cpython/cpython/python
@@ -497,6 +499,16 @@ $(POSIX_HELLO_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/posix_hello"
 	@$(MAKE) -C $(PORTS_DIR) posix_hello LIBC_ENABLED=$(LIBC_ENABLED)
 
+.PHONY: $(TOOLCHAIN_AS_BIN)
+$(TOOLCHAIN_AS_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
+	@echo "  MAKE    ports/toolchain/as"
+	@$(MAKE) -C $(PORTS_DIR) toolchain/as/as LIBC_ENABLED=$(LIBC_ENABLED)
+
+.PHONY: $(TOOLCHAIN_LD_BIN)
+$(TOOLCHAIN_LD_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
+	@echo "  MAKE    ports/toolchain/ld"
+	@$(MAKE) -C $(PORTS_DIR) toolchain/ld/ld LIBC_ENABLED=$(LIBC_ENABLED)
+
 .PHONY: $(MUSL_TEST_BIN)
 $(MUSL_TEST_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    ports/musl_test"
@@ -616,7 +628,7 @@ $(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BU
 		exit 1; \
 	fi
 
-$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
+$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
 	@rm -rf $(BIOS_PAYLOAD_DIR)
 	@mkdir -p $(BIOS_PAYLOAD_DIR)
 	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
@@ -638,6 +650,8 @@ $(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $
 			dhcpc) src=$(DHCPC_BIN);; \
 			dhcpd) src=$(DHCPD_BIN);; \
 			posix_hello) src=$(POSIX_HELLO_BIN);; \
+			as) src=$(TOOLCHAIN_AS_BIN);; \
+			ld) src=$(TOOLCHAIN_LD_BIN);; \
 			musl_test) src=$(MUSL_TEST_BIN);; \
 			lua) src=$(LUA_BIN);; \
 			python) src=$(CPYTHON_BIN);; \
