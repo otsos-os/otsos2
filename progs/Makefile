@@ -24,6 +24,9 @@ OVEN_OBJS = oven.o
 CURSORD_BIN = demons/cursord
 CURSORD_OBJS = demons/cursord.o
 
+SRAPI_DEMO_BIN = srapi_demo
+SRAPI_DEMO_OBJS = srapi_demo.o
+
 SHMTEST_BIN = shmtest
 SHMTEST_OBJS = shmtest.o
 
@@ -51,10 +54,12 @@ MUSL_DIR = ../libc/musl
 MUSL_LIBC = $(MUSL_DIR)/lib/libc.a
 MUSL_CRT1 = $(MUSL_DIR)/lib/crt1.o
 NATIVE_DIR = ../libc/native
+LIBSRAPI_DIR = ../libc/LibSRAPI
 NATIVE_LIBC = $(NATIVE_DIR)/lib/libc.a
 NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
 NATIVE_HDR = $(NATIVE_DIR)/include/native.h
+LIBSRAPI = $(LIBSRAPI_DIR)/lib/libsrapi.a
 NATIVE_DYN_LDFLAGS = -m elf_x86_64 -pie --oformat=elf64-x86-64 \
                      -nostdlib -dynamic-linker /lib/drld \
                      --export-dynamic
@@ -63,9 +68,9 @@ MUSL_TEST_OBJS = musl_test.o
 LIBC_ENABLED ?= true
 
 ifeq ($(LIBC_ENABLED),true)
-ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) yabox $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(MUSL_TEST_BIN)
+ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SRAPI_DEMO_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) yabox $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(MUSL_TEST_BIN)
 else
-ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) yabox $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN)
+ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(SRAPI_DEMO_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) yabox $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN)
 endif
 
 all: $(ALL_TARGETS)
@@ -86,6 +91,10 @@ $(NATIVE_LIBC) $(NATIVE_SO) $(NATIVE_CRT0): FORCE
 	@echo "  MAKE    native libc"
 	@$(MAKE) -C $(NATIVE_DIR)
 
+$(LIBSRAPI): FORCE
+	@echo "  MAKE    LibSRAPI"
+	@$(MAKE) -C $(LIBSRAPI_DIR)
+
 $(SHELL_BIN): $(NATIVE_CRT0) $(SHELL_OBJS) $(NATIVE_SO)
 	@echo "  LLD      $@"
 	@$(LD) $(NATIVE_DYN_LDFLAGS) $(NATIVE_CRT0) $(SHELL_OBJS) \
@@ -103,6 +112,13 @@ $(CURSORD_BIN): $(NATIVE_CRT0) $(CURSORD_OBJS) $(NATIVE_SO)
 	@echo "  LLD      $@"
 	@$(LD) $(NATIVE_DYN_LDFLAGS) $(NATIVE_CRT0) $(CURSORD_OBJS) \
 	    $(NATIVE_SO) -o $@
+	@echo "  SIZE    $@"
+	@$(SIZE) $@
+
+$(SRAPI_DEMO_BIN): $(NATIVE_CRT0) $(SRAPI_DEMO_OBJS) $(LIBSRAPI) $(NATIVE_SO)
+	@echo "  LLD      $@"
+	@$(LD) $(NATIVE_DYN_LDFLAGS) $(NATIVE_CRT0) $(SRAPI_DEMO_OBJS) \
+	    $(LIBSRAPI) $(NATIVE_SO) -o $@
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
@@ -212,6 +228,11 @@ demons/cursord.o: demons/cursord.c $(NATIVE_HDR)
 	@echo "  CC      $< (native libc)"
 	@$(CC) $(CFLAGS) -fPIE -I$(NATIVE_DIR)/include -c $< -o $@
 
+srapi_demo.o: srapi_demo.c $(NATIVE_HDR) $(LIBSRAPI_DIR)/include/srapi.h
+	@echo "  CC      $< (LibSRAPI)"
+	@$(CC) $(CFLAGS) -fPIE -I$(NATIVE_DIR)/include \
+	    -I$(LIBSRAPI_DIR)/include -c $< -o $@
+
 musl_test.o: musl_test.c
 	@echo "  CC      $< (musl)"
 	@$(CC) $(TARGET_CFLAGS) -O2 -g -fno-pic -fno-stack-protector \
@@ -219,9 +240,10 @@ musl_test.o: musl_test.c
 	    -I$(MUSL_DIR)/obj/include -I$(MUSL_DIR)/include -c $< -o $@
 
 clean:
-	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN) $(OVEN_OBJS) $(OVEN_BIN) $(CURSORD_OBJS) $(CURSORD_BIN) $(SHMTEST_OBJS) $(SHMTEST_BIN) $(UDP_ECHO_OBJS) $(UDP_ECHO_BIN) $(TCP_ECHO_OBJS) $(TCP_ECHO_BIN) $(SEND_OBJS) $(SEND_BIN) $(DHCPC_OBJS) $(DHCPC_BIN) $(DHCPD_OBJS) $(DHCPD_BIN) $(POSIX_HELLO_OBJS) $(POSIX_HELLO_BIN) $(MUSL_TEST_OBJS) $(MUSL_TEST_BIN)
+	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN) $(OVEN_OBJS) $(OVEN_BIN) $(CURSORD_OBJS) $(CURSORD_BIN) $(SRAPI_DEMO_OBJS) $(SRAPI_DEMO_BIN) $(SHMTEST_OBJS) $(SHMTEST_BIN) $(UDP_ECHO_OBJS) $(UDP_ECHO_BIN) $(TCP_ECHO_OBJS) $(TCP_ECHO_BIN) $(SEND_OBJS) $(SEND_BIN) $(DHCPC_OBJS) $(DHCPC_BIN) $(DHCPD_OBJS) $(DHCPD_BIN) $(POSIX_HELLO_OBJS) $(POSIX_HELLO_BIN) $(MUSL_TEST_OBJS) $(MUSL_TEST_BIN)
 	$(MAKE) -C $(YABOX_DIR) clean
 	$(MAKE) -C $(TOOLCHAIN_AS_DIR) clean
 	$(MAKE) -C $(TOOLCHAIN_LD_DIR) clean
+	$(MAKE) -C $(LIBSRAPI_DIR) clean
 
 .PHONY: all clean yabox FORCE

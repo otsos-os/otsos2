@@ -1,0 +1,344 @@
+/* !DEFINES!
+
+$define %type demo_vertex as fixed point colored 2D vertex
+$define %func sleep_ms as procedure with args int
+$define %func now_ms as function with args void
+$define %func color_cycle as function with args frame, phase
+$define %func write_vertices as procedure with args vertex array, frame
+$define %func create_demo_pipeline as function with args device, outputs
+$define %func render_frame as function with args command state, frame
+$define %func main as start with args int, char **, char **
+
+*/
+
+/* !SPACE!
+
+$space %internal sleep_ms, now_ms, color_cycle, write_vertices
+$space %internal create_demo_pipeline, render_frame
+$space %export main
+
+*/
+
+/*
+ * Copyright (c) 2026, otsos team
+ */
+
+#include <native.h>
+#include <srapi.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+#define DEMO_VERTEX_COUNT	9
+#define DEMO_FRAME_MS		50
+#define DEMO_DURATION_MS	3000
+#define FX(n, d)		SRAPI_FIXED_FROM_RATIO(n, d)
+
+struct demo_vertex {
+	int32_t		x;
+	int32_t		y;
+	uint32_t	color;
+};
+
+static const struct srapi_vm_inst demo_vs[] = {
+	SRAPI_VM_INST(SRAPI_VM_LOAD_IN, 0, SRAPI_IO_X, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_STORE_OUT, SRAPI_IO_X, 0, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_LOAD_IN, 0, SRAPI_IO_Y, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_STORE_OUT, SRAPI_IO_Y, 0, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_LOAD_IN, 0, SRAPI_IO_R, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_STORE_OUT, SRAPI_IO_R, 0, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_LOAD_IN, 0, SRAPI_IO_G, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_STORE_OUT, SRAPI_IO_G, 0, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_LOAD_IN, 0, SRAPI_IO_B, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_STORE_OUT, SRAPI_IO_B, 0, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_LOAD_IN, 0, SRAPI_IO_A, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_STORE_OUT, SRAPI_IO_A, 0, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_END, 0, 0, 0, 0)
+};
+
+static const struct srapi_vm_inst demo_fs[] = {
+	SRAPI_VM_INST(SRAPI_VM_LOAD_IN, 0, SRAPI_IO_R, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_STORE_OUT, SRAPI_IO_R, 0, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_LOAD_IN, 0, SRAPI_IO_G, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_STORE_OUT, SRAPI_IO_G, 0, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_LOAD_IN, 0, SRAPI_IO_B, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_STORE_OUT, SRAPI_IO_B, 0, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_LOAD_IN, 0, SRAPI_IO_A, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_STORE_OUT, SRAPI_IO_A, 0, 0, 0),
+	SRAPI_VM_INST(SRAPI_VM_END, 0, 0, 0, 0)
+};
+
+static void
+sleep_ms(int ms)
+{
+	struct kevent	change;
+	struct kevent	event;
+	int		kq;
+
+	kq = eventKqueue();
+	if (kq < 0) {
+		return;
+	}
+	memset(&change, 0, sizeof(change));
+	change.ident = 1;
+	change.filter = EVFILT_TIMER;
+	change.flags = EV_ADD | EV_ONESHOT;
+	change.data = ms;
+	(void)eventWait(kq, &change, 1, &event, 1, ms + 50);
+	eventClose(kq);
+}
+
+static uint64_t
+now_ms(void)
+{
+	struct api_timeinfo	ti;
+
+	if (sysTimeInfo(&ti) != 0) {
+		return (0);
+	}
+	return (ti.uptime_sec * 1000ULL + ti.uptime_nsec / 1000000ULL);
+}
+
+static uint32_t
+color_cycle(uint32_t frame, uint32_t phase)
+{
+	uint32_t	t, r, g, b;
+
+	t = (frame * 13 + phase) % 768;
+	r = 0;
+	g = 0;
+	b = 0;
+	if (t < 256) {
+		r = 255 - t;
+		g = t;
+	} else if (t < 512) {
+		g = 511 - t;
+		b = t - 256;
+	} else {
+		b = 767 - t;
+		r = t - 512;
+	}
+	return (0xff000000U | (r << 16) | (g << 8) | b);
+}
+
+static void
+write_vertices(struct demo_vertex *v, uint32_t frame)
+{
+	uint32_t	c0, c1, c2, c3, c4, c5;
+
+	c0 = color_cycle(frame, 0);
+	c1 = color_cycle(frame, 128);
+	c2 = color_cycle(frame, 256);
+	c3 = color_cycle(frame, 384);
+	c4 = color_cycle(frame, 512);
+	c5 = color_cycle(frame, 640);
+
+	v[0].x = FX(-4, 5);
+	v[0].y = FX(-11, 20);
+	v[0].color = c0;
+	v[1].x = FX(-1, 5);
+	v[1].y = FX(-11, 20);
+	v[1].color = c1;
+	v[2].x = FX(-1, 5);
+	v[2].y = FX(9, 20);
+	v[2].color = c2;
+	v[3].x = FX(-4, 5);
+	v[3].y = FX(-11, 20);
+	v[3].color = c0;
+	v[4].x = FX(-1, 5);
+	v[4].y = FX(9, 20);
+	v[4].color = c2;
+	v[5].x = FX(-4, 5);
+	v[5].y = FX(9, 20);
+	v[5].color = c3;
+
+	v[6].x = FX(1, 4);
+	v[6].y = FX(-11, 20);
+	v[6].color = c4;
+	v[7].x = FX(17, 20);
+	v[7].y = FX(-11, 20);
+	v[7].color = c5;
+	v[8].x = FX(11, 20);
+	v[8].y = FX(1, 2);
+	v[8].color = c1;
+}
+
+static int
+create_demo_pipeline(srapi_device_t *device, srapi_shader_t **vs,
+    srapi_shader_t **fs, srapi_pipeline_t **pipeline)
+{
+	struct srapi_pipeline_desc	pdesc;
+	struct srapi_shader_desc	sdesc;
+	int				ret;
+
+	memset(&sdesc, 0, sizeof(sdesc));
+	sdesc.stage = SRAPI_SHADER_VERTEX;
+	sdesc.code = demo_vs;
+	sdesc.code_count = sizeof(demo_vs) / sizeof(demo_vs[0]);
+	ret = srapiCreateShader(device, &sdesc, vs);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	memset(&sdesc, 0, sizeof(sdesc));
+	sdesc.stage = SRAPI_SHADER_FRAGMENT;
+	sdesc.code = demo_fs;
+	sdesc.code_count = sizeof(demo_fs) / sizeof(demo_fs[0]);
+	ret = srapiCreateShader(device, &sdesc, fs);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+
+	memset(&pdesc, 0, sizeof(pdesc));
+	pdesc.vertex_shader = *vs;
+	pdesc.fragment_shader = *fs;
+	pdesc.vertex_layout.stride = sizeof(struct demo_vertex);
+	pdesc.vertex_layout.attr_count = 2;
+	pdesc.vertex_layout.attrs[0].location = SRAPI_VERTEX_LOCATION_POSITION;
+	pdesc.vertex_layout.attrs[0].format = SRAPI_VERTEX_FORMAT_FIXED2;
+	pdesc.vertex_layout.attrs[0].offset = offsetof(struct demo_vertex, x);
+	pdesc.vertex_layout.attrs[1].location = SRAPI_VERTEX_LOCATION_COLOR;
+	pdesc.vertex_layout.attrs[1].format = SRAPI_VERTEX_FORMAT_UNORM8_4;
+	pdesc.vertex_layout.attrs[1].offset =
+	    offsetof(struct demo_vertex, color);
+	return (srapiCreatePipeline(device, &pdesc, pipeline));
+}
+
+static int
+render_frame(srapi_cmd_buffer_t *cmd, srapi_pipeline_t *pipeline,
+    srapi_buffer_t *vertices, uint32_t frame)
+{
+	int	ret;
+
+	ret = srapiCmdBegin(cmd);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = srapiCmdClearColor(cmd, 0xff101018U);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = srapiCmdBindPipeline(cmd, pipeline);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = srapiCmdBindVertexBuffer(cmd, vertices);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = srapiCmdDraw(cmd, 0, DEMO_VERTEX_COUNT);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = srapiCmdPresent(cmd);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = srapiCmdEnd(cmd);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	(void)frame;
+	return (srapiSubmit(cmd));
+}
+
+int
+main(int argc, char **argv, char **envp)
+{
+	struct srapi_instance_desc	idesc;
+	struct srapi_device_desc		ddesc;
+	struct srapi_device_info		info;
+	struct srapi_buffer_desc		bdesc;
+	struct demo_vertex		verts[DEMO_VERTEX_COUNT];
+	srapi_instance_t		*instance;
+	srapi_device_t			*device;
+	srapi_shader_t			*vs, *fs;
+	srapi_pipeline_t		*pipeline;
+	srapi_buffer_t			*vertex_buffer;
+	srapi_cmd_buffer_t		*cmd;
+	uint64_t			start, now;
+	uint32_t			frame;
+	int				ret;
+
+	(void)argc;
+	(void)argv;
+	(void)envp;
+
+	(void)personality(API_PERSONALITY_NATIVE);
+	memset(&idesc, 0, sizeof(idesc));
+	memset(&ddesc, 0, sizeof(ddesc));
+	memset(&bdesc, 0, sizeof(bdesc));
+	instance = NULL;
+	device = NULL;
+	vs = NULL;
+	fs = NULL;
+	pipeline = NULL;
+	vertex_buffer = NULL;
+	cmd = NULL;
+
+	ret = srapiCreateInstance(&idesc, &instance);
+	if (ret != SRAPI_OK) {
+		printf("srapi_demo: instance failed %d\n", ret);
+		return (1);
+	}
+	ret = srapiCreateDevice(instance, &ddesc, &device);
+	if (ret != SRAPI_OK) {
+		printf("srapi_demo: device failed %d\n", ret);
+		return (1);
+	}
+	ret = srapiDeviceInfo(device, &info);
+	if (ret == SRAPI_OK) {
+		printf("srapi_demo: %ux%u %ubpp driver=%s\n", info.width,
+		    info.height, info.bpp, info.driver_name);
+	}
+	ret = create_demo_pipeline(device, &vs, &fs, &pipeline);
+	if (ret != SRAPI_OK) {
+		printf("srapi_demo: pipeline failed %d\n", ret);
+		return (1);
+	}
+	bdesc.size = sizeof(verts);
+	bdesc.usage = SRAPI_BUFFER_VERTEX;
+	ret = srapiCreateBuffer(device, &bdesc, &vertex_buffer);
+	if (ret != SRAPI_OK) {
+		printf("srapi_demo: vertex buffer failed %d\n", ret);
+		return (1);
+	}
+	ret = srapiCreateCommandBuffer(device, &cmd);
+	if (ret != SRAPI_OK) {
+		printf("srapi_demo: cmd failed %d\n", ret);
+		return (1);
+	}
+
+	start = now_ms();
+	frame = 0;
+	for (;;) {
+		write_vertices(verts, frame);
+		ret = srapiBufferWrite(vertex_buffer, 0, verts, sizeof(verts));
+		if (ret != SRAPI_OK) {
+			printf("srapi_demo: upload failed %d\n", ret);
+			break;
+		}
+		ret = render_frame(cmd, pipeline, vertex_buffer, frame);
+		if (ret != SRAPI_OK) {
+			printf("srapi_demo: render failed %d\n", ret);
+			break;
+		}
+		sleep_ms(DEMO_FRAME_MS);
+		frame++;
+		now = now_ms();
+		if ((start != 0 && now >= start + DEMO_DURATION_MS) ||
+		    (start == 0 && frame >= DEMO_DURATION_MS / DEMO_FRAME_MS)) {
+			break;
+		}
+	}
+
+	srapiDestroyCommandBuffer(cmd);
+	srapiDestroyBuffer(vertex_buffer);
+	srapiDestroyPipeline(pipeline);
+	srapiDestroyShader(fs);
+	srapiDestroyShader(vs);
+	srapiDestroyDevice(device);
+	srapiDestroyInstance(instance);
+	printf("srapi_demo: done\n");
+	return (0);
+}

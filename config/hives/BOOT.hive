@@ -73,6 +73,10 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 		string Dest = "/bin/cursord"
 	}
 
+	key Modules.srapi_demo {
+		string Dest = "/bin/srapi_demo"
+	}
+
 	key Modules.udp_echo {
 		string Dest = "/bin/udp_echo"
 	}

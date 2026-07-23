@@ -36,6 +36,20 @@ static u64 page_flags_for_prot(u32 prot) {
   return flags;
 }
 
+static u64 kernel_virt_to_phys(void *ptr) {
+  u64 vaddr = (u64)ptr;
+  u64 page = vaddr & ~(u64)(PAGE_SIZE - 1);
+  u64 phys = pmap_extract(page);
+
+  if (phys == 0 && vaddr >= KERNEL_VMA) {
+    phys = page - KERNEL_VMA;
+  }
+  if (phys == 0) {
+    return 0;
+  }
+  return phys | (vaddr & (PAGE_SIZE - 1));
+}
+
 /* Map a GEM buffer into the current process's address space. The GEM
  * buffer's physical pages are shared — writes are visible to the kernel
  * (and to other processes that map the same handle). This is zero-copy:
@@ -64,10 +78,15 @@ static u64 mmap_gem(process_t *proc, u32 gem_handle, u64 length, u32 prot,
 
   u64 pflags = page_flags_for_prot(prot);
 
-  /* GEM owns its backing pages; mmap only aliases them into userspace. */
-  u64 phys_base = (u64)buf->data;
   for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
-    pmap_enter(addr + off, phys_base + off, pflags);
+    u64 phys = kernel_virt_to_phys(buf->data + off);
+    if (phys == 0) {
+      for (u64 done = 0; done < off; done += PAGE_SIZE) {
+        pmap_remove(addr + done);
+      }
+      return (u64)(-API_ERR_NO_MEMORY);
+    }
+    pmap_enter(addr + off, phys, pflags);
   }
 
   vm_object_t *obj = vm_object_create(VM_OBJ_GEM, aligned, buf);

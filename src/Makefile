@@ -39,6 +39,7 @@ FETCH_BIN = $(PROGS_DIR)/fetch
 SHELL_BIN = $(PROGS_DIR)/sh
 OVEN_BIN = $(PROGS_DIR)/oven
 CURSORD_BIN = $(PROGS_DIR)/demons/cursord
+SRAPI_DEMO_BIN = $(PROGS_DIR)/srapi_demo
 SHMTEST_BIN = $(PROGS_DIR)/shmtest
 UDP_ECHO_BIN = $(PROGS_DIR)/udp_echo
 TCP_ECHO_BIN = $(PROGS_DIR)/tcp_echo
@@ -462,6 +463,11 @@ $(CURSORD_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    progs/demons/cursord"
 	@$(MAKE) -C $(PROGS_DIR) demons/cursord LIBC_ENABLED=$(LIBC_ENABLED)
 
+.PHONY: $(SRAPI_DEMO_BIN)
+$(SRAPI_DEMO_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
+	@echo "  MAKE    progs/srapi_demo"
+	@$(MAKE) -C $(PROGS_DIR) srapi_demo LIBC_ENABLED=$(LIBC_ENABLED)
+
 .PHONY: $(SHMTEST_BIN)
 $(SHMTEST_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    progs/shmtest"
@@ -631,7 +637,7 @@ $(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BU
 		exit 1; \
 	fi
 
-$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
+$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SRAPI_DEMO_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
 	@rm -rf $(BIOS_PAYLOAD_DIR)
 	@mkdir -p $(BIOS_PAYLOAD_DIR)
 	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
@@ -646,6 +652,7 @@ $(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $
 			ls|cat|touch|pwd|whoami|rm|mkdir|rmdir|cp|mv|unzip|profile) src=$(YABOX_DIR)/$$m;; \
 			oven) src=$(OVEN_BIN);; \
 			cursord) src=$(CURSORD_BIN);; \
+			srapi_demo) src=$(SRAPI_DEMO_BIN);; \
 			shmtest) src=$(SHMTEST_BIN);; \
 			udp_echo) src=$(UDP_ECHO_BIN);; \
 			tcp_echo) src=$(TCP_ECHO_BIN);; \
