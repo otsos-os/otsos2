@@ -3,6 +3,7 @@
 $define %type srapi_cmd_buffer as command recording buffer
 $define %func srapiCmdBegin as function with args command buffer
 $define %func srapiCmdClearRect as function with args command buffer, rect, color
+$define %func srapiCmdBlitSurface as function with args command buffer, surface, regions
 $define %func srapiCmdDraw as function with args command buffer, draw range
 $define %func srapiSubmit as function with args command buffer
 
@@ -13,7 +14,8 @@ $define %func srapiSubmit as function with args command buffer
 $space %internal cmd_reserve, cmd_append
 $space %export srapiCmdReset, srapiCmdBegin, srapiCmdEnd
 $space %export srapiCmdClearColor, srapiCmdClearRect
-$space %export srapiCmdBindPipeline, srapiCmdBindVertexBuffer
+$space %export srapiCmdBlitSurface, srapiCmdBindPipeline
+$space %export srapiCmdBindVertexBuffer
 $space %export srapiCmdPushConstants, srapiCmdSetViewport, srapiCmdDraw
 $space %export srapiCmdPresent, srapiSubmit
 
@@ -141,6 +143,37 @@ srapiCmdClearRect(srapi_cmd_buffer_t *cmd, uint32_t x, uint32_t y,
 	rec->u.clear.width = width;
 	rec->u.clear.height = height;
 	rec->u.clear.rect_valid = 1;
+	return (SRAPI_OK);
+}
+
+int
+srapiCmdBlitSurface(srapi_cmd_buffer_t *cmd, srapi_surface_t *surface,
+    const struct srapi_region *src, const struct srapi_region *dst,
+    uint32_t flags)
+{
+	struct srapi_cmd_record	*rec;
+	int			ret;
+
+	if (!surface) {
+		return (SRAPI_ERR_INVALID);
+	}
+	ret = cmd_append(cmd, &rec);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	rec->type = SRAPI_CMD_BLIT_SURFACE;
+	rec->u.blit.surface = surface;
+	rec->u.blit.flags = flags;
+	rec->u.blit.src_valid = 0;
+	rec->u.blit.dst_valid = 0;
+	if (src) {
+		rec->u.blit.src = *src;
+		rec->u.blit.src_valid = 1;
+	}
+	if (dst) {
+		rec->u.blit.dst = *dst;
+		rec->u.blit.dst_valid = 1;
+	}
 	return (SRAPI_OK);
 }
 
@@ -286,6 +319,19 @@ srapiSubmit(srapi_cmd_buffer_t *cmd)
 				ret = srapi_raster_clear(&cmd->device->backbuffer,
 				    cmd->records[i].u.clear.color);
 			}
+			if (ret != SRAPI_OK) {
+				return (ret);
+			}
+			break;
+		case SRAPI_CMD_BLIT_SURFACE:
+			ret = srapi_raster_blit_surface(
+			    &cmd->device->backbuffer,
+			    cmd->records[i].u.blit.surface,
+			    cmd->records[i].u.blit.src_valid ?
+			    &cmd->records[i].u.blit.src : NULL,
+			    cmd->records[i].u.blit.dst_valid ?
+			    &cmd->records[i].u.blit.dst : NULL,
+			    cmd->records[i].u.blit.flags);
 			if (ret != SRAPI_OK) {
 				return (ret);
 			}

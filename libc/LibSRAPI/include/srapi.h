@@ -4,15 +4,24 @@ $define %type srapi_instance as opaque SRAPI instance
 $define %type srapi_device as opaque SRAPI device
 $define %type srapi_buffer as opaque SRAPI buffer
 $define %type srapi_image as opaque SRAPI image
+$define %type srapi_surface as opaque CPU pixel surface
 $define %type srapi_shader as opaque SRAPI shader module
 $define %type srapi_pipeline as opaque SRAPI graphics pipeline
 $define %type srapi_cmd_buffer as opaque SRAPI command buffer
 $define %type srapi_input_event as SRAPI input event
 $define %type srapi_input_state as cached SRAPI input state
+$define %type srapi_region as rectangular pixel region
+$define %type srapi_surface_desc as CPU pixel surface descriptor
 $define %type srapi_vm_inst as one shader VM instruction
 $define %func srapiCreateInstance as function with args desc, out instance
 $define %func srapiCreateDevice as function with args instance, desc, out device
 $define %func srapiCreateBuffer as function with args device, desc, out buffer
+$define %func srapiCreateSurface as function with args device, desc, out surface
+$define %func srapiDestroySurface as procedure with args surface
+$define %func srapiMapSurface as function with args surface, out, out pitch
+$define %func srapiUnmapSurface as procedure with args surface
+$define %func srapiSurfaceWrite as function with args surface, region, pixels, pitch
+$define %func srapiSurfaceSetPalette as function with args surface, first, colors, count
 $define %func srapiCreateShader as function with args device, desc, out shader
 $define %func srapiComputeShader as function with args shader
 $define %func srapiCreatePipeline as function with args device, desc, out pipeline
@@ -21,6 +30,7 @@ $define %func srapiPollInput as function with args device, events, max events
 $define %func srapiFlushInput as function with args device
 $define %func srapiGetInputState as function with args device, out state
 $define %func srapiInputKeyDown as function with args state, key
+$define %func srapiCmdBlitSurface as function with args command buffer, surface, regions
 $define %func srapiSubmit as function with args command buffer
 
 */
@@ -28,18 +38,23 @@ $define %func srapiSubmit as function with args command buffer
 /* !SPACE!
 
 $space %export srapi_instance, srapi_device, srapi_buffer, srapi_image
-$space %export srapi_shader, srapi_pipeline, srapi_cmd_buffer
-$space %export srapi_input_event, srapi_input_state, srapi_vm_inst
+$space %export srapi_surface, srapi_shader, srapi_pipeline
+$space %export srapi_cmd_buffer, srapi_input_event, srapi_input_state
+$space %export srapi_region, srapi_surface_desc, srapi_vm_inst
 $space %export srapiCreateInstance, srapiDestroyInstance
 $space %export srapiCreateDevice, srapiDestroyDevice, srapiDeviceInfo
 $space %export srapiDeviceBackbuffer, srapiCreateBuffer, srapiDestroyBuffer
 $space %export srapiMapBuffer, srapiUnmapBuffer, srapiBufferWrite
+$space %export srapiCreateSurface, srapiDestroySurface, srapiMapSurface
+$space %export srapiUnmapSurface, srapiSurfaceWrite
+$space %export srapiSurfaceSetPalette
 $space %export srapiCreateShader, srapiComputeShader, srapiDestroyShader
 $space %export srapiCreatePipeline
 $space %export srapiDestroyPipeline, srapiCreateCommandBuffer
 $space %export srapiDestroyCommandBuffer, srapiCmdReset, srapiCmdBegin
 $space %export srapiCmdEnd, srapiCmdClearColor, srapiCmdClearRect
-$space %export srapiCmdBindPipeline, srapiCmdBindVertexBuffer
+$space %export srapiCmdBlitSurface, srapiCmdBindPipeline
+$space %export srapiCmdBindVertexBuffer
 $space %export srapiCmdPushConstants, srapiCmdSetViewport, srapiCmdDraw
 $space %export srapiCmdPresent, srapiSubmit
 $space %export srapiPollInput, srapiFlushInput, srapiGetInputState
@@ -97,6 +112,7 @@ typedef struct srapi_instance	srapi_instance_t;
 typedef struct srapi_device	srapi_device_t;
 typedef struct srapi_buffer	srapi_buffer_t;
 typedef struct srapi_image	srapi_image_t;
+typedef struct srapi_surface	srapi_surface_t;
 typedef struct srapi_shader	srapi_shader_t;
 typedef struct srapi_pipeline	srapi_pipeline_t;
 typedef struct srapi_cmd_buffer	srapi_cmd_buffer_t;
@@ -117,6 +133,15 @@ enum srapi_buffer_usage {
 	SRAPI_BUFFER_VERTEX = 0x00000001,
 	SRAPI_BUFFER_INDEX = 0x00000002,
 	SRAPI_BUFFER_UNIFORM = 0x00000004
+};
+
+enum srapi_surface_format {
+	SRAPI_SURFACE_FORMAT_ARGB8888 = 1,
+	SRAPI_SURFACE_FORMAT_INDEX8 = 2
+};
+
+enum srapi_blit_flags {
+	SRAPI_BLIT_NEAREST = 0x00000001
 };
 
 enum srapi_shader_stage {
@@ -230,6 +255,13 @@ struct srapi_device_info {
 	char		driver_name[32];
 };
 
+struct srapi_region {
+	uint32_t	x;
+	uint32_t	y;
+	uint32_t	width;
+	uint32_t	height;
+};
+
 struct srapi_input_event {
 	uint64_t	timestamp;
 	uint64_t	seq;
@@ -266,6 +298,14 @@ struct srapi_input_state {
 struct srapi_buffer_desc {
 	size_t		size;
 	uint32_t	usage;
+};
+
+struct srapi_surface_desc {
+	uint32_t	width;
+	uint32_t	height;
+	uint32_t	format;
+	uint32_t	pitch;
+	uint32_t	flags;
 };
 
 struct srapi_shader_desc {
@@ -319,6 +359,18 @@ void	srapiUnmapBuffer(srapi_buffer_t *buffer);
 int	srapiBufferWrite(srapi_buffer_t *buffer, size_t offset,
 	    const void *data, size_t size);
 
+int	srapiCreateSurface(srapi_device_t *device,
+	    const struct srapi_surface_desc *desc, srapi_surface_t **out);
+void	srapiDestroySurface(srapi_surface_t *surface);
+int	srapiMapSurface(srapi_surface_t *surface, void **out,
+	    uint32_t *out_pitch);
+void	srapiUnmapSurface(srapi_surface_t *surface);
+int	srapiSurfaceWrite(srapi_surface_t *surface,
+	    const struct srapi_region *region, const void *pixels,
+	    uint32_t src_pitch);
+int	srapiSurfaceSetPalette(srapi_surface_t *surface, uint32_t first,
+	    const uint32_t *colors, uint32_t count);
+
 int	srapiCreateShader(srapi_device_t *device,
 	    const struct srapi_shader_desc *desc, srapi_shader_t **out);
 int	srapiComputeShader(srapi_shader_t *shader);
@@ -337,6 +389,9 @@ int	srapiCmdEnd(srapi_cmd_buffer_t *cmd);
 int	srapiCmdClearColor(srapi_cmd_buffer_t *cmd, uint32_t color);
 int	srapiCmdClearRect(srapi_cmd_buffer_t *cmd, uint32_t x, uint32_t y,
 	    uint32_t width, uint32_t height, uint32_t color);
+int	srapiCmdBlitSurface(srapi_cmd_buffer_t *cmd,
+	    srapi_surface_t *surface, const struct srapi_region *src,
+	    const struct srapi_region *dst, uint32_t flags);
 int	srapiCmdBindPipeline(srapi_cmd_buffer_t *cmd,
 	    srapi_pipeline_t *pipeline);
 int	srapiCmdBindVertexBuffer(srapi_cmd_buffer_t *cmd,

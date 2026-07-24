@@ -3,7 +3,9 @@
 $define %type srapi_rect as dirty rectangle
 $define %type srapi_vertex_out as post vertex shader data
 $define %type srapi_cmd_record as recorded command
+$define %type srapi_surface as CPU pixel surface
 $define %type srapi_shader_cpu_fn as compiled shader entry point
+$define %func srapi_surface_bytes_per_pixel as function with args format
 $define %func srapi_input_state_reset as procedure with args state
 $define %func srapi_input_state_begin_poll as procedure with args state
 $define %func srapi_input_state_apply as procedure with args state, event
@@ -15,6 +17,7 @@ $define %func srapiComputeShader as function with args shader
 $define %func srapi_vm_run as function with args shader, input, push, output
 $define %func srapi_raster_clear as function with args image, color
 $define %func srapi_raster_clear_rect as function with args image, rect, color
+$define %func srapi_raster_blit_surface as function with args image, surface, regions
 $define %func srapi_raster_draw as function with args draw state
 
 */
@@ -23,12 +26,13 @@ $define %func srapi_raster_draw as function with args draw state
 
 $space %internal srapi_rect, srapi_vertex_out, srapi_cmd_record
 $space %internal srapi_shader_cpu_fn
+$space %internal srapi_surface_bytes_per_pixel
 $space %internal srapi_input_state_reset, srapi_input_state_begin_poll
 $space %internal srapi_input_state_apply, srapi_input_shutdown
 $space %internal srapi_image_mark_dirty, srapi_backend_present
 $space %internal srapi_backend_unbind, srapiComputeShader, srapi_vm_run
 $space %internal srapi_raster_clear, srapi_raster_clear_rect
-$space %internal srapi_raster_draw
+$space %internal srapi_raster_blit_surface, srapi_raster_draw
 
 */
 
@@ -57,7 +61,8 @@ enum srapi_cmd_type {
 	SRAPI_CMD_PUSH_CONSTANTS = 4,
 	SRAPI_CMD_SET_VIEWPORT = 5,
 	SRAPI_CMD_DRAW = 6,
-	SRAPI_CMD_PRESENT = 7
+	SRAPI_CMD_PRESENT = 7,
+	SRAPI_CMD_BLIT_SURFACE = 8
 };
 
 struct srapi_rect {
@@ -101,6 +106,18 @@ struct srapi_buffer {
 	void		*data;
 	size_t		size;
 	uint32_t	usage;
+};
+
+struct srapi_surface {
+	srapi_device_t	*device;
+	void		*pixels;
+	size_t		size;
+	uint32_t	palette[256];
+	uint32_t	width;
+	uint32_t	height;
+	uint32_t	pitch;
+	uint32_t	format;
+	uint32_t	flags;
 };
 
 struct srapi_shader {
@@ -153,6 +170,14 @@ struct srapi_cmd_record {
 			uint32_t	first_vertex;
 			uint32_t	vertex_count;
 		} draw;
+		struct {
+			srapi_surface_t		*surface;
+			struct srapi_region	src;
+			struct srapi_region	dst;
+			uint32_t		flags;
+			int			src_valid;
+			int			dst_valid;
+		} blit;
 	} u;
 };
 
@@ -173,6 +198,7 @@ struct srapi_vertex_out {
 
 void	srapi_image_mark_dirty(srapi_image_t *image, uint32_t x,
 	    uint32_t y, uint32_t width, uint32_t height);
+uint32_t	srapi_surface_bytes_per_pixel(uint32_t format);
 void	srapi_input_state_reset(struct srapi_input_state *state);
 void	srapi_input_state_begin_poll(struct srapi_input_state *state);
 void	srapi_input_state_apply(struct srapi_input_state *state,
@@ -186,6 +212,9 @@ int	srapi_vm_run(const srapi_shader_t *shader, const int32_t *input,
 int	srapi_raster_clear(srapi_image_t *image, uint32_t color);
 int	srapi_raster_clear_rect(srapi_image_t *image, uint32_t x, uint32_t y,
 	    uint32_t width, uint32_t height, uint32_t color);
+int	srapi_raster_blit_surface(srapi_image_t *image,
+	    srapi_surface_t *surface, const struct srapi_region *src_region,
+	    const struct srapi_region *dst_region, uint32_t flags);
 int	srapi_raster_draw(srapi_device_t *device, srapi_image_t *image,
 	    srapi_pipeline_t *pipeline, const struct srapi_viewport *viewport,
 	    srapi_buffer_t *vertex_buffer, uint32_t first_vertex,

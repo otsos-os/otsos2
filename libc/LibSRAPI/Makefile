@@ -12,7 +12,7 @@ CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fPIE -fno-stack-protector \
 
 LIB = lib/libsrapi.a
 SRC = src/backend.c src/command.c src/core.c src/input/backend.c \
-	src/input/state.c src/jit.c src/raster.c src/vm.c
+	src/input/state.c src/jit.c src/raster.c src/surface.c src/vm.c
 OBJ = $(SRC:src/%.c=build/%.o)
 HDR = include/srapi.h src/srapi_private.h
 

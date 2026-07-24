@@ -3,19 +3,22 @@
 $define %type srapi_vertex_out as transformed vertex data
 $define %func srapi_raster_clear as function with args image, color
 $define %func srapi_raster_clear_rect as function with args image, rect, color
+$define %func srapi_raster_blit_surface as function with args image, surface, regions
 $define %func srapi_raster_draw as function with args draw state
 
 */
 
 /* !SPACE!
 
-$space %internal clamp_i32, clamp_i64_to_i32, store_pixel
+$space %internal clamp_i32, clamp_i64_to_i32, store_color_ptr
+$space %internal store_pixel, surface_fetch_pixel
 $space %internal fixed_to_u8, pack_color
 $space %internal setup_vertex_input, fetch_vertex, edge_fn, choose_shift
 $space %internal interp_slot, interp_delta_slot, shade_fragment
 $space %internal clear_row_16, clear_row_24, clear_row_32
 $space %internal raster_triangle
 $space %export srapi_raster_clear, srapi_raster_clear_rect
+$space %export srapi_raster_blit_surface
 $space %export srapi_raster_draw
 
 */
@@ -56,12 +59,33 @@ clamp_i64_to_i32(int64_t v)
 }
 
 static void
+store_color_ptr(uint8_t *dst, uint32_t bytes_pp, uint32_t color)
+{
+	uint32_t	r, g, b;
+	uint16_t	rgb565;
+
+	if (bytes_pp == 4) {
+		*(uint32_t *)(void *)dst = color;
+	} else if (bytes_pp == 3) {
+		dst[0] = (uint8_t)(color & 0xff);
+		dst[1] = (uint8_t)((color >> 8) & 0xff);
+		dst[2] = (uint8_t)((color >> 16) & 0xff);
+	} else if (bytes_pp == 2) {
+		r = (color >> 16) & 0xff;
+		g = (color >> 8) & 0xff;
+		b = color & 0xff;
+		rgb565 = (uint16_t)(((r >> 3) << 11) |
+		    ((g >> 2) << 5) | (b >> 3));
+		*(uint16_t *)(void *)dst = rgb565;
+	}
+}
+
+static void
 store_pixel(srapi_image_t *image, uint32_t x, uint32_t y, uint32_t color)
 {
 	uint8_t		*base;
 	uint64_t	offset;
-	uint32_t	bytes_pp, r, g, b;
-	uint16_t	rgb565;
+	uint32_t	bytes_pp;
 
 	if (!image || !image->pixels || x >= image->width ||
 	    y >= image->height) {
@@ -73,20 +97,21 @@ store_pixel(srapi_image_t *image, uint32_t x, uint32_t y, uint32_t color)
 	if (offset + bytes_pp > image->size) {
 		return;
 	}
-	if (bytes_pp == 4) {
-		*(uint32_t *)(base + offset) = color;
-	} else if (bytes_pp == 3) {
-		base[offset] = (uint8_t)(color & 0xff);
-		base[offset + 1] = (uint8_t)((color >> 8) & 0xff);
-		base[offset + 2] = (uint8_t)((color >> 16) & 0xff);
-	} else if (bytes_pp == 2) {
-		r = (color >> 16) & 0xff;
-		g = (color >> 8) & 0xff;
-		b = color & 0xff;
-		rgb565 = (uint16_t)(((r >> 3) << 11) |
-		    ((g >> 2) << 5) | (b >> 3));
-		*(uint16_t *)(base + offset) = rgb565;
+	store_color_ptr(base + offset, bytes_pp, color);
+}
+
+static uint32_t
+surface_fetch_pixel(const srapi_surface_t *surface, uint32_t x, uint32_t y)
+{
+	const uint8_t	*row;
+	uint8_t		index;
+
+	row = (const uint8_t *)surface->pixels + (size_t)y * surface->pitch;
+	if (surface->format == SRAPI_SURFACE_FORMAT_ARGB8888) {
+		return (((const uint32_t *)(const void *)row)[x]);
 	}
+	index = row[x];
+	return (surface->palette[index]);
 }
 
 static uint32_t
@@ -487,6 +512,105 @@ srapi_raster_clear(srapi_image_t *image, uint32_t color)
 	}
 	return (srapi_raster_clear_rect(image, 0, 0, image->width,
 	    image->height, color));
+}
+
+int
+srapi_raster_blit_surface(srapi_image_t *image, srapi_surface_t *surface,
+    const struct srapi_region *src_region,
+    const struct srapi_region *dst_region, uint32_t flags)
+{
+	struct srapi_region	src, dst, orig_dst;
+	uint8_t			*base, *dst_row;
+	uint32_t		*dst32;
+	uint32_t		bytes_pp, x, y, sx, sy, color;
+	uint64_t		x_start, x_step, x_fp, y_fp, y_step;
+
+	if (!image || !image->pixels || !surface || !surface->pixels) {
+		return (SRAPI_ERR_INVALID);
+	}
+	if (surface->device != image->device) {
+		return (SRAPI_ERR_INVALID);
+	}
+	if (flags & ~SRAPI_BLIT_NEAREST) {
+		return (SRAPI_ERR_UNSUPPORTED);
+	}
+	if (!src_region || src_region->width == 0 ||
+	    src_region->height == 0) {
+		src.x = 0;
+		src.y = 0;
+		src.width = surface->width;
+		src.height = surface->height;
+	} else {
+		src = *src_region;
+	}
+	if (src.x >= surface->width || src.y >= surface->height) {
+		return (SRAPI_OK);
+	}
+	if (src.width > surface->width - src.x) {
+		src.width = surface->width - src.x;
+	}
+	if (src.height > surface->height - src.y) {
+		src.height = surface->height - src.y;
+	}
+	if (src.width == 0 || src.height == 0) {
+		return (SRAPI_OK);
+	}
+	if (!dst_region || dst_region->width == 0 ||
+	    dst_region->height == 0) {
+		dst.x = 0;
+		dst.y = 0;
+		dst.width = image->width;
+		dst.height = image->height;
+	} else {
+		dst = *dst_region;
+	}
+	if (dst.x >= image->width || dst.y >= image->height ||
+	    dst.width == 0 || dst.height == 0) {
+		return (SRAPI_OK);
+	}
+	orig_dst = dst;
+	if (dst.width > image->width - dst.x) {
+		dst.width = image->width - dst.x;
+	}
+	if (dst.height > image->height - dst.y) {
+		dst.height = image->height - dst.y;
+	}
+	bytes_pp = image->bpp / 8;
+	if (bytes_pp != 2 && bytes_pp != 3 && bytes_pp != 4) {
+		return (SRAPI_ERR_UNSUPPORTED);
+	}
+	x_start = (((uint64_t)(dst.x - orig_dst.x) * src.width) << 16) /
+	    orig_dst.width;
+	x_step = ((uint64_t)src.width << 16) / orig_dst.width;
+	y_fp = (((uint64_t)(dst.y - orig_dst.y) * src.height) << 16) /
+	    orig_dst.height;
+	y_step = ((uint64_t)src.height << 16) / orig_dst.height;
+	base = (uint8_t *)image->pixels;
+	for (y = 0; y < dst.height; y++) {
+		sy = src.y + (uint32_t)(y_fp >> 16);
+		x_fp = x_start;
+		dst_row = base + (size_t)(dst.y + y) * image->pitch +
+		    (size_t)dst.x * bytes_pp;
+		if (bytes_pp == 4) {
+			dst32 = (uint32_t *)(void *)dst_row;
+			for (x = 0; x < dst.width; x++) {
+				sx = src.x + (uint32_t)(x_fp >> 16);
+				dst32[x] = surface_fetch_pixel(surface, sx, sy);
+				x_fp += x_step;
+			}
+		} else {
+			for (x = 0; x < dst.width; x++) {
+				sx = src.x + (uint32_t)(x_fp >> 16);
+				color = surface_fetch_pixel(surface, sx, sy);
+				store_color_ptr(dst_row + (size_t)x * bytes_pp,
+				    bytes_pp, color);
+				x_fp += x_step;
+			}
+		}
+		y_fp += y_step;
+	}
+	srapi_image_mark_dirty(image, dst.x, dst.y, dst.width, dst.height);
+	return (SRAPI_OK);
 }
 
 int
