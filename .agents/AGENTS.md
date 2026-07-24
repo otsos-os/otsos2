@@ -171,6 +171,10 @@ Monolithic kernel with the following rough layers:
 - Small native userspace archive library built on top of `libc/native`.
 - Currently exports `la_zip_extract()` for ZIP extraction.  Supported ZIP
   method is stored/no-compression only;
+
+### Native crypto library (`libc/LibCrypto`)
+
+- Small native userspace crypto library
 ### Dynamic linking support
 
 - The kernel already handles `PT_INTERP` in both `spawn.c` (`api_proc_spawn`)
