@@ -60,6 +60,9 @@ srapi_vm_run(const srapi_shader_t *shader, const int32_t *input,
 	if (!shader || !input || !push || !output) {
 		return (SRAPI_ERR_INVALID);
 	}
+	if (shader->cpu_entry) {
+		return (shader->cpu_entry(input, push, output));
+	}
 	memset(regs, 0, sizeof(regs));
 	for (pc = 0; pc < shader->code_count; pc++) {
 		inst = &shader->code[pc];

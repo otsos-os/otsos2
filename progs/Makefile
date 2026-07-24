@@ -55,11 +55,16 @@ MUSL_LIBC = $(MUSL_DIR)/lib/libc.a
 MUSL_CRT1 = $(MUSL_DIR)/lib/crt1.o
 NATIVE_DIR = ../libc/native
 LIBSRAPI_DIR = ../libc/LibSRAPI
+LIBELF_DIR = ../libc/LibELF
+LIBEMIT_DIR = ../libc/LibEmit
 NATIVE_LIBC = $(NATIVE_DIR)/lib/libc.a
 NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
 NATIVE_HDR = $(NATIVE_DIR)/include/native.h
 LIBSRAPI = $(LIBSRAPI_DIR)/lib/libsrapi.a
+LIBAS = $(TOOLCHAIN_AS_DIR)/lib/libas.a
+LIBELF = $(LIBELF_DIR)/lib/libelf.a
+LIBEMIT = $(LIBEMIT_DIR)/lib/libemit.a
 NATIVE_DYN_LDFLAGS = -m elf_x86_64 -pie --oformat=elf64-x86-64 \
                      -nostdlib -dynamic-linker /lib/drld \
                      --export-dynamic
@@ -95,6 +100,18 @@ $(LIBSRAPI): FORCE
 	@echo "  MAKE    LibSRAPI"
 	@$(MAKE) -C $(LIBSRAPI_DIR)
 
+$(LIBAS): FORCE
+	@echo "  MAKE    progs/toolchain/as"
+	@$(MAKE) -C $(TOOLCHAIN_AS_DIR)
+
+$(LIBELF): FORCE
+	@echo "  MAKE    LibELF"
+	@$(MAKE) -C $(LIBELF_DIR)
+
+$(LIBEMIT): FORCE
+	@echo "  MAKE    LibEmit"
+	@$(MAKE) -C $(LIBEMIT_DIR)
+
 $(SHELL_BIN): $(NATIVE_CRT0) $(SHELL_OBJS) $(NATIVE_SO)
 	@echo "  LLD      $@"
 	@$(LD) $(NATIVE_DYN_LDFLAGS) $(NATIVE_CRT0) $(SHELL_OBJS) \
@@ -115,10 +132,11 @@ $(CURSORD_BIN): $(NATIVE_CRT0) $(CURSORD_OBJS) $(NATIVE_SO)
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
-$(SRAPI_DEMO_BIN): $(NATIVE_CRT0) $(SRAPI_DEMO_OBJS) $(LIBSRAPI) $(NATIVE_SO)
+$(SRAPI_DEMO_BIN): $(NATIVE_CRT0) $(SRAPI_DEMO_OBJS) $(LIBSRAPI) \
+    $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO)
 	@echo "  LLD      $@"
 	@$(LD) $(NATIVE_DYN_LDFLAGS) $(NATIVE_CRT0) $(SRAPI_DEMO_OBJS) \
-	    $(LIBSRAPI) $(NATIVE_SO) -o $@
+	    $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO) -o $@
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 

@@ -34,6 +34,8 @@ $define %func emit_buf_write as function with args emit_buf *, const void *, siz
 $define %func emit_amd64_reg_parse as function with args const char *, int *
 $define %func emit_amd64_mov_imm64_reg as function with args emit_buf *, unsigned long, int
 $define %func emit_amd64_mov_reg_reg as function with args emit_buf *, int, int
+$define %func emit_amd64_mov_mem32_reg as function with args emit_buf *, int, int32, int
+$define %func emit_amd64_mov_reg_mem32 as function with args emit_buf *, int, int, int32
 $define %func emit_amd64_lea_rip_reg as function with args emit_buf *, int
 
 */
@@ -49,6 +51,8 @@ $space %export emit_amd64_nop, emit_amd64_hlt, emit_amd64_cli, emit_amd64_sti
 $space %export emit_amd64_iretq, emit_amd64_int_imm8
 $space %export emit_amd64_push_reg, emit_amd64_pop_reg
 $space %export emit_amd64_mov_imm64_reg, emit_amd64_mov_reg_reg
+$space %export emit_amd64_reg32_parse, emit_amd64_mov_mem32_reg
+$space %export emit_amd64_mov_reg_mem32
 $space %export emit_amd64_mov_rip_reg, emit_amd64_lea_rip_reg
 $space %export emit_amd64_xor_reg_reg, emit_amd64_test_reg_reg
 $space %export emit_amd64_add_imm_reg, emit_amd64_sub_imm_reg
@@ -102,6 +106,7 @@ int	emit_buf_i32(emit_buf *buf, int32_t value);
 int	emit_buf_align(emit_buf *buf, size_t align, uint8_t fill);
 
 int	emit_amd64_reg_parse(const char *name, int *out_reg);
+int	emit_amd64_reg32_parse(const char *name, int *out_reg);
 int	emit_amd64_ret(emit_buf *buf);
 int	emit_amd64_syscall(emit_buf *buf);
 int	emit_amd64_nop(emit_buf *buf);
@@ -114,6 +119,10 @@ int	emit_amd64_push_reg(emit_buf *buf, int reg);
 int	emit_amd64_pop_reg(emit_buf *buf, int reg);
 int	emit_amd64_mov_imm64_reg(emit_buf *buf, uint64_t imm, int reg);
 int	emit_amd64_mov_reg_reg(emit_buf *buf, int src, int dst);
+int	emit_amd64_mov_mem32_reg(emit_buf *buf, int base, int32_t disp,
+	    int dst);
+int	emit_amd64_mov_reg_mem32(emit_buf *buf, int src, int base,
+	    int32_t disp);
 int	emit_amd64_mov_rip_reg(emit_buf *buf, int dst);
 int	emit_amd64_lea_rip_reg(emit_buf *buf, int dst);
 int	emit_amd64_xor_reg_reg(emit_buf *buf, int src, int dst);

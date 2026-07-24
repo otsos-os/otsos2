@@ -12,6 +12,7 @@ $define %func srapiCreateInstance as function with args desc, out instance
 $define %func srapiCreateDevice as function with args instance, desc, out device
 $define %func srapiCreateBuffer as function with args device, desc, out buffer
 $define %func srapiCreateShader as function with args device, desc, out shader
+$define %func srapiComputeShader as function with args shader
 $define %func srapiCreatePipeline as function with args device, desc, out pipeline
 $define %func srapiCreateCommandBuffer as function with args device, out command buffer
 $define %func srapiSubmit as function with args command buffer
@@ -26,13 +27,14 @@ $space %export srapi_vm_inst, srapiCreateInstance, srapiDestroyInstance
 $space %export srapiCreateDevice, srapiDestroyDevice, srapiDeviceInfo
 $space %export srapiDeviceBackbuffer, srapiCreateBuffer, srapiDestroyBuffer
 $space %export srapiMapBuffer, srapiUnmapBuffer, srapiBufferWrite
-$space %export srapiCreateShader, srapiDestroyShader, srapiCreatePipeline
+$space %export srapiCreateShader, srapiComputeShader, srapiDestroyShader
+$space %export srapiCreatePipeline
 $space %export srapiDestroyPipeline, srapiCreateCommandBuffer
 $space %export srapiDestroyCommandBuffer, srapiCmdReset, srapiCmdBegin
-$space %export srapiCmdEnd, srapiCmdClearColor, srapiCmdBindPipeline
-$space %export srapiCmdBindVertexBuffer, srapiCmdPushConstants
-$space %export srapiCmdSetViewport, srapiCmdDraw, srapiCmdPresent
-$space %export srapiSubmit
+$space %export srapiCmdEnd, srapiCmdClearColor, srapiCmdClearRect
+$space %export srapiCmdBindPipeline, srapiCmdBindVertexBuffer
+$space %export srapiCmdPushConstants, srapiCmdSetViewport, srapiCmdDraw
+$space %export srapiCmdPresent, srapiSubmit
 
 */
 
@@ -243,6 +245,7 @@ int	srapiBufferWrite(srapi_buffer_t *buffer, size_t offset,
 
 int	srapiCreateShader(srapi_device_t *device,
 	    const struct srapi_shader_desc *desc, srapi_shader_t **out);
+int	srapiComputeShader(srapi_shader_t *shader);
 void	srapiDestroyShader(srapi_shader_t *shader);
 
 int	srapiCreatePipeline(srapi_device_t *device,
@@ -256,6 +259,8 @@ int	srapiCmdReset(srapi_cmd_buffer_t *cmd);
 int	srapiCmdBegin(srapi_cmd_buffer_t *cmd);
 int	srapiCmdEnd(srapi_cmd_buffer_t *cmd);
 int	srapiCmdClearColor(srapi_cmd_buffer_t *cmd, uint32_t color);
+int	srapiCmdClearRect(srapi_cmd_buffer_t *cmd, uint32_t x, uint32_t y,
+	    uint32_t width, uint32_t height, uint32_t color);
 int	srapiCmdBindPipeline(srapi_cmd_buffer_t *cmd,
 	    srapi_pipeline_t *pipeline);
 int	srapiCmdBindVertexBuffer(srapi_cmd_buffer_t *cmd,

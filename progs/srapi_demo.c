@@ -6,6 +6,8 @@ $define %func now_ms as function with args void
 $define %func color_cycle as function with args frame, phase
 $define %func write_vertices as procedure with args vertex array, frame
 $define %func create_demo_pipeline as function with args device, outputs
+$define %func add_clear_rect as function with args cmd, bounds, rect
+$define %func clear_demo_regions as function with args cmd, frame, bounds
 $define %func render_frame as function with args command state, frame
 $define %func main as start with args int, char **, char **
 
@@ -14,7 +16,8 @@ $define %func main as start with args int, char **, char **
 /* !SPACE!
 
 $space %internal sleep_ms, now_ms, color_cycle, write_vertices
-$space %internal create_demo_pipeline, render_frame
+$space %internal create_demo_pipeline, add_clear_rect, clear_demo_regions
+$space %internal render_frame
 $space %export main
 
 */
@@ -188,6 +191,14 @@ create_demo_pipeline(srapi_device_t *device, srapi_shader_t **vs,
 	if (ret != SRAPI_OK) {
 		return (ret);
 	}
+	ret = srapiComputeShader(*vs);
+	if (ret != SRAPI_OK && ret != SRAPI_ERR_UNSUPPORTED) {
+		return (ret);
+	}
+	ret = srapiComputeShader(*fs);
+	if (ret != SRAPI_OK && ret != SRAPI_ERR_UNSUPPORTED) {
+		return (ret);
+	}
 
 	memset(&pdesc, 0, sizeof(pdesc));
 	pdesc.vertex_shader = *vs;
@@ -205,8 +216,64 @@ create_demo_pipeline(srapi_device_t *device, srapi_shader_t **vs,
 }
 
 static int
+add_clear_rect(srapi_cmd_buffer_t *cmd, uint32_t screen_w, uint32_t screen_h,
+    uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t color)
+{
+	if (x >= screen_w || y >= screen_h || width == 0 || height == 0) {
+		return (SRAPI_OK);
+	}
+	if (width > screen_w - x) {
+		width = screen_w - x;
+	}
+	if (height > screen_h - y) {
+		height = screen_h - y;
+	}
+	return (srapiCmdClearRect(cmd, x, y, width, height, color));
+}
+
+static int
+clear_demo_regions(srapi_cmd_buffer_t *cmd, uint32_t frame,
+    uint32_t screen_w, uint32_t screen_h)
+{
+	uint32_t	bg;
+	uint32_t	x, y, w, h;
+	int	ret;
+
+	bg = 0xff101018U;
+	if (frame == 0 || screen_w < 16 || screen_h < 16) {
+		return (srapiCmdClearColor(cmd, bg));
+	}
+	x = screen_w / 10;
+	y = screen_h / 4;
+	if (x > 4) {
+		x -= 4;
+	}
+	if (y > 4) {
+		y -= 4;
+	}
+	w = screen_w / 3 + 8;
+	h = screen_h * 56 / 100 + 8;
+	ret = add_clear_rect(cmd, screen_w, screen_h, x, y, w, h, bg);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	x = screen_w * 3 / 5;
+	y = screen_h / 4;
+	if (x > 4) {
+		x -= 4;
+	}
+	if (y > 4) {
+		y -= 4;
+	}
+	w = screen_w * 37 / 100 + 8;
+	h = screen_h * 56 / 100 + 8;
+	return (add_clear_rect(cmd, screen_w, screen_h, x, y, w, h, bg));
+}
+
+static int
 render_frame(srapi_cmd_buffer_t *cmd, srapi_pipeline_t *pipeline,
-    srapi_buffer_t *vertices, uint32_t frame)
+    srapi_buffer_t *vertices, uint32_t frame, uint32_t screen_w,
+    uint32_t screen_h)
 {
 	int	ret;
 
@@ -214,7 +281,7 @@ render_frame(srapi_cmd_buffer_t *cmd, srapi_pipeline_t *pipeline,
 	if (ret != SRAPI_OK) {
 		return (ret);
 	}
-	ret = srapiCmdClearColor(cmd, 0xff101018U);
+	ret = clear_demo_regions(cmd, frame, screen_w, screen_h);
 	if (ret != SRAPI_OK) {
 		return (ret);
 	}
@@ -268,6 +335,7 @@ main(int argc, char **argv, char **envp)
 	memset(&idesc, 0, sizeof(idesc));
 	memset(&ddesc, 0, sizeof(ddesc));
 	memset(&bdesc, 0, sizeof(bdesc));
+	memset(&info, 0, sizeof(info));
 	instance = NULL;
 	device = NULL;
 	vs = NULL;
@@ -318,7 +386,8 @@ main(int argc, char **argv, char **envp)
 			printf("srapi_demo: upload failed %d\n", ret);
 			break;
 		}
-		ret = render_frame(cmd, pipeline, vertex_buffer, frame);
+		ret = render_frame(cmd, pipeline, vertex_buffer, frame,
+		    info.width, info.height);
 		if (ret != SRAPI_OK) {
 			printf("srapi_demo: render failed %d\n", ret);
 			break;

@@ -3,11 +3,14 @@
 $define %type srapi_rect as dirty rectangle
 $define %type srapi_vertex_out as post vertex shader data
 $define %type srapi_cmd_record as recorded command
+$define %type srapi_shader_cpu_fn as compiled shader entry point
 $define %func srapi_image_mark_dirty as procedure with args image, rect
 $define %func srapi_backend_present as function with args device, image
 $define %func srapi_backend_unbind as function with args device, image
+$define %func srapiComputeShader as function with args shader
 $define %func srapi_vm_run as function with args shader, input, push, output
 $define %func srapi_raster_clear as function with args image, color
+$define %func srapi_raster_clear_rect as function with args image, rect, color
 $define %func srapi_raster_draw as function with args draw state
 
 */
@@ -15,9 +18,11 @@ $define %func srapi_raster_draw as function with args draw state
 /* !SPACE!
 
 $space %internal srapi_rect, srapi_vertex_out, srapi_cmd_record
+$space %internal srapi_shader_cpu_fn
 $space %internal srapi_image_mark_dirty, srapi_backend_present
-$space %internal srapi_backend_unbind, srapi_vm_run
-$space %internal srapi_raster_clear, srapi_raster_draw
+$space %internal srapi_backend_unbind, srapiComputeShader, srapi_vm_run
+$space %internal srapi_raster_clear, srapi_raster_clear_rect
+$space %internal srapi_raster_draw
 
 */
 
@@ -34,6 +39,10 @@ $space %internal srapi_raster_clear, srapi_raster_draw
 #include <stdint.h>
 
 #define SRAPI_CMD_INITIAL_CAP	32
+#define SRAPI_SHADER_CPU_COMPILED 0x00000001
+
+typedef int (*srapi_shader_cpu_fn)(const int32_t *input,
+    const int32_t *push, int32_t *output);
 
 enum srapi_cmd_type {
 	SRAPI_CMD_CLEAR = 1,
@@ -88,8 +97,12 @@ struct srapi_buffer {
 struct srapi_shader {
 	srapi_device_t			*device;
 	struct srapi_vm_inst		*code;
+	void				*cpu_code;
+	srapi_shader_cpu_fn		cpu_entry;
+	size_t				cpu_code_size;
 	uint32_t			stage;
 	uint32_t			code_count;
+	uint32_t			cpu_flags;
 };
 
 struct srapi_pipeline {
@@ -107,6 +120,11 @@ struct srapi_cmd_record {
 	union {
 		struct {
 			uint32_t	color;
+			uint32_t	x;
+			uint32_t	y;
+			uint32_t	width;
+			uint32_t	height;
+			int		rect_valid;
 		} clear;
 		struct {
 			srapi_pipeline_t *pipeline;
@@ -148,9 +166,12 @@ void	srapi_image_mark_dirty(srapi_image_t *image, uint32_t x,
 	    uint32_t y, uint32_t width, uint32_t height);
 int	srapi_backend_present(srapi_device_t *device, srapi_image_t *image);
 int	srapi_backend_unbind(srapi_device_t *device, srapi_image_t *image);
+int	srapiComputeShader(srapi_shader_t *shader);
 int	srapi_vm_run(const srapi_shader_t *shader, const int32_t *input,
 	    const int32_t *push, int32_t *output);
 int	srapi_raster_clear(srapi_image_t *image, uint32_t color);
+int	srapi_raster_clear_rect(srapi_image_t *image, uint32_t x, uint32_t y,
+	    uint32_t width, uint32_t height, uint32_t color);
 int	srapi_raster_draw(srapi_device_t *device, srapi_image_t *image,
 	    srapi_pipeline_t *pipeline, const struct srapi_viewport *viewport,
 	    srapi_buffer_t *vertex_buffer, uint32_t first_vertex,

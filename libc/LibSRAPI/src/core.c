@@ -311,6 +311,9 @@ srapiDestroyShader(srapi_shader_t *shader)
 	if (!shader) {
 		return;
 	}
+	if (shader->cpu_code && shader->cpu_code_size != 0) {
+		(void)memUnmap(shader->cpu_code, shader->cpu_code_size);
+	}
 	free(shader->code);
 	free(shader);
 }

@@ -1,17 +1,17 @@
 [2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[UEFI] OTSOS UEFI loader
-[UEFI] bootpack 0x02730800 bytes
+[UEFI] bootpack 0x02738000 bytes
 [UEFI] ACPI RSDP 0x6117e014
 [UEFI] module cat 0x000020c8 bytes
 [UEFI] module lua 0x0010adc8 bytes
 [UEFI] module dhcpc 0x000017f8 bytes
 [UEFI] module pwd 0x00001dd0 bytes
 [UEFI] module yes 0x00001778 bytes
-[UEFI] module ld 0x000077d8 bytes
+[UEFI] module ld 0x000080e8 bytes
 [UEFI] module cp 0x000021e0 bytes
 [UEFI] module drld 0x00007570 bytes
 [UEFI] module cursord 0x00001c98 bytes
 [UEFI] module profile 0x00005ab0 bytes
-[UEFI] module srapi_demo 0x00005070 bytes
+[UEFI] module srapi_demo 0x0000c970 bytes
 [UEFI] module unzip 0x00003220 bytes
 [UEFI] module init 0x00001658 bytes
 [UEFI] module python-stdlib 0x00a1e366 bytes
@@ -25,7 +25,7 @@
 [UEFI] module ls 0x00002058 bytes
 [UEFI] module oven 0x00004b38 bytes
 [UEFI] module cmseed 0x00001a81 bytes
-[UEFI] module as 0x00008758 bytes
+[UEFI] module as 0x00009608 bytes
 [UEFI] module posix_hello 0x00001788 bytes
 [UEFI] module tcp_echo 0x00005d10 bytes
 [UEFI] module udp_echo 0x00005e30 bytes
@@ -38,19 +38,19 @@
 [UEFI] module musl_test 0x00032f28 bytes
 [UEFI] exit boot services
 [UEFI] kernel entry 0x00100030
-[BOOTMEM] initialized: 5 ranges, free=1521000 KB
+[BOOTMEM] initialized: 5 ranges, free=1520972 KB
 Heap initialized at 0xffffffff80460000 header size: 40
 free block size: 8388568
 [driver] [HIVEFS] loaded cmseed: 5 hives, 6785 bytes
 [driver] [CM] registry ready
 [driver] [EVENTTIMER] registered "i8254" frequency 1193182 Hz quality 100
 [PMAP] Initialized. CR3: 0x102000
-[RAMDISK] pool allocated: 39821312 bytes at 0xffffffff80c60000
-[KMEM] growth pool set: 0xffffffff8325a000 size=23068672
-[VM_PAGE] initialized: 359304 pages from bootmem (14173 KB metadata)
+[RAMDISK] pool allocated: 39858176 bytes at 0xffffffff80c60000
+[KMEM] growth pool set: 0xffffffff83263000 size=23068672
+[VM_PAGE] initialized: 359288 pages from bootmem (14173 KB metadata)
 [LAPIC] id=0 ver=20 base=0x0xfee00000
 [driver] [TIMER] using event timer "i8254" at 1000 Hz
-[driver] [RTC] CMOS time: 2026-7-24 2:39:54 (epoch 1784860794)
+[driver] [RTC] CMOS time: 2026-7-24 3:2:55 (epoch 1784862175)
 [TIME] timezone offset: 3 hours
 [TIME] initialized, waiting for clocksource
 [TIMECOUNTER] registered et_timer_ticks: freq=1000 Hz, quality=100
@@ -61,8 +61,8 @@ free block size: 8388568
 [TRACE] CPU 0 ring: 1024 records, 200 KB
 [TRACE] enabled sources=0x7f ring=1024 sample_ticks=10
 [LAPIC] calibrating via pit timer...
-[LAPIC] calibrated freq=7726960 Hz
-[driver] [EVENTTIMER] registered "LAPIC" frequency 7726960 Hz quality 1000
+[LAPIC] calibrated freq=7659920 Hz
+[driver] [EVENTTIMER] registered "LAPIC" frequency 7659920 Hz quality 1000
 [driver] [APIC] switching to lapic timer 1000 with hz  1000
 [driver] [TIMER] using event timer "LAPIC" at 1000 Hz
 [SYSCALL] syscall/sysret initialized
@@ -80,8 +80,8 @@ free block size: 8388568
 [RNG] initializing ChaCha20-DRBG...
 [RNG] CSPRNG ready (pool=256 bytes, reseed threshold=1048576 bytes)
 [driver] [DISK] Disk manager initialized
-[driver] [DISK] Registered disk 0: ramdisk0 (Type: 2, Sectors: 274384)
-[driver] [RAMDISK] Initialized: pool 39821312 bytes (9722 blocks), grow 100663296 bytes (24576 blocks), 274384 sectors max
+[driver] [DISK] Registered disk 0: ramdisk0 (Type: 2, Sectors: 274456)
+[driver] [RAMDISK] Initialized: pool 39858176 bytes (9731 blocks), grow 100663296 bytes (24576 blocks), 274456 sectors max
 boot from mb2 (magic: 0x36d76289)
 Tag type: 2, size: 30 (BOOT_LOADER_NAME)
 Tag type: 4, size: 16 (BASIC_MEMINFO)
@@ -142,11 +142,11 @@ Tag type: 3, size: 26 (other)
 [PMAP] Initialized. CR3: 0x102000
 [SYSCALL] syscall/sysret initialized
 [TRACE] CPU 1 ring: 1024 records, 200 KB
-[LAPIC] AP timer started count=7726
-[SMP] with ap  1 1 init succesful ,tss at 0xffffffff804cf3e8
-[SMP] AP 1 online
+[LAPIC] AP timer started count=7659
+[SM[PS] MPw]it hA P ap1  o 1nl i1n ien
+it succesful ,tss at 0xffffffff804cf3e8
 CPU: Intel(R) Core(TM) i5-10300H CPU @ 2.50GHz
-RAM: 1489 MB (1525092 KB)
+RAM: 1489 MB (1525064 KB)
 [driver] [POWER] ACPI reset register available at 0x4050
 [driver] [POWER] DSDT at 0x6117a000, length 9043
 [driver] [POWER] found _S5_ at DSDT offset 8960
@@ -204,16 +204,16 @@ kmem heap                       idt                             timer           
 ps/2 mouse                      [driver] ChainFS: Initializing... (g_chainfs at 0xffffffff801b9c20, disk: ramdisk0)
 [driver] ChainFS: Invalid magic number 0x0, expected 0xcafebabe
 chainfs init                    [CHAINFS] init failed, formatting disk...
-[driver] ChainFS: Formatting disk with 274384 blocks, 4096 max files
+[driver] ChainFS: Formatting disk with 274456 blocks, 4096 max files
 [driver] ChainFS: Format complete
 [driver] ChainFS: Initializing... (g_chainfs at 0xffffffff801b9c20, disk: ramdisk0)
 [CHAINFS] magic overwritten by memcpy at 0xffffffff801b9c20 len=512 ra=0xffffffff8012b37f
 [driver] [CHAINFS] g_chainfs phys=0x1b9c20
 [driver] ChainFS: Initialized successfully
-[driver]   Total blocks: 274384
+[driver]   Total blocks: 274456
 [driver]   File table blocks: 512
-[driver]   Block map blocks: 2140
-[driver]   Data area start: 2653
+[driver]   Block map blocks: 2141
+[driver]   Data area start: 2654
 [driver]   Root directory block: 0
 chainfs format                  chainfs ready                   [driver] [DEVFS] mounted at /dev (8 devices, RAM-backed)
 [driver] [VFS] backends mounted: / chainfs, /dev devfs
@@ -235,7 +235,7 @@ cm registry                     [USERSPACE] Initializing userspace subsystem...
 [API] Initializing handle tables at 0xffffffff801dd300
 [IPC] initialized: 32 services, 64 sessions/service
 [driver] ChainFS: Created directory: /bin
-[KERNEL] Installed /bin/as from module 'as' (34648 bytes)
+[KERNEL] Installed /bin/as from module 'as' (38408 bytes)
 [driver] ChainFS: Directory already exists: /bin
 [KERNEL] Installed /bin/cat from module 'cat' (8392 bytes)
 [driver] ChainFS: Directory already exists: /bin
@@ -253,7 +253,7 @@ cm registry                     [USERSPACE] Initializing userspace subsystem...
 [driver] ChainFS: Directory already exists: /bin
 [KERNEL] Installed /bin/init from module 'init' (5720 bytes)
 [driver] ChainFS: Directory already exists: /bin
-[KERNEL] Installed /bin/ld from module 'ld' (30680 bytes)
+[KERNEL] Installed /bin/ld from module 'ld' (33000 bytes)
 [driver] ChainFS: Directory already exists: /lib
 [KERNEL] Installed /lib/ld-musl-x86_64.so.1 from module 'ld-musl' (3015392 bytes)
 [driver] ChainFS: Directory already exists: /bin
@@ -291,7 +291,7 @@ cm registry                     [USERSPACE] Initializing userspace subsystem...
 [driver] ChainFS: Directory already exists: /bin
 [KERNEL] Installed /bin/sh from module 'sh' (21456 bytes)
 [driver] ChainFS: Directory already exists: /bin
-[KERNEL] Installed /bin/srapi_demo from module 'srapi_demo' (20592 bytes)
+[KERNEL] Installed /bin/srapi_demo from module 'srapi_demo' (51568 bytes)
 [driver] ChainFS: Directory already exists: /bin
 [KERNEL] Installed /bin/tcp_echo from module 'tcp_echo' (23824 bytes)
 [driver] ChainFS: Directory already exists: /bin
@@ -305,19 +305,22 @@ cm registry                     [USERSPACE] Initializing userspace subsystem...
 [driver] ChainFS: Directory already exists: /bin
 [KERNEL] Installed /bin/yes from module 'yes' (6008 bytes)
 [KUSR] Initializing...
-[KERNEL] Found init module at 0x5c0df600, size 5720. Starting init...
+[KERNEL] Found init module at 0x5c0e0800, size 5720. Starting init...
 [USERSPACE] Loading init process from module...
-[USERSPACE] Module at 0x5c0df600, size 5720 bytes
+[USERSPACE] Module at 0x5c0e0800, size 5720 bytes
 [USERSPACE] Loading ELF process 'init' (5720 bytes)
 [ELF] Loading segment: vaddr=0x400000 filesz=901 memsz=901 flags=5
 [ELF] Loading segment: vaddr=0x400390 filesz=193 memsz=193 flags=4
 [ELF] main loaded: entry=0x400000 phdr=0x3ff040 phnum=3 interp_len=0 data=[0x0, 0x0)
 [SCHED] PID 1 preferred_cpu=0
-[THREAD] Created thread tid=1 
+[THREAD] Created thread tid=1 for PID 1 rip=0x400000
+[USERSPACE] Created process 'init' (PID 1)
+[USERSPACE]   Entry: 0x400000
+[U
 Hello init (event-driven)
 [EVENT] Created kqueue idx=0 owner_pid=1
 [EVENT] added knote ident=0 filter=-1
-Enter program path (relative, e.g. hello): wh  /bin/sh
+Enter program path (relative, e.g. hello): /bin/sh
 [ELF] Loading segment: vaddr=0x400000 filesz=6030 memsz=6030 flags=4
 [ELF] Loading segment: vaddr=0x402790 filesz=10832 memsz=10832 flags=5
 [ELF] Loading segment: vaddr=0x4061e0 filesz=224 memsz=3616 flags=6
@@ -331,18 +334,18 @@ Enter program path (relative, e.g. hello): wh  /bin/sh
 [SCHED] PID 2 preferred_cpu=1
 [THREAD] Created thread tid=2 for PID 2 rip=0x40000000
 [SPAWN] Created 'sh' (PID 2) from '/bin/sh'
+[SYSCALL] PID 2 personality: 1 -> 0
 [EVFILT_PROC] attach: monitoring pid=2
 [EVENT] added knote ident=2 filter=-4
-[SYSCALL] PID 2 personality: 1 -> 0
 [SYSCALL] PID 2 personality: 0 -> 0
 otsos2 shell (sh) - type 'help' for commands
-/ $ whoami
-whoami
-[ELF] Loading segment: vaddr=0x400000 filesz=2836 memsz=2836 flags=4
-[ELF] Loading segment: vaddr=0x401b20 filesz=2240 memsz=2240 flags=5
-[ELF] Loading segment: vaddr=0x4033e0 filesz=280 memsz=3104 flags=6
-[ELF] Loading segment: vaddr=0x4044f8 filesz=112 memsz=112 flags=6
-[ELF] main loaded: entry=0x401b20 phdr=0x400040 phnum=9 interp_len=10 data=[0x403000, 0x405000)
+/ $ srapi_demo
+srapi_demo
+[ELF] Loading segment: vaddr=0x400000 filesz=9044 memsz=9044 flags=4
+[ELF] Loading segment: vaddr=0x403360 filesz=34944 memsz=34944 flags=5
+[ELF] Loading segment: vaddr=0x40cbe0 filesz=280 memsz=1056 flags=6
+[ELF] Loading segment: vaddr=0x40dcf8 filesz=280 memsz=280 flags=6
+[ELF] main loaded: entry=0x403360 phdr=0x400040 phnum=9 interp_len=10 data=[0x40c000, 0x40e000)
 [SPAWN] PT_INTERP '/lib/drld'
 [ELF] Loading segment: vaddr=0x40000000 filesz=18650 memsz=18650 flags=5
 [ELF] Loading segment: vaddr=0x400048e0 filesz=1348 memsz=1348 flags=4
@@ -350,136 +353,214 @@ whoami
 [ELF] loaded interp: base=0x0 entry=0x40000000
 [SCHED] PID 3 preferred_cpu=0
 [THREAD] Created thread tid=3 for PID 3 rip=0x40000000
-[SPAWN] Created 'whoami' (PID 3) from '/bin/whoami'
+[SPAWN] Created 'srapi_demo' (PID 3) from '/bin/srapi_demo'
 [SYSCALL] PID 3 personality: 1 -> 0
-user
-[PROC] Process 'whoami' (PID 3) exited with code 0
-/ $ srapi_demo
-srapi_demo
-[ELF] Loading segment: vaddr=0x400000 filesz=4700 memsz=4700 flags=4
-[ELF] Loading segment: vaddr=0x402260 filesz=11280 memsz=11280 flags=5
-[ELF] Loading segment: vaddr=0x405e70 filesz=224 memsz=400 flags=6
-[ELF] Loading segment: vaddr=0x406f50 filesz=200 memsz=200 flags=6
-[ELF] main loaded: entry=0x402260 phdr=0x400040 phnum=9 interp_len=10 data=[0x405000, 0x408000)
-[SPAWN] PT_INTERP '/lib/drld'
-[ELF] Loading segment: vaddr=0x40000000 filesz=18650 memsz=18650 flags=5
-[ELF] Loading segment: vaddr=0x400048e0 filesz=1348 memsz=1348 flags=4
-[ELF] Loading segment: vaddr=0x40004e28 filesz=192 memsz=33800 flags=6
-[ELF] loaded interp: base=0x0 entry=0x40000000
-[SCHED] PID 4 preferred_cpu=1
-[THREAD] Created thread tid=4 for PID 4 rip=0x40000000
-[SPAWN] Created 'srapi_demo' (PID 4) from '/bin/srapi_demo'
-[SYSCALL] PID 4 personality: 1 -> 0
-[SYSCALL] PID 4 personality: 0 -> 0
+[SYSCALL] PID 3 personality: 0 -> 0
 srapi_demo: 1024x768 32bpp driver=fbdev
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
-[EVENT] Created kqueue idx=1 owner_pid=4
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
+[EVFILT_TIMER] attach: ident=1 period=50 ticks
+[EVENT] added knote ident=1 filter=-3
+[EVENT] Destroyed kqueue idx=1
+[EVENT] Created kqueue idx=1 owner_pid=3
 [EVFILT_TIMER] attach: ident=1 period=50 ticks
 [EVENT] added knote ident=1 filter=-3
 [EVENT] Destroyed kqueue idx=1
 srapi_demo: done
-[PROC] Process 'srapi_demo' (PID 4) exited with code 0
+[PROC] Process 'srapi_demo' (PID 3) exited with code 0
 / $ 

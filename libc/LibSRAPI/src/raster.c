@@ -2,16 +2,21 @@
 
 $define %type srapi_vertex_out as transformed vertex data
 $define %func srapi_raster_clear as function with args image, color
+$define %func srapi_raster_clear_rect as function with args image, rect, color
 $define %func srapi_raster_draw as function with args draw state
 
 */
 
 /* !SPACE!
 
-$space %internal clamp_i32, store_pixel, fixed_to_u8, pack_color
+$space %internal clamp_i32, clamp_i64_to_i32, store_pixel
+$space %internal fixed_to_u8, pack_color
 $space %internal setup_vertex_input, fetch_vertex, edge_fn, choose_shift
-$space %internal interp_slot, shade_fragment, raster_triangle
-$space %export srapi_raster_clear, srapi_raster_draw
+$space %internal interp_slot, interp_delta_slot, shade_fragment
+$space %internal clear_row_16, clear_row_24, clear_row_32
+$space %internal raster_triangle
+$space %export srapi_raster_clear, srapi_raster_clear_rect
+$space %export srapi_raster_draw
 
 */
 
@@ -36,6 +41,18 @@ clamp_i32(int32_t v, int32_t lo, int32_t hi)
 		return (hi);
 	}
 	return (v);
+}
+
+static int32_t
+clamp_i64_to_i32(int64_t v)
+{
+	if (v > 2147483647LL) {
+		return (2147483647);
+	}
+	if (v < (-2147483647LL - 1LL)) {
+		return ((int32_t)(-2147483647LL - 1LL));
+	}
+	return ((int32_t)v);
 }
 
 static void
@@ -238,6 +255,21 @@ interp_slot(const struct srapi_vertex_out *v0,
 	return ((int32_t)(r / a));
 }
 
+static int32_t
+interp_delta_slot(const struct srapi_vertex_out *v0,
+    const struct srapi_vertex_out *v1, const struct srapi_vertex_out *v2,
+    uint32_t slot, int64_t dw0, int64_t dw1, int64_t dw2, int64_t area)
+{
+	int64_t	r;
+
+	if (area == 0) {
+		return (0);
+	}
+	r = (int64_t)v0->io[slot] * dw0 + (int64_t)v1->io[slot] * dw1 +
+	    (int64_t)v2->io[slot] * dw2;
+	return (clamp_i64_to_i32(r / area));
+}
+
 static uint32_t
 shade_fragment(srapi_pipeline_t *pipeline, const int32_t *input)
 {
@@ -260,7 +292,11 @@ raster_triangle(srapi_image_t *image, srapi_pipeline_t *pipeline,
     const struct srapi_vertex_out *v2)
 {
 	int32_t	input[SRAPI_VM_IO_SLOTS];
-	int64_t	area, w0, w1, w2;
+	int32_t	row_io[SRAPI_VM_IO_SLOTS];
+	int32_t	dx_io[SRAPI_VM_IO_SLOTS];
+	int32_t	dy_io[SRAPI_VM_IO_SLOTS];
+	int64_t	area, w0, w1, w2, row_w0, row_w1, row_w2;
+	int64_t	w0dx, w1dx, w2dx, w0dy, w1dy, w2dy;
 	int32_t	minx, miny, maxx, maxy, px, py;
 	int32_t	x, y;
 	uint32_t shift, slot, color;
@@ -283,57 +319,174 @@ raster_triangle(srapi_image_t *image, srapi_pipeline_t *pipeline,
 	    (int32_t)image->width - 1);
 	maxy = clamp_i32((maxy + SRAPI_FIXED_ONE - 1) >> 16, 0,
 	    (int32_t)image->height - 1);
+	px = (minx << 16) + (SRAPI_FIXED_ONE / 2);
+	py = (miny << 16) + (SRAPI_FIXED_ONE / 2);
+	w0 = edge_fn(v1->sx, v1->sy, v2->sx, v2->sy, px, py);
+	w1 = edge_fn(v2->sx, v2->sy, v0->sx, v0->sy, px, py);
+	w2 = edge_fn(v0->sx, v0->sy, v1->sx, v1->sy, px, py);
+	w0dx = (int64_t)(v2->sy - v1->sy) * SRAPI_FIXED_ONE;
+	w1dx = (int64_t)(v0->sy - v2->sy) * SRAPI_FIXED_ONE;
+	w2dx = (int64_t)(v1->sy - v0->sy) * SRAPI_FIXED_ONE;
+	w0dy = -(int64_t)(v2->sx - v1->sx) * SRAPI_FIXED_ONE;
+	w1dy = -(int64_t)(v0->sx - v2->sx) * SRAPI_FIXED_ONE;
+	w2dy = -(int64_t)(v1->sx - v0->sx) * SRAPI_FIXED_ONE;
+	if (area < 0) {
+		area = -area;
+		w0 = -w0;
+		w1 = -w1;
+		w2 = -w2;
+		w0dx = -w0dx;
+		w1dx = -w1dx;
+		w2dx = -w2dx;
+		w0dy = -w0dy;
+		w1dy = -w1dy;
+		w2dy = -w2dy;
+	}
 	shift = choose_shift(area);
+	for (slot = 0; slot < SRAPI_VM_IO_SLOTS; slot++) {
+		row_io[slot] = interp_slot(v0, v1, v2, slot, w0, w1, w2,
+		    area, shift);
+		dx_io[slot] = interp_delta_slot(v0, v1, v2, slot, w0dx,
+		    w1dx, w2dx, area);
+		dy_io[slot] = interp_delta_slot(v0, v1, v2, slot, w0dy,
+		    w1dy, w2dy, area);
+	}
 
+	row_w0 = w0;
+	row_w1 = w1;
+	row_w2 = w2;
 	for (y = miny; y <= maxy; y++) {
+		memcpy(input, row_io, sizeof(input));
+		w0 = row_w0;
+		w1 = row_w1;
+		w2 = row_w2;
 		for (x = minx; x <= maxx; x++) {
-			px = (x << 16) + (SRAPI_FIXED_ONE / 2);
-			py = (y << 16) + (SRAPI_FIXED_ONE / 2);
-			w0 = edge_fn(v1->sx, v1->sy, v2->sx, v2->sy,
-			    px, py);
-			w1 = edge_fn(v2->sx, v2->sy, v0->sx, v0->sy,
-			    px, py);
-			w2 = edge_fn(v0->sx, v0->sy, v1->sx, v1->sy,
-			    px, py);
-			if (area < 0) {
-				w0 = -w0;
-				w1 = -w1;
-				w2 = -w2;
+			if (w0 >= 0 && w1 >= 0 && w2 >= 0) {
+				input[SRAPI_IO_PIXEL_X] = x << 16;
+				input[SRAPI_IO_PIXEL_Y] = y << 16;
+				color = shade_fragment(pipeline, input);
+				store_pixel(image, (uint32_t)x, (uint32_t)y,
+				    color);
 			}
-			if (w0 < 0 || w1 < 0 || w2 < 0) {
-				continue;
-			}
-			memset(input, 0, sizeof(input));
+			w0 += w0dx;
+			w1 += w1dx;
+			w2 += w2dx;
 			for (slot = 0; slot < SRAPI_VM_IO_SLOTS; slot++) {
-				input[slot] = interp_slot(v0, v1, v2, slot,
-				    w0, w1, w2, area < 0 ? -area : area,
-				    shift);
+				input[slot] += dx_io[slot];
 			}
-			input[SRAPI_IO_PIXEL_X] = x << 16;
-			input[SRAPI_IO_PIXEL_Y] = y << 16;
-			color = shade_fragment(pipeline, input);
-			store_pixel(image, (uint32_t)x, (uint32_t)y, color);
+		}
+		row_w0 += w0dy;
+		row_w1 += w1dy;
+		row_w2 += w2dy;
+		for (slot = 0; slot < SRAPI_VM_IO_SLOTS; slot++) {
+			row_io[slot] += dy_io[slot];
 		}
 	}
 	srapi_image_mark_dirty(image, (uint32_t)minx, (uint32_t)miny,
 	    (uint32_t)(maxx - minx + 1), (uint32_t)(maxy - miny + 1));
 }
 
+static void
+clear_row_32(uint8_t *row, uint32_t width, uint32_t color)
+{
+	uint32_t	x;
+	uint32_t	*dst;
+
+	dst = (uint32_t *)(void *)row;
+	for (x = 0; x < width; x++) {
+		dst[x] = color;
+	}
+}
+
+static void
+clear_row_24(uint8_t *row, uint32_t width, uint32_t color)
+{
+	uint32_t	x;
+
+	for (x = 0; x < width; x++) {
+		row[x * 3] = (uint8_t)(color & 0xff);
+		row[x * 3 + 1] = (uint8_t)((color >> 8) & 0xff);
+		row[x * 3 + 2] = (uint8_t)((color >> 16) & 0xff);
+	}
+}
+
+static void
+clear_row_16(uint8_t *row, uint32_t width, uint32_t color)
+{
+	uint32_t	x, r, g, b;
+	uint16_t	rgb565;
+	uint16_t	*dst;
+
+	r = (color >> 16) & 0xff;
+	g = (color >> 8) & 0xff;
+	b = color & 0xff;
+	rgb565 = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+	dst = (uint16_t *)(void *)row;
+	for (x = 0; x < width; x++) {
+		dst[x] = rgb565;
+	}
+}
+
+int
+srapi_raster_clear_rect(srapi_image_t *image, uint32_t x, uint32_t y,
+    uint32_t width, uint32_t height, uint32_t color)
+{
+	uint8_t		*base, *first, *row;
+	uint64_t	offset;
+	uint32_t	bytes_pp, endx, endy, yy, row_bytes;
+
+	if (!image || !image->pixels || width == 0 || height == 0) {
+		return (SRAPI_ERR_INVALID);
+	}
+	if (x >= image->width || y >= image->height) {
+		return (SRAPI_OK);
+	}
+	endx = x + width;
+	endy = y + height;
+	if (endx > image->width || endx < x) {
+		endx = image->width;
+	}
+	if (endy > image->height || endy < y) {
+		endy = image->height;
+	}
+	width = endx - x;
+	height = endy - y;
+	bytes_pp = image->bpp / 8;
+	row_bytes = width * bytes_pp;
+	offset = (uint64_t)y * image->pitch + (uint64_t)x * bytes_pp;
+	if (offset + row_bytes > image->size) {
+		return (SRAPI_ERR_RANGE);
+	}
+	base = (uint8_t *)image->pixels;
+	first = base + offset;
+	if (bytes_pp == 4) {
+		clear_row_32(first, width, color);
+	} else if (bytes_pp == 3) {
+		clear_row_24(first, width, color);
+	} else if (bytes_pp == 2) {
+		clear_row_16(first, width, color);
+	} else {
+		return (SRAPI_ERR_UNSUPPORTED);
+	}
+	for (yy = 1; yy < height; yy++) {
+		row = first + (uint64_t)yy * image->pitch;
+		if ((uint64_t)(row - base) + row_bytes > image->size) {
+			return (SRAPI_ERR_RANGE);
+		}
+		memcpy(row, first, row_bytes);
+	}
+	srapi_image_mark_dirty(image, x, y, width, height);
+	return (SRAPI_OK);
+}
+
 int
 srapi_raster_clear(srapi_image_t *image, uint32_t color)
 {
-	uint32_t	x, y;
-
-	if (!image || !image->pixels) {
+	if (!image) {
 		return (SRAPI_ERR_INVALID);
 	}
-	for (y = 0; y < image->height; y++) {
-		for (x = 0; x < image->width; x++) {
-			store_pixel(image, x, y, color);
-		}
-	}
-	srapi_image_mark_dirty(image, 0, 0, image->width, image->height);
-	return (SRAPI_OK);
+	return (srapi_raster_clear_rect(image, 0, 0, image->width,
+	    image->height, color));
 }
 
 int

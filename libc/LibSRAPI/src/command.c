@@ -2,6 +2,7 @@
 
 $define %type srapi_cmd_buffer as command recording buffer
 $define %func srapiCmdBegin as function with args command buffer
+$define %func srapiCmdClearRect as function with args command buffer, rect, color
 $define %func srapiCmdDraw as function with args command buffer, draw range
 $define %func srapiSubmit as function with args command buffer
 
@@ -11,10 +12,10 @@ $define %func srapiSubmit as function with args command buffer
 
 $space %internal cmd_reserve, cmd_append
 $space %export srapiCmdReset, srapiCmdBegin, srapiCmdEnd
-$space %export srapiCmdClearColor, srapiCmdBindPipeline
-$space %export srapiCmdBindVertexBuffer, srapiCmdPushConstants
-$space %export srapiCmdSetViewport, srapiCmdDraw, srapiCmdPresent
-$space %export srapiSubmit
+$space %export srapiCmdClearColor, srapiCmdClearRect
+$space %export srapiCmdBindPipeline, srapiCmdBindVertexBuffer
+$space %export srapiCmdPushConstants, srapiCmdSetViewport, srapiCmdDraw
+$space %export srapiCmdPresent, srapiSubmit
 
 */
 
@@ -115,6 +116,31 @@ srapiCmdClearColor(srapi_cmd_buffer_t *cmd, uint32_t color)
 	}
 	rec->type = SRAPI_CMD_CLEAR;
 	rec->u.clear.color = color;
+	rec->u.clear.rect_valid = 0;
+	return (SRAPI_OK);
+}
+
+int
+srapiCmdClearRect(srapi_cmd_buffer_t *cmd, uint32_t x, uint32_t y,
+    uint32_t width, uint32_t height, uint32_t color)
+{
+	struct srapi_cmd_record	*rec;
+	int			ret;
+
+	if (width == 0 || height == 0) {
+		return (SRAPI_ERR_INVALID);
+	}
+	ret = cmd_append(cmd, &rec);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	rec->type = SRAPI_CMD_CLEAR;
+	rec->u.clear.color = color;
+	rec->u.clear.x = x;
+	rec->u.clear.y = y;
+	rec->u.clear.width = width;
+	rec->u.clear.height = height;
+	rec->u.clear.rect_valid = 1;
 	return (SRAPI_OK);
 }
 
@@ -248,8 +274,18 @@ srapiSubmit(srapi_cmd_buffer_t *cmd)
 	for (i = 0; i < cmd->count; i++) {
 		switch (cmd->records[i].type) {
 		case SRAPI_CMD_CLEAR:
-			ret = srapi_raster_clear(&cmd->device->backbuffer,
-			    cmd->records[i].u.clear.color);
+			if (cmd->records[i].u.clear.rect_valid) {
+				ret = srapi_raster_clear_rect(
+				    &cmd->device->backbuffer,
+				    cmd->records[i].u.clear.x,
+				    cmd->records[i].u.clear.y,
+				    cmd->records[i].u.clear.width,
+				    cmd->records[i].u.clear.height,
+				    cmd->records[i].u.clear.color);
+			} else {
+				ret = srapi_raster_clear(&cmd->device->backbuffer,
+				    cmd->records[i].u.clear.color);
+			}
 			if (ret != SRAPI_OK) {
 				return (ret);
 			}

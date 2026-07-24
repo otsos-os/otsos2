@@ -4,13 +4,14 @@ AR ?= llvm-ar
 
 ROOT = ../..
 NATIVE_DIR = $(ROOT)/libc/native
+AS_DIR = $(ROOT)/progs/toolchain/as
 TARGET_CFLAGS ?= --target=$(TARGET)
 CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fPIE -fno-stack-protector \
 	-nostdlib -nostdinc -fno-builtin -O2 -Wall -Wextra \
-	-Iinclude -I$(NATIVE_DIR)/include
+	-Iinclude -I$(NATIVE_DIR)/include -I$(AS_DIR)/include
 
 LIB = lib/libsrapi.a
-SRC = src/backend.c src/command.c src/core.c src/raster.c src/vm.c
+SRC = src/backend.c src/command.c src/core.c src/jit.c src/raster.c src/vm.c
 OBJ = $(SRC:src/%.c=build/%.o)
 HDR = include/srapi.h src/srapi_private.h
 

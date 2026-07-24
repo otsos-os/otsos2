@@ -34,6 +34,7 @@ $define %func as_read_file as function with args const char *, char **, size_t *
 $define %func as_parse_line as function with args as_context *, char *, int
 $define %func as_write_object as function with args as_context *, const char *
 $define %func as_write_binary as function with args as_context *, const char *
+$define %func as_assemble_binary as function with args name, source, out data, out size
 
 */
 
@@ -47,12 +48,13 @@ $space %internal as_mark_symbol_global, as_add_reloc, as_parse_number
 $space %internal as_parse_symbol_rip, as_split_operands, as_emit_data_value
 $space %internal as_emit_string, as_parse_directive, as_parse_instruction
 $space %internal as_parse_line, as_assemble, as_write_object
-$space %internal as_write_binary, as_usage
-$space %export main
+$space %internal as_flatten_binary, as_write_binary, as_usage
+$space %export as_assemble_binary, main
 
 */
 
 #include <ctype.h>
+#include <libas.h>
 #include <libelf.h>
 #include <libemit.h>
 #include <stdarg.h>
@@ -120,6 +122,7 @@ static int	as_add_reloc(as_context *ctx, uint16_t section, uint64_t offset,
 		    uint32_t type, uint32_t symbol, int64_t addend);
 static int	as_parse_number(const char *text, int64_t *out);
 static int	as_parse_symbol_rip(const char *op, char *name, size_t name_size);
+static int	as_parse_disp_base(const char *op, int32_t *disp, int *base);
 static int	as_split_operands(char *rest, char **ops, int max_ops);
 static int	as_emit_data_value(as_context *ctx, int line_no, int width,
 		    const char *op);
@@ -130,6 +133,7 @@ static int	as_parse_instruction(as_context *ctx, char *line, int line_no);
 static int	as_parse_line(as_context *ctx, char *line, int line_no);
 static int	as_assemble(as_context *ctx, char *source);
 static int	as_write_object(as_context *ctx, const char *path);
+static int	as_flatten_binary(as_context *ctx, emit_buf *flat);
 static int	as_write_binary(as_context *ctx, const char *path);
 static void	as_usage(void);
 
@@ -463,6 +467,46 @@ as_parse_symbol_rip(const char *op, char *name, size_t name_size)
 }
 
 static int
+as_parse_disp_base(const char *op, int32_t *disp, int *base)
+{
+	char	buf[64];
+	char	*open, *close;
+	int64_t	value;
+	size_t	len;
+
+	if (!op || !disp || !base) {
+		return (-1);
+	}
+	open = strchr(op, '(');
+	close = open ? strchr(open, ')') : NULL;
+	if (!open || !close || close[1] != '\0') {
+		return (-1);
+	}
+	len = (size_t)(open - op);
+	if (len >= sizeof(buf)) {
+		return (-1);
+	}
+	memcpy(buf, op, len);
+	buf[len] = '\0';
+	if (len == 0) {
+		value = 0;
+	} else if (as_parse_number(buf, &value) != 0) {
+		return (-1);
+	}
+	len = (size_t)(close - open - 1);
+	if (len >= sizeof(buf)) {
+		return (-1);
+	}
+	memcpy(buf, open + 1, len);
+	buf[len] = '\0';
+	if (emit_amd64_reg_parse(buf, base) != 0) {
+		return (-1);
+	}
+	*disp = (int32_t)value;
+	return (0);
+}
+
+static int
 as_split_operands(char *rest, char **ops, int max_ops)
 {
 	char	*start;
@@ -717,7 +761,8 @@ as_parse_instruction(as_context *ctx, char *line, int line_no)
 	emit_buf	*buf;
 	int64_t		imm;
 	uint64_t	start;
-	int		count, reg_a, reg_b, sym;
+	int32_t		disp;
+	int		count, reg_a, reg_b, base, sym;
 
 	if (ctx->current_section == AS_SEC_BSS) {
 		return (as_error(ctx, line_no, "instruction in .bss"));
@@ -817,6 +862,22 @@ as_parse_instruction(as_context *ctx, char *line, int line_no)
 			return (0);
 		}
 		return (as_error(ctx, line_no, "unsupported mov operands"));
+	}
+	if (strcmp(mnemonic, "movl") == 0) {
+		if (count != 2) {
+			return (as_error(ctx, line_no, "bad movl operands"));
+		}
+		if (as_parse_disp_base(ops[0], &disp, &base) == 0 &&
+		    emit_amd64_reg32_parse(ops[1], &reg_b) == 0) {
+			return (emit_amd64_mov_mem32_reg(buf, base, disp,
+			    reg_b));
+		}
+		if (emit_amd64_reg32_parse(ops[0], &reg_a) == 0 &&
+		    as_parse_disp_base(ops[1], &disp, &base) == 0) {
+			return (emit_amd64_mov_reg_mem32(buf, reg_a, base,
+			    disp));
+		}
+		return (as_error(ctx, line_no, "unsupported movl operands"));
 	}
 	if (strcmp(mnemonic, "leaq") == 0 || strcmp(mnemonic, "lea") == 0) {
 		if (count != 2 ||
@@ -1007,29 +1068,35 @@ as_write_object(as_context *ctx, const char *path)
 }
 
 static int
-as_write_binary(as_context *ctx, const char *path)
+as_flatten_binary(as_context *ctx, emit_buf *flat)
 {
 	uint64_t	bases[AS_SEC_COUNT + 1];
-	emit_buf	flat;
 	as_reloc	*rel;
 	as_symbol	*sym;
 	uint64_t	s, p, v64;
 	int32_t		v32;
 	int		i;
 
-	emit_buf_init(&flat);
-	bases[AS_SEC_TEXT] = flat.size;
-	emit_buf_write(&flat, ctx->sections[AS_SEC_TEXT].data,
-	    ctx->sections[AS_SEC_TEXT].size);
-	bases[AS_SEC_RODATA] = flat.size;
-	emit_buf_write(&flat, ctx->sections[AS_SEC_RODATA].data,
-	    ctx->sections[AS_SEC_RODATA].size);
-	bases[AS_SEC_DATA] = flat.size;
-	emit_buf_write(&flat, ctx->sections[AS_SEC_DATA].data,
-	    ctx->sections[AS_SEC_DATA].size);
-	bases[AS_SEC_BSS] = flat.size;
+	bases[AS_SEC_TEXT] = flat->size;
+	if (emit_buf_write(flat, ctx->sections[AS_SEC_TEXT].data,
+	    ctx->sections[AS_SEC_TEXT].size) != 0) {
+		return (-1);
+	}
+	bases[AS_SEC_RODATA] = flat->size;
+	if (emit_buf_write(flat, ctx->sections[AS_SEC_RODATA].data,
+	    ctx->sections[AS_SEC_RODATA].size) != 0) {
+		return (-1);
+	}
+	bases[AS_SEC_DATA] = flat->size;
+	if (emit_buf_write(flat, ctx->sections[AS_SEC_DATA].data,
+	    ctx->sections[AS_SEC_DATA].size) != 0) {
+		return (-1);
+	}
+	bases[AS_SEC_BSS] = flat->size;
 	for (i = 0; i < (int)ctx->bss_size; i++) {
-		emit_buf_u8(&flat, 0);
+		if (emit_buf_u8(flat, 0) != 0) {
+			return (-1);
+		}
 	}
 
 	for (i = 0; i < ctx->reloc_count; i++) {
@@ -1038,26 +1105,79 @@ as_write_binary(as_context *ctx, const char *path)
 		if (!sym->defined) {
 			fprintf(stderr, "as: unresolved symbol '%s' in raw output\n",
 			    sym->name);
-			emit_buf_free(&flat);
 			return (-1);
 		}
 		s = bases[sym->section] + sym->value;
 		p = bases[rel->section] + rel->offset;
 		if (rel->type == ELF64_R_X86_64_64) {
 			v64 = s + rel->addend;
-			emit_buf_write_at(&flat, (size_t)p, &v64, sizeof(v64));
+			emit_buf_write_at(flat, (size_t)p, &v64, sizeof(v64));
 		} else if (rel->type == ELF64_R_X86_64_PC32 ||
 		    rel->type == ELF64_R_X86_64_PLT32) {
 			v32 = (int32_t)(s + rel->addend - p);
-			emit_buf_write_at(&flat, (size_t)p, &v32, sizeof(v32));
+			emit_buf_write_at(flat, (size_t)p, &v32, sizeof(v32));
 		} else {
-			emit_buf_free(&flat);
 			return (-1);
 		}
 	}
-	i = as_write_file(path, flat.data, flat.size);
+	return (0);
+}
+
+static int
+as_write_binary(as_context *ctx, const char *path)
+{
+	emit_buf	flat;
+	int		rc;
+
+	emit_buf_init(&flat);
+	rc = as_flatten_binary(ctx, &flat);
+	if (rc == 0) {
+		rc = as_write_file(path, flat.data, flat.size);
+	}
 	emit_buf_free(&flat);
-	return (i);
+	return (rc);
+}
+
+int
+as_assemble_binary(const char *name, const char *source, void **out_data,
+    size_t *out_size)
+{
+	as_context	ctx;
+	emit_buf	flat;
+	char		*copy;
+	const char	*input_name;
+	size_t		len;
+	int		rc;
+
+	if (!source || !out_data || !out_size) {
+		return (-1);
+	}
+	*out_data = NULL;
+	*out_size = 0;
+	input_name = name ? name : "<memory>";
+	len = strlen(source) + 1;
+	copy = malloc(len);
+	if (!copy) {
+		return (-1);
+	}
+	memcpy(copy, source, len);
+	as_init(&ctx, input_name);
+	emit_buf_init(&flat);
+	rc = as_assemble(&ctx, copy);
+	if (rc == 0) {
+		rc = as_flatten_binary(&ctx, &flat);
+	}
+	if (rc == 0) {
+		*out_data = flat.data;
+		*out_size = flat.size;
+		flat.data = NULL;
+		flat.size = 0;
+		flat.capacity = 0;
+	}
+	emit_buf_free(&flat);
+	as_free(&ctx);
+	free(copy);
+	return (rc);
 }
 
 static void
@@ -1066,6 +1186,7 @@ as_usage(void)
 	fprintf(stderr, "usage: as [-f elf64|bin] [-o output] input.s\n");
 }
 
+#ifndef LIBAS_NO_MAIN
 int
 main(int argc, char **argv, char **envp)
 {
@@ -1121,3 +1242,4 @@ main(int argc, char **argv, char **envp)
 	}
 	return (0);
 }
+#endif

@@ -36,13 +36,15 @@ $define %func emit_buf_free as procedure with args emit_buf *
 $define %func emit_buf_write as function with args emit_buf *, const void *, size_t
 $define %func emit_amd64_rex as function with args emit_buf *, int, int, int
 $define %func emit_amd64_modrm as function with args emit_buf *, int, int, int
+$define %func emit_amd64_modrm_mem as function with args emit_buf *, int, int, int32
 $define %func emit_amd64_imm_op_reg as function with args emit_buf *, int, int32_t, int
 
 */
 
 /* !SPACE!
 
-$space %internal emit_amd64_rex, emit_amd64_modrm, emit_amd64_imm_op_reg
+$space %internal emit_amd64_rex, emit_amd64_modrm, emit_amd64_modrm_mem
+$space %internal emit_amd64_imm_op_reg
 $space %export emit_buf_init, emit_buf_free, emit_buf_reserve
 $space %export emit_buf_write, emit_buf_write_at
 $space %export emit_buf_u8, emit_buf_u16, emit_buf_u32, emit_buf_u64
@@ -52,6 +54,8 @@ $space %export emit_amd64_nop, emit_amd64_hlt, emit_amd64_cli, emit_amd64_sti
 $space %export emit_amd64_iretq, emit_amd64_int_imm8
 $space %export emit_amd64_push_reg, emit_amd64_pop_reg
 $space %export emit_amd64_mov_imm64_reg, emit_amd64_mov_reg_reg
+$space %export emit_amd64_reg32_parse, emit_amd64_mov_mem32_reg
+$space %export emit_amd64_mov_reg_mem32
 $space %export emit_amd64_mov_rip_reg, emit_amd64_lea_rip_reg
 $space %export emit_amd64_xor_reg_reg, emit_amd64_test_reg_reg
 $space %export emit_amd64_add_imm_reg, emit_amd64_sub_imm_reg
@@ -216,6 +220,28 @@ emit_amd64_reg_parse(const char *name, int *out_reg)
 	return (-1);
 }
 
+int
+emit_amd64_reg32_parse(const char *name, int *out_reg)
+{
+	static const char *regs[] = {
+		"%eax", "%ecx", "%edx", "%ebx", "%esp", "%ebp", "%esi",
+		"%edi", "%r8d", "%r9d", "%r10d", "%r11d", "%r12d",
+		"%r13d", "%r14d", "%r15d"
+	};
+	int	i;
+
+	if (!name || !out_reg) {
+		return (-1);
+	}
+	for (i = 0; i < 16; i++) {
+		if (strcmp(name, regs[i]) == 0) {
+			*out_reg = i;
+			return (0);
+		}
+	}
+	return (-1);
+}
+
 static int
 emit_amd64_rex(emit_buf *buf, int w, int reg, int rm)
 {
@@ -244,6 +270,38 @@ emit_amd64_modrm(emit_buf *buf, int mod, int reg, int rm)
 
 	value = (uint8_t)(((mod & 3) << 6) | ((reg & 7) << 3) | (rm & 7));
 	return (emit_buf_u8(buf, value));
+}
+
+static int
+emit_amd64_modrm_mem(emit_buf *buf, int reg, int base, int32_t disp)
+{
+	int	mod;
+
+	if (base < 0 || base > 15 || reg < 0 || reg > 15) {
+		return (-1);
+	}
+	if (disp == 0 && (base & 7) != EMIT_AMD64_RBP) {
+		mod = 0;
+	} else if (disp >= -128 && disp <= 127) {
+		mod = 1;
+	} else {
+		mod = 2;
+	}
+	if (emit_amd64_modrm(buf, mod, reg, base) != 0) {
+		return (-1);
+	}
+	if ((base & 7) == EMIT_AMD64_RSP) {
+		if (emit_buf_u8(buf, 0x24) != 0) {
+			return (-1);
+		}
+	}
+	if (mod == 1) {
+		return (emit_buf_u8(buf, (uint8_t)disp));
+	}
+	if (mod == 2) {
+		return (emit_buf_i32(buf, disp));
+	}
+	return (0);
 }
 
 int
@@ -353,6 +411,36 @@ emit_amd64_mov_reg_reg(emit_buf *buf, int src, int dst)
 		return (-1);
 	}
 	return (emit_amd64_modrm(buf, 3, src, dst));
+}
+
+int
+emit_amd64_mov_mem32_reg(emit_buf *buf, int base, int32_t disp, int dst)
+{
+	if (base < 0 || base > 15 || dst < 0 || dst > 15) {
+		return (-1);
+	}
+	if (emit_amd64_rex(buf, 0, dst, base) != 0) {
+		return (-1);
+	}
+	if (emit_buf_u8(buf, 0x8b) != 0) {
+		return (-1);
+	}
+	return (emit_amd64_modrm_mem(buf, dst, base, disp));
+}
+
+int
+emit_amd64_mov_reg_mem32(emit_buf *buf, int src, int base, int32_t disp)
+{
+	if (src < 0 || src > 15 || base < 0 || base > 15) {
+		return (-1);
+	}
+	if (emit_amd64_rex(buf, 0, src, base) != 0) {
+		return (-1);
+	}
+	if (emit_buf_u8(buf, 0x89) != 0) {
+		return (-1);
+	}
+	return (emit_amd64_modrm_mem(buf, src, base, disp));
 }
 
 int
