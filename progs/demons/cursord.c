@@ -27,10 +27,13 @@
 /* !DEFINES!
 
 $define %func daemonize as function with args void
+$define %func clamp_cursor as function with args int, int
+$define %func attach_input as function with args int
+$define %func arm_frame_timer as function with args int
 $define %func cursor_shape as function with args int, int
 $define %func cursor_outline as function with args int, int
-$define %func put_cursor_pixel as procedure with args uint32_t, uint32_t, uint32_t, uint32_t
-$define %func draw_cursor as procedure with args uint32_t
+$define %func put_cursor_pixel as procedure with args pixels, position, color
+$define %func draw_cursor as procedure with args uint32_t *
 $define %func commit_cursor as function with args uint32_t, uint32_t, int, int
 $define %func main as start with args int, char **, char **
 
@@ -38,7 +41,8 @@ $define %func main as start with args int, char **, char **
 
 /* !SPACE!
 
-$space %internal daemonize, cursor_shape, cursor_outline
+$space %internal daemonize, clamp_cursor, attach_input, arm_frame_timer
+$space %internal cursor_shape, cursor_outline
 $space %internal put_cursor_pixel, draw_cursor, commit_cursor
 $space %export main
 
@@ -53,6 +57,9 @@ $space %export main
 #define	CURSOR_H		32
 #define	CURSOR_PITCH		(CURSOR_W * 4)
 #define	CURSOR_EVENT_BATCH	32
+#define	CURSOR_INPUT_IDENT	0
+#define	CURSOR_TIMER_IDENT	1
+#define	CURSOR_FRAME_MS		16
 
 static void
 log_msg(const char *msg)
@@ -94,6 +101,43 @@ daemonize(void)
 }
 
 static int
+clamp_cursor(int value, int max)
+{
+	if (value < 0) {
+		return (0);
+	}
+	if (value > max) {
+		return (max);
+	}
+	return (value);
+}
+
+static int
+attach_input(int kq)
+{
+	struct kevent	change;
+
+	memset(&change, 0, sizeof(change));
+	change.ident = CURSOR_INPUT_IDENT;
+	change.filter = EVFILT_INPUT;
+	change.flags = EV_ADD | EV_CLEAR;
+	return (eventWait(kq, &change, 1, NULL, 0, -1));
+}
+
+static int
+arm_frame_timer(int kq)
+{
+	struct kevent	change;
+
+	memset(&change, 0, sizeof(change));
+	change.ident = CURSOR_TIMER_IDENT;
+	change.filter = EVFILT_TIMER;
+	change.flags = EV_ADD | EV_ONESHOT;
+	change.data = CURSOR_FRAME_MS;
+	return (eventWait(kq, &change, 1, NULL, 0, -1));
+}
+
+static int
 cursor_shape(int x, int y)
 {
 	if (x < 0 || y < 0) {
@@ -125,17 +169,17 @@ cursor_outline(int x, int y)
 }
 
 static void
-put_cursor_pixel(uint32_t gem, uint32_t x, uint32_t y, uint32_t color)
+put_cursor_pixel(uint32_t *pixels, uint32_t x, uint32_t y, uint32_t color)
 {
-	(void)drmRapiPutPixel(gem, CURSOR_PITCH, 32, x, y, color);
+	pixels[y * CURSOR_W + x] = color;
 }
 
 static void
-draw_cursor(uint32_t gem)
+draw_cursor(uint32_t *pixels)
 {
 	uint32_t	x, y;
 
-	(void)drmRapiClear(gem, CURSOR_PITCH, 32, 0x00000000);
+	memset(pixels, 0, CURSOR_PITCH * CURSOR_H);
 
 	for (y = 0; y < CURSOR_H; y++) {
 		for (x = 0; x < CURSOR_W; x++) {
@@ -143,9 +187,9 @@ draw_cursor(uint32_t gem)
 				continue;
 			}
 			if (cursor_outline((int)x, (int)y)) {
-				put_cursor_pixel(gem, x, y, 0xFF000000);
+				put_cursor_pixel(pixels, x, y, 0xFF000000);
 			} else {
-				put_cursor_pixel(gem, x, y, 0xFFFFFFFF);
+				put_cursor_pixel(pixels, x, y, 0xFFFFFFFF);
 			}
 		}
 	}
@@ -193,11 +237,13 @@ main(int argc, char **argv, char **envp)
 {
 	struct api_drm_objects	objects;
 	struct api_drm_info	info;
-	struct kevent		change;
 	struct kevent		events[CURSOR_EVENT_BATCH];
+	struct api_input_event	*input;
+	void			*cursor_pixels;
 	uint32_t		gem, fb;
-	int			i, kq, n, x, y, dx, dy, max_x, max_y;
-	int			raw_x, raw_y, have_raw;
+	int			i, kq, n, x, y, target_x, target_y, dx, dy;
+	int			max_x, max_y, raw_x, raw_y, have_raw;
+	int			pending, timer_armed, timer_ready;
 
 	(void)argc;
 	(void)argv;
@@ -233,15 +279,25 @@ main(int argc, char **argv, char **envp)
 		return (1);
 	}
 
-	draw_cursor(gem);
+	cursor_pixels = drmGemMmap(gem, CURSOR_PITCH * CURSOR_H,
+	    API_MAP_READ | API_MAP_WRITE);
+	if (!cursor_pixels) {
+		log_msg("cursord: cursor map failed\n");
+		return (1);
+	}
+	draw_cursor((uint32_t *)cursor_pixels);
 
 	x = (int)(info.width / 2);
 	y = (int)(info.height / 2);
+	target_x = x;
+	target_y = y;
 	max_x = info.width > 0 ? (int)info.width - 1 : 0;
 	max_y = info.height > 0 ? (int)info.height - 1 : 0;
 	raw_x = 0;
 	raw_y = 0;
 	have_raw = 0;
+	pending = 0;
+	timer_armed = 0;
 	(void)commit_cursor(objects.cursor_plane_id, fb, x, y);
 
 	kq = eventKqueue();
@@ -250,11 +306,7 @@ main(int argc, char **argv, char **envp)
 		return (1);
 	}
 
-	memset(&change, 0, sizeof(change));
-	change.ident = 0;
-	change.filter = EVFILT_INPUT;
-	change.flags = EV_ADD | EV_CLEAR;
-	if (eventWait(kq, &change, 1, NULL, 0, -1) < 0) {
+	if (attach_input(kq) < 0) {
 		log_msg("cursord: input event attach failed\n");
 		return (1);
 	}
@@ -266,11 +318,14 @@ main(int argc, char **argv, char **envp)
 		if (n <= 0) {
 			continue;
 		}
-		dx = 0;
-		dy = 0;
+		timer_ready = 0;
 		for (i = 0; i < n; i++) {
-			struct api_input_event	*input;
-
+			if (events[i].filter == EVFILT_TIMER &&
+			    events[i].ident == CURSOR_TIMER_IDENT) {
+				timer_ready = 1;
+				timer_armed = 0;
+				continue;
+			}
 			if (events[i].filter != EVFILT_INPUT) {
 				continue;
 			}
@@ -278,6 +333,8 @@ main(int argc, char **argv, char **envp)
 			if (input->type != API_INPUT_TYPE_MOUSE) {
 				continue;
 			}
+			dx = 0;
+			dy = 0;
 			if (have_raw) {
 				dx += input->x - raw_x;
 				dy += input->y - raw_y;
@@ -288,25 +345,29 @@ main(int argc, char **argv, char **envp)
 			}
 			raw_x = input->x;
 			raw_y = input->y;
+			if (dx == 0 && dy == 0) {
+				continue;
+			}
+			target_x = clamp_cursor(target_x + dx, max_x);
+			target_y = clamp_cursor(target_y + dy, max_y);
+			pending = 1;
 		}
-		if (dx == 0 && dy == 0) {
-			continue;
+		if (pending && !timer_armed && !timer_ready) {
+			if (arm_frame_timer(kq) == 0) {
+				timer_armed = 1;
+			} else {
+				timer_ready = 1;
+			}
 		}
-		x += dx;
-		y += dy;
-		if (x < 0) {
-			x = 0;
+		if (timer_ready && pending) {
+			if (target_x != x || target_y != y) {
+				x = target_x;
+				y = target_y;
+				(void)commit_cursor(objects.cursor_plane_id,
+				    fb, x, y);
+			}
+			pending = 0;
 		}
-		if (y < 0) {
-			y = 0;
-		}
-		if (x > max_x) {
-			x = max_x;
-		}
-		if (y > max_y) {
-			y = max_y;
-		}
-		(void)commit_cursor(objects.cursor_plane_id, fb, x, y);
 	}
 
 	return (0);
