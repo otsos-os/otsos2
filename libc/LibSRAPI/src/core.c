@@ -153,6 +153,8 @@ srapiCreateDevice(srapi_instance_t *instance,
 		return (SRAPI_ERR_NO_MEMORY);
 	}
 	device->instance = instance;
+	device->input_kq = -1;
+	srapi_input_state_reset(&device->input_state);
 	if (desc) {
 		device->flags = desc->flags;
 	}
@@ -180,6 +182,7 @@ srapiDestroyDevice(srapi_device_t *device)
 	if (!device) {
 		return;
 	}
+	srapi_input_shutdown(device);
 	image_release(&device->backbuffer);
 	free(device);
 }

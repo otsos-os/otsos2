@@ -4,6 +4,8 @@ $define %type demo_vertex as fixed point colored 2D vertex
 $define %func sleep_ms as procedure with args int
 $define %func now_ms as function with args void
 $define %func color_cycle as function with args frame, phase
+$define %func input_color as function with args old color, input event
+$define %func update_input_color as function with args device, old color
 $define %func write_vertices as procedure with args vertex array, frame
 $define %func create_demo_pipeline as function with args device, outputs
 $define %func add_clear_rect as function with args cmd, bounds, rect
@@ -15,9 +17,9 @@ $define %func main as start with args int, char **, char **
 
 /* !SPACE!
 
-$space %internal sleep_ms, now_ms, color_cycle, write_vertices
-$space %internal create_demo_pipeline, add_clear_rect, clear_demo_regions
-$space %internal render_frame
+$space %internal sleep_ms, now_ms, color_cycle, input_color
+$space %internal update_input_color, write_vertices, create_demo_pipeline
+$space %internal add_clear_rect, clear_demo_regions, render_frame
 $space %export main
 
 */
@@ -35,7 +37,8 @@ $space %export main
 
 #define DEMO_VERTEX_COUNT	9
 #define DEMO_FRAME_MS		50
-#define DEMO_DURATION_MS	3000
+#define DEMO_DURATION_MS	10000
+#define DEMO_INPUT_BATCH	16
 #define FX(n, d)		SRAPI_FIXED_FROM_RATIO(n, d)
 
 struct demo_vertex {
@@ -125,46 +128,88 @@ color_cycle(uint32_t frame, uint32_t phase)
 	return (0xff000000U | (r << 16) | (g << 8) | b);
 }
 
-static void
-write_vertices(struct demo_vertex *v, uint32_t frame)
+static uint32_t
+input_color(uint32_t old_color, const struct srapi_input_event *event)
 {
-	uint32_t	c0, c1, c2, c3, c4, c5;
+	uint32_t	seed, r, g, b;
 
-	c0 = color_cycle(frame, 0);
-	c1 = color_cycle(frame, 128);
-	c2 = color_cycle(frame, 256);
-	c3 = color_cycle(frame, 384);
-	c4 = color_cycle(frame, 512);
-	c5 = color_cycle(frame, 640);
+	seed = old_color ^ (uint32_t)event->seq;
+	seed ^= (uint32_t)event->timestamp;
+	seed ^= (uint32_t)event->x * 1103515245U;
+	seed ^= (uint32_t)event->y * 12345U;
+	seed ^= (uint32_t)event->dx * 2654435761U;
+	seed ^= (uint32_t)event->dy * 2246822519U;
+	seed ^= (uint32_t)event->dz * 3266489917U;
+	seed ^= event->buttons * 668265263U;
+	seed ^= event->key * 374761393U;
+	seed ^= event->mods * 1597334677U;
+	seed ^= event->ch * 3812015801U;
+	seed ^= seed >> 16;
+	seed *= 2246822519U;
+	seed ^= seed >> 13;
+	seed *= 3266489917U;
+	seed ^= seed >> 16;
+	r = 64 + (seed & 0xbf);
+	g = 64 + ((seed >> 8) & 0xbf);
+	b = 64 + ((seed >> 16) & 0xbf);
+	return (0xff000000U | (r << 16) | (g << 8) | b);
+}
+
+static uint32_t
+update_input_color(srapi_device_t *device, uint32_t old_color)
+{
+	struct srapi_input_event	events[DEMO_INPUT_BATCH];
+	uint32_t		color;
+	int			n, i;
+
+	color = old_color;
+	n = srapiPollInput(device, events, DEMO_INPUT_BATCH);
+	if (n <= 0) {
+		return (color);
+	}
+	for (i = 0; i < n; i++) {
+		color = input_color(color, &events[i]);
+	}
+	return (color);
+}
+
+static void
+write_vertices(struct demo_vertex *v, uint32_t frame, uint32_t square_color)
+{
+	uint32_t	t0, t1, t2;
+
+	t0 = color_cycle(frame, 128);
+	t1 = color_cycle(frame, 512);
+	t2 = color_cycle(frame, 640);
 
 	v[0].x = FX(-4, 5);
 	v[0].y = FX(-11, 20);
-	v[0].color = c0;
+	v[0].color = square_color;
 	v[1].x = FX(-1, 5);
 	v[1].y = FX(-11, 20);
-	v[1].color = c1;
+	v[1].color = square_color;
 	v[2].x = FX(-1, 5);
 	v[2].y = FX(9, 20);
-	v[2].color = c2;
+	v[2].color = square_color;
 	v[3].x = FX(-4, 5);
 	v[3].y = FX(-11, 20);
-	v[3].color = c0;
+	v[3].color = square_color;
 	v[4].x = FX(-1, 5);
 	v[4].y = FX(9, 20);
-	v[4].color = c2;
+	v[4].color = square_color;
 	v[5].x = FX(-4, 5);
 	v[5].y = FX(9, 20);
-	v[5].color = c3;
+	v[5].color = square_color;
 
 	v[6].x = FX(1, 4);
 	v[6].y = FX(-11, 20);
-	v[6].color = c4;
+	v[6].color = t1;
 	v[7].x = FX(17, 20);
 	v[7].y = FX(-11, 20);
-	v[7].color = c5;
+	v[7].color = t2;
 	v[8].x = FX(11, 20);
 	v[8].y = FX(1, 2);
-	v[8].color = c1;
+	v[8].color = t0;
 }
 
 static int
@@ -324,7 +369,7 @@ main(int argc, char **argv, char **envp)
 	srapi_buffer_t			*vertex_buffer;
 	srapi_cmd_buffer_t		*cmd;
 	uint64_t			start, now;
-	uint32_t			frame;
+	uint32_t			frame, square_color;
 	int				ret;
 
 	(void)argc;
@@ -379,8 +424,10 @@ main(int argc, char **argv, char **envp)
 
 	start = now_ms();
 	frame = 0;
+	square_color = 0xff3880ffU;
 	for (;;) {
-		write_vertices(verts, frame);
+		square_color = update_input_color(device, square_color);
+		write_vertices(verts, frame, square_color);
 		ret = srapiBufferWrite(vertex_buffer, 0, verts, sizeof(verts));
 		if (ret != SRAPI_OK) {
 			printf("srapi_demo: upload failed %d\n", ret);

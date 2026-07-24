@@ -7,6 +7,8 @@ $define %type srapi_image as opaque SRAPI image
 $define %type srapi_shader as opaque SRAPI shader module
 $define %type srapi_pipeline as opaque SRAPI graphics pipeline
 $define %type srapi_cmd_buffer as opaque SRAPI command buffer
+$define %type srapi_input_event as SRAPI input event
+$define %type srapi_input_state as cached SRAPI input state
 $define %type srapi_vm_inst as one shader VM instruction
 $define %func srapiCreateInstance as function with args desc, out instance
 $define %func srapiCreateDevice as function with args instance, desc, out device
@@ -15,6 +17,10 @@ $define %func srapiCreateShader as function with args device, desc, out shader
 $define %func srapiComputeShader as function with args shader
 $define %func srapiCreatePipeline as function with args device, desc, out pipeline
 $define %func srapiCreateCommandBuffer as function with args device, out command buffer
+$define %func srapiPollInput as function with args device, events, max events
+$define %func srapiFlushInput as function with args device
+$define %func srapiGetInputState as function with args device, out state
+$define %func srapiInputKeyDown as function with args state, key
 $define %func srapiSubmit as function with args command buffer
 
 */
@@ -23,7 +29,8 @@ $define %func srapiSubmit as function with args command buffer
 
 $space %export srapi_instance, srapi_device, srapi_buffer, srapi_image
 $space %export srapi_shader, srapi_pipeline, srapi_cmd_buffer
-$space %export srapi_vm_inst, srapiCreateInstance, srapiDestroyInstance
+$space %export srapi_input_event, srapi_input_state, srapi_vm_inst
+$space %export srapiCreateInstance, srapiDestroyInstance
 $space %export srapiCreateDevice, srapiDestroyDevice, srapiDeviceInfo
 $space %export srapiDeviceBackbuffer, srapiCreateBuffer, srapiDestroyBuffer
 $space %export srapiMapBuffer, srapiUnmapBuffer, srapiBufferWrite
@@ -35,6 +42,8 @@ $space %export srapiCmdEnd, srapiCmdClearColor, srapiCmdClearRect
 $space %export srapiCmdBindPipeline, srapiCmdBindVertexBuffer
 $space %export srapiCmdPushConstants, srapiCmdSetViewport, srapiCmdDraw
 $space %export srapiCmdPresent, srapiSubmit
+$space %export srapiPollInput, srapiFlushInput, srapiGetInputState
+$space %export srapiInputKeyDown
 
 */
 
@@ -77,6 +86,8 @@ $space %export srapiCmdPresent, srapiSubmit
 #define SRAPI_MAX_PUSH_CONSTANTS 16
 #define SRAPI_VM_REGS		32
 #define SRAPI_VM_IO_SLOTS	16
+#define SRAPI_INPUT_KEY_BITS	256
+#define SRAPI_INPUT_KEY_WORDS	(SRAPI_INPUT_KEY_BITS / 32)
 
 #define SRAPI_FIXED_FROM_INT(v)	((int32_t)((v) * SRAPI_FIXED_ONE))
 #define SRAPI_FIXED_FROM_RATIO(n, d) \
@@ -111,6 +122,38 @@ enum srapi_buffer_usage {
 enum srapi_shader_stage {
 	SRAPI_SHADER_VERTEX = 1,
 	SRAPI_SHADER_FRAGMENT = 2
+};
+
+enum srapi_input_type {
+	SRAPI_INPUT_NONE = 0,
+	SRAPI_INPUT_KEYBOARD = 1,
+	SRAPI_INPUT_MOUSE = 2
+};
+
+enum srapi_key_event_flags {
+	SRAPI_KEY_PRESS = 0x00000001,
+	SRAPI_KEY_RELEASE = 0x00000002,
+	SRAPI_KEY_REPEAT = 0x00000004,
+	SRAPI_KEY_EXTENDED = 0x00000008
+};
+
+enum srapi_mouse_event_flags {
+	SRAPI_MOUSE_MOVE = 0x00000001,
+	SRAPI_MOUSE_BUTTON = 0x00000002,
+	SRAPI_MOUSE_WHEEL = 0x00000004,
+	SRAPI_MOUSE_OVERFLOW = 0x00000008
+};
+
+enum srapi_input_flags {
+	SRAPI_INPUT_DROPPED = 0x80000000U
+};
+
+enum srapi_mouse_button {
+	SRAPI_MOUSE_LEFT = 0x00000001,
+	SRAPI_MOUSE_RIGHT = 0x00000002,
+	SRAPI_MOUSE_MIDDLE = 0x00000004,
+	SRAPI_MOUSE_X1 = 0x00000008,
+	SRAPI_MOUSE_X2 = 0x00000010
 };
 
 enum srapi_vertex_format {
@@ -185,6 +228,39 @@ struct srapi_device_info {
 	uint32_t	pitch;
 	uint32_t	bpp;
 	char		driver_name[32];
+};
+
+struct srapi_input_event {
+	uint64_t	timestamp;
+	uint64_t	seq;
+	uint32_t	type;
+	uint32_t	device;
+	uint32_t	flags;
+	uint32_t	lost;
+	int32_t		x;
+	int32_t		y;
+	int32_t		dx;
+	int32_t		dy;
+	int32_t		dz;
+	uint32_t	buttons;
+	uint32_t	key;
+	uint32_t	raw;
+	uint32_t	mods;
+	uint32_t	ch;
+};
+
+struct srapi_input_state {
+	uint64_t	last_timestamp;
+	uint32_t	keys[SRAPI_INPUT_KEY_WORDS];
+	int32_t		mouse_x;
+	int32_t		mouse_y;
+	int32_t		mouse_dx;
+	int32_t		mouse_dy;
+	int32_t		mouse_dz;
+	uint32_t	mouse_buttons;
+	uint32_t	mods;
+	uint32_t	events;
+	uint32_t	dropped;
 };
 
 struct srapi_buffer_desc {
@@ -273,5 +349,12 @@ int	srapiCmdDraw(srapi_cmd_buffer_t *cmd, uint32_t first_vertex,
 	    uint32_t vertex_count);
 int	srapiCmdPresent(srapi_cmd_buffer_t *cmd);
 int	srapiSubmit(srapi_cmd_buffer_t *cmd);
+
+int	srapiPollInput(srapi_device_t *device,
+	    struct srapi_input_event *events, uint32_t max_events);
+int	srapiFlushInput(srapi_device_t *device);
+int	srapiGetInputState(srapi_device_t *device,
+	    struct srapi_input_state *out);
+int	srapiInputKeyDown(const struct srapi_input_state *state, uint32_t key);
 
 #endif

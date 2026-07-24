@@ -4,6 +4,10 @@ $define %type srapi_rect as dirty rectangle
 $define %type srapi_vertex_out as post vertex shader data
 $define %type srapi_cmd_record as recorded command
 $define %type srapi_shader_cpu_fn as compiled shader entry point
+$define %func srapi_input_state_reset as procedure with args state
+$define %func srapi_input_state_begin_poll as procedure with args state
+$define %func srapi_input_state_apply as procedure with args state, event
+$define %func srapi_input_shutdown as procedure with args device
 $define %func srapi_image_mark_dirty as procedure with args image, rect
 $define %func srapi_backend_present as function with args device, image
 $define %func srapi_backend_unbind as function with args device, image
@@ -19,6 +23,8 @@ $define %func srapi_raster_draw as function with args draw state
 
 $space %internal srapi_rect, srapi_vertex_out, srapi_cmd_record
 $space %internal srapi_shader_cpu_fn
+$space %internal srapi_input_state_reset, srapi_input_state_begin_poll
+$space %internal srapi_input_state_apply, srapi_input_shutdown
 $space %internal srapi_image_mark_dirty, srapi_backend_present
 $space %internal srapi_backend_unbind, srapiComputeShader, srapi_vm_run
 $space %internal srapi_raster_clear, srapi_raster_clear_rect
@@ -84,7 +90,10 @@ struct srapi_device {
 	struct api_drm_info		info;
 	struct api_drm_objects		objects;
 	struct srapi_image		backbuffer;
+	struct srapi_input_state	input_state;
 	uint32_t			flags;
+	int				input_kq;
+	int				input_ready;
 };
 
 struct srapi_buffer {
@@ -164,6 +173,11 @@ struct srapi_vertex_out {
 
 void	srapi_image_mark_dirty(srapi_image_t *image, uint32_t x,
 	    uint32_t y, uint32_t width, uint32_t height);
+void	srapi_input_state_reset(struct srapi_input_state *state);
+void	srapi_input_state_begin_poll(struct srapi_input_state *state);
+void	srapi_input_state_apply(struct srapi_input_state *state,
+	    const struct srapi_input_event *event);
+void	srapi_input_shutdown(srapi_device_t *device);
 int	srapi_backend_present(srapi_device_t *device, srapi_image_t *image);
 int	srapi_backend_unbind(srapi_device_t *device, srapi_image_t *image);
 int	srapiComputeShader(srapi_shader_t *shader);
