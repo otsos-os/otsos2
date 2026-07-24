@@ -123,6 +123,7 @@ static int	as_add_reloc(as_context *ctx, uint16_t section, uint64_t offset,
 static int	as_parse_number(const char *text, int64_t *out);
 static int	as_parse_symbol_rip(const char *op, char *name, size_t name_size);
 static int	as_parse_disp_base(const char *op, int32_t *disp, int *base);
+static int	as_branch_cc(const char *mnemonic, uint8_t *cc);
 static int	as_split_operands(char *rest, char **ops, int max_ops);
 static int	as_emit_data_value(as_context *ctx, int line_no, int width,
 		    const char *op);
@@ -507,6 +508,39 @@ as_parse_disp_base(const char *op, int32_t *disp, int *base)
 }
 
 static int
+as_branch_cc(const char *mnemonic, uint8_t *cc)
+{
+	if (!mnemonic || !cc) {
+		return (-1);
+	}
+	if (strcmp(mnemonic, "je") == 0 || strcmp(mnemonic, "jz") == 0) {
+		*cc = 0x4;
+		return (0);
+	}
+	if (strcmp(mnemonic, "jne") == 0 || strcmp(mnemonic, "jnz") == 0) {
+		*cc = 0x5;
+		return (0);
+	}
+	if (strcmp(mnemonic, "jl") == 0 || strcmp(mnemonic, "jnge") == 0) {
+		*cc = 0xc;
+		return (0);
+	}
+	if (strcmp(mnemonic, "jge") == 0 || strcmp(mnemonic, "jnl") == 0) {
+		*cc = 0xd;
+		return (0);
+	}
+	if (strcmp(mnemonic, "jle") == 0 || strcmp(mnemonic, "jng") == 0) {
+		*cc = 0xe;
+		return (0);
+	}
+	if (strcmp(mnemonic, "jg") == 0 || strcmp(mnemonic, "jnle") == 0) {
+		*cc = 0xf;
+		return (0);
+	}
+	return (-1);
+}
+
+static int
 as_split_operands(char *rest, char **ops, int max_ops)
 {
 	char	*start;
@@ -763,6 +797,7 @@ as_parse_instruction(as_context *ctx, char *line, int line_no)
 	uint64_t	start;
 	int32_t		disp;
 	int		count, reg_a, reg_b, base, sym;
+	uint8_t		cc;
 
 	if (ctx->current_section == AS_SEC_BSS) {
 		return (as_error(ctx, line_no, "instruction in .bss"));
@@ -879,6 +914,15 @@ as_parse_instruction(as_context *ctx, char *line, int line_no)
 		}
 		return (as_error(ctx, line_no, "unsupported movl operands"));
 	}
+	if (strcmp(mnemonic, "movslq") == 0 ||
+	    strcmp(mnemonic, "movsxd") == 0) {
+		if (count != 2 ||
+		    emit_amd64_reg32_parse(ops[0], &reg_a) != 0 ||
+		    emit_amd64_reg_parse(ops[1], &reg_b) != 0) {
+			return (as_error(ctx, line_no, "bad movslq operands"));
+		}
+		return (emit_amd64_movsxd_reg_reg(buf, reg_a, reg_b));
+	}
 	if (strcmp(mnemonic, "leaq") == 0 || strcmp(mnemonic, "lea") == 0) {
 		if (count != 2 ||
 		    as_parse_symbol_rip(ops[0], sym_name, sizeof(sym_name)) != 0 ||
@@ -910,17 +954,85 @@ as_parse_instruction(as_context *ctx, char *line, int line_no)
 	}
 	if (strcmp(mnemonic, "addq") == 0 || strcmp(mnemonic, "subq") == 0 ||
 	    strcmp(mnemonic, "cmpq") == 0) {
-		if (count != 2 || as_parse_number(ops[0], &imm) != 0 ||
+		if (count != 2) {
+			return (as_error(ctx, line_no, "bad qword operands"));
+		}
+		if (as_parse_number(ops[0], &imm) == 0 &&
+		    emit_amd64_reg_parse(ops[1], &reg_b) == 0) {
+			if (strcmp(mnemonic, "addq") == 0) {
+				return (emit_amd64_add_imm_reg(buf,
+				    (int32_t)imm, reg_b));
+			}
+			if (strcmp(mnemonic, "subq") == 0) {
+				return (emit_amd64_sub_imm_reg(buf,
+				    (int32_t)imm, reg_b));
+			}
+			return (emit_amd64_cmp_imm_reg(buf, (int32_t)imm,
+			    reg_b));
+		}
+		if (emit_amd64_reg_parse(ops[0], &reg_a) == 0 &&
+		    emit_amd64_reg_parse(ops[1], &reg_b) == 0) {
+			if (strcmp(mnemonic, "addq") == 0) {
+				return (emit_amd64_add_reg_reg(buf, reg_a,
+				    reg_b));
+			}
+			if (strcmp(mnemonic, "subq") == 0) {
+				return (emit_amd64_sub_reg_reg(buf, reg_a,
+				    reg_b));
+			}
+			return (emit_amd64_cmp_reg_reg(buf, reg_a, reg_b));
+		}
+		return (as_error(ctx, line_no, "bad qword operands"));
+	}
+	if (strcmp(mnemonic, "imulq") == 0) {
+		if (count != 2 ||
+		    emit_amd64_reg_parse(ops[0], &reg_a) != 0 ||
 		    emit_amd64_reg_parse(ops[1], &reg_b) != 0) {
-			return (as_error(ctx, line_no, "bad immediate operands"));
+			return (as_error(ctx, line_no, "bad imulq operands"));
 		}
-		if (strcmp(mnemonic, "addq") == 0) {
-			return (emit_amd64_add_imm_reg(buf, (int32_t)imm, reg_b));
+		return (emit_amd64_imul_reg_reg(buf, reg_a, reg_b));
+	}
+	if (strcmp(mnemonic, "shlq") == 0 || strcmp(mnemonic, "salq") == 0 ||
+	    strcmp(mnemonic, "sarq") == 0) {
+		if (count != 2 || as_parse_number(ops[0], &imm) != 0 ||
+		    imm < 0 || imm > 63 ||
+		    emit_amd64_reg_parse(ops[1], &reg_b) != 0) {
+			return (as_error(ctx, line_no, "bad shift operands"));
 		}
-		if (strcmp(mnemonic, "subq") == 0) {
-			return (emit_amd64_sub_imm_reg(buf, (int32_t)imm, reg_b));
+		if (strcmp(mnemonic, "sarq") == 0) {
+			return (emit_amd64_sar_imm_reg(buf, (uint8_t)imm,
+			    reg_b));
 		}
-		return (emit_amd64_cmp_imm_reg(buf, (int32_t)imm, reg_b));
+		return (emit_amd64_shl_imm_reg(buf, (uint8_t)imm, reg_b));
+	}
+	if (strcmp(mnemonic, "cqto") == 0 || strcmp(mnemonic, "cqo") == 0) {
+		if (count != 0) {
+			return (as_error(ctx, line_no, "bad cqto operands"));
+		}
+		return (emit_amd64_cqto(buf));
+	}
+	if (strcmp(mnemonic, "idivq") == 0) {
+		if (count != 1 ||
+		    emit_amd64_reg_parse(ops[0], &reg_a) != 0) {
+			return (as_error(ctx, line_no, "bad idivq operand"));
+		}
+		return (emit_amd64_idiv_reg(buf, reg_a));
+	}
+	if (as_branch_cc(mnemonic, &cc) == 0) {
+		if (count != 1 || ops[0][0] == '*') {
+			return (as_error(ctx, line_no, "bad branch operand"));
+		}
+		start = buf->size;
+		sym = as_get_symbol(ctx, ops[0]);
+		if (sym < 0) {
+			return (as_error(ctx, line_no, "too many symbols"));
+		}
+		if (emit_amd64_jcc_rel32(buf, cc, 0) != 0 ||
+		    as_add_reloc(ctx, ctx->current_section, start + 2,
+		    ELF64_R_X86_64_PC32, (uint32_t)sym, -4) != 0) {
+			return (as_error(ctx, line_no, "emit failed"));
+		}
+		return (0);
 	}
 	if (strcmp(mnemonic, "call") == 0 || strcmp(mnemonic, "callq") == 0 ||
 	    strcmp(mnemonic, "jmp") == 0 || strcmp(mnemonic, "jmpq") == 0) {

@@ -1,15 +1,16 @@
 /* !DEFINES!
 
-$define %type jit_reg_src as tracked VM register value source
 $define %func srapiComputeShader as function with args shader
 
 */
 
 /* !SPACE!
 
-$space %internal fixed_mul, fixed_div, jit_clamp01, asm_append
-$space %internal jit_reg_clear, jit_source_store, jit_emit_shader
-$space %internal jit_install
+$space %internal asm_append, jit_reg_offset, jit_emit_epilogue
+$space %internal jit_emit_load64, jit_emit_store32, jit_emit_copy
+$space %internal jit_emit_load_input, jit_emit_binary, jit_emit_mul
+$space %internal jit_emit_div, jit_emit_minmax, jit_emit_clamp01
+$space %internal jit_emit_store_output, jit_emit_shader, jit_install
 $space %export srapiComputeShader
 
 */
@@ -29,46 +30,6 @@ $space %export srapiComputeShader
 #include <string.h>
 
 #include "srapi_private.h"
-
-enum {
-	JIT_SRC_INVALID = 0,
-	JIT_SRC_INPUT = 1,
-	JIT_SRC_PUSH = 2,
-	JIT_SRC_IMM = 3
-};
-
-struct jit_reg_src {
-	int32_t		imm;
-	uint32_t	slot;
-	uint32_t	kind;
-};
-
-static int32_t
-fixed_mul(int32_t a, int32_t b)
-{
-	return ((int32_t)(((int64_t)a * (int64_t)b) >> 16));
-}
-
-static int32_t
-fixed_div(int32_t a, int32_t b)
-{
-	if (b == 0) {
-		return (0);
-	}
-	return ((int32_t)(((int64_t)a << 16) / (int64_t)b));
-}
-
-static int32_t
-jit_clamp01(int32_t v)
-{
-	if (v < 0) {
-		return (0);
-	}
-	if (v > SRAPI_FIXED_ONE) {
-		return (SRAPI_FIXED_ONE);
-	}
-	return (v);
-}
 
 static int
 asm_append(char *asm_source, size_t capacity, size_t *used,
@@ -90,66 +51,320 @@ asm_append(char *asm_source, size_t capacity, size_t *used,
 	return (SRAPI_OK);
 }
 
-static void
-jit_reg_clear(struct jit_reg_src *regs)
+static int32_t
+jit_reg_offset(uint32_t reg)
 {
-	uint32_t	i;
-
-	for (i = 0; i < SRAPI_VM_REGS; i++) {
-		regs[i].kind = JIT_SRC_INVALID;
-		regs[i].slot = 0;
-		regs[i].imm = 0;
-	}
+	return (-((int32_t)reg + 1) * (int32_t)sizeof(int32_t));
 }
 
 static int
-jit_source_store(char *asm_source, size_t capacity, size_t *used,
-    const struct jit_reg_src *src, uint32_t out_slot)
+jit_emit_epilogue(char *asm_source, size_t capacity, size_t *used)
 {
-	const char	*base;
-	uint32_t	in_off, out_off;
-	int		ret;
+	return (asm_append(asm_source, capacity, used,
+	    "\tmovq %%rbp, %%rsp\n"
+	    "\tpopq %%rbp\n"
+	    "\tmovq $0, %%rax\n"
+	    "\tret\n"));
+}
 
-	if (!src || out_slot >= SRAPI_VM_IO_SLOTS) {
+static int
+jit_emit_load64(char *asm_source, size_t capacity, size_t *used,
+    const uint8_t *written, uint32_t src, const char *reg32,
+    const char *reg64)
+{
+	int32_t	off;
+	int	ret;
+
+	if (src >= SRAPI_VM_REGS) {
 		return (SRAPI_ERR_SHADER);
 	}
-	out_off = out_slot * (uint32_t)sizeof(int32_t);
-	if (src->kind == JIT_SRC_INPUT || src->kind == JIT_SRC_PUSH) {
-		base = src->kind == JIT_SRC_INPUT ? "%rdi" : "%rsi";
-		in_off = src->slot * (uint32_t)sizeof(int32_t);
-		ret = asm_append(asm_source, capacity, used,
-		    "\tmovl %u(%s), %%eax\n", in_off, base);
-		if (ret != SRAPI_OK) {
-			return (ret);
-		}
+	if (!written[src]) {
 		return (asm_append(asm_source, capacity, used,
-		    "\tmovl %%eax, %u(%%rdx)\n", out_off));
+		    "\tmovq $0, %s\n", reg64));
 	}
-	if (src->kind == JIT_SRC_IMM) {
+	off = jit_reg_offset(src);
+	ret = asm_append(asm_source, capacity, used,
+	    "\tmovl %d(%%rbp), %s\n", off, reg32);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	return (asm_append(asm_source, capacity, used,
+	    "\tmovslq %s, %s\n", reg32, reg64));
+}
+
+static int
+jit_emit_store32(char *asm_source, size_t capacity, size_t *used,
+    uint32_t dst)
+{
+	if (dst >= SRAPI_VM_REGS) {
+		return (SRAPI_ERR_SHADER);
+	}
+	return (asm_append(asm_source, capacity, used,
+	    "\tmovl %%eax, %d(%%rbp)\n", jit_reg_offset(dst)));
+}
+
+static int
+jit_emit_copy(char *asm_source, size_t capacity, size_t *used,
+    uint8_t *written, uint32_t dst, uint32_t src)
+{
+	int32_t	src_off;
+	int	ret;
+
+	if (dst >= SRAPI_VM_REGS || src >= SRAPI_VM_REGS) {
+		return (SRAPI_ERR_SHADER);
+	}
+	if (!written[src]) {
+		written[dst] = 0;
+		return (SRAPI_OK);
+	}
+	src_off = jit_reg_offset(src);
+	ret = asm_append(asm_source, capacity, used,
+	    "\tmovl %d(%%rbp), %%eax\n", src_off);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = jit_emit_store32(asm_source, capacity, used, dst);
+	if (ret == SRAPI_OK) {
+		written[dst] = 1;
+	}
+	return (ret);
+}
+
+static int
+jit_emit_load_input(char *asm_source, size_t capacity, size_t *used,
+    uint8_t *written, uint32_t dst, uint32_t slot, const char *base)
+{
+	int	ret;
+
+	if (dst >= SRAPI_VM_REGS) {
+		return (SRAPI_ERR_SHADER);
+	}
+	ret = asm_append(asm_source, capacity, used,
+	    "\tmovl %u(%s), %%eax\n",
+	    slot * (uint32_t)sizeof(int32_t), base);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = jit_emit_store32(asm_source, capacity, used, dst);
+	if (ret == SRAPI_OK) {
+		written[dst] = 1;
+	}
+	return (ret);
+}
+
+static int
+jit_emit_binary(char *asm_source, size_t capacity, size_t *used,
+    uint8_t *written, uint32_t dst, uint32_t src0, uint32_t src1,
+    const char *op)
+{
+	int	ret;
+
+	ret = jit_emit_load64(asm_source, capacity, used, written, src0,
+	    "%eax", "%rax");
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = jit_emit_load64(asm_source, capacity, used, written, src1,
+	    "%ecx", "%rcx");
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = asm_append(asm_source, capacity, used, "\t%s %%rcx, %%rax\n",
+	    op);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = jit_emit_store32(asm_source, capacity, used, dst);
+	if (ret == SRAPI_OK) {
+		written[dst] = 1;
+	}
+	return (ret);
+}
+
+static int
+jit_emit_mul(char *asm_source, size_t capacity, size_t *used,
+    uint8_t *written, uint32_t dst, uint32_t src0, uint32_t src1)
+{
+	int	ret;
+
+	ret = jit_emit_load64(asm_source, capacity, used, written, src0,
+	    "%eax", "%rax");
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = jit_emit_load64(asm_source, capacity, used, written, src1,
+	    "%ecx", "%rcx");
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = asm_append(asm_source, capacity, used,
+	    "\timulq %%rcx, %%rax\n"
+	    "\tsarq $16, %%rax\n");
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = jit_emit_store32(asm_source, capacity, used, dst);
+	if (ret == SRAPI_OK) {
+		written[dst] = 1;
+	}
+	return (ret);
+}
+
+static int
+jit_emit_div(char *asm_source, size_t capacity, size_t *used,
+    uint8_t *written, uint32_t dst, uint32_t src0, uint32_t src1,
+    uint32_t label_id)
+{
+	int	ret;
+
+	ret = jit_emit_load64(asm_source, capacity, used, written, src1,
+	    "%ecx", "%rcx");
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = asm_append(asm_source, capacity, used,
+	    "\ttestq %%rcx, %%rcx\n"
+	    "\tje .Ljit_div_zero_%u\n", label_id);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = jit_emit_load64(asm_source, capacity, used, written, src0,
+	    "%eax", "%rax");
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = asm_append(asm_source, capacity, used,
+	    "\tshlq $16, %%rax\n"
+	    "\tcqto\n"
+	    "\tidivq %%rcx\n"
+	    "\tjmp .Ljit_div_done_%u\n"
+	    ".Ljit_div_zero_%u:\n"
+	    "\tmovq $0, %%rax\n"
+	    ".Ljit_div_done_%u:\n",
+	    label_id, label_id, label_id);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = jit_emit_store32(asm_source, capacity, used, dst);
+	if (ret == SRAPI_OK) {
+		written[dst] = 1;
+	}
+	return (ret);
+}
+
+static int
+jit_emit_minmax(char *asm_source, size_t capacity, size_t *used,
+    uint8_t *written, uint32_t dst, uint32_t src0, uint32_t src1,
+    uint32_t label_id, int is_max)
+{
+	const char	*jcc;
+	int		ret;
+
+	jcc = is_max ? "jge" : "jle";
+	ret = jit_emit_load64(asm_source, capacity, used, written, src0,
+	    "%eax", "%rax");
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = jit_emit_load64(asm_source, capacity, used, written, src1,
+	    "%ecx", "%rcx");
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = asm_append(asm_source, capacity, used,
+	    "\tcmpq %%rcx, %%rax\n"
+	    "\t%s .Ljit_minmax_done_%u\n"
+	    "\tmovq %%rcx, %%rax\n"
+	    ".Ljit_minmax_done_%u:\n",
+	    jcc, label_id, label_id);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = jit_emit_store32(asm_source, capacity, used, dst);
+	if (ret == SRAPI_OK) {
+		written[dst] = 1;
+	}
+	return (ret);
+}
+
+static int
+jit_emit_clamp01(char *asm_source, size_t capacity, size_t *used,
+    uint8_t *written, uint32_t dst, uint32_t src, uint32_t label_id)
+{
+	int	ret;
+
+	ret = jit_emit_load64(asm_source, capacity, used, written, src,
+	    "%eax", "%rax");
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = asm_append(asm_source, capacity, used,
+	    "\tcmpq $0, %%rax\n"
+	    "\tjge .Ljit_clamp_nonneg_%u\n"
+	    "\tmovq $0, %%rax\n"
+	    "\tjmp .Ljit_clamp_done_%u\n"
+	    ".Ljit_clamp_nonneg_%u:\n"
+	    "\tcmpq $%d, %%rax\n"
+	    "\tjle .Ljit_clamp_done_%u\n"
+	    "\tmovq $%d, %%rax\n"
+	    ".Ljit_clamp_done_%u:\n",
+	    label_id, label_id, label_id, SRAPI_FIXED_ONE, label_id,
+	    SRAPI_FIXED_ONE, label_id);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	ret = jit_emit_store32(asm_source, capacity, used, dst);
+	if (ret == SRAPI_OK) {
+		written[dst] = 1;
+	}
+	return (ret);
+}
+
+static int
+jit_emit_store_output(char *asm_source, size_t capacity, size_t *used,
+    const uint8_t *written, uint32_t out_slot, uint32_t src)
+{
+	int	ret;
+
+	if (out_slot >= SRAPI_VM_IO_SLOTS || src >= SRAPI_VM_REGS) {
+		return (SRAPI_ERR_SHADER);
+	}
+	if (written[src]) {
 		ret = asm_append(asm_source, capacity, used,
-		    "\tmovq $%d, %%rax\n", src->imm);
-		if (ret != SRAPI_OK) {
-			return (ret);
-		}
-		return (asm_append(asm_source, capacity, used,
-		    "\tmovl %%eax, %u(%%rdx)\n", out_off));
+		    "\tmovl %d(%%rbp), %%eax\n", jit_reg_offset(src));
+	} else {
+		ret = asm_append(asm_source, capacity, used,
+		    "\tmovq $0, %%rax\n");
 	}
-	return (SRAPI_ERR_UNSUPPORTED);
+	if (ret != SRAPI_OK) {
+		return (ret);
+	}
+	return (asm_append(asm_source, capacity, used,
+	    "\tmovl %%eax, %u(%%r8)\n",
+	    out_slot * (uint32_t)sizeof(int32_t)));
 }
 
 static int
 jit_emit_shader(srapi_shader_t *shader, char *asm_source, size_t capacity)
 {
 	const struct srapi_vm_inst	*inst;
-	struct jit_reg_src		regs[SRAPI_VM_REGS];
 	size_t				used;
-	uint32_t			pc;
+	uint32_t			pc, label_id;
+	uint8_t				written[SRAPI_VM_REGS];
 	int				ret;
 
 	used = 0;
-	jit_reg_clear(regs);
+	label_id = 0;
+	memset(written, 0, sizeof(written));
 	ret = asm_append(asm_source, capacity, &used,
-	    ".text\n.globl srapi_shader_main\nsrapi_shader_main:\n");
+	    ".text\n"
+	    ".globl srapi_shader_main\n"
+	    "srapi_shader_main:\n"
+	    "\tpushq %%rbp\n"
+	    "\tmovq %%rsp, %%rbp\n"
+	    "\tsubq $%u, %%rsp\n"
+	    "\tmovq %%rdx, %%r8\n",
+	    (uint32_t)(SRAPI_VM_REGS * sizeof(int32_t)));
 	if (ret != SRAPI_OK) {
 		return (ret);
 	}
@@ -166,129 +381,77 @@ jit_emit_shader(srapi_shader_t *shader, char *asm_source, size_t capacity)
 			pc = shader->code_count;
 			break;
 		case SRAPI_VM_MOV:
-			if (inst->src0 >= SRAPI_VM_REGS) {
-				return (SRAPI_ERR_SHADER);
-			}
-			regs[inst->dst] = regs[inst->src0];
+			ret = jit_emit_copy(asm_source, capacity, &used,
+			    written, inst->dst, inst->src0);
 			break;
 		case SRAPI_VM_MOV_IMM:
-			regs[inst->dst].kind = JIT_SRC_IMM;
-			regs[inst->dst].slot = 0;
-			regs[inst->dst].imm = inst->imm;
+			ret = asm_append(asm_source, capacity, &used,
+			    "\tmovq $%d, %%rax\n", inst->imm);
+			if (ret == SRAPI_OK) {
+				ret = jit_emit_store32(asm_source, capacity,
+				    &used, inst->dst);
+			}
+			if (ret == SRAPI_OK) {
+				written[inst->dst] = 1;
+			}
 			break;
 		case SRAPI_VM_LOAD_IN:
 			if (inst->src0 >= SRAPI_VM_IO_SLOTS) {
 				return (SRAPI_ERR_SHADER);
 			}
-			regs[inst->dst].kind = JIT_SRC_INPUT;
-			regs[inst->dst].slot = inst->src0;
-			regs[inst->dst].imm = 0;
+			ret = jit_emit_load_input(asm_source, capacity, &used,
+			    written, inst->dst, inst->src0, "%rdi");
 			break;
 		case SRAPI_VM_LOAD_PUSH:
 			if (inst->src0 >= SRAPI_MAX_PUSH_CONSTANTS) {
 				return (SRAPI_ERR_SHADER);
 			}
-			regs[inst->dst].kind = JIT_SRC_PUSH;
-			regs[inst->dst].slot = inst->src0;
-			regs[inst->dst].imm = 0;
+			ret = jit_emit_load_input(asm_source, capacity, &used,
+			    written, inst->dst, inst->src0, "%rsi");
 			break;
 		case SRAPI_VM_STORE_OUT:
-			if (inst->dst >= SRAPI_VM_IO_SLOTS ||
-			    inst->src0 >= SRAPI_VM_REGS) {
-				return (SRAPI_ERR_SHADER);
-			}
-			ret = jit_source_store(asm_source, capacity, &used,
-			    &regs[inst->src0], inst->dst);
-			if (ret != SRAPI_OK) {
-				return (ret);
-			}
+			ret = jit_emit_store_output(asm_source, capacity, &used,
+			    written, inst->dst, inst->src0);
 			break;
 		case SRAPI_VM_ADD:
-			if (inst->src0 >= SRAPI_VM_REGS ||
-			    inst->src1 >= SRAPI_VM_REGS ||
-			    regs[inst->src0].kind != JIT_SRC_IMM ||
-			    regs[inst->src1].kind != JIT_SRC_IMM) {
-				return (SRAPI_ERR_UNSUPPORTED);
-			}
-			regs[inst->dst].kind = JIT_SRC_IMM;
-			regs[inst->dst].imm = regs[inst->src0].imm +
-			    regs[inst->src1].imm;
+			ret = jit_emit_binary(asm_source, capacity, &used,
+			    written, inst->dst, inst->src0, inst->src1, "addq");
 			break;
 		case SRAPI_VM_SUB:
-			if (inst->src0 >= SRAPI_VM_REGS ||
-			    inst->src1 >= SRAPI_VM_REGS ||
-			    regs[inst->src0].kind != JIT_SRC_IMM ||
-			    regs[inst->src1].kind != JIT_SRC_IMM) {
-				return (SRAPI_ERR_UNSUPPORTED);
-			}
-			regs[inst->dst].kind = JIT_SRC_IMM;
-			regs[inst->dst].imm = regs[inst->src0].imm -
-			    regs[inst->src1].imm;
+			ret = jit_emit_binary(asm_source, capacity, &used,
+			    written, inst->dst, inst->src0, inst->src1, "subq");
 			break;
 		case SRAPI_VM_MUL:
-			if (inst->src0 >= SRAPI_VM_REGS ||
-			    inst->src1 >= SRAPI_VM_REGS ||
-			    regs[inst->src0].kind != JIT_SRC_IMM ||
-			    regs[inst->src1].kind != JIT_SRC_IMM) {
-				return (SRAPI_ERR_UNSUPPORTED);
-			}
-			regs[inst->dst].kind = JIT_SRC_IMM;
-			regs[inst->dst].imm = fixed_mul(regs[inst->src0].imm,
-			    regs[inst->src1].imm);
+			ret = jit_emit_mul(asm_source, capacity, &used,
+			    written, inst->dst, inst->src0, inst->src1);
 			break;
 		case SRAPI_VM_DIV:
-			if (inst->src0 >= SRAPI_VM_REGS ||
-			    inst->src1 >= SRAPI_VM_REGS ||
-			    regs[inst->src0].kind != JIT_SRC_IMM ||
-			    regs[inst->src1].kind != JIT_SRC_IMM) {
-				return (SRAPI_ERR_UNSUPPORTED);
-			}
-			regs[inst->dst].kind = JIT_SRC_IMM;
-			regs[inst->dst].imm = fixed_div(regs[inst->src0].imm,
-			    regs[inst->src1].imm);
+			ret = jit_emit_div(asm_source, capacity, &used,
+			    written, inst->dst, inst->src0, inst->src1,
+			    label_id++);
 			break;
 		case SRAPI_VM_MIN:
-			if (inst->src0 >= SRAPI_VM_REGS ||
-			    inst->src1 >= SRAPI_VM_REGS ||
-			    regs[inst->src0].kind != JIT_SRC_IMM ||
-			    regs[inst->src1].kind != JIT_SRC_IMM) {
-				return (SRAPI_ERR_UNSUPPORTED);
-			}
-			regs[inst->dst].kind = JIT_SRC_IMM;
-			regs[inst->dst].imm = regs[inst->src0].imm <
-			    regs[inst->src1].imm ? regs[inst->src0].imm :
-			    regs[inst->src1].imm;
+			ret = jit_emit_minmax(asm_source, capacity, &used,
+			    written, inst->dst, inst->src0, inst->src1,
+			    label_id++, 0);
 			break;
 		case SRAPI_VM_MAX:
-			if (inst->src0 >= SRAPI_VM_REGS ||
-			    inst->src1 >= SRAPI_VM_REGS ||
-			    regs[inst->src0].kind != JIT_SRC_IMM ||
-			    regs[inst->src1].kind != JIT_SRC_IMM) {
-				return (SRAPI_ERR_UNSUPPORTED);
-			}
-			regs[inst->dst].kind = JIT_SRC_IMM;
-			regs[inst->dst].imm = regs[inst->src0].imm >
-			    regs[inst->src1].imm ? regs[inst->src0].imm :
-			    regs[inst->src1].imm;
+			ret = jit_emit_minmax(asm_source, capacity, &used,
+			    written, inst->dst, inst->src0, inst->src1,
+			    label_id++, 1);
 			break;
 		case SRAPI_VM_CLAMP01:
-			if (inst->src0 >= SRAPI_VM_REGS ||
-			    regs[inst->src0].kind != JIT_SRC_IMM) {
-				return (SRAPI_ERR_UNSUPPORTED);
-			}
-			regs[inst->dst].kind = JIT_SRC_IMM;
-			regs[inst->dst].imm = jit_clamp01(regs[inst->src0].imm);
+			ret = jit_emit_clamp01(asm_source, capacity, &used,
+			    written, inst->dst, inst->src0, label_id++);
 			break;
 		default:
 			return (SRAPI_ERR_SHADER);
 		}
+		if (ret != SRAPI_OK) {
+			return (ret);
+		}
 	}
-	ret = asm_append(asm_source, capacity, &used,
-	    "\tmovq $0, %%rax\n\tret\n");
-	if (ret != SRAPI_OK) {
-		return (ret);
-	}
-	return (SRAPI_OK);
+	return (jit_emit_epilogue(asm_source, capacity, &used));
 }
 
 static int
@@ -333,7 +496,7 @@ srapiComputeShader(srapi_shader_t *shader)
 	if (shader->cpu_entry) {
 		return (SRAPI_OK);
 	}
-	asm_capacity = 256 + (size_t)shader->code_count * 128;
+	asm_capacity = 512 + (size_t)shader->code_count * 512;
 	asm_source = malloc(asm_capacity);
 	if (!asm_source) {
 		return (SRAPI_ERR_NO_MEMORY);

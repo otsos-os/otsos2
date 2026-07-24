@@ -36,6 +36,7 @@ $define %func emit_amd64_mov_imm64_reg as function with args emit_buf *, unsigne
 $define %func emit_amd64_mov_reg_reg as function with args emit_buf *, int, int
 $define %func emit_amd64_mov_mem32_reg as function with args emit_buf *, int, int32, int
 $define %func emit_amd64_mov_reg_mem32 as function with args emit_buf *, int, int, int32
+$define %func emit_amd64_movsxd_reg_reg as function with args emit_buf *, int, int
 $define %func emit_amd64_lea_rip_reg as function with args emit_buf *, int
 
 */
@@ -52,12 +53,16 @@ $space %export emit_amd64_iretq, emit_amd64_int_imm8
 $space %export emit_amd64_push_reg, emit_amd64_pop_reg
 $space %export emit_amd64_mov_imm64_reg, emit_amd64_mov_reg_reg
 $space %export emit_amd64_reg32_parse, emit_amd64_mov_mem32_reg
-$space %export emit_amd64_mov_reg_mem32
+$space %export emit_amd64_mov_reg_mem32, emit_amd64_movsxd_reg_reg
 $space %export emit_amd64_mov_rip_reg, emit_amd64_lea_rip_reg
 $space %export emit_amd64_xor_reg_reg, emit_amd64_test_reg_reg
+$space %export emit_amd64_add_reg_reg, emit_amd64_sub_reg_reg
+$space %export emit_amd64_cmp_reg_reg, emit_amd64_imul_reg_reg
+$space %export emit_amd64_shl_imm_reg, emit_amd64_sar_imm_reg
+$space %export emit_amd64_cqto, emit_amd64_idiv_reg
 $space %export emit_amd64_add_imm_reg, emit_amd64_sub_imm_reg
 $space %export emit_amd64_cmp_imm_reg, emit_amd64_call_rel32
-$space %export emit_amd64_jmp_rel32
+$space %export emit_amd64_jmp_rel32, emit_amd64_jcc_rel32
 
 */
 
@@ -123,14 +128,24 @@ int	emit_amd64_mov_mem32_reg(emit_buf *buf, int base, int32_t disp,
 	    int dst);
 int	emit_amd64_mov_reg_mem32(emit_buf *buf, int src, int base,
 	    int32_t disp);
+int	emit_amd64_movsxd_reg_reg(emit_buf *buf, int src32, int dst64);
 int	emit_amd64_mov_rip_reg(emit_buf *buf, int dst);
 int	emit_amd64_lea_rip_reg(emit_buf *buf, int dst);
 int	emit_amd64_xor_reg_reg(emit_buf *buf, int src, int dst);
 int	emit_amd64_test_reg_reg(emit_buf *buf, int src, int dst);
+int	emit_amd64_add_reg_reg(emit_buf *buf, int src, int dst);
+int	emit_amd64_sub_reg_reg(emit_buf *buf, int src, int dst);
+int	emit_amd64_cmp_reg_reg(emit_buf *buf, int src, int dst);
+int	emit_amd64_imul_reg_reg(emit_buf *buf, int src, int dst);
+int	emit_amd64_shl_imm_reg(emit_buf *buf, uint8_t imm, int reg);
+int	emit_amd64_sar_imm_reg(emit_buf *buf, uint8_t imm, int reg);
+int	emit_amd64_cqto(emit_buf *buf);
+int	emit_amd64_idiv_reg(emit_buf *buf, int reg);
 int	emit_amd64_add_imm_reg(emit_buf *buf, int32_t imm, int reg);
 int	emit_amd64_sub_imm_reg(emit_buf *buf, int32_t imm, int reg);
 int	emit_amd64_cmp_imm_reg(emit_buf *buf, int32_t imm, int reg);
 int	emit_amd64_call_rel32(emit_buf *buf, int32_t rel);
 int	emit_amd64_jmp_rel32(emit_buf *buf, int32_t rel);
+int	emit_amd64_jcc_rel32(emit_buf *buf, uint8_t cc, int32_t rel);
 
 #endif
