@@ -173,13 +173,16 @@ keyboard_getchar_blocking(void)
 void
 keyboard_common_handler(void)
 {
+	void	*ch;
+
 	if (!current_driver || !current_driver->handler) {
 		return;
 	}
 
 	current_driver->handler();
-
-	void	*ch;
+	if (direct_input_depth == 0) {
+		terminal_input_poll();
+	}
 
 	ch = terminal_get_input_channel();
 	if (ch) {

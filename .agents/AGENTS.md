@@ -129,7 +129,7 @@ Monolithic kernel with the following rough layers:
 - `init/init.c` — first userspace process, event-driven program spawner via
   `procSpawn` and `procWait`.
 - `progs/yes.c`, `fetch.c`, `shell.c`, `udp_echo.c`, `tcp_echo.c`, `send.c`,
-  `posix_hello.c`, `musl_test.c`, `demons/cursord.c` — small test/utility
+  `ssh/main.c`, `posix_hello.c`, `musl_test.c`, `demons/cursord.c` — small test/utility
   binaries and daemons. `dhcpc` is an IPC control client; `dhcpd` owns the
   DHCP lease lifecycle and publishes `system.network.dhcpd`.
 - `progs/posix_hello.c` uses Linux x86-64 syscall numbers and expects the
@@ -162,6 +162,11 @@ Monolithic kernel with the following rough layers:
 - Source files are split by subsystem (`data.c`, `fs.c`, `proc.c`,
   `event.c`, `sys.c`, `drm.c`, etc.); do not collapse them into one wrapper
   file.
+- Native terminal mode control is exposed through `CALL_TERM_MODE` and
+  `termMode()`/`termGetMode()`/`termSetMode()`/`termEnterRaw()`/
+  `termRestoreMode()`.  Interactive native programs such as SSH should save the
+  current `struct api_term_mode`, enter raw mode for byte-granular terminal IO,
+  and restore the saved mode before exit.
 - `stdio` is buffered
 - Builds `lib/crt0.o` and `lib/libc.a` for freestanding userspace binaries.
 - Keep POSIX-only work on musl / personality layer; do not blur the two.
@@ -174,7 +179,25 @@ Monolithic kernel with the following rough layers:
 
 ### Native crypto library (`libc/LibCrypto`)
 
-- Small native userspace crypto library
+- Small native userspace crypto library built on top of `libc/native`, not
+  POSIX/OpenSSL.
+- Builds `lib/libcrypto.a` and exports a compact SSH-oriented primitive set:
+  random bytes, secure wipe, constant-time memory equality, SHA-256, SHA-512,
+  HMAC-SHA256, IETF ChaCha20, original 64-bit nonce/counter ChaCha20 for SSH
+  packet ciphers, Poly1305, RFC8439 ChaCha20-Poly1305, Curve25519/X25519, and
+  Ed25519 signature verification.
+- Poly1305 is used by the SSH transport MAC path; keep its final
+  reduction/serialization compatible with RFC Poly1305 vectors before
+  debugging higher-level SSH packet authentication failures.
+- Keep new primitives freestanding and native-ABI friendly.  Do not add POSIX
+  file/socket dependencies here.
+
+### Native SSH library (`libc/LibSSH`)
+
+- Native userspace SSH protocol library built on top of `libc/native` and
+  `libc/LibCrypto`; it is intended to support a real native SSH client rather
+  than a POSIX port.
+
 ### Dynamic linking support
 
 - The kernel already handles `PT_INTERP` in both `spawn.c` (`api_proc_spawn`)

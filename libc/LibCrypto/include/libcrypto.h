@@ -23,6 +23,8 @@ $define %func lc_chacha20_init as function with args lc_chacha20_ctx *, const ui
 $define %func lc_chacha20_set_counter as procedure with args lc_chacha20_ctx *, uint32_t
 $define %func lc_chacha20_xor as function with args lc_chacha20_ctx *, const void *, void *, size_t
 $define %func lc_chacha20_block as function with args key, nonce, counter, out block
+$define %func lc_chacha20_xor64 as function with args key, nonce, counter64, input, output, length
+$define %func lc_chacha20_block64 as function with args key, nonce, counter64, out block
 $define %func lc_chacha20_wipe as procedure with args lc_chacha20_ctx *
 $define %func lc_poly1305_auth as procedure with args out, data, size, key
 $define %func lc_chacha20_poly1305_seal as function with args key, nonce, aad, plaintext, ciphertext, tag
@@ -46,6 +48,7 @@ $space %export lc_hmac_sha256_init, lc_hmac_sha256_update
 $space %export lc_hmac_sha256_final, lc_hmac_sha256
 $space %export lc_chacha20_init, lc_chacha20_set_counter
 $space %export lc_chacha20_xor, lc_chacha20_block, lc_chacha20_wipe
+$space %export lc_chacha20_xor64, lc_chacha20_block64
 $space %export lc_poly1305_auth
 $space %export lc_chacha20_poly1305_seal
 $space %export lc_chacha20_poly1305_open
@@ -93,6 +96,7 @@ $space %export lc_ed25519_verify
 #define LC_HMAC_SHA256_SIZE		32
 #define LC_CHACHA20_KEY_SIZE		32
 #define LC_CHACHA20_NONCE_SIZE		12
+#define LC_CHACHA20_NONCE64_SIZE	8
 #define LC_CHACHA20_BLOCK_SIZE		64
 #define LC_POLY1305_KEY_SIZE		32
 #define LC_POLY1305_TAG_SIZE		16
@@ -168,6 +172,12 @@ int	lc_chacha20_xor(lc_chacha20_ctx *ctx, const void *in,
 int	lc_chacha20_block(const uint8_t key[LC_CHACHA20_KEY_SIZE],
 	    const uint8_t nonce[LC_CHACHA20_NONCE_SIZE], uint32_t counter,
 	    uint8_t out[LC_CHACHA20_BLOCK_SIZE]);
+int	lc_chacha20_xor64(const uint8_t key[LC_CHACHA20_KEY_SIZE],
+	    const uint8_t nonce[LC_CHACHA20_NONCE64_SIZE],
+	    uint64_t counter, const void *in, void *out, size_t len);
+int	lc_chacha20_block64(const uint8_t key[LC_CHACHA20_KEY_SIZE],
+	    const uint8_t nonce[LC_CHACHA20_NONCE64_SIZE],
+	    uint64_t counter, uint8_t out[LC_CHACHA20_BLOCK_SIZE]);
 void	lc_chacha20_wipe(lc_chacha20_ctx *ctx);
 
 void	lc_poly1305_auth(uint8_t tag[LC_POLY1305_TAG_SIZE],

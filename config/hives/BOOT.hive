@@ -88,6 +88,10 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 	key Modules.send {
 		string Dest = "/bin/send"
 	}
+
+	key Modules.ssh {
+		string Dest = "/bin/ssh"
+	}
 	
 	key Modules.dhcpc {
 		string Dest = "/bin/dhcpc"

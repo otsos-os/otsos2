@@ -44,6 +44,7 @@ SHMTEST_BIN = $(PROGS_DIR)/shmtest
 UDP_ECHO_BIN = $(PROGS_DIR)/udp_echo
 TCP_ECHO_BIN = $(PROGS_DIR)/tcp_echo
 SEND_BIN = $(PROGS_DIR)/send
+SSH_BIN = $(PROGS_DIR)/ssh/ssh
 DHCPC_BIN = $(PROGS_DIR)/dhcpc
 DHCPD_BIN = $(PROGS_DIR)/demons/dhcpd
 POSIX_HELLO_BIN = $(PROGS_DIR)/posix_hello
@@ -321,6 +322,7 @@ SYS_O = ../bin/sys.o
 API_TIME_O = ../bin/api_time.o
 TERM_POWER_O = ../bin/term_power.o
 TERM_INFO_O = ../bin/term_info.o
+TERM_MODE_O = ../bin/term_mode.o
 INPUT_O = ../bin/input.o
 
 TIME_O = ../bin/time.o
@@ -348,7 +350,8 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(POSIX_O) $(POSIX_IO_O) $(POSIX_PROC_O) $(POSIX_FS_O) \
       $(POSIX_MEM_O) $(POSIX_SOCKET_O) $(POSIX_SIGNAL_O) $(SIGNAL_O) \
       $(PROC_PID_O) $(PROC_PERM_O) $(THREAD_API_O) $(FUTEX_O) $(SYS_O) \
-      $(API_TIME_O) $(TERM_POWER_O) $(TERM_INFO_O) $(INPUT_O) \
+      $(API_TIME_O) $(TERM_POWER_O) $(TERM_INFO_O) $(TERM_MODE_O) \
+      $(INPUT_O) \
       $(TIME_O) $(CLOCKSOURCE_O) $(ET_CLOCKSOURCE_O) $(CMOS_RTC_O)
 
 .PHONY: all ask_version check_build_tools check_run_tools check_bios_run_tools kvm
@@ -487,6 +490,11 @@ $(TCP_ECHO_BIN): $(NATIVE_CRT0) $(NATIVE_LIBC)
 $(SEND_BIN): $(NATIVE_CRT0) $(NATIVE_LIBC)
 	@echo "  MAKE    progs/send"
 	@$(MAKE) -C $(PROGS_DIR) send LIBC_ENABLED=$(LIBC_ENABLED)
+
+.PHONY: $(SSH_BIN)
+$(SSH_BIN): $(NATIVE_CRT0) $(NATIVE_LIBC)
+	@echo "  MAKE    progs/ssh"
+	@$(MAKE) -C $(PROGS_DIR) ssh/ssh LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(DHCPC_BIN)
 $(DHCPC_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
@@ -637,7 +645,7 @@ $(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BU
 		exit 1; \
 	fi
 
-$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SRAPI_DEMO_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
+$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SRAPI_DEMO_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
 	@rm -rf $(BIOS_PAYLOAD_DIR)
 	@mkdir -p $(BIOS_PAYLOAD_DIR)
 	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
@@ -657,6 +665,7 @@ $(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $
 			udp_echo) src=$(UDP_ECHO_BIN);; \
 			tcp_echo) src=$(TCP_ECHO_BIN);; \
 			send) src=$(SEND_BIN);; \
+			ssh) src=$(SSH_BIN);; \
 			dhcpc) src=$(DHCPC_BIN);; \
 			dhcpd) src=$(DHCPD_BIN);; \
 			posix_hello) src=$(POSIX_HELLO_BIN);; \
@@ -1312,6 +1321,10 @@ $(TERM_POWER_O): kernel/api/term_power.c kernel/api/api.h kernel/console/termina
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(TERM_INFO_O): kernel/api/term_info.c kernel/api/api.h kernel/console/terminal.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(TERM_MODE_O): kernel/api/term_mode.c kernel/api/api.h kernel/console/terminal.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

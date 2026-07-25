@@ -153,6 +153,9 @@ void syscall_handler(registers_t *regs) {
   case CALL_TERM_INFO:
     regs->rax = (u64)api_term_info((struct api_term_info *)arg1);
     break;
+  case CALL_TERM_MODE:
+    regs->rax = (u64)api_term_mode((struct api_term_mode *)arg1);
+    break;
   case CALL_TERM_POWER:
     regs->rax = (u64)api_term_power((struct api_term_power *)arg1);
     break;

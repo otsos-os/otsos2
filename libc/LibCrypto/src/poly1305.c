@@ -122,6 +122,7 @@ lc_poly1305_auth(uint8_t tag[LC_POLY1305_TAG_SIZE], const void *data,
 	const uint8_t	*m;
 	uint32_t	r[5], h[5], g[5];
 	uint64_t	f0, f1, f2, f3;
+	uint32_t	w0, w1, w2, w3;
 	uint32_t	mask, nmask, c;
 	size_t		blocks, rem;
 
@@ -189,14 +190,19 @@ lc_poly1305_auth(uint8_t tag[LC_POLY1305_TAG_SIZE], const void *data,
 	h[3] = (h[3] & nmask) | (g[3] & mask);
 	h[4] = (h[4] & nmask) | (g[4] & mask);
 
-	f0 = ((uint64_t)h[0] | ((uint64_t)h[1] << 26)) +
-	    lc_load32_le(key + 16);
-	f1 = ((uint64_t)(h[1] >> 6) | ((uint64_t)h[2] << 20)) +
-	    lc_load32_le(key + 20) + (f0 >> 32);
-	f2 = ((uint64_t)(h[2] >> 12) | ((uint64_t)h[3] << 14)) +
-	    lc_load32_le(key + 24) + (f1 >> 32);
-	f3 = ((uint64_t)(h[3] >> 18) | ((uint64_t)h[4] << 8)) +
-	    lc_load32_le(key + 28) + (f2 >> 32);
+	w0 = (uint32_t)(((uint64_t)h[0] |
+	    ((uint64_t)h[1] << 26)) & 0xffffffffULL);
+	w1 = (uint32_t)(((uint64_t)(h[1] >> 6) |
+	    ((uint64_t)h[2] << 20)) & 0xffffffffULL);
+	w2 = (uint32_t)(((uint64_t)(h[2] >> 12) |
+	    ((uint64_t)h[3] << 14)) & 0xffffffffULL);
+	w3 = (uint32_t)(((uint64_t)(h[3] >> 18) |
+	    ((uint64_t)h[4] << 8)) & 0xffffffffULL);
+
+	f0 = (uint64_t)w0 + lc_load32_le(key + 16);
+	f1 = (uint64_t)w1 + lc_load32_le(key + 20) + (f0 >> 32);
+	f2 = (uint64_t)w2 + lc_load32_le(key + 24) + (f1 >> 32);
+	f3 = (uint64_t)w3 + lc_load32_le(key + 28) + (f2 >> 32);
 
 	lc_store32_le(tag, (uint32_t)f0);
 	lc_store32_le(tag + 4, (uint32_t)f1);

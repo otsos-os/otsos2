@@ -6,20 +6,26 @@ $define %type uint32_t as 32 bit unsigned
 $define %type size_t as object size
 $define %func rotl32 as function with args uint32_t, uint32_t
 $define %func lc_chacha20_rounds as procedure with args const uint32_t *, uint8_t *
+$define %func lc_chacha20_setup64 as procedure with args uint32_t *, const uint8_t *, const uint8_t *, uint64_t
 $define %func lc_chacha20_refill as procedure with args lc_chacha20_ctx *
 $define %func lc_chacha20_init as function with args lc_chacha20_ctx *, const uint8_t *, const uint8_t *, uint32_t
 $define %func lc_chacha20_set_counter as procedure with args lc_chacha20_ctx *, uint32_t
 $define %func lc_chacha20_xor as function with args lc_chacha20_ctx *, const void *, void *, size_t
 $define %func lc_chacha20_block as function with args key, nonce, counter, out block
+$define %func lc_chacha20_xor64 as function with args key, nonce, counter64, input, output, length
+$define %func lc_chacha20_block64 as function with args key, nonce, counter64, out block
 $define %func lc_chacha20_wipe as procedure with args lc_chacha20_ctx *
 
 */
 
 /* !SPACE!
 
-$space %internal rotl32, lc_chacha20_rounds, lc_chacha20_refill
+$space %internal rotl32, lc_chacha20_rounds, lc_chacha20_setup64
+$space %internal lc_chacha20_refill
 $space %export lc_chacha20_init, lc_chacha20_set_counter
-$space %export lc_chacha20_xor, lc_chacha20_block, lc_chacha20_wipe
+$space %export lc_chacha20_xor, lc_chacha20_block
+$space %export lc_chacha20_xor64, lc_chacha20_block64
+$space %export lc_chacha20_wipe
 
 */
 
@@ -109,6 +115,26 @@ lc_chacha20_refill(lc_chacha20_ctx *ctx)
 	ctx->position = 0;
 }
 
+static void
+lc_chacha20_setup64(uint32_t state[16],
+    const uint8_t key[LC_CHACHA20_KEY_SIZE],
+    const uint8_t nonce[LC_CHACHA20_NONCE64_SIZE], uint64_t counter)
+{
+	int	i;
+
+	state[0] = 0x61707865;
+	state[1] = 0x3320646e;
+	state[2] = 0x79622d32;
+	state[3] = 0x6b206574;
+	for (i = 0; i < 8; i++) {
+		state[4 + i] = lc_load32_le(key + i * 4);
+	}
+	state[12] = (uint32_t)counter;
+	state[13] = (uint32_t)(counter >> 32);
+	state[14] = lc_load32_le(nonce);
+	state[15] = lc_load32_le(nonce + 4);
+}
+
 int
 lc_chacha20_init(lc_chacha20_ctx *ctx,
     const uint8_t key[LC_CHACHA20_KEY_SIZE],
@@ -187,6 +213,64 @@ lc_chacha20_block(const uint8_t key[LC_CHACHA20_KEY_SIZE],
 	lc_chacha20_refill(&ctx);
 	memcpy(out, ctx.keystream, LC_CHACHA20_BLOCK_SIZE);
 	lc_chacha20_wipe(&ctx);
+	return (0);
+}
+
+int
+lc_chacha20_block64(const uint8_t key[LC_CHACHA20_KEY_SIZE],
+    const uint8_t nonce[LC_CHACHA20_NONCE64_SIZE], uint64_t counter,
+    uint8_t out[LC_CHACHA20_BLOCK_SIZE])
+{
+	uint32_t	state[16];
+
+	if (!key || !nonce || !out) {
+		errno = EINVAL;
+		return (-1);
+	}
+	lc_chacha20_setup64(state, key, nonce, counter);
+	lc_chacha20_rounds(state, out);
+	lc_wipe(state, sizeof(state));
+	return (0);
+}
+
+int
+lc_chacha20_xor64(const uint8_t key[LC_CHACHA20_KEY_SIZE],
+    const uint8_t nonce[LC_CHACHA20_NONCE64_SIZE], uint64_t counter,
+    const void *in, void *out, size_t len)
+{
+	uint8_t		block[LC_CHACHA20_BLOCK_SIZE];
+	const uint8_t	*src;
+	uint8_t		*dst;
+	size_t		off, todo, i;
+
+	if (!key || !nonce || (!in && len != 0) || (!out && len != 0)) {
+		errno = EINVAL;
+		return (-1);
+	}
+	src = (const uint8_t *)in;
+	dst = (uint8_t *)out;
+	off = 0;
+	while (off < len) {
+		if (lc_chacha20_block64(key, nonce, counter, block) != 0) {
+			lc_wipe(block, sizeof(block));
+			return (-1);
+		}
+		todo = len - off;
+		if (todo > sizeof(block)) {
+			todo = sizeof(block);
+		}
+		for (i = 0; i < todo; i++) {
+			dst[off + i] = src[off + i] ^ block[i];
+		}
+		off += todo;
+		if (off < len && counter == UINT64_MAX) {
+			lc_wipe(block, sizeof(block));
+			errno = EINVAL;
+			return (-1);
+		}
+		counter++;
+	}
+	lc_wipe(block, sizeof(block));
 	return (0);
 }
 

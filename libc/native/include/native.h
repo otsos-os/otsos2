@@ -67,9 +67,87 @@ $space %export traceMark
 #define CALL_TERM_READ		0x100
 #define CALL_TERM_WRITE		0x101
 #define CALL_TERM_INFO		0x102
+#define CALL_TERM_MODE		0x103
 #define CALL_TERM_POWER		0x111
 #define TERM_READ_IGNORE_SIGINT	0x00000001
 #define TERM_READ_NO_ECHO	0x00000002
+
+#define API_TERM_ACTIVE		(-1)
+#define API_TERM_MODE_GET	0
+#define API_TERM_MODE_SET	1
+#define API_TERM_NCCS		32
+
+#define API_TERM_IFLAG_IGNBRK	0000001
+#define API_TERM_IFLAG_BRKINT	0000002
+#define API_TERM_IFLAG_IGNPAR	0000004
+#define API_TERM_IFLAG_PARMRK	0000010
+#define API_TERM_IFLAG_INPCK	0000020
+#define API_TERM_IFLAG_ISTRIP	0000040
+#define API_TERM_IFLAG_INLCR	0000100
+#define API_TERM_IFLAG_IGNCR	0000200
+#define API_TERM_IFLAG_ICRNL	0000400
+#define API_TERM_IFLAG_IXON	0001000
+#define API_TERM_IFLAG_IXOFF	0002000
+#define API_TERM_IFLAG_IXANY	0004000
+#define API_TERM_IFLAG_IMAXBEL	0010000
+#define API_TERM_IFLAG_IUTF8	0040000
+
+#define API_TERM_OFLAG_OPOST	0000001
+#define API_TERM_OFLAG_OLCUC	0000002
+#define API_TERM_OFLAG_ONLCR	0000004
+#define API_TERM_OFLAG_OCRNL	0000010
+#define API_TERM_OFLAG_ONOCR	0000020
+#define API_TERM_OFLAG_ONLRET	0000040
+#define API_TERM_OFLAG_OFILL	0000100
+#define API_TERM_OFLAG_OFDEL	0000200
+
+#define API_TERM_CFLAG_CBAUD	0010017
+#define API_TERM_CFLAG_CSIZE	0000060
+#define API_TERM_CFLAG_CS5	0000000
+#define API_TERM_CFLAG_CS6	0000020
+#define API_TERM_CFLAG_CS7	0000040
+#define API_TERM_CFLAG_CS8	0000060
+#define API_TERM_CFLAG_CSTOPB	0000100
+#define API_TERM_CFLAG_CREAD	0000200
+#define API_TERM_CFLAG_PARENB	0000400
+#define API_TERM_CFLAG_PARODD	0001000
+#define API_TERM_CFLAG_HUPCL	0002000
+#define API_TERM_CFLAG_CLOCAL	0004000
+
+#define API_TERM_LFLAG_ISIG	0000001
+#define API_TERM_LFLAG_ICANON	0000002
+#define API_TERM_LFLAG_XCASE	0000004
+#define API_TERM_LFLAG_ECHO	0000010
+#define API_TERM_LFLAG_ECHOE	0000020
+#define API_TERM_LFLAG_ECHOK	0000040
+#define API_TERM_LFLAG_ECHONL	0000100
+#define API_TERM_LFLAG_NOFLSH	0000200
+#define API_TERM_LFLAG_TOSTOP	0000400
+#define API_TERM_LFLAG_ECHOCTL	0001000
+#define API_TERM_LFLAG_ECHOPRT	0002000
+#define API_TERM_LFLAG_ECHOKE	0004000
+#define API_TERM_LFLAG_FLUSHO	0010000
+#define API_TERM_LFLAG_PENDIN	0040000
+#define API_TERM_LFLAG_IEXTEN	0100000
+
+#define API_TERM_CC_VINTR	0
+#define API_TERM_CC_VQUIT	1
+#define API_TERM_CC_VERASE	2
+#define API_TERM_CC_VKILL	3
+#define API_TERM_CC_VEOF	4
+#define API_TERM_CC_VTIME	5
+#define API_TERM_CC_VMIN	6
+#define API_TERM_CC_VSTART	8
+#define API_TERM_CC_VSTOP	9
+#define API_TERM_CC_VSUSP	10
+#define API_TERM_CC_VEOL	11
+#define API_TERM_CC_VREPRINT	12
+#define API_TERM_CC_VDISCARD	13
+#define API_TERM_CC_VWERASE	14
+#define API_TERM_CC_VLNEXT	15
+#define API_TERM_CC_VEOL2	16
+
+#define API_TERM_SPEED_B38400	0000015
 #define CALL_INPUT_READ		0x120
 #define CALL_INPUT_POLL		0x121
 #define CALL_INPUT_FLUSH	0x122
@@ -690,6 +768,18 @@ struct api_term_power {
 	int	flags;
 };
 
+struct api_term_mode {
+	int	op;
+	int	tty;
+	uint32_t	iflag;
+	uint32_t	oflag;
+	uint32_t	cflag;
+	uint32_t	lflag;
+	uint8_t		cc[API_TERM_NCCS];
+	uint32_t	ispeed;
+	uint32_t	ospeed;
+};
+
 struct mem_map_args {
 	uint64_t	addr;
 	uint64_t	length;
@@ -900,6 +990,11 @@ ssize_t	termWrite(const void *buf, size_t count);
 ssize_t	termPrint(const char *text);
 int	termInfo(struct api_term_info *info);
 int	termPower(struct api_term_power *args);
+int	termMode(struct api_term_mode *args);
+int	termGetMode(struct api_term_mode *mode);
+int	termSetMode(const struct api_term_mode *mode);
+int	termEnterRaw(struct api_term_mode *saved);
+int	termRestoreMode(const struct api_term_mode *saved);
 int	inputRead(struct api_key_event *buf, uint32_t count, uint32_t flags);
 int	inputPoll(void);
 int	inputFlush(void);
