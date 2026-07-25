@@ -33,13 +33,3 @@ Native API used by permission-aware tools:
 
 procPerm(0) checks the current process.  The return value is
 API_PROC_PERM_USER or API_PROC_PERM_KUSR.
-
-Native API used by profile:
-- traceOpen / traceCtl / traceRead / traceInfo
-- procSpawnNative or procSpawn
-
-Examples:
-- profile ls /
-- profile --full --source syscall,scheduler ls /
-- profile --raw --raw-limit 32 --stacks ls /
-- profile --csv -o trace.csv --system oven

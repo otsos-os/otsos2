@@ -10,6 +10,8 @@ $define %func traceClose as function with args int
 $define %func traceRead as function with args int, api_trace_read *
 $define %func traceCtl as function with args int, uint32_t, void *
 $define %func traceInfo as function with args uint32_t, void *
+$define %func traceLoad as function with args int, api_trace_load *
+$define %func traceReadAggs as function with args int, api_trace_aggs *
 $define %func traceMark as function with args uint32_t, five uint64_t
 
 */
@@ -17,7 +19,7 @@ $define %func traceMark as function with args uint32_t, five uint64_t
 /* !SPACE!
 
 $space %export traceOpen, traceClose, traceRead, traceCtl, traceInfo
-$space %export traceMark
+$space %export traceLoad, traceReadAggs, traceMark
 
 */
 
@@ -82,6 +84,22 @@ traceInfo(uint32_t op, void *arg)
 {
 	return (__sysret_int(__syscall2(CALL_TRACE_INFO, (long)op,
 	    (long)arg)));
+}
+
+int
+traceLoad(int trace, struct api_trace_load *load)
+{
+	return (traceCtl(trace, API_TRACE_OP_LOAD, load));
+}
+
+ssize_t
+traceReadAggs(int trace, struct api_trace_aggs *args)
+{
+	if (args != NULL) {
+		args->trace = trace;
+	}
+	return (__sysret(__syscall2(CALL_TRACE_INFO,
+	    (long)API_TRACE_INFO_AGGS, (long)args)));
 }
 
 int

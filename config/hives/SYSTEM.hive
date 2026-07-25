@@ -36,12 +36,13 @@ hive SYSTEM @access(read=user, add=kusr, edit=kusr) {
 		u32 StackDepth = 4
 	}
 
-	key Trace.Sources {
-		bool Main = true
+	key Trace.Providers {
+		bool Core = true
+		bool Profile = true
 		bool Pmu = true
 		bool Syscall = true
-		bool Handler = true
-		bool Scheduler = true
+		bool Irq = true
+		bool Sched = true
 		bool Event = true
 		bool User = true
 	}

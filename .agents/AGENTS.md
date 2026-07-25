@@ -89,9 +89,11 @@ Monolithic kernel with the following rough layers:
 - `ipc/` — named native IPC services and connected sessions with atomic
   messages, credentials, correlation IDs, bounded queues, backpressure, timed
   calls, handle lifecycle integration, and `EVFILT_IPC` readiness.
-- `trace/` — kernel observability core: event registry, per-CPU ring buffers,
-  trace sessions, PMU samples from `drivers/pmu`, syscall/IRQ/scheduler/kqueue
-  tracepoints. Runtime toggles live in the `SYSTEM` registry hive.
+- `trace/` — kernel observability core: DTrace-like providers/probes, safe
+  per-session programs with predicates/actions, per-session per-CPU buffers,
+  kernel aggregations, PMU samples from `drivers/pmu`, and syscall/IRQ/
+  scheduler/kqueue tracepoints. Runtime toggles live in the `SYSTEM` registry
+  hive.
 - `kshell/` — optional kernel debug shell; runtime command metadata and prompt
   live in the `SYSTEM` registry hive.
 - `crypto/` — SHA-256, HMAC-SHA256, PBKDF2, ChaCha20, RNG, plus `kusr`
