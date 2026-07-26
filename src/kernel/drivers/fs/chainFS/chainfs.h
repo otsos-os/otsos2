@@ -154,6 +154,9 @@ int	chainfs_chdir(const char *path);
 int	chainfs_list_dir(const char *path,
 	    chainfs_file_entry_t *files, u32 max_files,
 	    u32 *file_count);
+int	chainfs_list_dir_range(const char *path, u32 start,
+	    chainfs_file_entry_t *files, u32 max_files,
+	    u32 *file_count, u32 *total_count);
 char	*chainfs_get_current_path(char *buffer, u32 buffer_size);
 
 int	chainfs_resolve_path(const char *path,

@@ -43,6 +43,8 @@ void		devfs_init(void);
 vnode_t		*devfs_lookup(const char *path);
 int		devfs_root_readdir(vnode_t *vn, u32 index, char *name,
 		    int *type);
+int		devfs_root_listdir(vnode_t *vn, u32 start,
+		    vfs_dirent_t *entries, u32 max_entries, u32 *count);
 int		devfs_register(const char *name, int device_id,
 		    int (*read_fn)(vnode_t *, void *, u64, u64),
 		    int (*write_fn)(vnode_t *, const void *, u64, u64),

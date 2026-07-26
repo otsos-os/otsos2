@@ -58,6 +58,7 @@ $define %func chainfs_mkdir as function with args const char *
 $define %func chainfs_create_socket as function with args const char *
 $define %func chainfs_chdir as function with args const char *
 $define %func chainfs_list_dir as function with args const char *, chainfs_file_entry_t *, u32, u32 *
+$define %func chainfs_list_dir_range as function with args const char *, u32, chainfs_file_entry_t *, u32, u32 *, u32 *
 $define %func chainfs_get_current_path as function with args char *, u32
 $define %func chainfs_rmdir as function with args const char *
 
@@ -74,7 +75,8 @@ $space %export chainfs_read_file_range, chainfs_write_file
 $space %export chainfs_link, chainfs_delete_file, chainfs_get_file_list
 $space %export chainfs_find_in_directory, chainfs_resolve_path
 $space %export chainfs_mkdir, chainfs_create_socket, chainfs_chdir
-$space %export chainfs_list_dir, chainfs_get_current_path, chainfs_rmdir
+$space %export chainfs_list_dir, chainfs_list_dir_range
+$space %export chainfs_get_current_path, chainfs_rmdir
 $space %export g_chainfs, g_chainfs_phys
 
 */
@@ -1451,11 +1453,25 @@ int
 chainfs_list_dir(const char *path, chainfs_file_entry_t *files,
     u32 max_files, u32 *file_count)
 {
+	return (chainfs_list_dir_range(path, 0, files, max_files,
+	    file_count, NULL));
+}
+
+int
+chainfs_list_dir_range(const char *path, u32 start,
+    chainfs_file_entry_t *files, u32 max_files, u32 *file_count,
+    u32 *total_count)
+{
 	chainfs_file_entry_t	dir_entry;
+	chainfs_file_entry_t	sector_entries[ENTRIES_PER_BLOCK];
 	u32			dir_block, dir_offset, entries_per_block;
-	u32			found, block, i;
+	u32			found, seen, block, i;
 	chainfs_file_entry_t	*entries;
 	int			ret;
+
+	if (!path || !file_count || (max_files != 0 && !files)) {
+		return (-API_ERR_BAD_VALUE);
+	}
 
 	if (path[0] == 0) {
 		dir_block = g_chainfs.current_dir_block;
@@ -1480,27 +1496,39 @@ chainfs_list_dir(const char *path, chainfs_file_entry_t *files,
 	entries_per_block =
 	    CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t);
 	found = 0;
+	seen = 0;
+	if (max_files == 0 && total_count == NULL) {
+		*file_count = 0;
+		return (0);
+	}
 
 	for (block = 1;
-	    block < 1 + g_chainfs.superblock.file_table_block_count &&
-	    found < max_files;
+	    block < 1 + g_chainfs.superblock.file_table_block_count;
 	    block++) {
-		disk_read(g_chainfs.disk, block,
-		    g_chainfs.sector_buffer);
-		entries = (chainfs_file_entry_t *)
-		    g_chainfs.sector_buffer;
+		if (total_count == NULL && max_files != 0 &&
+		    found >= max_files) {
+			break;
+		}
 
-		for (i = 0; i < entries_per_block && found < max_files;
-		    i++) {
+		disk_read(g_chainfs.disk, block, (u8 *)sector_entries);
+		entries = sector_entries;
+
+		for (i = 0; i < entries_per_block; i++) {
 			if (entries[i].status == 1 &&
 			    entries[i].parent_block == dir_block) {
-				files[found] = entries[i];
-				found++;
+				if (seen >= start && found < max_files) {
+					files[found] = entries[i];
+					found++;
+				}
+				seen++;
 			}
 		}
 	}
 
 	*file_count = found;
+	if (total_count) {
+		*total_count = seen;
+	}
 	return (0);
 }
 

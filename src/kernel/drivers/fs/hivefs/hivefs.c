@@ -33,6 +33,7 @@ $define %type s64 as 64 bit signed
 $define %type int as 32 bit signed
 $define %type char as 8 bit signed
 $define %type vnode_t as VFS vnode
+$define %type vfs_dirent_t as VFS directory entry
 $define %type posix_stat_t as POSIX stat record
 $define %type vfs_back_ops_t as backend operation table
 $define %type hivefs_pack_header_t as cmseed pack header
@@ -92,6 +93,7 @@ $define %func hivefs_vnode_read as function with args vnode, buf, count, off
 $define %func hivefs_vnode_write as function with args vnode, buf, count, off
 $define %func hivefs_vnode_stat as function with args vnode_t *, posix_stat_t *
 $define %func hivefs_vnode_readdir as function with args vnode, idx, name, type
+$define %func hivefs_vnode_listdir as function with args vnode, start, entries, max_entries, count
 $define %func hivefs_back_init as function with args void
 $define %func hivefs_back_lookup as function with args const char *
 $define %func hivefs_back_create_file as function with args const char *
@@ -138,7 +140,7 @@ $space %internal hivefs_free_hive_blobs, hivefs_pack_align
 $space %internal hivefs_build_pack, hivefs_commit
 $space %internal hivefs_validate_hive, hivefs_make_vnode
 $space %internal hivefs_vnode_read, hivefs_vnode_write, hivefs_vnode_stat
-$space %internal hivefs_vnode_readdir
+$space %internal hivefs_vnode_readdir, hivefs_vnode_listdir
 $space %internal hivefs_back_init, hivefs_back_lookup
 $space %internal hivefs_back_create_file, hivefs_back_mkdir
 $space %internal hivefs_back_rmdir, hivefs_back_unlink
@@ -312,6 +314,8 @@ static int	hivefs_vnode_write(vnode_t *vn, const void *buf, u64 count,
 static int	hivefs_vnode_stat(vnode_t *vn, posix_stat_t *st);
 static int	hivefs_vnode_readdir(vnode_t *vn, u32 index, char *name,
 		    int *type);
+static int	hivefs_vnode_listdir(vnode_t *vn, u32 start,
+		    vfs_dirent_t *entries, u32 max_entries, u32 *count);
 static int	hivefs_commit(void);
 static int	hivefs_pack_load(const void *data, u32 size, int owned);
 
@@ -1506,6 +1510,7 @@ hivefs_make_vnode(int kind, u32 hive, u32 node, u32 value,
 	vn->write_fn = (type == VREG) ? hivefs_vnode_write : NULL;
 	vn->stat_fn = hivefs_vnode_stat;
 	vn->readdir_fn = (type == VDIR) ? hivefs_vnode_readdir : NULL;
+	vn->listdir_fn = (type == VDIR) ? hivefs_vnode_listdir : NULL;
 	return (vn);
 }
 
@@ -1660,24 +1665,56 @@ hivefs_vnode_stat(vnode_t *vn, posix_stat_t *st)
 static int
 hivefs_vnode_readdir(vnode_t *vn, u32 index, char *name, int *type)
 {
+	vfs_dirent_t	entry;
+	u32		count;
+	int		ret;
+
+	count = 0;
+	ret = hivefs_vnode_listdir(vn, index, &entry, 1, &count);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (count == 0) {
+		return (0);
+	}
+	hivefs_name_copy(entry.name, name);
+	if (type) {
+		*type = entry.type;
+	}
+	return (1);
+}
+
+static int
+hivefs_vnode_listdir(vnode_t *vn, u32 start, vfs_dirent_t *entries,
+    u32 max_entries, u32 *count)
+{
 	hivefs_vnode_data_t	*data;
 	hivefs_hive_t		*hive;
-	u32			node, seen, i;
+	u32			node, seen, copied, value_start, i;
 
-	if (!vn || !name || !vn->data) {
+	if (!vn || !entries || !count || !vn->data) {
 		return (-API_ERR_BAD_VALUE);
+	}
+
+	*count = 0;
+	if (max_entries == 0) {
+		return (0);
 	}
 
 	data = (hivefs_vnode_data_t *)vn->data;
 	if (data->kind == HIVEFS_KIND_ROOT) {
-		if (index >= g_hivefs.hive_count) {
-			return (0);
+		copied = 0;
+		for (i = start; i < g_hivefs.hive_count &&
+		    copied < max_entries; i++) {
+			memset(&entries[copied], 0,
+			    sizeof(entries[copied]));
+			hivefs_name_copy(g_hivefs.hives[i].name,
+			    entries[copied].name);
+			entries[copied].type = VDIR;
+			copied++;
 		}
-		hivefs_name_copy(g_hivefs.hives[index].name, name);
-		if (type) {
-			*type = VDIR;
-		}
-		return (1);
+		*count = copied;
+		return (0);
 	}
 	if (data->hive >= g_hivefs.hive_count ||
 	    (data->kind != HIVEFS_KIND_HIVE &&
@@ -1692,37 +1729,45 @@ hivefs_vnode_readdir(vnode_t *vn, u32 index, char *name, int *type)
 	}
 
 	seen = 0;
+	copied = 0;
 	for (i = 0; i < hive->node_count; i++) {
 		if (hive->nodes[i].deleted ||
 		    hive->nodes[i].parent != node) {
 			continue;
 		}
-		if (seen == index) {
-			hivefs_name_copy(hive->nodes[i].name, name);
-			if (type) {
-				*type = VDIR;
-			}
-			return (1);
+		if (seen >= start && copied < max_entries) {
+			memset(&entries[copied], 0, sizeof(entries[copied]));
+			hivefs_name_copy(hive->nodes[i].name,
+			    entries[copied].name);
+			entries[copied].type = VDIR;
+			copied++;
 		}
 		seen++;
 	}
 
-	index -= seen;
+	if (copied >= max_entries) {
+		*count = copied;
+		return (0);
+	}
+
+	value_start = (start > seen) ? start - seen : 0;
 	seen = 0;
 	for (i = 0; i < hive->value_count; i++) {
 		if (hive->values[i].deleted ||
 		    hive->values[i].node != node) {
 			continue;
 		}
-		if (seen == index) {
-			hivefs_name_copy(hive->values[i].name, name);
-			if (type) {
-				*type = VREG;
-			}
-			return (1);
+		if (seen >= value_start && copied < max_entries) {
+			memset(&entries[copied], 0, sizeof(entries[copied]));
+			hivefs_name_copy(hive->values[i].name,
+			    entries[copied].name);
+			entries[copied].type = VREG;
+			copied++;
 		}
 		seen++;
 	}
+
+	*count = copied;
 	return (0);
 }
 

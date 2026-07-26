@@ -43,6 +43,8 @@
 
 static int	posix_poll_wait_channel;
 
+#define	POSIX_GETDENTS_BATCH	16
+
 void
 posix_poll_notify(void)
 {
@@ -142,6 +144,27 @@ posix_vfs_ret(int ret)
 	case API_ERR_INVAL:
 	default:
 		return (-POSIX_EINVAL);
+	}
+}
+
+static u8
+posix_dtype_from_vtype(int type)
+{
+	switch (type) {
+	case VREG:
+		return (POSIX_DT_REG);
+	case VDIR:
+		return (POSIX_DT_DIR);
+	case VCHR:
+		return (POSIX_DT_CHR);
+	case VPIPE:
+		return (POSIX_DT_FIFO);
+	case VLNK:
+		return (POSIX_DT_LNK);
+	case VSOCK:
+		return (POSIX_DT_SOCK);
+	default:
+		return (POSIX_DT_UNKNOWN);
 	}
 }
 
@@ -2201,16 +2224,16 @@ s64
 posix_getdents64(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5,
     u64 a6, registers_t *regs)
 {
+	vfs_dirent_t	entries[POSIX_GETDENTS_BATCH];
 	struct process	*proc;
-	posix_fd_t	*pfd;
 	posix_dirent64_t	*de;
+	posix_fd_t	*pfd;
 	u8		*buf;
-	u32		idx;
+	u32		idx, batch_count, batch_index, consumed, want;
 	u32		name_len;
 	u64		pos;
-	int		type, ret;
+	int		ret;
 	u16		reclen;
-	char		name[32];
 
 	(void)a4; (void)a5; (void)a6; (void)regs;
 
@@ -2240,35 +2263,49 @@ posix_getdents64(u64 fd_u, u64 buf_u, u64 count, u64 a4, u64 a5,
 	idx = (u32)pfd->offset;
 
 	while (pos + POSIX_DIRENT64_NAME_OFF + 1 <= count) {
-		memset(name, 0, sizeof(name));
-
-		type = POSIX_DT_UNKNOWN;
-		ret = vnode_readdir(pfd->vnode, idx, name, &type);
-		if (ret < 0) {
+		want = POSIX_GETDENTS_BATCH;
+		batch_count = 0;
+		ret = vnode_listdir(pfd->vnode, idx, entries, want,
+		    &batch_count);
+		if (ret != 0) {
 			return (posix_vfs_ret(ret));
 		}
-		if (ret == 0) {
+		if (batch_count == 0) {
 			break;
 		}
-
-		name_len = strlen(name);
-		reclen = (u16)((POSIX_DIRENT64_NAME_OFF + name_len + 1 +
-		    7) & ~7);
-
-		if (pos + reclen > count) {
-			break;
+		if (batch_count > want) {
+			batch_count = want;
 		}
 
-		de = (posix_dirent64_t *)(buf + pos);
-		de->d_ino = idx + 1;
-		de->d_off = (s64)(idx + 1);
-		de->d_reclen = reclen;
-		de->d_type = (u8)type;
-		memcpy(de->d_name, name, name_len);
-		de->d_name[name_len] = '\0';
+		consumed = 0;
+		for (batch_index = 0; batch_index < batch_count;
+		    batch_index++) {
+			name_len = strlen(entries[batch_index].name);
+			reclen = (u16)((POSIX_DIRENT64_NAME_OFF +
+			    name_len + 1 + 7) & ~7);
 
-		pos += reclen;
-		idx++;
+			if (pos + reclen > count) {
+				break;
+			}
+
+			de = (posix_dirent64_t *)(buf + pos);
+			de->d_ino = idx + consumed + 1;
+			de->d_off = (s64)(idx + consumed + 1);
+			de->d_reclen = reclen;
+			de->d_type =
+			    posix_dtype_from_vtype(entries[batch_index].type);
+			memcpy(de->d_name, entries[batch_index].name,
+			    name_len);
+			de->d_name[name_len] = '\0';
+
+			pos += reclen;
+			consumed++;
+		}
+
+		idx += consumed;
+		if (consumed < batch_count) {
+			break;
+		}
 	}
 
 	pfd->offset = (u64)idx;

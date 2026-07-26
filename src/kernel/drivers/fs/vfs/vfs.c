@@ -32,6 +32,7 @@ $define %type u64 as 64 bit unsigned
 $define %type s64 as 64 bit signed
 $define %type int as 32 bit signed
 $define %type char as 8 bit signed
+$define %type vfs_dirent_t as VFS directory entry
 $define %type vnode_t as VFS vnode
 $define %type vfs_back_ops as backend operation table forward declaration
 $define %type posix_stat_t as POSIX stat fields
@@ -51,6 +52,7 @@ $define %func vnode_read as function with args vnode_t *, void *, u64, u64
 $define %func vnode_write as function with args vnode_t *, const void *, u64, u64
 $define %func vnode_stat as function with args vnode_t *, posix_stat_t *
 $define %func vnode_readdir as function with args vnode_t *, u32, char *, int *
+$define %func vnode_listdir as function with args vnode_t *, u32, vfs_dirent_t *, u32, u32 *
 $define %func vnode_ioctl as function with args vnode_t *, u64, void *
 $define %func vnode_readlink as function with args vnode_t *, char *, size_t
 $define %func vfs_resolve as function with args const char *, vnode_t **
@@ -78,7 +80,7 @@ $space %export vfs_mount, vfs_mount_named
 $space %export vfs_umount, vfs_unmount, vfs_mount_can_exec
 $space %export vnode_alloc, vnode_acquire, vnode_release, vnode_can_exec
 $space %export vnode_read, vnode_write, vnode_stat, vnode_readdir
-$space %export vnode_ioctl, vnode_readlink
+$space %export vnode_listdir, vnode_ioctl, vnode_readlink
 $space %export vfs_resolve, vfs_resolve_nofollow, vfs_create_file
 $space %export vfs_mkdir, vfs_rmdir, vfs_unlink, vfs_rename
 $space %export vfs_truncate, vfs_symlink, vfs_link, vfs_readlink
@@ -376,19 +378,92 @@ vnode_stat(vnode_t *vn, posix_stat_t *st)
 int
 vnode_readdir(vnode_t *vn, u32 index, char *name, int *type)
 {
+	vfs_dirent_t	entry;
+	u32		count;
+	int		ret;
+
 	if (!vn || !name) {
 		return (-API_ERR_BAD_VALUE);
 	}
 	if (vn->type != VDIR) {
 		return (-API_ERR_NOT_DIR);
 	}
-	if (!vn->readdir_fn) {
+	if (!vfs_back_mount_can_read(vn->mount_id)) {
+		return (-API_ERR_ACCESS);
+	}
+	if (!vn->readdir_fn && !vn->listdir_fn) {
 		return (-API_ERR_NOT_SUPPORTED);
+	}
+	if (vn->readdir_fn) {
+		return (vn->readdir_fn(vn, index, name, type));
+	}
+
+	count = 0;
+	ret = vn->listdir_fn(vn, index, &entry, 1, &count);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (count == 0) {
+		return (0);
+	}
+	memcpy(name, entry.name, sizeof(entry.name));
+	name[sizeof(entry.name) - 1] = '\0';
+	if (type) {
+		*type = entry.type;
+	}
+	return (1);
+}
+
+int
+vnode_listdir(vnode_t *vn, u32 start, vfs_dirent_t *entries,
+    u32 max_entries, u32 *count)
+{
+	char	name[32];
+	u32	i, out;
+	int	type, ret;
+
+	if (!vn || !entries || !count) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (vn->type != VDIR) {
+		return (-API_ERR_NOT_DIR);
 	}
 	if (!vfs_back_mount_can_read(vn->mount_id)) {
 		return (-API_ERR_ACCESS);
 	}
-	return (vn->readdir_fn(vn, index, name, type));
+
+	*count = 0;
+	if (max_entries == 0) {
+		return (0);
+	}
+	if (vn->listdir_fn) {
+		return (vn->listdir_fn(vn, start, entries, max_entries,
+		    count));
+	}
+	if (!vn->readdir_fn) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
+
+	out = 0;
+	for (i = 0; i < max_entries; i++) {
+		memset(name, 0, sizeof(name));
+		type = 0;
+		ret = vn->readdir_fn(vn, start + i, name, &type);
+		if (ret < 0) {
+			return (ret);
+		}
+		if (ret == 0) {
+			break;
+		}
+		memset(&entries[out], 0, sizeof(entries[out]));
+		memcpy(entries[out].name, name, sizeof(entries[out].name) - 1);
+		entries[out].name[sizeof(entries[out].name) - 1] = '\0';
+		entries[out].type = type;
+		out++;
+	}
+
+	*count = out;
+	return (0);
 }
 
 int

@@ -24,6 +24,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <kernel/api/errno.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/console/terminal.h>
 #include <kernel/console/pty.h>
@@ -368,6 +369,7 @@ devfs_lookup(const char *path)
 		vn = vnode_alloc(VDIR, "dev");
 		if (vn) {
 			vn->readdir_fn = devfs_root_readdir;
+			vn->listdir_fn = devfs_root_listdir;
 			vn->data = NULL;
 		}
 		return (vn);
@@ -460,4 +462,55 @@ devfs_root_readdir(vnode_t *vn, u32 index, char *name, int *type)
 	}
 
 	return (1);
+}
+
+int
+devfs_root_listdir(vnode_t *vn, u32 start, vfs_dirent_t *entries,
+    u32 max_entries, u32 *count)
+{
+	devfs_node_t	*cur;
+	u32		visible, slot, copied, end, list_index;
+	int		j;
+
+	(void)vn;
+
+	if (!entries || !count) {
+		return (-API_ERR_BAD_VALUE);
+	}
+
+	*count = 0;
+	if (max_entries == 0 || start >= (u32)devfs_count) {
+		return (0);
+	}
+
+	if (max_entries > 0xFFFFFFFFU - start) {
+		end = 0xFFFFFFFFU;
+	} else {
+		end = start + max_entries;
+	}
+
+	cur = devfs_list;
+	copied = 0;
+	list_index = 0;
+	while (cur) {
+		if ((u32)devfs_count <= list_index) {
+			break;
+		}
+		visible = (u32)devfs_count - 1 - list_index;
+		if (visible >= start && visible < end) {
+			slot = visible - start;
+			memset(&entries[slot], 0, sizeof(entries[slot]));
+			for (j = 0; j < 31 && cur->name[j] != '\0'; j++) {
+				entries[slot].name[j] = cur->name[j];
+			}
+			entries[slot].name[j] = '\0';
+			entries[slot].type = VCHR;
+			copied++;
+		}
+		cur = cur->next;
+		list_index++;
+	}
+
+	*count = copied;
+	return (0);
 }

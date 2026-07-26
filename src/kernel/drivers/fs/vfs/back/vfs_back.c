@@ -32,6 +32,7 @@ $define %type u64 as 64 bit unsigned
 $define %type int as 32 bit signed
 $define %type char as 8 bit signed
 $define %type vnode_t as VFS vnode
+$define %type vfs_dirent_t as VFS directory entry
 $define %type vfs_back_ops_t as backend operation table
 $define %type vfs_mount_t as mounted backend slot
 $define %type chainfs_file_entry_t as ChainFS file table entry
@@ -54,7 +55,10 @@ $define %func chainfs_vnode_write as function with args vnode_t *, const void *,
 $define %func chainfs_vnode_readlink as function with args vnode_t *, char *, size_t
 $define %func chainfs_vnode_stat as function with args vnode_t *, posix_stat_t *
 $define %func chainfs_vnode_readdir as function with args vnode_t *, u32, char *, int *
+$define %func chainfs_vnode_listdir as function with args vnode_t *, u32, vfs_dirent_t *, u32, u32 *
 $define %func vfs_root_readdir as function with args vnode_t *, u32, char *, int *
+$define %func vfs_root_listdir as function with args vnode_t *, u32, vfs_dirent_t *, u32, u32 *
+$define %func vfs_root_chain_name_exists as function with args const char *
 $define %func chainfs_back_lookup as function with args const char *
 $define %func chainfs_back_init as function with args void
 $define %func chainfs_back_create_file as function with args const char *
@@ -108,7 +112,9 @@ $space %internal chainfs_back_ready, chainfs_entry_vtype
 $space %internal chainfs_entry_dtype, chainfs_copy_name
 $space %internal chainfs_vnode_read, chainfs_vnode_write
 $space %internal chainfs_vnode_readlink, chainfs_vnode_stat
-$space %internal chainfs_vnode_readdir, vfs_root_readdir
+$space %internal chainfs_vnode_readdir, chainfs_vnode_listdir
+$space %internal vfs_root_readdir, vfs_root_listdir
+$space %internal vfs_root_chain_name_exists
 $space %internal chainfs_back_lookup, chainfs_back_init
 $space %internal chainfs_back_create_file, chainfs_back_mkdir
 $space %internal chainfs_back_rmdir, chainfs_back_unlink
@@ -142,7 +148,7 @@ $space %export vfs_back_chdir, vfs_back_getcwd, vfs_back_write_file
 
 #define	VFS_BACK_MAX_MOUNTS	8
 #define	VFS_BACK_MAX_PATH	256
-#define	VFS_BACK_ROOT_ENTRIES	128
+#define	VFS_BACK_LISTDIR_BATCH	32
 
 typedef struct vfs_mount {
 	char			path[VFS_BACK_MAX_PATH];
@@ -156,6 +162,11 @@ static vfs_mount_t	vfs_mounts[VFS_BACK_MAX_MOUNTS];
 static int		vfs_mount_count;
 static u32		vfs_next_mount_id;
 
+static int	chainfs_vnode_listdir(vnode_t *vn, u32 start,
+		    vfs_dirent_t *entries, u32 max_entries, u32 *count);
+static int	vfs_root_listdir(vnode_t *vn, u32 start,
+		    vfs_dirent_t *entries, u32 max_entries, u32 *count);
+static int	vfs_root_chain_name_exists(const char *name);
 static int	chainfs_back_init(void);
 static vnode_t	*chainfs_back_lookup(const char *path);
 static int	chainfs_back_create_file(const char *path);
@@ -605,68 +616,168 @@ chainfs_vnode_stat(vnode_t *vn, posix_stat_t *st)
 static int
 chainfs_vnode_readdir(vnode_t *vn, u32 index, char *name, int *type)
 {
-	chainfs_file_entry_t	entries[VFS_BACK_ROOT_ENTRIES];
-	char			*path;
+	vfs_dirent_t		entry;
 	u32			count;
 	int			ret;
 
-	path = (char *)vn->data;
-	if (!path || !name) {
-		return (-API_ERR_BAD_VALUE);
-	}
-
 	count = 0;
-	ret = chainfs_list_dir(path, entries, VFS_BACK_ROOT_ENTRIES,
-	    &count);
+	ret = chainfs_vnode_listdir(vn, index, &entry, 1, &count);
 	if (ret != 0) {
 		return (ret);
 	}
-	if (index >= count) {
+	if (count == 0) {
 		return (0);
 	}
-
-	chainfs_copy_name(entries[index].name, name);
+	chainfs_copy_name(entry.name, name);
 	if (type) {
-		*type = chainfs_entry_dtype(entries[index].type);
+		*type = entry.type;
 	}
 	return (1);
 }
 
 static int
+chainfs_vnode_listdir(vnode_t *vn, u32 start, vfs_dirent_t *entries,
+    u32 max_entries, u32 *count)
+{
+	chainfs_file_entry_t	files[VFS_BACK_LISTDIR_BATCH];
+	char			*path;
+	u32			fs_count, i, limit;
+	int			ret;
+
+	path = (char *)vn->data;
+	if (!path || !entries || !count) {
+		return (-API_ERR_BAD_VALUE);
+	}
+
+	*count = 0;
+	if (max_entries == 0) {
+		return (0);
+	}
+	limit = max_entries;
+	if (limit > VFS_BACK_LISTDIR_BATCH) {
+		limit = VFS_BACK_LISTDIR_BATCH;
+	}
+
+	fs_count = 0;
+	ret = chainfs_list_dir_range(path, start, files, limit,
+	    &fs_count, NULL);
+	if (ret != 0) {
+		return (ret);
+	}
+
+	for (i = 0; i < fs_count; i++) {
+		memset(&entries[i], 0, sizeof(entries[i]));
+		chainfs_copy_name(files[i].name, entries[i].name);
+		entries[i].type = chainfs_entry_dtype(files[i].type);
+	}
+	*count = fs_count;
+	return (0);
+}
+
+static int
 vfs_root_readdir(vnode_t *vn, u32 index, char *name, int *type)
 {
-	chainfs_file_entry_t	entries[VFS_BACK_ROOT_ENTRIES];
+	vfs_dirent_t	entry;
+	u32		count;
+	int		ret;
+
+	if (!name) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	count = 0;
+	ret = vfs_root_listdir(vn, index, &entry, 1, &count);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (count == 0) {
+		return (0);
+	}
+	chainfs_copy_name(entry.name, name);
+	if (type) {
+		*type = entry.type;
+	}
+	return (1);
+}
+
+static int
+vfs_root_chain_name_exists(const char *name)
+{
+	chainfs_file_entry_t	entry;
+	char			path[VFS_BACK_MAX_PATH];
+	u32			entry_block, entry_offset;
+	int			len, i;
+
+	if (!name || name[0] == '\0') {
+		return (0);
+	}
+	len = strlen(name);
+	if (len + 2 > VFS_BACK_MAX_PATH) {
+		return (0);
+	}
+
+	path[0] = '/';
+	for (i = 0; i < len; i++) {
+		path[i + 1] = name[i];
+	}
+	path[len + 1] = '\0';
+
+	return (chainfs_find_file(path, &entry, &entry_block,
+	    &entry_offset) == 0);
+}
+
+static int
+vfs_root_listdir(vnode_t *vn, u32 start, vfs_dirent_t *entries,
+    u32 max_entries, u32 *count)
+{
+	chainfs_file_entry_t	files[VFS_BACK_LISTDIR_BATCH];
 	char			mount_name[32];
-	u32			count, seen, mount_index;
-	int			duplicate, i, k, ret;
+	u32			chain_count, fs_count, copied, mount_index;
+	u32			seen, i, limit;
+	int			ret;
 
 	(void)vn;
 
-	if (!name) {
+	if (!entries || !count) {
 		return (-API_ERR_BAD_VALUE);
 	}
 	if (!chainfs_back_ready()) {
 		return (-API_ERR_IO);
 	}
 
-	count = 0;
-	ret = chainfs_list_dir("/", entries, VFS_BACK_ROOT_ENTRIES,
-	    &count);
+	*count = 0;
+	if (max_entries == 0) {
+		return (0);
+	}
+
+	limit = max_entries;
+	if (limit > VFS_BACK_LISTDIR_BATCH) {
+		limit = VFS_BACK_LISTDIR_BATCH;
+	}
+
+	chain_count = 0;
+	fs_count = 0;
+	ret = chainfs_list_dir_range("/", start, files, limit,
+	    &fs_count, &chain_count);
 	if (ret != 0) {
 		return (ret);
 	}
 
-	if (index < count) {
-		chainfs_copy_name(entries[index].name, name);
-		if (type) {
-			*type = chainfs_entry_dtype(entries[index].type);
-		}
-		return (1);
+	copied = 0;
+	for (i = 0; i < fs_count; i++) {
+		memset(&entries[copied], 0, sizeof(entries[copied]));
+		chainfs_copy_name(files[i].name, entries[copied].name);
+		entries[copied].type = chainfs_entry_dtype(files[i].type);
+		copied++;
+	}
+	if (copied >= max_entries ||
+	    (start < chain_count && start + copied < chain_count)) {
+		*count = copied;
+		return (0);
 	}
 
-	mount_index = index - count;
+	mount_index = (start > chain_count) ? start - chain_count : 0;
 	seen = 0;
-	for (i = 0; i < vfs_mount_count; i++) {
+	for (i = 0; i < (u32)vfs_mount_count && copied < max_entries; i++) {
 		if (strcmp(vfs_mounts[i].path, "/") == 0) {
 			continue;
 		}
@@ -674,25 +785,22 @@ vfs_root_readdir(vnode_t *vn, u32 index, char *name, int *type)
 		    sizeof(mount_name)) != 0) {
 			continue;
 		}
-		duplicate = 0;
-		for (k = 0; k < (int)count; k++) {
-			if (strcmp(entries[k].name, mount_name) == 0) {
-				duplicate = 1;
-				break;
-			}
-		}
-		if (duplicate) {
+		if (vfs_root_chain_name_exists(mount_name)) {
 			continue;
 		}
-		if (seen == mount_index) {
-			chainfs_copy_name(mount_name, name);
-			if (type) {
-				*type = VDIR;
-			}
-			return (1);
+		if (seen < mount_index) {
+			seen++;
+			continue;
 		}
+
+		memset(&entries[copied], 0, sizeof(entries[copied]));
+		chainfs_copy_name(mount_name, entries[copied].name);
+		entries[copied].type = VDIR;
+		copied++;
 		seen++;
 	}
+
+	*count = copied;
 	return (0);
 }
 
@@ -744,10 +852,12 @@ chainfs_back_lookup(const char *path)
 	vn->write_fn = chainfs_vnode_write;
 	vn->stat_fn = chainfs_vnode_stat;
 	vn->readdir_fn = chainfs_vnode_readdir;
+	vn->listdir_fn = chainfs_vnode_listdir;
 	vn->readlink_fn = chainfs_vnode_readlink;
 
 	if (strcmp(path, "/") == 0) {
 		vn->readdir_fn = vfs_root_readdir;
+		vn->listdir_fn = vfs_root_listdir;
 	}
 	return (vn);
 }
@@ -970,6 +1080,7 @@ devfs_back_lookup(const char *path)
 		vn = vnode_alloc(VDIR, "dev");
 		if (vn) {
 			vn->readdir_fn = devfs_root_readdir;
+			vn->listdir_fn = devfs_root_listdir;
 			vn->data = NULL;
 		}
 		return (vn);

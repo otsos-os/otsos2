@@ -26,82 +26,158 @@
 
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/api/api.h>
+#include <kernel/other/restrict.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
 
-int api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries) {
-  vnode_t *vn;
-  u32 i;
-  int ret;
-  char name[32];
-  int type;
-  int j;
-  char curpath[256];
-  const char *resolve_path;
+#define	API_FS_LISTDIR_BATCH	32
+#define	API_FS_LISTDIR_MAX	4096U
+#define	API_FS_PATH_MAX		256
 
-  if (!buf || max_entries == 0) {
-    return -API_ERR_BAD_VALUE;
-  }
-  if (!is_user_address(buf, max_entries * sizeof(struct api_dirent))) {
-    return -API_ERR_BAD_ADDR;
-  }
+static int
+copy_user_path(const char *path, char *out, int *use_cwd)
+{
+	int	len;
 
-  if (path) {
-    if (!is_user_address(path, 1)) {
-      return -API_ERR_BAD_ADDR;
-    }
-  }
+	if (!out || !use_cwd) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (!path) {
+		out[0] = '\0';
+		*use_cwd = 1;
+		return (0);
+	}
+	if (!is_user_address(path, 1) ||
+	    !user_range_fault_in(path, 1, 0)) {
+		return (-API_ERR_BAD_ADDR);
+	}
 
-  /*
-   * Determine the path to list.  An empty or NULL path means the
-   * current directory, which ChainFS tracks internally.  We resolve
-   * it to an absolute path so that VFS can handle it uniformly.
-   */
-  if (path == NULL || path[0] == '\0') {
-    ret = vfs_getcwd(curpath, sizeof(curpath));
-    if (ret != 0) {
-      return ret;
-    }
-    resolve_path = curpath;
-  } else {
-    resolve_path = path;
-  }
+	len = 0;
+	while (len < API_FS_PATH_MAX - 1) {
+		if (!is_user_address(path + len, 1) ||
+		    !user_range_fault_in(path + len, 1, 0)) {
+			return (-API_ERR_BAD_ADDR);
+		}
+		out[len] = path[len];
+		if (out[len] == '\0') {
+			*use_cwd = (len == 0);
+			return (0);
+		}
+		len++;
+	}
 
-  ret = vfs_resolve(resolve_path, &vn);
-  if (ret != 0) {
-    return ret;
-  }
-  if (vn == NULL) {
-    return -API_ERR_NOT_FOUND;
-  }
+	out[0] = '\0';
+	return (-API_ERR_TOO_BIG);
+}
 
-  if (vn->type != VDIR) {
-    vnode_release(vn);
-    return -API_ERR_NOT_DIR;
-  }
+static u8
+api_fs_dtype(int type)
+{
+	switch (type) {
+	case VREG:
+		return (API_FS_TYPE_REG);
+	case VDIR:
+		return (API_FS_TYPE_DIR);
+	case VCHR:
+		return (API_FS_TYPE_CHR);
+	case VPIPE:
+		return (API_FS_TYPE_PIPE);
+	case VLNK:
+		return (API_FS_TYPE_LNK);
+	default:
+		return (0);
+	}
+}
 
-  for (i = 0; i < max_entries; i++) {
-    type = 0;
-    ret = vnode_readdir(vn, i, name, &type);
-    if (ret < 0) {
-      vnode_release(vn);
-      return ret;
-    }
-    if (ret == 0) {
-      break;
-    }
+static void
+copy_dirent_to_user(struct api_dirent *dst, const vfs_dirent_t *src)
+{
+	int	i;
 
-    memset(buf[i].name, 0, sizeof(buf[i].name));
-    for (j = 0; j < 31 && name[j] != '\0'; j++) {
-      buf[i].name[j] = name[j];
-    }
-    buf[i].name[j] = '\0';
-    buf[i].type = (u8)type;
-    buf[i].pad[0] = 0;
-    buf[i].pad[1] = 0;
-    buf[i].pad[2] = 0;
-  }
+	memset(dst, 0, sizeof(*dst));
+	for (i = 0; i < 31 && src->name[i] != '\0'; i++) {
+		dst->name[i] = src->name[i];
+	}
+	dst->name[i] = '\0';
+	dst->type = api_fs_dtype(src->type);
+}
 
-  vnode_release(vn);
-  return (int)i;
+int
+api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries)
+{
+	vfs_dirent_t	entries[API_FS_LISTDIR_BATCH];
+	vnode_t		*vn;
+	size_t		user_size;
+	u32		listed, count, want, i;
+	char		kpath[API_FS_PATH_MAX];
+	int		use_cwd, ret;
+
+	if (!buf || max_entries == 0) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (max_entries > API_FS_LISTDIR_MAX) {
+		return (-API_ERR_TOO_BIG);
+	}
+
+	user_size = (size_t)max_entries * sizeof(struct api_dirent);
+	if (!is_user_address(buf, user_size) ||
+	    !user_range_fault_in(buf, user_size, 1)) {
+		return (-API_ERR_BAD_ADDR);
+	}
+
+	ret = copy_user_path(path, kpath, &use_cwd);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (use_cwd) {
+		ret = vfs_getcwd(kpath, sizeof(kpath));
+		if (ret != 0) {
+			return (ret);
+		}
+	}
+	if (restrict_kusr_check(kpath)) {
+		return (-API_ERR_PERM);
+	}
+
+	vn = NULL;
+	ret = vfs_resolve(kpath, &vn);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (vn == NULL) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	if (vn->type != VDIR) {
+		vnode_release(vn);
+		return (-API_ERR_NOT_DIR);
+	}
+
+	listed = 0;
+	while (listed < max_entries) {
+		want = max_entries - listed;
+		if (want > API_FS_LISTDIR_BATCH) {
+			want = API_FS_LISTDIR_BATCH;
+		}
+
+		count = 0;
+		ret = vnode_listdir(vn, listed, entries, want, &count);
+		if (ret != 0) {
+			vnode_release(vn);
+			return (ret);
+		}
+		if (count == 0) {
+			break;
+		}
+		if (count > want) {
+			count = want;
+		}
+
+		for (i = 0; i < count; i++) {
+			copy_dirent_to_user(&buf[listed + i], &entries[i]);
+		}
+		listed += count;
+	}
+
+	vnode_release(vn);
+	return ((int)listed);
 }

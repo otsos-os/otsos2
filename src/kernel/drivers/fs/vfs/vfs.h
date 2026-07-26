@@ -32,8 +32,9 @@ $define %type u64 as 64 bit unsigned
 $define %type s64 as 64 bit signed
 $define %type int as 32 bit signed
 $define %type char as 8 bit signed
+$define %type vfs_dirent_t as struct with VFS directory entry data
 $define %type vnode_t as struct with type, refcount, size, mode, name, ops, data
-$define %type vfs_ops_t as struct with read, write, stat, readdir function pointers
+$define %type vfs_ops_t as struct with read, write, stat, listdir function pointers
 $define %type vfs_back_ops as backend operation table forward declaration
 $define %type posix_stat_t as struct with POSIX stat fields
 
@@ -61,6 +62,7 @@ $define %func vnode_read as function with args vnode_t *, void *, u64, u64
 $define %func vnode_write as function with args vnode_t *, const void *, u64, u64
 $define %func vnode_stat as function with args vnode_t *, posix_stat_t *
 $define %func vnode_readdir as function with args vnode_t *, u32, char *, int *
+$define %func vnode_listdir as function with args vnode_t *, u32, vfs_dirent_t *, u32, u32 *
 $define %func vnode_alloc as function with args int, const char *
 $define %func vfs_is_initialized as function with args void
 $define %func vnode_readlink as function with args vnode_t *, char *, size_t
@@ -76,6 +78,7 @@ $space %export vfs_mkdir, vfs_rmdir, vfs_unlink, vfs_rename
 $space %export vfs_truncate, vfs_symlink, vfs_link, vfs_readlink
 $space %export vnode_acquire, vnode_release, vnode_can_exec
 $space %export vnode_read, vnode_write, vnode_stat, vnode_readdir
+$space %export vnode_listdir
 $space %export vnode_readlink
 $space %export vnode_alloc
 $space %export vfs_is_initialized
@@ -152,6 +155,11 @@ typedef struct posix_stat {
 	s64	__unused[3];
 } __attribute__((packed)) posix_stat_t;
 
+typedef struct vfs_dirent {
+	char	name[32];
+	int	type;
+} vfs_dirent_t;
+
 typedef struct vnode {
 	int		type;
 	int		refcount;
@@ -167,6 +175,8 @@ typedef struct vnode {
 	int		(*write_fn)(struct vnode *, const void *, u64, u64);
 	int		(*stat_fn)(struct vnode *, posix_stat_t *);
 	int		(*readdir_fn)(struct vnode *, u32, char *, int *);
+	int		(*listdir_fn)(struct vnode *, u32, vfs_dirent_t *,
+			    u32, u32 *);
 	int		(*ioctl_fn)(struct vnode *, u64, void *);
 	int		(*readlink_fn)(struct vnode *, char *, size_t);
 } vnode_t;
@@ -209,6 +219,8 @@ int		vnode_write(vnode_t *vn, const void *buf, u64 count,
 int		vnode_stat(vnode_t *vn, posix_stat_t *st);
 int		vnode_readdir(vnode_t *vn, u32 index, char *name,
 		    int *type);
+int		vnode_listdir(vnode_t *vn, u32 start, vfs_dirent_t *entries,
+		    u32 max_entries, u32 *count);
 int		vnode_ioctl(vnode_t *vn, u64 cmd, void *arg);
 int		vnode_readlink(vnode_t *vn, char *buf, size_t bufsize);
 
