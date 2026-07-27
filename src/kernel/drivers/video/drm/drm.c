@@ -41,27 +41,54 @@ static int g_ready;
 
 static const drm_driver_t *g_known_drivers[8];
 static u32 g_known_count;
-
-extern const drm_driver_t *drm_fbdev_driver_get(void);
-extern const drm_driver_t *drm_virtio_gpu_driver_get(void);
+static const void *(*g_boot_info_provider)(void);
 
 static void build_driver_list(void) {
-  if (g_known_count > 0) {
-    return;
+  return;
+}
+
+int drm_register_driver(const drm_driver_t *driver) {
+  if (!driver || !driver->name) {
+    return DRM_ERR_INVAL;
   }
-  const drm_driver_t *vgpu = drm_virtio_gpu_driver_get();
-  if (vgpu && g_known_count < 8) {
-    g_known_drivers[g_known_count++] = vgpu;
+  for (u32 i = 0; i < g_known_count; i++) {
+    if (g_known_drivers[i] == driver ||
+        strcmp(g_known_drivers[i]->name, driver->name) == 0) {
+      return DRM_OK;
+    }
   }
-  const drm_driver_t *fbdev = drm_fbdev_driver_get();
-  if (fbdev && g_known_count < 8) {
-    g_known_drivers[g_known_count++] = fbdev;
+  if (g_known_count >= 8) {
+    return DRM_ERR_NOMEM;
   }
+  g_known_drivers[g_known_count++] = driver;
+  drivers_log("[DRM] registered driver '%s'\n", driver->name);
+  return DRM_OK;
+}
+
+int drm_register_boot_info_provider(const void *(*provider)(void)) {
+  if (!provider) {
+    return DRM_ERR_INVAL;
+  }
+  g_boot_info_provider = provider;
+  return DRM_OK;
+}
+
+static const void *drm_get_default_boot_info(void) {
+  if (!g_boot_info_provider) {
+    return NULL;
+  }
+  return g_boot_info_provider();
 }
 
 const drm_driver_t *drm_driver_get_fbdev(void) {
   build_driver_list();
-  return drm_fbdev_driver_get();
+  for (u32 i = 0; i < g_known_count; i++) {
+    const drm_driver_t *d = g_known_drivers[i];
+    if (d && (d->flags & DRM_DRIVER_F_BOOT_FB) != 0) {
+      return d;
+    }
+  }
+  return NULL;
 }
 
 u32 drm_driver_count(void) {
@@ -87,8 +114,6 @@ int drm_driver_get_selected_index(void) {
   return -1;
 }
 
-extern const void *drm_fbdev_get_boot_info(void);
-
 u32
 drm_driver_available_count(void)
 {
@@ -96,7 +121,7 @@ drm_driver_available_count(void)
 	u32		count, i;
 
 	build_driver_list();
-	boot = drm_fbdev_get_boot_info();
+	boot = drm_get_default_boot_info();
 	count = 0;
 	for (i = 0; i < g_known_count; i++) {
 		const drm_driver_t	*d;
@@ -123,7 +148,7 @@ drm_driver_available_get(u32 index)
 	u32		count, i;
 
 	build_driver_list();
-	boot = drm_fbdev_get_boot_info();
+	boot = drm_get_default_boot_info();
 	count = 0;
 	for (i = 0; i < g_known_count; i++) {
 		const drm_driver_t	*d;
@@ -257,7 +282,7 @@ int drm_reinit(const drm_driver_t *new_driver, const void *boot_info) {
     return DRM_ERR_INVAL;
   }
 
-  boot = boot_info ? boot_info : drm_fbdev_get_boot_info();
+  boot = boot_info ? boot_info : drm_get_default_boot_info();
 
   drivers_log("[DRM] reinit: trying new driver '");
   drivers_log(new_driver->name ? new_driver->name : "?");

@@ -45,6 +45,7 @@ $space %export power_button_is_initialized
 */
 
 #include <kernel/drivers/acpi/acpi.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/drivers/power/pbutton.h>
 #include <kernel/drivers/power/power.h>
 #include <mlibc/stdio.h>
@@ -133,3 +134,64 @@ power_button_is_initialized(void)
 {
 	return (g_pbutton_initialized);
 }
+
+static void
+power_button_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "power_button", 0) == NULL) {
+		device_add_child(parent, "power_button", 0);
+	}
+}
+
+static int
+power_button_probe(device_t dev)
+{
+	acpi_fadt_t	*fadt;
+
+	(void)dev;
+	if (!acpi_is_initialized()) {
+		return (-1);
+	}
+	fadt = acpi_get_fadt();
+	if (fadt == NULL) {
+		return (-1);
+	}
+	if (fadt->pm1a_event_block == 0 && fadt->pm1b_event_block == 0) {
+		return (-1);
+	}
+	return (0);
+}
+
+static void
+power_button_poll_hook(void *arg)
+{
+	(void)arg;
+	power_button_poll();
+}
+
+static int
+power_button_attach(device_t dev)
+{
+	if (power_button_init() != 0) {
+		return (-1);
+	}
+	(void)bus_setup_poll(dev, NB_POLL_TIMER, power_button_poll_hook,
+	    NULL, NULL);
+	return (0);
+}
+
+static devclass_t power_button_devclass = {
+	.name		= "power_button",
+	.maxunit	= 1,
+};
+
+static driver_t power_button_driver = {
+	.name		= "power_button",
+	.identify	= power_button_identify,
+	.probe		= power_button_probe,
+	.attach		= power_button_attach,
+};
+
+PLATFORM_DRIVER_MODULE(power_button, power_button_driver,
+    power_button_devclass, NEWBUS_PASS_LATE, NEWBUS_ORDER_MIDDLE);

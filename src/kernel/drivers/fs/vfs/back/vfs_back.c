@@ -75,6 +75,9 @@ $define %func chainfs_back_write_file as function with args const char *, const 
 $define %func devfs_back_init as function with args void
 $define %func devfs_back_lookup as function with args const char *
 $define %func vfs_back_init as function with args void
+$define %func vfs_back_register_ops as function with args const vfs_back_ops_t *
+$define %func vfs_chainfs_back_ops as function with args void
+$define %func vfs_devfs_back_ops as function with args void
 $define %func vfs_back_mount as function with args const char *, const vfs_back_ops_t *
 $define %func vfs_back_mount_flags as function with args const char *, const vfs_back_ops_t *, u64
 $define %func vfs_back_mount_named as function with args const char *, const char *, u64
@@ -123,7 +126,9 @@ $space %internal chainfs_back_symlink, chainfs_back_link
 $space %internal chainfs_back_chdir, chainfs_back_getcwd
 $space %internal chainfs_back_write_file
 $space %internal devfs_back_init, devfs_back_lookup
-$space %export vfs_back_init, vfs_back_mount, vfs_back_mount_flags
+$space %export vfs_back_init, vfs_back_register_ops
+$space %export vfs_chainfs_back_ops, vfs_devfs_back_ops
+$space %export vfs_back_mount, vfs_back_mount_flags
 $space %export vfs_back_mount_named, vfs_back_umount
 $space %export vfs_back_mount_can_read, vfs_back_mount_can_write
 $space %export vfs_back_mount_can_exec, vfs_back_mount_can_exec_id
@@ -139,7 +144,6 @@ $space %export vfs_back_chdir, vfs_back_getcwd, vfs_back_write_file
 #include <kernel/api/errno.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
-#include <kernel/drivers/fs/hivefs/hivefs.h>
 #include <kernel/drivers/fs/vfs/back/vfs_back.h>
 #include <kernel/process.h>
 #include <mlibc/mlibc.h>
@@ -147,6 +151,7 @@ $space %export vfs_back_chdir, vfs_back_getcwd, vfs_back_write_file
 #include <mm/kmem.h>
 
 #define	VFS_BACK_MAX_MOUNTS	8
+#define	VFS_BACK_MAX_OPS	16
 #define	VFS_BACK_MAX_PATH	256
 #define	VFS_BACK_LISTDIR_BATCH	32
 
@@ -161,6 +166,8 @@ typedef struct vfs_mount {
 static vfs_mount_t	vfs_mounts[VFS_BACK_MAX_MOUNTS];
 static int		vfs_mount_count;
 static u32		vfs_next_mount_id;
+static const vfs_back_ops_t *vfs_back_ops_registry[VFS_BACK_MAX_OPS];
+static int		vfs_back_ops_count;
 
 static int	chainfs_vnode_listdir(vnode_t *vn, u32 start,
 		    vfs_dirent_t *entries, u32 max_entries, u32 *count);
@@ -284,14 +291,17 @@ vfs_back_root_mount(void)
 static const vfs_back_ops_t *
 vfs_back_find_ops(const char *fstype)
 {
+	int	i;
+
 	if (!fstype) {
 		return (NULL);
 	}
-	if (strcmp(fstype, "devfs") == 0) {
-		return (&devfs_back_ops);
-	}
-	if (strcmp(fstype, "hivefs") == 0) {
-		return (hivefs_back_ops());
+	for (i = 0; i < vfs_back_ops_count; i++) {
+		if (vfs_back_ops_registry[i] != NULL &&
+		    vfs_back_ops_registry[i]->name != NULL &&
+		    strcmp(vfs_back_ops_registry[i]->name, fstype) == 0) {
+			return (vfs_back_ops_registry[i]);
+		}
 	}
 	return (NULL);
 }
@@ -1091,34 +1101,45 @@ devfs_back_lookup(const char *path)
 int
 vfs_back_init(void)
 {
-	int	ret;
-
 	vfs_mount_count = 0;
 	vfs_next_mount_id = 1;
-
-	if (chainfs_back_ops.init) {
-		ret = chainfs_back_ops.init();
-		if (ret != 0) {
-			return (ret);
-		}
-	}
-	ret = vfs_back_mount("/", &chainfs_back_ops);
-	if (ret != 0) {
-		return (ret);
-	}
-	if (devfs_back_ops.init) {
-		ret = devfs_back_ops.init();
-		if (ret != 0) {
-			return (ret);
-		}
-	}
-	ret = vfs_back_mount("/dev", &devfs_back_ops);
-	if (ret != 0) {
-		return (ret);
-	}
-
-	drivers_log("[VFS] backends mounted: / chainfs, /dev devfs\n");
+	vfs_back_ops_count = 0;
+	memset(vfs_back_ops_registry, 0, sizeof(vfs_back_ops_registry));
 	return (0);
+}
+
+int
+vfs_back_register_ops(const vfs_back_ops_t *ops)
+{
+	int	i;
+
+	if (ops == NULL || ops->name == NULL || ops->lookup == NULL) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	for (i = 0; i < vfs_back_ops_count; i++) {
+		if (vfs_back_ops_registry[i] == ops ||
+		    strcmp(vfs_back_ops_registry[i]->name, ops->name) == 0) {
+			return (0);
+		}
+	}
+	if (vfs_back_ops_count >= VFS_BACK_MAX_OPS) {
+		return (-API_ERR_OBJECTS_FULL);
+	}
+	vfs_back_ops_registry[vfs_back_ops_count++] = ops;
+	drivers_log("[VFS] backend registered: %s\n", ops->name);
+	return (0);
+}
+
+const vfs_back_ops_t *
+vfs_chainfs_back_ops(void)
+{
+	return (&chainfs_back_ops);
+}
+
+const vfs_back_ops_t *
+vfs_devfs_back_ops(void)
+{
+	return (&devfs_back_ops);
 }
 
 int

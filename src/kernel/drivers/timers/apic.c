@@ -46,6 +46,7 @@ $space %export apic_timer_init
 
 #include <kernel/interrupts/apic/lapic.h>
 #include <kernel/drivers/eventtimer.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/cm/cm.h>
 #include <mlibc/stdio.h>
@@ -96,10 +97,16 @@ apic_timer_init(void)
 	int	enabled, quality;
 	u64	max_ns;
 	u32	timer_hz;
+	char	default_timer[16];
 
 	enabled = cm_get_bool_default("SYSTEM", "Timer",
 	    "ApicEnabled", 1);
 	if (!enabled)
+		return;
+	memset(default_timer, 0, sizeof(default_timer));
+	cm_get_string_default("SYSTEM", "Timer", "DefaultTimer",
+	    default_timer, sizeof(default_timer), "apic");
+	if (strcmp(default_timer, "apic") != 0)
 		return;
 	if (!lapic_is_enabled())
 		return;
@@ -137,3 +144,45 @@ apic_timer_init(void)
 	    " %d\n", timer_hz, quality);
 	timer_reinit(timer_hz);
 }
+
+static void
+apic_timer_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "apic_timer", 0) == NULL) {
+		device_add_child(parent, "apic_timer", 0);
+	}
+}
+
+static int
+apic_timer_probe(device_t dev)
+{
+	(void)dev;
+	if (!lapic_is_enabled()) {
+		return (-1);
+	}
+	return (80);
+}
+
+static int
+apic_timer_attach(device_t dev)
+{
+	(void)dev;
+	apic_timer_init();
+	return (0);
+}
+
+static devclass_t apic_timer_devclass = {
+	.name		= "apic_timer",
+	.maxunit	= 1,
+};
+
+static driver_t apic_timer_driver = {
+	.name		= "apic_timer",
+	.identify	= apic_timer_identify,
+	.probe		= apic_timer_probe,
+	.attach		= apic_timer_attach,
+};
+
+PLATFORM_DRIVER_MODULE(apic_timer, apic_timer_driver,
+    apic_timer_devclass, NEWBUS_PASS_CORE, NEWBUS_ORDER_MIDDLE);

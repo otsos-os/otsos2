@@ -93,6 +93,8 @@ static u32			g_cursor_x, g_cursor_y;
 static u32			g_cursor_w, g_cursor_h;
 static drm_id_t		g_primary_fb_id;
 
+static const drm_driver_t *virtio_gpu_drm_driver_get_internal(void);
+
 static int
 virtio_gpu_setup_queues(virtio_gpu_state_t *st)
 {
@@ -221,6 +223,7 @@ virtio_gpu_pci_probe(pci_device_t *dev, const pci_match_t *match)
 	g_state.pitch = g_state.width * (VIRTIO_GPU_BPP / 8);
 	g_state.bpp = VIRTIO_GPU_BPP;
 	g_state.hw_ready = 1;
+	(void)drm_register_driver(virtio_gpu_drm_driver_get_internal());
 
 	drivers_log("[VIRTIO_GPU] hardware ready: %ux%u "
 	    "x%u bpp\n",
@@ -246,10 +249,20 @@ static pci_driver_t virtio_gpu_pci_driver = {
 	.remove		= NULL,
 };
 
+static devclass_t virtio_gpu_devclass = {
+	.name		= "virtio-gpu",
+	.maxunit	= 1,
+};
+
+PCI_DRIVER_MODULE(virtio_gpu, virtio_gpu_pci_driver, virtio_gpu_devclass,
+    NEWBUS_PASS_DISPLAY, NEWBUS_ORDER_MIDDLE);
+
 int
 drm_virtio_gpu_pci_register(void)
 {
-	return (pci_register_driver(&virtio_gpu_pci_driver));
+	drivers_log("[VIRTIO_GPU] pci_register entry is deprecated; "
+	    "using PCI_DRIVER_MODULE\n");
+	return (0);
 }
 
 int
@@ -706,8 +719,14 @@ static const drm_driver_t g_virtio_gpu_driver = {
 	.shutdown	= vgpu_drm_shutdown,
 };
 
+static const drm_driver_t *
+virtio_gpu_drm_driver_get_internal(void)
+{
+	return (&g_virtio_gpu_driver);
+}
+
 const drm_driver_t *
 drm_virtio_gpu_driver_get(void)
 {
-	return (&g_virtio_gpu_driver);
+	return (virtio_gpu_drm_driver_get_internal());
 }

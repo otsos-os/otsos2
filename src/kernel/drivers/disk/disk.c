@@ -50,6 +50,7 @@ $space %export disk_read, disk_write
 */
 
 #include "disk.h"
+#include <kernel/drivers/newbus/newbus.h>
 #include <mlibc/stdio.h>
 
 #define	MAX_DISKS	8
@@ -122,3 +123,35 @@ disk_write(disk_t *disk, u32 lba, u8 *buffer)
 		disk->write_sector(disk, lba, buffer);
 	}
 }
+
+static void
+disk_core_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "disk_core", 0) == NULL) {
+		device_add_child(parent, "disk_core", 0);
+	}
+}
+
+static int
+disk_core_attach(device_t dev)
+{
+	(void)dev;
+	disk_manager_init();
+	return (0);
+}
+
+static devclass_t disk_core_devclass = {
+	.name		= "disk",
+	.maxunit	= 1,
+};
+
+static driver_t disk_core_driver = {
+	.name		= "disk_core",
+	.identify	= disk_core_identify,
+	.probe		= NULL,
+	.attach		= disk_core_attach,
+};
+
+PSEUDO_DRIVER_MODULE(disk_core, disk_core_driver, disk_core_devclass,
+    NEWBUS_PASS_CORE, NEWBUS_ORDER_FIRST);

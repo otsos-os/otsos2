@@ -93,6 +93,7 @@ $space %export vfs_read_file_full, vfs_write_file
 #include <kernel/api/errno.h>
 #include <kernel/drivers/fs/vfs/back/vfs_back.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdio.h>
 #include <mm/kmem.h>
@@ -105,6 +106,9 @@ vfs_init(void)
 {
 	int	i;
 
+	if (vfs_initialized) {
+		return;
+	}
 	for (i = 0; i < VFS_MAX_VNODES; i++) {
 		memset(&vnode_pool[i], 0, sizeof(vnode_t));
 	}
@@ -118,6 +122,38 @@ vfs_init(void)
 	drivers_log("[VFS] initialized (vnode pool: %d slots)\n",
 	    VFS_MAX_VNODES);
 }
+
+static void
+vfs_core_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "vfs_core", 0) == NULL) {
+		device_add_child(parent, "vfs_core", 0);
+	}
+}
+
+static int
+vfs_core_attach(device_t dev)
+{
+	(void)dev;
+	vfs_init();
+	return (vfs_is_initialized() ? 0 : -1);
+}
+
+static devclass_t vfs_core_devclass = {
+	.name		= "vfs",
+	.maxunit	= 1,
+};
+
+static driver_t vfs_core_driver = {
+	.name		= "vfs_core",
+	.identify	= vfs_core_identify,
+	.probe		= NULL,
+	.attach		= vfs_core_attach,
+};
+
+PSEUDO_DRIVER_MODULE(vfs_core, vfs_core_driver,
+    vfs_core_devclass, NEWBUS_PASS_FILESYSTEM, NEWBUS_ORDER_FIRST);
 
 int
 vfs_is_initialized(void)

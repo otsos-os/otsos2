@@ -41,6 +41,9 @@ typedef u32 drm_handle_t;   /* process-local GEM handle (0 == invalid) */
 
 #define DRM_ID_NONE 0
 
+/* Driver represents the firmware/boot linear framebuffer. */
+#define DRM_DRIVER_F_BOOT_FB 0x00000001U
+
 typedef enum {
   DRM_OBJECT_FRAMEBUFFER = 1,
   DRM_OBJECT_PLANE,
@@ -127,6 +130,7 @@ struct drm_connector {
 struct drm_driver {
   const char *name;
   int priority;
+  u32 flags;
   int (*probe)(const void *boot_info);
   int (*init)(const void *boot_info);
   int (*atomic_commit)(const drm_kms_state_t *state);
@@ -139,7 +143,10 @@ int drm_reinit(const drm_driver_t *new_driver, const void *boot_info);
 int drm_is_ready(void);
 const char *drm_get_driver_name(void);
 
-/* Driver registry (for fbdev etc). */
+/* Driver registry. Display backends register themselves from newbus attach. */
+int drm_register_driver(const drm_driver_t *driver);
+/* Optional provider used by UI/syscalls when they need the current boot FB. */
+int drm_register_boot_info_provider(const void *(*provider)(void));
 const drm_driver_t *drm_driver_get_fbdev(void);
 const drm_driver_t *drm_driver_select(const void *boot_info, const char *preferred);
 const drm_driver_t *drm_driver_get_selected(void);

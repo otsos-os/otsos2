@@ -63,12 +63,10 @@ $space %export watchdog_ping, watchdog_tick
 */
 
 #include <kernel/drivers/timer.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/panic.h>
 #include <mlibc/stdio.h>
-
-int	watchdog_i6300esb_init(void);
-int	watchdog_ich_tco_init(void);
 
 static watchdog_device_t	*watchdog_devices[WATCHDOG_MAX_DEVICES];
 static int			watchdog_device_count_val;
@@ -122,9 +120,6 @@ watchdog_init(void)
 	if (watchdog_initialized) {
 		return;
 	}
-
-	watchdog_i6300esb_init();
-	watchdog_ich_tco_init();
 
 	watchdog_initialized = 1;
 }
@@ -318,3 +313,43 @@ watchdog_tick(void)
 
 	watchdog_last_ping_tick = now;
 }
+
+static void
+watchdog_core_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "watchdog_core", 0) == NULL) {
+		device_add_child(parent, "watchdog_core", 0);
+	}
+}
+
+static void
+watchdog_core_poll(void *arg)
+{
+	(void)arg;
+	watchdog_tick();
+}
+
+static int
+watchdog_core_attach(device_t dev)
+{
+	watchdog_init();
+	(void)bus_setup_poll(dev, NB_POLL_TIMER, watchdog_core_poll,
+	    NULL, NULL);
+	return (0);
+}
+
+static devclass_t watchdog_core_devclass = {
+	.name		= "watchdog",
+	.maxunit	= 1,
+};
+
+static driver_t watchdog_core_driver = {
+	.name		= "watchdog_core",
+	.identify	= watchdog_core_identify,
+	.probe		= NULL,
+	.attach		= watchdog_core_attach,
+};
+
+PSEUDO_DRIVER_MODULE(watchdog_core, watchdog_core_driver,
+    watchdog_core_devclass, NEWBUS_PASS_CORE, NEWBUS_ORDER_MIDDLE);

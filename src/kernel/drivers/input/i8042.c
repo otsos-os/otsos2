@@ -25,6 +25,7 @@
  */
 
 #include <kernel/drivers/input/i8042.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <mlibc/mlibc.h>
 
 #define	I8042_DATA_PORT		0x60
@@ -183,3 +184,63 @@ i8042_test_port2(u8 *result)
 	}
 	return (i8042_read_data(result));
 }
+
+static void
+i8042_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "i8042", 0) == NULL) {
+		device_add_child(parent, "i8042", 0);
+	}
+}
+
+static int
+i8042_probe(device_t dev)
+{
+	(void)dev;
+	if (i8042_status() == 0xFF) {
+		return (-1);
+	}
+	return (0);
+}
+
+static int
+i8042_attach(device_t dev)
+{
+	device_t	child;
+
+	bus_set_resource(dev, SYS_RES_IOPORT, 0, I8042_DATA_PORT, 1, 0);
+	bus_set_resource(dev, SYS_RES_IOPORT, 1, I8042_CMD_PORT, 1, 0);
+
+	child = device_find_child(dev, "atkbd", 0);
+	if (child == NULL) {
+		child = device_add_child(dev, "atkbd", 0);
+	}
+	if (child != NULL) {
+		bus_set_resource(child, SYS_RES_IRQ, 0, 1, 1, 0);
+	}
+
+	child = device_find_child(dev, "psm", 0);
+	if (child == NULL) {
+		child = device_add_child(dev, "psm", 0);
+	}
+	if (child != NULL) {
+		bus_set_resource(child, SYS_RES_IRQ, 0, 12, 1, 0);
+	}
+	return (0);
+}
+
+static devclass_t i8042_devclass = {
+	.name		= "i8042",
+	.maxunit	= 1,
+};
+
+static driver_t i8042_driver = {
+	.name		= "i8042",
+	.identify	= i8042_identify,
+	.probe		= i8042_probe,
+	.attach		= i8042_attach,
+};
+
+ISA_DRIVER_MODULE(i8042, i8042_driver, i8042_devclass,
+    NEWBUS_PASS_BUS, NEWBUS_ORDER_MIDDLE);

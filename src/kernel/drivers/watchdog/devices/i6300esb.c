@@ -257,8 +257,18 @@ static pci_driver_t i6300esb_pci_driver = {
 	.remove		= NULL,
 };
 
+static devclass_t i6300esb_devclass = {
+	.name		= "watchdog",
+	.maxunit	= 8,
+};
+
+PCI_DRIVER_MODULE(watchdog_i6300esb, i6300esb_pci_driver,
+    i6300esb_devclass, NEWBUS_PASS_LATE, NEWBUS_ORDER_MIDDLE);
+
 int
 watchdog_i6300esb_init(void)
 {
-	return (pci_register_driver(&i6300esb_pci_driver));
+	drivers_log("[WDT] i6300esb init entry is deprecated; "
+	    "using PCI_DRIVER_MODULE\n");
+	return (0);
 }

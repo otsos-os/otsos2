@@ -32,6 +32,7 @@ $define %type u32 as 32 bit unsigned
 $define %type int as 32 bit signed
 
 $define %func console_init as procedure with args void
+$define %func console_early_init as procedure with args void
 $define %func console_is_initialized as function with args void
 $define %func console_reinit as procedure with args void
 $define %func console_putchar as procedure with args char
@@ -48,7 +49,8 @@ $define %func console_get_height as function with args void
 
 /* !SPACE!
 
-$space %export console_init, console_is_initialized, console_reinit
+$space %export console_init, console_early_init
+$space %export console_is_initialized, console_reinit
 $space %export console_putchar, console_puts, printf, clear_scr
 $space %export console_set_color, console_color_rgb, console_put_entry_at
 $space %export console_get_width, console_get_height
@@ -60,6 +62,7 @@ $space %export console_get_width, console_get_height
 
 #include <mlibc/mlibc.h>
 void	console_init(void);
+void	console_early_init(void);
 int	console_is_initialized(void);
 void	console_reinit(void);
 void	console_putchar(char c);

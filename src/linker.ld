@@ -31,6 +31,13 @@ SECTIONS
         *(.rodata)
         *(.rodata.*)
     }
+    .newbus_drivers : AT(ADDR(.newbus_drivers) - KERNEL_VMA) {
+        . = ALIGN(8);
+        __start_newbus_drivers = .;
+        KEEP(*(.newbus.drivers))
+        . = ALIGN(8);
+        __stop_newbus_drivers = .;
+    }
     .data : AT(ADDR(.data) - KERNEL_VMA) {
         *(.data)
         *(.data.*)

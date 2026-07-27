@@ -27,6 +27,7 @@
 #ifndef PCI_H
 #define PCI_H
 
+#include <kernel/drivers/newbus/newbus.h>
 #include <mlibc/mlibc.h>
 
 #define PCI_MAX_DEVICES 256
@@ -106,6 +107,7 @@ typedef struct pci_device {
 
   pci_driver_t *driver;
   void *driver_data;
+  device_t nb_device;
 } pci_device_t;
 
 typedef struct pci_driver {
@@ -130,6 +132,9 @@ int pci_is_initialized(void);
 
 int pci_register_driver(pci_driver_t *driver);
 int pci_unregister_driver(pci_driver_t *driver);
+int pci_newbus_probe(device_t dev, pci_driver_t *driver);
+int pci_newbus_attach(device_t dev, pci_driver_t *driver);
+int pci_newbus_detach(device_t dev, pci_driver_t *driver);
 
 int pci_scan(void);
 int pci_device_count(void);
@@ -148,5 +153,32 @@ void pci_write_command(const pci_device_t *dev, u16 command);
 void pci_enable_io_space(const pci_device_t *dev);
 void pci_enable_memory_space(const pci_device_t *dev);
 void pci_enable_bus_mastering(const pci_device_t *dev);
+
+#define	PCI_DRIVER_MODULE(modname, pcidrv, devclass, passv, orderv) \
+	static int modname##_newbus_probe(device_t dev) \
+	{ \
+		return (pci_newbus_probe(dev, &(pcidrv))); \
+	} \
+	static int modname##_newbus_attach(device_t dev) \
+	{ \
+		return (pci_newbus_attach(dev, &(pcidrv))); \
+	} \
+	static int modname##_newbus_detach(device_t dev) \
+	{ \
+		return (pci_newbus_detach(dev, &(pcidrv))); \
+	} \
+	static driver_t modname##_newbus_driver = { \
+		.name = #modname, \
+		.identify = NULL, \
+		.probe = modname##_newbus_probe, \
+		.attach = modname##_newbus_attach, \
+		.detach = modname##_newbus_detach, \
+		.suspend = NULL, \
+		.resume = NULL, \
+		.shutdown = NULL, \
+		.priv = NULL, \
+	}; \
+	DRIVER_MODULE(modname, pci, modname##_newbus_driver, devclass, \
+	    passv, orderv)
 
 #endif

@@ -25,6 +25,7 @@
  */
 
 #include <kernel/drivers/input/input.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/event/event.h>
 #include <mlibc/mlibc.h>
 
@@ -193,3 +194,35 @@ input_event_reset(void)
 	memset(input_event_ring, 0, sizeof(input_event_ring));
 	input_irq_restore(flags);
 }
+
+static void
+input_core_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "input_core", 0) == NULL) {
+		device_add_child(parent, "input_core", 0);
+	}
+}
+
+static int
+input_core_attach(device_t dev)
+{
+	(void)dev;
+	input_event_reset();
+	return (0);
+}
+
+static devclass_t input_core_devclass = {
+	.name		= "input",
+	.maxunit	= 1,
+};
+
+static driver_t input_core_driver = {
+	.name		= "input_core",
+	.identify	= input_core_identify,
+	.probe		= NULL,
+	.attach		= input_core_attach,
+};
+
+PSEUDO_DRIVER_MODULE(input_core, input_core_driver,
+    input_core_devclass, NEWBUS_PASS_CORE, NEWBUS_ORDER_MIDDLE);

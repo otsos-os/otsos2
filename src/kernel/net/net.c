@@ -70,7 +70,7 @@ $space %export net_iface_set_ip, net_iface_set_netmask, net_iface_set_gw
 #include <kernel/net/arp.h>
 #include <kernel/net/udp.h>
 #include <kernel/net/endpoint.h>
-#include <kernel/net/loopback.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/cm/cm.h>
 #include <kernel/api/errno.h>
@@ -152,8 +152,6 @@ net_init(void)
 	cm_register_consumer(CM_CONSUMER_NET, "net", net_cm_update);
 	g_initialized = 1;
 
-	loopback_init();
-
 	drivers_log("[NET] network subsystem initialized\n");
 	return (0);
 }
@@ -228,6 +226,47 @@ net_iface_unregister(net_iface_t *iface)
 		return;
 	}
 }
+
+static void
+net_core_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "net_core", 0) == NULL) {
+		device_add_child(parent, "net_core", 0);
+	}
+}
+
+static void
+net_core_poll(void *arg)
+{
+	(void)arg;
+	net_tick();
+}
+
+static int
+net_core_attach(device_t dev)
+{
+	if (net_init() != 0) {
+		return (-1);
+	}
+	bus_setup_poll(dev, NB_POLL_TIMER, net_core_poll, NULL, NULL);
+	return (0);
+}
+
+static devclass_t net_core_devclass = {
+	.name		= "net",
+	.maxunit	= 1,
+};
+
+static driver_t net_core_driver = {
+	.name		= "net_core",
+	.identify	= net_core_identify,
+	.probe		= NULL,
+	.attach		= net_core_attach,
+};
+
+PSEUDO_DRIVER_MODULE(net_core, net_core_driver, net_core_devclass,
+    NEWBUS_PASS_CORE, NEWBUS_ORDER_MIDDLE);
 
 int
 net_iface_count(void)

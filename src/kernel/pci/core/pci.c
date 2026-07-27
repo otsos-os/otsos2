@@ -25,6 +25,7 @@
  */
 
 #include <kernel/pci/pci.h>
+#include <kernel/pci/utils/bar.h>
 #include <kernel/pci/utils/io.h>
 #include <mlibc/stdio.h>
 #include <kernel/panic.h>
@@ -39,12 +40,11 @@ static int pci_config_present(void) {
   return (read_back == 0x80000000U);
 }
 
-static pci_driver_t *pci_drivers[PCI_MAX_DRIVERS];
-static int pci_driver_count_val = 0;
 static int pci_initialized = 0;
 
-static int pci_match_device(const pci_device_t *dev,
-                            const pci_match_t *match) {
+static int
+pci_match_device(const pci_device_t *dev, const pci_match_t *match)
+{
   if (match->vendor_id != PCI_ANY_ID && match->vendor_id != dev->vendor_id) {
     return 0;
   }
@@ -65,121 +65,178 @@ static int pci_match_device(const pci_device_t *dev,
   return 1;
 }
 
-static int pci_probe_with_driver(pci_device_t *dev, pci_driver_t *driver) {
+static const pci_match_t *
+pci_find_driver_match(pci_device_t *dev, pci_driver_t *driver)
+{
+  u32 i;
+
   if (!driver || !driver->matches || driver->match_count == 0) {
-    return -1;
+    return NULL;
   }
 
-  for (u32 i = 0; i < driver->match_count; i++) {
-    const pci_match_t *match = &driver->matches[i];
+  for (i = 0; i < driver->match_count; i++) {
+    const pci_match_t *match;
+
+    match = &driver->matches[i];
     if (!pci_match_device(dev, match)) {
       continue;
     }
-
-    if (driver->probe) {
-      if (driver->probe(dev, match) != 0) {
-        continue;
-      }
-    }
-
-    dev->driver = driver;
-    return 0;
+    return match;
   }
 
-  return -1;
+  return NULL;
 }
 
-static void pci_try_attach_device(pci_device_t *dev) {
-  if (!dev || dev->driver) {
-    return;
-  }
+static void
+pci_bus_add_resources(device_t child, pci_device_t *pdev)
+{
+  pci_bar_t bar;
+  int i;
 
-  for (int i = 0; i < pci_driver_count_val; i++) {
-    pci_driver_t *driver = pci_drivers[i];
-    if (pci_probe_with_driver(dev, driver) == 0) {
-      if (driver && driver->name) {
-        printk("[PCI] %s bound to %02x:%02x.%u\n", driver->name, dev->bus,
-                    dev->slot, dev->function);
-      }
-      return;
+  for (i = 0; i < pci_get_bar_count(pdev); i++) {
+    if (pci_read_bar(pdev, (u8)i, &bar) != 0 || bar.base == 0 ||
+        bar.size == 0) {
+      continue;
     }
+    if (bar.is_io) {
+      bus_set_resource(child, SYS_RES_IOPORT, i, bar.base, bar.size, 0);
+    } else {
+      bus_set_resource(child, SYS_RES_MEMORY, i, bar.base, bar.size, 0);
+    }
+  }
+  if (pdev->irq_pin != 0 && pdev->irq_line != 0xFF) {
+    bus_set_resource(child, SYS_RES_IRQ, 0, pdev->irq_line, 1, 0);
   }
 }
 
-static void pci_attach_all_devices(void) {
-  int count = pci_device_count();
-  for (int i = 0; i < count; i++) {
-    pci_try_attach_device(pci_get_device(i));
+static void
+pci_bus_identify(driver_t *driver, device_t parent)
+{
+  (void)driver;
+  if (device_find_child(parent, "pci", 0) == NULL) {
+    device_add_child(parent, "pci", 0);
   }
 }
 
-int pci_register_driver(pci_driver_t *driver) {
-  if (!driver) {
-    return -1;
+static int
+pci_bus_probe(device_t dev)
+{
+  (void)dev;
+  if (!pci_config_present()) {
+    return (-1);
   }
-  for (int i = 0; i < pci_driver_count_val; i++) {
-    if (pci_drivers[i] == driver) {
-      return -1;
-    }
-  }
-  if (pci_driver_count_val >= PCI_MAX_DRIVERS) {
-    printk("[PCI] driver limit reached (%d)\n", PCI_MAX_DRIVERS);
-    return -1;
-  }
-
-  pci_drivers[pci_driver_count_val++] = driver;
-  if (driver->name) {
-    printk("[PCI] driver registered: %s\n", driver->name);
-  }
-
-  if (pci_initialized) {
-    pci_attach_all_devices();
-  }
-
-  return 0;
+  return (100);
 }
 
-int pci_unregister_driver(pci_driver_t *driver) {
-  if (!driver) {
-    return -1;
-  }
+static int
+pci_bus_attach(device_t dev)
+{
+  pci_device_t *pdev;
+  device_t child;
+  int devices;
+  int i;
 
-  int index = -1;
-  for (int i = 0; i < pci_driver_count_val; i++) {
-    if (pci_drivers[i] == driver) {
-      index = i;
-      break;
+  if (!pci_config_present()) {
+    return (-1);
+  }
+  devices = pci_scan();
+  printk("[PCI] scan complete: %d device(s)\n", devices);
+  for (i = 0; i < devices; i++) {
+    pdev = pci_get_device(i);
+    child = device_add_child(dev, "pcifn", -1);
+    if (child == NULL) {
+      continue;
     }
+    pdev->nb_device = child;
+    device_set_ivars(child, pdev);
+    pci_bus_add_resources(child, pdev);
   }
-  if (index < 0) {
-    return -1;
-  }
-
-  int dev_count = pci_device_count();
-  for (int i = 0; i < dev_count; i++) {
-    pci_device_t *dev = pci_get_device(i);
-    if (dev && dev->driver == driver) {
-      if (driver->remove) {
-        driver->remove(dev);
-      }
-      dev->driver = NULL;
-      dev->driver_data = NULL;
-    }
-  }
-
-  for (int i = index; i < pci_driver_count_val - 1; i++) {
-    pci_drivers[i] = pci_drivers[i + 1];
-  }
-  pci_driver_count_val--;
-
-  if (driver->name) {
-    printk("[PCI] driver unregistered: %s\n", driver->name);
-  }
-
-  return 0;
+  pci_initialized = 1;
+  return (0);
 }
 
-void pci_init(void) {
+int
+pci_newbus_probe(device_t dev, pci_driver_t *driver)
+{
+  pci_device_t *pdev;
+
+  if (dev == NULL || driver == NULL) {
+    return (-1);
+  }
+  pdev = (pci_device_t *)device_get_ivars(dev);
+  if (pdev == NULL || pci_find_driver_match(pdev, driver) == NULL) {
+    return (-1);
+  }
+  return (100);
+}
+
+int
+pci_newbus_attach(device_t dev, pci_driver_t *driver)
+{
+  const pci_match_t *match;
+  pci_device_t *pdev;
+
+  if (dev == NULL || driver == NULL) {
+    return (-1);
+  }
+  pdev = (pci_device_t *)device_get_ivars(dev);
+  if (pdev == NULL) {
+    return (-1);
+  }
+  match = pci_find_driver_match(pdev, driver);
+  if (match == NULL) {
+    return (-1);
+  }
+  if (driver->probe != NULL && driver->probe(pdev, match) != 0) {
+    return (-1);
+  }
+  pdev->driver = driver;
+  if (driver->name != NULL) {
+    printk("[PCI] %s bound to %02x:%02x.%u\n", driver->name,
+        pdev->bus, pdev->slot, pdev->function);
+  }
+  return (0);
+}
+
+int
+pci_newbus_detach(device_t dev, pci_driver_t *driver)
+{
+  pci_device_t *pdev;
+
+  if (dev == NULL || driver == NULL) {
+    return (-1);
+  }
+  pdev = (pci_device_t *)device_get_ivars(dev);
+  if (pdev == NULL || pdev->driver != driver) {
+    return (-1);
+  }
+  if (driver->remove != NULL) {
+    driver->remove(pdev);
+  }
+  pdev->driver = NULL;
+  pdev->driver_data = NULL;
+  return (0);
+}
+
+int
+pci_register_driver(pci_driver_t *driver)
+{
+  (void)driver;
+  drivers_log("[PCI] pci_register_driver is deprecated; "
+      "use PCI_DRIVER_MODULE\n");
+  return (-1);
+}
+
+int
+pci_unregister_driver(pci_driver_t *driver)
+{
+  (void)driver;
+  return (-1);
+}
+
+void
+pci_init(void)
+{
   if (pci_initialized) {
     return;
   }
@@ -189,10 +246,27 @@ void pci_init(void) {
     return;
   }
 
-  int devices = pci_scan();
-  printk("[PCI] scan complete: %d device(s)\n", devices);
-  pci_attach_all_devices();
-  pci_initialized = 1;
+  drivers_log("[PCI] pci_init is deprecated; pci0 is a newbus device\n");
 }
 
 int pci_is_initialized(void) { return pci_initialized; }
+
+static devclass_t pci_bus_devclass = {
+  .name = "pci",
+  .maxunit = 1,
+};
+
+static driver_t pci_bus_driver = {
+  .name = "pci",
+  .identify = pci_bus_identify,
+  .probe = pci_bus_probe,
+  .attach = pci_bus_attach,
+  .detach = NULL,
+  .suspend = NULL,
+  .resume = NULL,
+  .shutdown = NULL,
+  .priv = NULL,
+};
+
+DRIVER_MODULE(pci, platform, pci_bus_driver, pci_bus_devclass,
+    NEWBUS_PASS_BUS, NEWBUS_ORDER_MIDDLE);

@@ -14,6 +14,7 @@ $define %func console_color_rgb as function with args u8
 $define %func console_get_width as function with args void
 $define %func console_get_height as function with args void
 $define %func console_init as procedure with args void
+$define %func console_early_init as procedure with args void
 $define %func console_is_initialized as function with args void
 $define %func console_reinit as procedure with args void
 $define %func console_set_color as procedure with args u8
@@ -30,7 +31,8 @@ $define %func printf as procedure with args const char *, ...
 /* !SPACE!
 
 $space %export console_color_rgb, console_get_width, console_get_height
-$space %export console_init, console_is_initialized, console_reinit
+$space %export console_init, console_early_init
+$space %export console_is_initialized, console_reinit
 $space %export console_set_color, console_put_entry_at, console_putchar
 $space %export console_puts, clear_scr, printf
 $space %internal early_scroll, early_putc
@@ -41,6 +43,7 @@ $space %internal early_scroll, early_putc
 #include <kernel/console/palette.h>
 #include <kernel/console/terminal.h>
 #include <kernel/drivers/console/kms_console.h>
+#include <kernel/drivers/uart/uart.h>
 #include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/kms/crtc.h>
 #include <kernel/drivers/video/drm/rapi/rapi.h>
@@ -90,6 +93,12 @@ void
 console_init(void)
 {
 	terminal_init();
+}
+
+void
+console_early_init(void)
+{
+	uart_init();
 }
 
 int

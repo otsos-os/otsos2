@@ -25,6 +25,7 @@
  */
 
 #include <kernel/drivers/rtc/rtc.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/time.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -43,6 +44,10 @@
 #define	RTC_STATUS_B_24H	0x02
 #define	RTC_STATUS_B_BIN	0x04
 #define	RTC_UIP		0x80
+#define	RTC_MAX_DRIVERS	4
+
+static const rtc_driver_t	*rtc_drivers[RTC_MAX_DRIVERS];
+static int			rtc_driver_count;
 
 static u8
 bcd_to_bin(u8 bcd)
@@ -130,7 +135,30 @@ read_cmos_fields(u8 *sec, u8 *min, u8 *hour,
 }
 
 int
-rtc_read_time(struct bintime *bt)
+rtc_register_driver(const rtc_driver_t *driver)
+{
+	int	i;
+
+	if (driver == NULL || driver->name == NULL ||
+	    driver->read_time == NULL) {
+		return (-1);
+	}
+	for (i = 0; i < rtc_driver_count; i++) {
+		if (rtc_drivers[i] == driver ||
+		    strcmp(rtc_drivers[i]->name, driver->name) == 0) {
+			return (0);
+		}
+	}
+	if (rtc_driver_count >= RTC_MAX_DRIVERS) {
+		return (-1);
+	}
+	rtc_drivers[rtc_driver_count++] = driver;
+	drivers_log("[RTC] registered: %s\n", driver->name);
+	return (0);
+}
+
+static int
+cmos_rtc_read_time(struct bintime *bt)
 {
 	u8	sec, min, hour, mday, month, year, century;
 	u32	full_year;
@@ -190,3 +218,59 @@ rtc_read_time(struct bintime *bt)
 
 	return (0);
 }
+
+int
+rtc_read_time(struct bintime *bt)
+{
+	if (rtc_driver_count == 0 || rtc_drivers[0] == NULL ||
+	    rtc_drivers[0]->read_time == NULL) {
+		return (-1);
+	}
+	return (rtc_drivers[0]->read_time(bt));
+}
+
+static const rtc_driver_t cmos_rtc_ops = {
+	.name		= "cmos_rtc",
+	.read_time	= cmos_rtc_read_time,
+};
+
+static void
+cmos_rtc_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "cmos_rtc", 0) == NULL) {
+		device_add_child(parent, "cmos_rtc", 0);
+	}
+}
+
+static int
+cmos_rtc_probe(device_t dev)
+{
+	(void)dev;
+	if (cmos_read(RTC_REG_STATUS_A) == 0xFF) {
+		return (-1);
+	}
+	return (0);
+}
+
+static int
+cmos_rtc_attach(device_t dev)
+{
+	(void)dev;
+	return (rtc_register_driver(&cmos_rtc_ops));
+}
+
+static devclass_t cmos_rtc_devclass = {
+	.name		= "rtc",
+	.maxunit	= 1,
+};
+
+static driver_t cmos_rtc_driver = {
+	.name		= "cmos_rtc",
+	.identify	= cmos_rtc_identify,
+	.probe		= cmos_rtc_probe,
+	.attach		= cmos_rtc_attach,
+};
+
+ISA_DRIVER_MODULE(cmos_rtc, cmos_rtc_driver, cmos_rtc_devclass,
+    NEWBUS_PASS_FIRMWARE, NEWBUS_ORDER_MIDDLE);

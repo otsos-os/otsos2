@@ -26,10 +26,11 @@
 
 #include <kernel/api/errno.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
+#include <kernel/drivers/fs/vfs/back/vfs_back.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/console/terminal.h>
 #include <kernel/console/pty.h>
 #include <kernel/crypto/rng/rng.h>
-#include <kernel/drivers/video/drm/fbdev.h>
 #include <kernel/process.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -327,31 +328,7 @@ devfs_init(void)
 {
 	devfs_list = NULL;
 	devfs_count = 0;
-
-	devfs_register("null", DEVFS_DEV_NULL,
-	    dev_null_read, dev_null_write, NULL, NULL, NULL);
-	devfs_register("zero", DEVFS_DEV_ZERO,
-	    dev_zero_read, dev_zero_write, NULL, NULL, NULL);
-	devfs_register("tty", DEVFS_DEV_TTY,
-	    vnode_tty_read, vnode_tty_write, vnode_tty_ioctl,
-	    vnode_tty_stat, (void *)(unsigned long)-1);
-	devfs_register("console", DEVFS_DEV_CONSOLE,
-	    vnode_tty_read, vnode_tty_write, vnode_tty_ioctl,
-	    vnode_tty_stat, (void *)(unsigned long)-1);
-	devfs_register("random", DEVFS_DEV_RANDOM,
-	    dev_random_read, dev_random_write, NULL, NULL, NULL);
-	devfs_register("urandom", DEVFS_DEV_URANDOM,
-	    dev_urandom_read, dev_urandom_write, NULL, NULL, NULL);
-	if (drm_fbdev_is_ready()) {
-		devfs_register("fb0", DEVFS_DEV_FB0,
-		    drm_fbdev_vnode_read, drm_fbdev_vnode_write,
-		    drm_fbdev_vnode_ioctl, drm_fbdev_vnode_stat, NULL);
-	}
-
-	pty_init();
-
-	drivers_log("[DEVFS] mounted at /dev (%d devices, RAM-backed)\n",
-	    devfs_count);
+	drivers_log("[DEVFS] registry initialized\n");
 }
 
 vnode_t *
@@ -514,3 +491,98 @@ devfs_root_listdir(vnode_t *vn, u32 start, vfs_dirent_t *entries,
 	*count = copied;
 	return (0);
 }
+
+static void
+devfs_builtin_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "devfs_builtin", 0) == NULL) {
+		device_add_child(parent, "devfs_builtin", 0);
+	}
+}
+
+static int
+devfs_builtin_attach(device_t dev)
+{
+	(void)dev;
+	devfs_register("null", DEVFS_DEV_NULL,
+	    dev_null_read, dev_null_write, NULL, NULL, NULL);
+	devfs_register("zero", DEVFS_DEV_ZERO,
+	    dev_zero_read, dev_zero_write, NULL, NULL, NULL);
+	devfs_register("tty", DEVFS_DEV_TTY,
+	    vnode_tty_read, vnode_tty_write, vnode_tty_ioctl,
+	    vnode_tty_stat, (void *)(unsigned long)-1);
+	devfs_register("console", DEVFS_DEV_CONSOLE,
+	    vnode_tty_read, vnode_tty_write, vnode_tty_ioctl,
+	    vnode_tty_stat, (void *)(unsigned long)-1);
+	devfs_register("random", DEVFS_DEV_RANDOM,
+	    dev_random_read, dev_random_write, NULL, NULL, NULL);
+	devfs_register("urandom", DEVFS_DEV_URANDOM,
+	    dev_urandom_read, dev_urandom_write, NULL, NULL, NULL);
+	pty_init();
+	drivers_log("[DEVFS] builtins registered (%d devices)\n",
+	    devfs_count);
+	return (0);
+}
+
+static devclass_t devfs_builtin_devclass = {
+	.name		= "devfs",
+	.maxunit	= 1,
+};
+
+static driver_t devfs_builtin_driver = {
+	.name		= "devfs_builtin",
+	.identify	= devfs_builtin_identify,
+	.probe		= NULL,
+	.attach		= devfs_builtin_attach,
+};
+
+PSEUDO_DRIVER_MODULE(devfs_builtin, devfs_builtin_driver,
+    devfs_builtin_devclass, NEWBUS_PASS_FILESYSTEM,
+    NEWBUS_ORDER_LATE + 1);
+
+static void
+devfs_mount_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "devfs_mount", 0) == NULL) {
+		device_add_child(parent, "devfs_mount", 0);
+	}
+}
+
+static int
+devfs_mount_attach(device_t dev)
+{
+	const vfs_back_ops_t	*ops;
+	int			ret;
+
+	(void)dev;
+	ops = vfs_devfs_back_ops();
+	if (ops == NULL) {
+		return (-1);
+	}
+	(void)vfs_back_register_ops(ops);
+	if (ops->init != NULL && ops->init() != 0) {
+		return (-1);
+	}
+	ret = vfs_back_mount("/dev", ops);
+	if (ret == -API_ERR_EXISTS) {
+		return (0);
+	}
+	return (ret);
+}
+
+static devclass_t devfs_mount_devclass = {
+	.name		= "devfs",
+	.maxunit	= 1,
+};
+
+static driver_t devfs_mount_driver = {
+	.name		= "devfs_mount",
+	.identify	= devfs_mount_identify,
+	.probe		= NULL,
+	.attach		= devfs_mount_attach,
+};
+
+PSEUDO_DRIVER_MODULE(devfs_mount, devfs_mount_driver,
+    devfs_mount_devclass, NEWBUS_PASS_FILESYSTEM, NEWBUS_ORDER_LATE);

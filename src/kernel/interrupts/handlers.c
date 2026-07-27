@@ -25,17 +25,12 @@
  */
 
 #include <kernel/interrupts/apic/lapic.h>
-#include <kernel/drivers/keyboard/keyboard.h>
-#include <kernel/drivers/mouse/mouse.h>
 #include <kernel/console/console.h>
 #include <kernel/crypto/rng/rng.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/drivers/eventtimer.h>
-#include <kernel/drivers/power/pbutton.h>
 #include <kernel/console/terminal.h>
-#include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/event/event.h>
-#include <kernel/net/net.h>
-#include <kernel/drivers/net/virtio-net/virtio_net.h>
 #include <kernel/interrupts/idt.h>
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_map.h>
@@ -105,37 +100,27 @@ void irq_handler(registers_t *regs) {
   trace_irq_enter(regs);
   if (regs->int_no >= 32 && regs->int_no < 48) {
     irq = (u8)(regs->int_no - 32);
-    virtio_net_irq(irq);
+    (void)newbus_irq_dispatch(irq);
   }
 
   if (regs->int_no == 32) {
     eventtimer_dispatch();
     trace_sample_tick(regs);
-    power_button_poll();
-    watchdog_tick();
     event_timer_tick();
-    net_tick();
     crypto_rng_tick();
-    keyboard_poll();
-    ps2_mouse_poll();
+    newbus_poll_dispatch(NB_POLL_TIMER);
     scheduler_tick(regs);
     terminal_update();
   } else if (regs->int_no == 33) {
-    keyboard_common_handler();
     scheduler_tick(regs);
   } else if (regs->int_no == 44) {
-    ps2_mouse_handler();
     scheduler_tick(regs);
   } else if (regs->int_no == 48) {
     eventtimer_dispatch();
     trace_sample_tick(regs);
-    power_button_poll();
-    watchdog_tick();
     event_timer_tick();
-    net_tick();
     crypto_rng_tick();
-    keyboard_poll();
-    ps2_mouse_poll();
+    newbus_poll_dispatch(NB_POLL_TIMER);
     scheduler_tick(regs);
     terminal_update();
     trace_irq_exit(regs);

@@ -49,7 +49,7 @@ $space %internal parse_s5_from_dsdt
 */
 
 #include <kernel/drivers/acpi/acpi.h>
-#include <kernel/drivers/power/pbutton.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/drivers/power/power.h>
 #include <kernel/panic.h>
 #include <mlibc/stdio.h>
@@ -184,8 +184,6 @@ power_init(void)
 	    "SLP_TYP_S5=%u/%u\n",
 	    g_power.pm1a_control, g_power.pm1b_control,
 	    g_power.slp_typa_s5, g_power.slp_typb_s5);
-
-	(void)power_button_init();
 
 	return (0);
 }
@@ -344,3 +342,41 @@ power_is_initialized(void)
 {
 	return (g_power.initialized);
 }
+
+static void
+power_core_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "power_core", 0) == NULL) {
+		device_add_child(parent, "power_core", 0);
+	}
+}
+
+static int
+power_core_attach(device_t dev)
+{
+	power_info_t	info;
+
+	(void)dev;
+	(void)power_init();
+	info = power_get_info();
+	if (info.acpi_available) {
+		(void)power_acpi_enable();
+	}
+	return (0);
+}
+
+static devclass_t power_core_devclass = {
+	.name		= "power",
+	.maxunit	= 1,
+};
+
+static driver_t power_core_driver = {
+	.name		= "power_core",
+	.identify	= power_core_identify,
+	.probe		= NULL,
+	.attach		= power_core_attach,
+};
+
+PLATFORM_DRIVER_MODULE(power_core, power_core_driver, power_core_devclass,
+    NEWBUS_PASS_LATE, NEWBUS_ORDER_FIRST);

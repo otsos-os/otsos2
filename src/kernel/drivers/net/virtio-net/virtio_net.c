@@ -83,8 +83,6 @@ $space %export virtio_net_pci_register, virtio_net_irq
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
-extern void	pic_unmask_irq(unsigned char irq);
-
 #define	VIRTIO_NET_DEVICE_ID		0x1041
 #define	VIRTIO_NET_LEGACY_DEVICE_ID	0x1000
 #define	VIRTIO_NET_QUEUE_SIZE		64
@@ -130,12 +128,20 @@ typedef struct {
 	u8			irq_enabled;
 	u8			polling;
 	int			ready;
+	device_t		nb_dev;
+	resource_t		*irq_res;
+	void			*irq_cookie;
 	netdev_t		ndev;
 	net_iface_t		iface;
 } virtio_net_state_t;
 
 static netdev_ops_t	virtio_net_ndev_ops;
 static virtio_net_state_t *g_virtio_net_states[VIRTIO_NET_MAX_STATES];
+
+static int	virtio_net_ndev_transmit(netdev_t *ndev,
+		    const u8 *frame, u16 len);
+static int	virtio_net_ndev_poll(netdev_t *ndev);
+static int	virtio_net_ndev_is_link_up(netdev_t *ndev);
 
 static int
 virtio_net_setup_queue(virtio_vq_t *vq, virtio_hw_t *hw, u16 index)
@@ -234,6 +240,29 @@ virtio_net_irq_unregister(virtio_net_state_t *st)
 }
 
 static int
+virtio_net_irq_state(void *arg)
+{
+	virtio_net_state_t	*st;
+	u8			isr;
+
+	st = (virtio_net_state_t *)arg;
+	if (!st || !st->ready || !st->irq_enabled) {
+		return (-1);
+	}
+	isr = virtio_hw_read_isr(&st->hw);
+	if ((isr & (VIRTIO_ISR_QUEUE | VIRTIO_ISR_CONFIG)) == 0) {
+		return (-1);
+	}
+	if (isr & VIRTIO_ISR_CONFIG) {
+		virtio_net_read_link(st);
+	}
+	if (isr & VIRTIO_ISR_QUEUE) {
+		virtio_net_ndev_poll(&st->ndev);
+	}
+	return (0);
+}
+
+static int
 virtio_net_post_rx(virtio_net_state_t *st, u16 slot)
 {
 	virtio_vq_t	*vq;
@@ -281,6 +310,12 @@ virtio_net_destroy(virtio_net_state_t *st)
 		return;
 	}
 	st->ready = 0;
+	if (st->irq_cookie != NULL && st->nb_dev != NULL &&
+	    st->irq_res != NULL) {
+		bus_teardown_intr(st->nb_dev, st->irq_res,
+		    st->irq_cookie);
+		st->irq_cookie = NULL;
+	}
 	virtio_net_irq_unregister(st);
 	if (st->iface_registered) {
 		net_iface_unregister(&st->iface);
@@ -461,6 +496,7 @@ virtio_net_pci_probe(pci_device_t *dev, const pci_match_t *match)
 {
 	virtio_net_state_t	*st;
 	u64			buffer_size;
+	int			rid;
 	u16			i;
 
 	(void)match;
@@ -550,15 +586,26 @@ virtio_net_pci_probe(pci_device_t *dev, const pci_match_t *match)
 	}
 	st->iface_registered = 1;
 	dev->driver_data = st;
+	st->nb_dev = dev->nb_device;
 
 	st->irq_line = dev->irq_line;
-	if (dev->irq_pin != 0 && dev->irq_line != 0xFF &&
-	    dev->irq_line < 16) {
+	if (st->nb_dev != NULL && dev->irq_pin != 0 &&
+	    dev->irq_line != 0xFF) {
+		rid = 0;
+		st->irq_res = bus_alloc_resource_any(st->nb_dev,
+		    SYS_RES_IRQ, &rid, RF_ACTIVE);
 		st->irq_enabled = 1;
 		virtio_net_irq_register(st);
-		pic_unmask_irq(st->irq_line);
-		drivers_log("[VIRTIO_NET] INTx IRQ %u hooked\n",
-		    st->irq_line);
+		if (st->irq_res != NULL &&
+		    bus_setup_intr(st->nb_dev, st->irq_res,
+		    virtio_net_irq_state, st, &st->irq_cookie) == 0) {
+			drivers_log("[VIRTIO_NET] INTx IRQ %u hooked\n",
+			    st->irq_line);
+		} else {
+			st->irq_enabled = 0;
+			drivers_log("[VIRTIO_NET] INTx IRQ setup "
+			    "failed\n");
+		}
 	}
 
 	drivers_log("[VIRTIO_NET] ready: "
@@ -608,6 +655,14 @@ static pci_driver_t virtio_net_pci_driver = {
 	.remove		= virtio_net_pci_remove,
 };
 
+static devclass_t virtio_net_devclass = {
+	.name		= "virtio-net",
+	.maxunit	= VIRTIO_NET_MAX_STATES,
+};
+
+PCI_DRIVER_MODULE(virtio_net, virtio_net_pci_driver, virtio_net_devclass,
+    NEWBUS_PASS_NETWORK, NEWBUS_ORDER_MIDDLE);
+
 static netdev_ops_t virtio_net_ndev_ops = {
 	.name		= "virtio-net",
 	.transmit	= virtio_net_ndev_transmit,
@@ -618,5 +673,7 @@ static netdev_ops_t virtio_net_ndev_ops = {
 int
 virtio_net_pci_register(void)
 {
-	return (pci_register_driver(&virtio_net_pci_driver));
+	drivers_log("[VIRTIO_NET] pci_register entry is deprecated; "
+	    "using PCI_DRIVER_MODULE\n");
+	return (0);
 }

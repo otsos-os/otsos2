@@ -26,10 +26,13 @@
 
 #include <drm/drm.h>
 #include <drm/fbdev.h>
+#include <drm/init.h>
 #include <drm/kms/crtc.h>
 #include <drm/kms/plane.h>
 #include <drm/kms/framebuffer.h>
 #include <drm/rapi/rapi.h>
+#include <kernel/drivers/fs/devfs/devfs.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/api/posix/posix.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
@@ -515,6 +518,7 @@ static int fbdev_atomic_commit(const drm_kms_state_t *state) {
 static const drm_driver_t g_fbdev_driver = {
     .name = "fbdev",
     .priority = 10,
+    .flags = DRM_DRIVER_F_BOOT_FB,
     .probe = fbdev_probe,
     .init = fbdev_init,
     .atomic_commit = fbdev_atomic_commit,
@@ -522,6 +526,43 @@ static const drm_driver_t g_fbdev_driver = {
 };
 
 const drm_driver_t *drm_fbdev_driver_get(void) { return &g_fbdev_driver; }
+
+static void
+fbdev_identify(driver_t *driver, device_t parent)
+{
+  (void)driver;
+  if (device_find_child(parent, "fbdev", 0) == NULL) {
+    device_add_child(parent, "fbdev", 0);
+  }
+}
+
+static int
+fbdev_attach(device_t dev)
+{
+  int ret;
+
+  (void)dev;
+  ret = drm_register_driver(&g_fbdev_driver);
+  if (ret != DRM_OK) {
+    return ret;
+  }
+  return drm_register_boot_info_provider(drm_fbdev_get_boot_info);
+}
+
+static devclass_t fbdev_devclass = {
+    .name = "fbdev",
+    .maxunit = 1,
+};
+
+static driver_t fbdev_driver = {
+    .name = "fbdev",
+    .identify = fbdev_identify,
+    .probe = NULL,
+    .attach = fbdev_attach,
+};
+
+FIRMWARE_DRIVER_MODULE(fbdev, fbdev_driver, fbdev_devclass,
+    NEWBUS_PASS_FIRMWARE, NEWBUS_ORDER_MIDDLE);
 
 int drm_fbdev_is_ready(void) { return fbdev_ready(); }
 
@@ -708,3 +749,43 @@ drm_fbdev_vnode_stat(vnode_t *vn, posix_stat_t *st)
   st->st_gid = 0;
   return 0;
 }
+
+static void
+fbdev_devfs_identify(driver_t *driver, device_t parent)
+{
+  (void)driver;
+  if (device_find_child(parent, "fbdev_devfs", 0) == NULL) {
+    device_add_child(parent, "fbdev_devfs", 0);
+  }
+}
+
+static int
+fbdev_devfs_probe(device_t dev)
+{
+  (void)dev;
+  return drm_fbdev_is_ready() ? 0 : -1;
+}
+
+static int
+fbdev_devfs_attach(device_t dev)
+{
+  (void)dev;
+  return devfs_register("fb0", DEVFS_DEV_FB0,
+      drm_fbdev_vnode_read, drm_fbdev_vnode_write,
+      drm_fbdev_vnode_ioctl, drm_fbdev_vnode_stat, NULL);
+}
+
+static devclass_t fbdev_devfs_devclass = {
+    .name = "fbdev",
+    .maxunit = 1,
+};
+
+static driver_t fbdev_devfs_driver = {
+    .name = "fbdev_devfs",
+    .identify = fbdev_devfs_identify,
+    .probe = fbdev_devfs_probe,
+    .attach = fbdev_devfs_attach,
+};
+
+PSEUDO_DRIVER_MODULE(fbdev_devfs, fbdev_devfs_driver,
+    fbdev_devfs_devclass, NEWBUS_PASS_FILESYSTEM, NEWBUS_ORDER_LAST);

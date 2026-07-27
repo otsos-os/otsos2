@@ -9,7 +9,7 @@
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
+ *    and/or other materials provided with the distribution.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -26,32 +26,31 @@
 
 /* !DEFINES!
 
+$define %type newbus_module_t as linker-set driver declaration
 $define %type int as 32 bit signed
-$define %type struct bintime as binary time (sec + 64-bit frac)
-$define %type rtc_driver_t as RTC provider descriptor
 
-$define %func rtc_register_driver as function with args const rtc_driver_t *
-$define %func rtc_read_time as function with args struct bintime *
+$define %func newbus_register_linker_modules as procedure with args void
 
 */
 
 /* !SPACE!
 
-$space %export rtc_register_driver, rtc_read_time
+$space %export newbus_register_linker_modules
 
 */
 
-#ifndef KERNEL_DRIVERS_RTC_RTC_H
-#define KERNEL_DRIVERS_RTC_RTC_H
+#include <kernel/drivers/newbus/newbus.h>
 
-#include <kernel/time.h>
+extern const newbus_module_t	__start_newbus_drivers[];
+extern const newbus_module_t	__stop_newbus_drivers[];
 
-typedef struct rtc_driver {
-	const char	*name;
-	int		(*read_time)(struct bintime *);
-} rtc_driver_t;
+void
+newbus_register_linker_modules(void)
+{
+	const newbus_module_t	*module;
 
-int	rtc_register_driver(const rtc_driver_t *driver);
-int	rtc_read_time(struct bintime *bt);
-
-#endif
+	for (module = __start_newbus_drivers;
+	    module < __stop_newbus_drivers; module++) {
+		newbus_driver_add_module(module);
+	}
+}

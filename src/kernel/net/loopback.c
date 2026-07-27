@@ -48,6 +48,7 @@ $space %export loopback_init
 */
 
 #include <kernel/net/loopback.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/net/net.h>
 #include <kernel/net/netdev/netdev.h>
 #include <mlibc/stdio.h>
@@ -139,3 +140,41 @@ loopback_init(void)
 	drivers_log("[LOOPBACK] loopback interface lo ready\n");
 	return (0);
 }
+
+static void
+loopback_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "loopback", 0) == NULL) {
+		device_add_child(parent, "loopback", 0);
+	}
+}
+
+static int
+loopback_probe(device_t dev)
+{
+	(void)dev;
+	return (net_is_initialized() ? 80 : -1);
+}
+
+static int
+loopback_attach(device_t dev)
+{
+	(void)dev;
+	return (loopback_init());
+}
+
+static devclass_t loopback_devclass = {
+	.name		= "netdev",
+	.maxunit	= 1,
+};
+
+static driver_t loopback_driver = {
+	.name		= "loopback",
+	.identify	= loopback_identify,
+	.probe		= loopback_probe,
+	.attach		= loopback_attach,
+};
+
+PSEUDO_DRIVER_MODULE(loopback, loopback_driver, loopback_devclass,
+    NEWBUS_PASS_NETWORK, NEWBUS_ORDER_FIRST);

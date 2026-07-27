@@ -26,6 +26,7 @@
 
 #include <kernel/time.h>
 #include <kernel/time/clocksource.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/drivers/timer.h>
 #include <mlibc/mlibc.h>
 
@@ -55,3 +56,45 @@ et_clocksource_init(void)
 	tc_register(&et_timecounter);
 	time_windup_current();
 }
+
+static void
+et_clocksource_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "et_clocksource", 0) == NULL) {
+		device_add_child(parent, "et_clocksource", 0);
+	}
+}
+
+static int
+et_clocksource_probe(device_t dev)
+{
+	(void)dev;
+	if (!timer_is_initialized()) {
+		return (-1);
+	}
+	return (50);
+}
+
+static int
+et_clocksource_attach(device_t dev)
+{
+	(void)dev;
+	et_clocksource_init();
+	return (0);
+}
+
+static devclass_t et_clocksource_devclass = {
+	.name		= "clocksource",
+	.maxunit	= 1,
+};
+
+static driver_t et_clocksource_driver = {
+	.name		= "et_clocksource",
+	.identify	= et_clocksource_identify,
+	.probe		= et_clocksource_probe,
+	.attach		= et_clocksource_attach,
+};
+
+PSEUDO_DRIVER_MODULE(et_clocksource, et_clocksource_driver,
+    et_clocksource_devclass, NEWBUS_PASS_CORE, NEWBUS_ORDER_LATE);

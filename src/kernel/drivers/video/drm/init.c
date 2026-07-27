@@ -26,6 +26,7 @@
 #include <drm/drm.h>
 #include <drm/fbdev.h>
 #include <drm/init.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/multiboot.h>
 #include <kernel/multiboot2.h>
 #include <mlibc/stdio.h>
@@ -88,3 +89,65 @@ int drm_boot_init_mb1(multiboot_info_t *mb_info, const char *preferred) {
   };
   return boot_init_common(&boot, preferred);
 }
+
+static void
+drm_boot_identify(driver_t *driver, device_t parent)
+{
+  (void)driver;
+  if (device_find_child(parent, "drm_boot", 0) == NULL) {
+    device_add_child(parent, "drm_boot", 0);
+  }
+}
+
+static int
+drm_boot_probe(device_t dev)
+{
+  const newbus_bootinfo_t *boot;
+
+  (void)dev;
+  boot = newbus_get_bootinfo();
+  if (boot == NULL) {
+    return -1;
+  }
+  if (boot->magic == MULTIBOOT2_BOOTLOADER_MAGIC && boot->mb2 != NULL) {
+    return 0;
+  }
+  if (boot->magic == MULTIBOOT_BOOTLOADER_MAGIC && boot->mb1 != NULL) {
+    return 0;
+  }
+  return -1;
+}
+
+static int
+drm_boot_attach(device_t dev)
+{
+  const newbus_bootinfo_t *boot;
+
+  (void)dev;
+  boot = newbus_get_bootinfo();
+  if (boot == NULL) {
+    return -1;
+  }
+  if (boot->magic == MULTIBOOT2_BOOTLOADER_MAGIC && boot->mb2 != NULL) {
+    return drm_boot_init_mb2((multiboot2_info_t *)boot->mb2, NULL);
+  }
+  if (boot->magic == MULTIBOOT_BOOTLOADER_MAGIC && boot->mb1 != NULL) {
+    return drm_boot_init_mb1((multiboot_info_t *)boot->mb1, NULL);
+  }
+  return -1;
+}
+
+static devclass_t drm_boot_devclass = {
+    .name = "drm",
+    .maxunit = 1,
+};
+
+static driver_t drm_boot_driver = {
+    .name = "drm_boot",
+    .identify = drm_boot_identify,
+    .probe = drm_boot_probe,
+    .attach = drm_boot_attach,
+};
+
+FIRMWARE_DRIVER_MODULE(drm_boot, drm_boot_driver, drm_boot_devclass,
+    NEWBUS_PASS_DISPLAY, NEWBUS_ORDER_LATE);

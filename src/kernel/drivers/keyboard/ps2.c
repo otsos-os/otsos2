@@ -65,6 +65,7 @@ $space %export ps2_keyboard_reset_state, ps2_keyboard_flush, ps2Scanf
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/keyboard/keymap.h>
 #include <kernel/drivers/keyboard/ps2.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/kshell/kshell.h>
 #include <kernel/drivers/power/power.h>
 #include <mlibc/stdio.h>
@@ -629,3 +630,76 @@ ps2Scanf(const char *format, ...)
 	__builtin_va_end(args);
 	return (count);
 }
+
+static keyboard_driver_t atkbd_keyboard_driver = {
+	.name		= "PS/2 Keyboard",
+	.init		= ps2_keyboard_init,
+	.getchar	= ps2_keyboard_getchar,
+	.handler	= ps2_keyboard_handler,
+	.poll		= ps2_keyboard_poll,
+	.flush		= ps2_keyboard_flush,
+	.reset		= ps2_keyboard_reset_state,
+};
+
+static int
+atkbd_intr(void *arg)
+{
+	(void)arg;
+	keyboard_common_handler();
+	return (0);
+}
+
+static void
+atkbd_poll(void *arg)
+{
+	(void)arg;
+	keyboard_poll();
+}
+
+static int
+atkbd_probe(device_t dev)
+{
+	(void)dev;
+	if (i8042_status() == 0xFF) {
+		return (-1);
+	}
+	return (0);
+}
+
+static int
+atkbd_attach(device_t dev)
+{
+	resource_t	*irq;
+	int		irq_ok, rid;
+
+	if (keyboard_register_driver(&atkbd_keyboard_driver) != 0) {
+		return (-1);
+	}
+	irq_ok = 0;
+	rid = 0;
+	irq = bus_alloc_resource_any(dev, SYS_RES_IRQ, &rid, RF_ACTIVE);
+	if (irq != NULL &&
+	    bus_setup_intr(dev, irq, atkbd_intr, NULL, NULL) == 0) {
+		irq_ok = 1;
+	}
+	if (!irq_ok) {
+		(void)bus_setup_poll(dev, NB_POLL_TIMER, atkbd_poll, NULL,
+		    NULL);
+	}
+	return (0);
+}
+
+static devclass_t atkbd_devclass = {
+	.name		= "keyboard",
+	.maxunit	= 1,
+};
+
+static driver_t atkbd_driver = {
+	.name		= "atkbd",
+	.identify	= NULL,
+	.probe		= atkbd_probe,
+	.attach		= atkbd_attach,
+};
+
+DRIVER_MODULE(atkbd, i8042, atkbd_driver, atkbd_devclass,
+    NEWBUS_PASS_INPUT, NEWBUS_ORDER_MIDDLE);

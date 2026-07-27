@@ -156,7 +156,10 @@ $space %export hivefs_back_ops
 */
 
 #include <kernel/api/errno.h>
+#include <kernel/cm/cm.h>
 #include <kernel/drivers/fs/hivefs/hivefs.h>
+#include <kernel/drivers/newbus/newbus.h>
+#include <kernel/multiboot2.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdio.h>
 #include <mm/kmem.h>
@@ -2622,3 +2625,97 @@ hivefs_back_ops(void)
 {
 	return (&hivefs_ops);
 }
+
+static void
+hivefs_cmseed_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "hivefs_cmseed", 0) == NULL) {
+		device_add_child(parent, "hivefs_cmseed", 0);
+	}
+}
+
+static int
+hivefs_cmseed_probe(device_t dev)
+{
+	const newbus_bootinfo_t	*boot;
+
+	(void)dev;
+	boot = newbus_get_bootinfo();
+	if (boot == NULL || boot->mb2 == NULL) {
+		return (-1);
+	}
+	return (multiboot2_find_module((multiboot2_info_t *)boot->mb2,
+	    "cmseed", NULL, NULL) == 0 ? 0 : -1);
+}
+
+static int
+hivefs_cmseed_attach(device_t dev)
+{
+	const newbus_bootinfo_t	*boot;
+	void			*mod;
+	u32			size;
+
+	(void)dev;
+	boot = newbus_get_bootinfo();
+	if (boot == NULL || boot->mb2 == NULL ||
+	    multiboot2_find_module((multiboot2_info_t *)boot->mb2,
+	    "cmseed", &mod, &size) != 0 || mod == NULL || size == 0) {
+		return (-1);
+	}
+	if (hivefs_load_pack(mod, size) != 0) {
+		printk("[HIVEFS] failed to load cmseed\n");
+		return (-1);
+	}
+	if (cm_init() != 0) {
+		printk("[CM] failed to initialize seed\n");
+		return (-1);
+	}
+	return (0);
+}
+
+static devclass_t hivefs_cmseed_devclass = {
+	.name		= "hivefs_cmseed",
+	.maxunit	= 1,
+};
+
+static driver_t hivefs_cmseed_driver = {
+	.name		= "hivefs_cmseed",
+	.identify	= hivefs_cmseed_identify,
+	.probe		= hivefs_cmseed_probe,
+	.attach		= hivefs_cmseed_attach,
+};
+
+FIRMWARE_DRIVER_MODULE(hivefs_cmseed, hivefs_cmseed_driver,
+    hivefs_cmseed_devclass, NEWBUS_PASS_FIRMWARE, NEWBUS_ORDER_EARLY);
+
+static void
+hivefs_backend_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "hivefs_backend", 0) == NULL) {
+		device_add_child(parent, "hivefs_backend", 0);
+	}
+}
+
+static int
+hivefs_backend_attach(device_t dev)
+{
+	(void)dev;
+	return (vfs_back_register_ops(&hivefs_ops));
+}
+
+static devclass_t hivefs_backend_devclass = {
+	.name		= "hivefs",
+	.maxunit	= 1,
+};
+
+static driver_t hivefs_backend_driver = {
+	.name		= "hivefs_backend",
+	.identify	= hivefs_backend_identify,
+	.probe		= NULL,
+	.attach		= hivefs_backend_attach,
+};
+
+PSEUDO_DRIVER_MODULE(hivefs_backend, hivefs_backend_driver,
+    hivefs_backend_devclass, NEWBUS_PASS_FILESYSTEM, NEWBUS_ORDER_MIDDLE);

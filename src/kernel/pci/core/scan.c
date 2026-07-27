@@ -147,6 +147,7 @@ static void pci_clear_devices(void) {
     pci_devices[i].device_id = 0;
     pci_devices[i].driver = NULL;
     pci_devices[i].driver_data = NULL;
+    pci_devices[i].nb_device = NULL;
   }
   pci_device_count_val = 0;
 }
@@ -184,6 +185,7 @@ static void pci_fill_device(pci_device_t *dev, u8 bus, u8 slot, u8 function) {
 
   dev->driver = NULL;
   dev->driver_data = NULL;
+  dev->nb_device = NULL;
 }
 
 static void pci_add_device(u8 bus, u8 slot, u8 function) {

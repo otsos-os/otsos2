@@ -142,6 +142,31 @@ static inline multiboot2_tag_t *multiboot2_find_tag(multiboot2_info_t *mb_info,
   return 0;
 }
 
+static inline int multiboot2_find_module(multiboot2_info_t *mb_info,
+                                         const char *name, void **out_start,
+                                         u32 *out_size) {
+  multiboot2_tag_t *tag = (multiboot2_tag_t *)((u8 *)mb_info + 8);
+
+  while (tag->type != MULTIBOOT2_TAG_TYPE_END) {
+    if (tag->type == MULTIBOOT2_TAG_TYPE_MODULE) {
+      multiboot2_tag_module_t *mod = (multiboot2_tag_module_t *)tag;
+      if (strcmp(mod->cmdline, name) == 0) {
+        if (out_start) {
+          *out_start = (void *)(u64)mod->mod_start;
+        }
+        if (out_size) {
+          *out_size = mod->mod_end - mod->mod_start;
+        }
+        return 0;
+      }
+    }
+    u64 next_addr = (u64)tag + tag->size;
+    next_addr = (next_addr + 7) & ~7;
+    tag = (multiboot2_tag_t *)next_addr;
+  }
+  return -1;
+}
+
 static inline u64 multiboot2_get_ram_kb(multiboot2_info_t *mb_info) {
   multiboot2_tag_mmap_t *mmap = (multiboot2_tag_mmap_t *)multiboot2_find_tag(
       mb_info, MULTIBOOT2_TAG_TYPE_MMAP);

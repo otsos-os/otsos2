@@ -37,6 +37,7 @@ $define %type keyboard_scancode_callback_t as function pointer for raw scancode 
 $define %type kbd_event as struct with normalized keyboard input event
 
 $define %func keyboard_manager_init as procedure with args void
+$define %func keyboard_register_driver as function with args keyboard_driver_t *
 $define %func keyboard_getchar as function with args void
 $define %func keyboard_getchar_blocking as function with args void
 $define %func keyboard_common_handler as procedure with args void
@@ -58,6 +59,7 @@ $define %func kbd_event_reset as procedure with args void
 /* !SPACE!
 
 $space %export keyboard_manager_init, keyboard_getchar
+$space %export keyboard_register_driver
 $space %export keyboard_getchar_blocking, keyboard_common_handler
 $space %export keyboard_poll, keyboard_reset_state
 $space %export keyboard_flush_chars, keyboard_flush_input
@@ -79,6 +81,7 @@ typedef char	(*keyboard_getchar_fn)(void);
 typedef void	(*keyboard_handler_fn)(void);
 typedef void	(*keyboard_poll_fn)(void);
 typedef void	(*keyboard_flush_fn)(void);
+typedef void	(*keyboard_reset_fn)(void);
 
 typedef struct {
 	const char		*name;
@@ -87,6 +90,7 @@ typedef struct {
 	keyboard_handler_fn	 handler;
 	keyboard_poll_fn	 poll;
 	keyboard_flush_fn	 flush;
+	keyboard_reset_fn	 reset;
 } keyboard_driver_t;
 
 typedef void (*keyboard_scancode_callback_t)(u8 scancode, int released,
@@ -104,6 +108,7 @@ struct kbd_event {
 #define	KBD_EVENT_RING_SIZE	256
 
 void		keyboard_manager_init(void);
+int		keyboard_register_driver(keyboard_driver_t *driver);
 char		keyboard_getchar(void);
 char		keyboard_getchar_blocking(void);
 void		keyboard_common_handler(void);

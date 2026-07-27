@@ -250,6 +250,15 @@ SMP_ASM_O = ../bin/smp_asm.o
 POWER_O = ../bin/power.o
 POWER_CTRL_O = ../bin/power_controller.o
 POWER_PBUTTON_O = ../bin/power_pbutton.o
+NEWBUS_DEVICE_O = ../bin/newbus_device.o
+NEWBUS_MODULE_O = ../bin/newbus_module.o
+NEWBUS_ROOT_O = ../bin/newbus_root.o
+NEWBUS_NEXUS_O = ../bin/newbus_nexus.o
+NEWBUS_PLATFORM_O = ../bin/newbus_platform.o
+NEWBUS_RESOURCE_O = ../bin/newbus_resource.o
+NEWBUS_INTR_O = ../bin/newbus_intr.o
+NEWBUS_POLL_O = ../bin/newbus_poll.o
+NEWBUS_DEBUG_O = ../bin/newbus_debug.o
 PCI_CORE_O = ../bin/pci_core.o
 PCI_SCAN_O = ../bin/pci_scan.o
 PCI_CONFIG_O = ../bin/pci_config.o
@@ -336,6 +345,7 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(TRACE_O) $(TRACE_PMU_O) $(PMU_O) \
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
+      $(NEWBUS_DEVICE_O) $(NEWBUS_MODULE_O) $(NEWBUS_ROOT_O) $(NEWBUS_NEXUS_O) $(NEWBUS_PLATFORM_O) $(NEWBUS_RESOURCE_O) $(NEWBUS_INTR_O) $(NEWBUS_POLL_O) $(NEWBUS_DEBUG_O) \
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
       $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O) \
       $(KSHELL_OBJ) \
@@ -773,7 +783,7 @@ $(PANIC_O): kernel/panic.c kernel/drivers/console/kms_console.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(CONSOLE_O): kernel/console/console.c kernel/console/console.h kernel/console/palette.h kernel/console/terminal.h kernel/drivers/console/kms_console.h
+$(CONSOLE_O): kernel/console/console.c kernel/console/console.h kernel/console/palette.h kernel/console/terminal.h kernel/drivers/console/kms_console.h kernel/drivers/uart/uart.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1120,6 +1130,42 @@ $(POWER_CTRL_O): kernel/drivers/power/controller.c kernel/drivers/power/power.h
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(POWER_PBUTTON_O): kernel/drivers/power/pbutton.c kernel/drivers/power/pbutton.h kernel/drivers/acpi/acpi.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(NEWBUS_DEVICE_O): kernel/drivers/newbus/device.c kernel/drivers/newbus/newbus.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(NEWBUS_MODULE_O): kernel/drivers/newbus/module.c kernel/drivers/newbus/newbus.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(NEWBUS_ROOT_O): kernel/drivers/newbus/root.c kernel/drivers/newbus/newbus.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(NEWBUS_NEXUS_O): kernel/drivers/newbus/nexus.c kernel/drivers/newbus/newbus.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(NEWBUS_PLATFORM_O): kernel/drivers/newbus/platform.c kernel/drivers/newbus/newbus.h kernel/drivers/acpi/acpi.h kernel/interrupts/apic/lapic.h kernel/interrupts/apic/ioapic.h kernel/smp/smp.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(NEWBUS_RESOURCE_O): kernel/drivers/newbus/resource.c kernel/drivers/newbus/newbus.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(NEWBUS_INTR_O): kernel/drivers/newbus/intr.c kernel/drivers/newbus/newbus.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(NEWBUS_POLL_O): kernel/drivers/newbus/poll.c kernel/drivers/newbus/newbus.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(NEWBUS_DEBUG_O): kernel/drivers/newbus/debug.c kernel/drivers/newbus/newbus.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

@@ -47,6 +47,7 @@ $space %export pit_init
 */
 
 #include <kernel/drivers/eventtimer.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -124,3 +125,35 @@ pit_init(void)
 
 	et_register(&pit_et);
 }
+
+static void
+pit_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "pit", 0) == NULL) {
+		device_add_child(parent, "pit", 0);
+	}
+}
+
+static int
+pit_attach(device_t dev)
+{
+	(void)dev;
+	pit_init();
+	return (0);
+}
+
+static devclass_t pit_devclass = {
+	.name		= "pit",
+	.maxunit	= 1,
+};
+
+static driver_t pit_driver = {
+	.name		= "pit",
+	.identify	= pit_identify,
+	.probe		= NULL,
+	.attach		= pit_attach,
+};
+
+ISA_DRIVER_MODULE(pit, pit_driver, pit_devclass,
+    NEWBUS_PASS_TIMER, NEWBUS_ORDER_FIRST);

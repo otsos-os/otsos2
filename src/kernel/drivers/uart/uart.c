@@ -24,6 +24,7 @@
  */
 
 #include <kernel/drivers/uart/uart.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <mlibc/mlibc.h>
 
 #define COM1_PORT		0x3F8
@@ -144,3 +145,43 @@ uart_has_data(void)
 	}
 	return (inb(COM1_LINE_STATUS) & UART_LSR_DATA_READY);
 }
+
+static void
+uart_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "uart", 0) == NULL) {
+		device_add_child(parent, "uart", 0);
+	}
+}
+
+static int
+uart_bus_probe(device_t dev)
+{
+	(void)dev;
+	return (uart_probe() ? 0 : -1);
+}
+
+static int
+uart_attach(device_t dev)
+{
+	bus_set_resource(dev, SYS_RES_IOPORT, 0, COM1_PORT, 8, 0);
+	bus_set_resource(dev, SYS_RES_IRQ, 0, 4, 1, 0);
+	uart_init();
+	return (uart_is_available() ? 0 : -1);
+}
+
+static devclass_t uart_devclass = {
+	.name		= "uart",
+	.maxunit	= 1,
+};
+
+static driver_t uart_driver = {
+	.name		= "uart",
+	.identify	= uart_identify,
+	.probe		= uart_bus_probe,
+	.attach		= uart_attach,
+};
+
+ISA_DRIVER_MODULE(uart, uart_driver, uart_devclass,
+    NEWBUS_PASS_FIRMWARE, NEWBUS_ORDER_EARLY);

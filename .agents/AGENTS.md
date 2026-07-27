@@ -32,15 +32,16 @@ Monolithic kernel with the following rough layers:
 
 1. Boot (`src/boot/boot.s`) — 32-bit protected mode, Multiboot2 entry point,
    identity/higher-half page tables, long mode switch, then `kmain()`.
-2. Kernel core (`src/kernel/kernel.c`) — initializes memory, interrupts, timer,
-   disk, filesystem, DRM, PCI, ACPI, userspace, and finally loads `init`.
+2. Kernel core (`src/kernel/kernel.c`) — initializes core services, boot memory,
+   interrupts, and newbus, then lets registered drivers attach by pass before
+   loading `init`.
 3. Memory management (`src/kernel/mm/*`) — bootmem allocator, kernel heap
    (`kmem`), UMA-style allocator, VM object/page/map/pager, page tables (`pmap`).
 4. Process/threading (`src/kernel/process.c`, `thread.c`, `scheduler.c`) —
    process table, threads, context switch, round-robin scheduler, signals, futex.
-5. Drivers (`src/kernel/drivers/*`) — disk (ramdisk, optional PATA), ChainFS,
-   VFS, devfs, keyboard, mouse, console, UART, timer, RTC, watchdog, PMU,
-   ACPI, PCI, virtio-gpu, DRM/KMS.
+5. Drivers (`src/kernel/drivers/*`) — newbus-managed storage, filesystems,
+   devfs nodes, input, console, UART, timers, RTC, watchdog, PMU, ACPI, PCI,
+   network, DRM/KMS, and display backends.
 6. Syscalls (`src/kernel/syscall.c`, `src/kernel/api/*`) — native ABI plus
    optional Linux/POSIX personality layer.
 7. Userspace (`init/`, `progs/`, `ports/`) — small freestanding programs loaded as
@@ -61,8 +62,22 @@ Monolithic kernel with the following rough layers:
 - `mm/` — `bootmem.c`, `kmem.c`, `uma.c`, `vm/pmap.c`, `vm/vm_page.c`,
   `vm/vm_object.c`, `vm/vm_map.c`, `vm/vm_pager.c`.
 - `drivers/` — storage, filesystem, video, keyboard, timer, ACPI, power, PCI,
-  watchdog, PMU. UART init uses a scratch-register probe; do not bring back
-  the old loopback-only availability check.
+  watchdog, PMU. Early serial console setup goes through `console_early_init()`;
+  UART's full driver attach is a newbus ISA module. UART probing uses a
+  scratch-register probe; do not bring back the old loopback-only availability
+  check.
+- `drivers/newbus/` — FreeBSD-like driver model. Concrete drivers self-register
+  with `DRIVER_MODULE`, `PCI_DRIVER_MODULE`, `ISA_DRIVER_MODULE`,
+  `FIRMWARE_DRIVER_MODULE`, `PLATFORM_DRIVER_MODULE`, or
+  `PSEUDO_DRIVER_MODULE`; attach ordering is controlled by pass/order. Keep
+  `kernel.c`, `interrupts/handlers.c`, `drivers/newbus/nexus.c`, PCI core, DRM
+  core, VFS core, and DevFS registries free of concrete driver enumeration.
+  Nexus creates only generic buses (`firmware`, `platform`, `isa`, `pseudo`);
+  PCI creates generic function children; drivers claim devices via probe.
+  Resources, IRQs, and timer polling must flow through `bus_set_resource`,
+  `bus_alloc_resource*`, `bus_setup_intr`, and `bus_setup_poll`.
+  Linker-set registration depends on the `.newbus.drivers` section in
+  `src/linker.ld`.
 - `drivers/pmu/` — CPU performance monitoring driver. Owns CPUID/MSR PMU
   detection, counter programming, per-CPU counter state, and `drivers_log`
   status lines. Trace code should consume it through the PMU API instead of
@@ -276,6 +291,8 @@ Monolithic kernel with the following rough layers:
 - `src/kernel/syscall.c:86` — `syscall_handler()` — dispatch.
 - `src/kernel/api/posix/posix.c:160` — `posix_syscall_handler()` — POSIX
   personality dispatch.
+- `src/kernel/drivers/newbus/` — driver module registry, generic bus tree,
+  resource tables, IRQ dispatch, and poll hooks.
 - `src/userland/userspace.c:56` — `userspace_init()` — enable Ring 3.
 - `src/userland/userspace.c:139` — `userspace_load_elf()` — create a process.
 - `init/init.c:250` — `_start()` — first userspace process.
@@ -345,7 +362,12 @@ User need to test, dont run test manually, ask user.
   32-bit accesses. VirtualBox rejects or mishandles a single 64-bit MMIO store
   even though QEMU accepts it.
 - Do not touch `kernel.c` boot order without understanding the memory-map and
-  Multiboot module layout.
+  Multiboot module layout. Driver startup belongs in newbus modules, not in
+  `kernel.c`.
+- Do not add concrete driver calls or lists to `nexus.c`, `kernel.c`, IRQ
+  handlers, PCI core, DRM core, VFS core, or DevFS init. Add or update a module
+  in the driver implementation and let it probe through the generic bus/resource
+  APIs.
 - ChainFS is a flat, single-chain filesystem; it is not POSIX-safe for hard
   links or large files. POSIX personality uses the VFS and devfs on top of it.
 - POSIX personality is opt-in per process via `CALL_PERSONALITY` (`0xFFFF`);
@@ -369,16 +391,19 @@ User need to test, dont run test manually, ask user.
 ## Dependencies Between Modules
 
 - `boot.s` → `kernel.c` (`kmain`)
-- `kernel.c` → memory (`mm/*`), interrupts (`idt`), timer, disk, ChainFS, VFS,
-  DRM, PCI, ACPI, power, userspace, kshell, CM registry, crypto, syscalls.
+- `kernel.c` → memory (`mm/*`), interrupts (`idt`), timer core, newbus,
+  userspace, kshell, CM registry, crypto, syscalls. Concrete drivers attach via
+  newbus passes instead of direct boot calls.
 - `syscall.c` → `api/*` handlers; for `PERSONALITY_POSIX` it delegates to
   `posix_syscall_handler()`.
 - `process.c`/`thread.c`/`scheduler.c` → each other, `mm/vm/pmap.h`, `idt.h`.
 - `userspace.c` → `elf.zig`, `pmap`, `vm_page`, `vm_map`, `vm_object`,
   `process`, `thread`, `gdt`.
 - `api` layer → VFS/devfs/ChainFS, terminal/DRM, process/thread, memory, time.
-- `drivers/fs/vfs` → `drivers/fs/devfs` and `drivers/fs/chainFS`.
-- `drivers/video/drm` → `drivers/video/card/virtio-gpu`.
+- `drivers/fs/vfs` exposes backend registration; concrete filesystem/devfs
+  modules register themselves through newbus.
+- `drivers/video/drm` exposes driver registration; display backends register
+  themselves through newbus or their parent bus.
 - `kshell` → `console`, `terminal`, `keyboard`, `drm`, `cm`.
 - `crypto` → `drivers/timer` for RNG entropy; `kusr` → `crypto` for
   PBKDF2/HMAC auth.
@@ -397,7 +422,7 @@ User need to test, dont run test manually, ask user.
   filesystem before starting `init`. These are not on disk; they come from the
   ISO.
 - The bootpack also carries `cmseed`, generated from `config/hives/*.hive`.
-  Kernel boot code validates it through `kernel/drivers/fs/hivefs/`, initializes
+  The `hivefs_cmseed` newbus firmware module validates it, initializes
   `kernel/cm/` early, and later mounts `/conf/registry` as read-only, noexec,
   nodev, kusr-only.
 - `config.toml` changes can affect build-time feature flags, but not runtime

@@ -35,6 +35,9 @@ $define %type vnode_t as VFS vnode
 $define %type vfs_back_ops_t as backend operation table
 
 $define %func vfs_back_init as function with args void
+$define %func vfs_back_register_ops as function with args const vfs_back_ops_t *
+$define %func vfs_chainfs_back_ops as function with args void
+$define %func vfs_devfs_back_ops as function with args void
 $define %func vfs_back_mount as function with args const char *, const vfs_back_ops_t *
 $define %func vfs_back_mount_flags as function with args const char *, const vfs_back_ops_t *, u64
 $define %func vfs_back_mount_named as function with args const char *, const char *, u64
@@ -63,7 +66,9 @@ $define %func vfs_back_write_file as function with args const char *, const u8 *
 
 /* !SPACE!
 
-$space %export vfs_back_init, vfs_back_mount, vfs_back_mount_flags
+$space %export vfs_back_init, vfs_back_register_ops
+$space %export vfs_chainfs_back_ops, vfs_devfs_back_ops
+$space %export vfs_back_mount, vfs_back_mount_flags
 $space %export vfs_back_mount_named, vfs_back_umount
 $space %export vfs_back_mount_can_read, vfs_back_mount_can_write
 $space %export vfs_back_mount_can_exec, vfs_back_mount_can_exec_id
@@ -100,6 +105,9 @@ typedef struct vfs_back_ops {
 } vfs_back_ops_t;
 
 int	vfs_back_init(void);
+int	vfs_back_register_ops(const vfs_back_ops_t *ops);
+const vfs_back_ops_t	*vfs_chainfs_back_ops(void);
+const vfs_back_ops_t	*vfs_devfs_back_ops(void);
 int	vfs_back_mount(const char *path, const vfs_back_ops_t *ops);
 int	vfs_back_mount_flags(const char *path, const vfs_back_ops_t *ops,
 	    u64 flags);

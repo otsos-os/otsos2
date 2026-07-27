@@ -83,6 +83,8 @@ $space %export g_chainfs, g_chainfs_phys
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/api/errno.h>
+#include <kernel/drivers/fs/vfs/back/vfs_back.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <mm/vm/pmap.h>
 
 chainfs_t	g_chainfs;
@@ -90,6 +92,7 @@ u64		g_chainfs_phys;
 
 #define	ENTRIES_PER_BLOCK \
     (CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t))
+#define	CHAINFS_BOOT_MAX_FILES	4096
 
 int
 chainfs_init(disk_t *disk)
@@ -1728,3 +1731,79 @@ chainfs_rmdir(const char *path)
 	drivers_log("ChainFS: Removed directory: %s\n", path);
 	return (0);
 }
+
+static void
+chainfs_root_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "chainfs_root", 0) == NULL) {
+		device_add_child(parent, "chainfs_root", 0);
+	}
+}
+
+static int
+chainfs_root_probe(device_t dev)
+{
+	(void)dev;
+	return (disk_count() > 0 ? 0 : -1);
+}
+
+static int
+chainfs_root_attach(device_t dev)
+{
+	const vfs_back_ops_t	*ops;
+	disk_t			*disk;
+	u32			format_blocks;
+	int			ret;
+
+	(void)dev;
+	disk = disk_get(0);
+	if (disk == NULL) {
+		return (-1);
+	}
+	ops = vfs_chainfs_back_ops();
+	if (ops == NULL) {
+		return (-1);
+	}
+	(void)vfs_back_register_ops(ops);
+	ret = chainfs_init(disk);
+	if (ret != 0) {
+		format_blocks = 64;
+		if (disk->total_sectors > 0) {
+			format_blocks = disk->total_sectors;
+		}
+		drivers_log("[CHAINFS] init failed on %s, formatting\n",
+		    disk->name ? disk->name : "disk");
+		if (chainfs_format(format_blocks,
+		    CHAINFS_BOOT_MAX_FILES) != 0) {
+			return (-1);
+		}
+		ret = chainfs_init(disk);
+		if (ret != 0) {
+			return (-1);
+		}
+	}
+	if (ops->init != NULL && ops->init() != 0) {
+		return (-1);
+	}
+	ret = vfs_back_mount("/", ops);
+	if (ret == -API_ERR_EXISTS) {
+		return (0);
+	}
+	return (ret);
+}
+
+static devclass_t chainfs_root_devclass = {
+	.name		= "chainfs",
+	.maxunit	= 1,
+};
+
+static driver_t chainfs_root_driver = {
+	.name		= "chainfs_root",
+	.identify	= chainfs_root_identify,
+	.probe		= chainfs_root_probe,
+	.attach		= chainfs_root_attach,
+};
+
+PSEUDO_DRIVER_MODULE(chainfs_root, chainfs_root_driver,
+    chainfs_root_devclass, NEWBUS_PASS_FILESYSTEM, NEWBUS_ORDER_MIDDLE);

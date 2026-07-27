@@ -36,6 +36,7 @@ $define %type keyboard_scancode_callback_t as function pointer for raw scancode 
 $define %type kbd_event as struct with normalized keyboard input event
 
 $define %func keyboard_manager_init as procedure with args void
+$define %func keyboard_register_driver as function with args keyboard_driver_t *
 $define %func keyboard_getchar as function with args void
 $define %func keyboard_getchar_blocking as function with args void
 $define %func keyboard_common_handler as procedure with args void
@@ -59,6 +60,7 @@ $define %func kbd_event_reset as procedure with args void
 /* !SPACE!
 
 $space %export keyboard_manager_init, keyboard_getchar
+$space %export keyboard_register_driver
 $space %export keyboard_getchar_blocking, keyboard_common_handler
 $space %export keyboard_poll, keyboard_reset_state
 $space %export keyboard_flush_chars, keyboard_flush_input
@@ -73,7 +75,7 @@ $space %export kbd_event_put, kbd_event_get, kbd_event_count, kbd_event_reset
 #include <kernel/console/terminal.h>
 #include <kernel/drivers/input/input.h>
 #include <kernel/drivers/keyboard/keyboard.h>
-#include <kernel/drivers/keyboard/ps2.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/event/event.h>
 #include <kernel/kshell/kshell.h>
@@ -82,8 +84,13 @@ $space %export kbd_event_put, kbd_event_get, kbd_event_count, kbd_event_reset
 #include <mlibc/mlibc.h>
 
 #define	KBD_STATUS_PORT	0x64
+#define	KEYBOARD_MAX_DRIVERS	8
 
 static keyboard_driver_t			*current_driver;
+static keyboard_driver_t			*keyboard_drivers[
+    KEYBOARD_MAX_DRIVERS];
+static int					keyboard_driver_count;
+static int					keyboard_initialized;
 static keyboard_scancode_callback_t		scancode_callback;
 static volatile int				direct_input_depth;
 
@@ -91,41 +98,60 @@ static struct kbd_event	kbd_event_ring[KBD_EVENT_RING_SIZE];
 static int			kbd_event_head;
 static int			kbd_event_tail;
 
-static keyboard_driver_t ps2_driver = {
-	.name		= "PS/2 Keyboard",
-	.init		= ps2_keyboard_init,
-	.getchar	= ps2_keyboard_getchar,
-	.handler	= ps2_keyboard_handler,
-	.poll		= ps2_keyboard_poll,
-	.flush		= ps2_keyboard_flush,
-};
-
 void
 keyboard_manager_init(void)
 {
-	u8	status;
-
-	status = inb(KBD_STATUS_PORT);
-	if (status == 0xFF) {
-		drivers_log("[KEYBOARD] no ps/2 detected "
-		    "(Status 0xFF).\n");
+	if (keyboard_initialized) {
 		return;
 	}
+	keyboard_driver_count = 0;
+	current_driver = NULL;
+	kbd_event_reset();
+	keyboard_initialized = 1;
+	drivers_log("[KEYBOARD] manager initialized\n");
+}
 
-	current_driver = &ps2_driver;
+int
+keyboard_register_driver(keyboard_driver_t *driver)
+{
+	int	i;
 
-	drivers_log("[KEYBOARD] detected: %s\n",
-	    (char *)current_driver->name);
-	drivers_log("[KEYBOARD] switch to driver: %s\n",
-	    (char *)current_driver->name);
-
-	if (current_driver->init) {
-		if (current_driver->init() != 0) {
-			drivers_log("[KEYBOARD] init failed, "
-			    "driver disabled.\n");
-			current_driver = NULL;
+	if (driver == NULL || driver->name == NULL) {
+		return (-1);
+	}
+	if (!keyboard_initialized) {
+		keyboard_manager_init();
+	}
+	for (i = 0; i < keyboard_driver_count; i++) {
+		if (keyboard_drivers[i] == driver) {
+			return (0);
 		}
 	}
+	if (keyboard_driver_count >= KEYBOARD_MAX_DRIVERS) {
+		drivers_log("[KEYBOARD] driver limit reached (%d)\n",
+		    KEYBOARD_MAX_DRIVERS);
+		return (-1);
+	}
+	keyboard_drivers[keyboard_driver_count++] = driver;
+
+	drivers_log("[KEYBOARD] detected: %s\n",
+	    (char *)driver->name);
+
+	if (current_driver != NULL) {
+		return (0);
+	}
+
+	if (driver->init) {
+		if (driver->init() != 0) {
+			drivers_log("[KEYBOARD] init failed, "
+			    "driver disabled.\n");
+			return (-1);
+		}
+	}
+	current_driver = driver;
+	drivers_log("[KEYBOARD] switch to driver: %s\n",
+	    (char *)current_driver->name);
+	return (0);
 }
 
 char
@@ -222,8 +248,8 @@ keyboard_poll(void)
 void
 keyboard_reset_state(void)
 {
-	if (current_driver == &ps2_driver) {
-		ps2_keyboard_reset_state();
+	if (current_driver && current_driver->reset) {
+		current_driver->reset();
 	}
 }
 
@@ -483,3 +509,35 @@ scanf(const char *format, ...)
 	__builtin_va_end(args);
 	return (count);
 }
+
+static void
+keyboard_core_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "keyboard_core", 0) == NULL) {
+		device_add_child(parent, "keyboard_core", 0);
+	}
+}
+
+static int
+keyboard_core_attach(device_t dev)
+{
+	(void)dev;
+	keyboard_manager_init();
+	return (0);
+}
+
+static devclass_t keyboard_core_devclass = {
+	.name		= "keyboard",
+	.maxunit	= 1,
+};
+
+static driver_t keyboard_core_driver = {
+	.name		= "keyboard_core",
+	.identify	= keyboard_core_identify,
+	.probe		= NULL,
+	.attach		= keyboard_core_attach,
+};
+
+PSEUDO_DRIVER_MODULE(keyboard_core, keyboard_core_driver,
+    keyboard_core_devclass, NEWBUS_PASS_CORE, NEWBUS_ORDER_MIDDLE);

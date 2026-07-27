@@ -60,6 +60,7 @@ $space %export pata_identify, pata_read_sector, pata_write_sector
 #include <kernel/drivers/disk/disk.h>
 #include <kernel/drivers/disk/pata/pata.h>
 #include <kernel/drivers/fs/chainFS/chainfs.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -349,3 +350,45 @@ pata_write_sector(u32 lba, u8 *buffer)
 	outb(IDE_COMMAND, 0xE7);
 	(void)pata_wait_not_bsy(1000000);
 }
+
+static void
+pata_identify_newbus(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "pata", 0) == NULL) {
+		device_add_child(parent, "pata", 0);
+	}
+}
+
+static int
+pata_probe_newbus(device_t dev)
+{
+	(void)dev;
+	if (inb(IDE_STATUS) == 0xFF) {
+		return (-1);
+	}
+	return (60);
+}
+
+static int
+pata_attach_newbus(device_t dev)
+{
+	(void)dev;
+	pata_identify(NULL);
+	return (0);
+}
+
+static devclass_t pata_devclass = {
+	.name		= "disk",
+	.maxunit	= 8,
+};
+
+static driver_t pata_driver = {
+	.name		= "pata",
+	.identify	= pata_identify_newbus,
+	.probe		= pata_probe_newbus,
+	.attach		= pata_attach_newbus,
+};
+
+ISA_DRIVER_MODULE(pata, pata_driver, pata_devclass,
+    NEWBUS_PASS_STORAGE, NEWBUS_ORDER_MIDDLE);

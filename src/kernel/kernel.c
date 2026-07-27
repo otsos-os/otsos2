@@ -31,8 +31,6 @@ $define %type u32 as 32 bit unsigned
 $define %type u64 as 64 bit unsigned
 $define %type int as 32 bit signed
 $define %type char as 8 bit signed
-$define %type disk_t as struct with name, type, sector_size, sectors, ops
-$define %type disk_type_t as enum with disk types
 $define %type multiboot_info_t as struct with multiboot1 info
 $define %type multiboot2_info_t as struct with multiboot2 info
 $define %type multiboot2_tag_t as struct with multiboot2 tag header
@@ -44,8 +42,6 @@ $define %func debug_multiboot2_tags as procedure with args multiboot2_info_t *
 $define %func mb2_find_module as function with args multiboot2_info_t *, const char *, void **, u32 *
 $define %func mb2_total_modules_size as function with args multiboot2_info_t *
 $define %func status_line as procedure with args const char *, int
-$define %func disk_has_type as function with args disk_type_t
-$define %func disk_find_type as function with args disk_type_t
 $define %func timer_sanity_check as function with args void
 $define %func net_test as procedure with args void
 $define %func enable_sse as procedure with args void
@@ -60,7 +56,6 @@ $define %func kmain as start with args u64, u64, u64, u64
 
 $space %internal debug_multiboot_info, debug_multiboot2_tags
 $space %internal mb2_find_module, mb2_total_modules_size, status_line
-$space %internal disk_has_type, disk_find_type
 $space %internal timer_sanity_check, net_test, enable_sse
 $space %internal kernel_ensure_parent_dirs, kernel_install_module_cb
 $space %internal kernel_install_registry_module_cb
@@ -73,26 +68,14 @@ $space %export kmain
 #include <kernel/cm/cm.h>
 #include <kernel/drivers/acpi/acpi.h>
 #include <kernel/drivers/disk/disk.h>
-#ifdef CONFIG_DISK_PATA
-#include <kernel/drivers/disk/pata/pata.h>
-#endif
-#include <kernel/drivers/disk/ramdisk/ramdisk.h>
-#include <kernel/drivers/eventtimer.h>
-#include <kernel/drivers/fs/chainFS/chainfs.h>
-#include <kernel/drivers/fs/devfs/devfs.h>
-#include <kernel/drivers/fs/hivefs/hivefs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/keyboard/keyboard.h>
-#include <kernel/drivers/mouse/mouse.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/drivers/power/power.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/console/terminal.h>
-#include <kernel/drivers/uart/uart.h>
 #include <kernel/time.h>
 #include <kernel/drivers/video/drm/drm.h>
-#include <kernel/drivers/video/drm/init.h>
-#include <kernel/drivers/video/card/virtio-gpu/virtio-gpu.h>
-#include <kernel/drivers/net/virtio-net/virtio_net.h>
 #include <kernel/drivers/watchdog/watchdog.h>
 #include <kernel/net/net.h>
 #include <kernel/net/arp.h>
@@ -120,13 +103,10 @@ $space %export kmain
 #include <mlibc/stdio.h>
 #include <mlibc/stdlib.h>
 #include <userland/userspace.h>
-#define BOOT_CHAINFS_MAX_FILES	4096
 
 extern void	cpuid_get(u32 code, u32 *res);
 extern void	cinfo(char *buf);
 extern u64	rinfo(u64 mb_ptr);
-extern void	pit_init(void);
-extern void	apic_timer_init(void);
 extern char	start;
 extern char	kernel_end;
 
@@ -216,32 +196,8 @@ static int
 mb2_find_module(multiboot2_info_t *mb_info, const char *name,
     void **out_start, u32 *out_size)
 {
-	multiboot2_tag_t		*tag;
-	multiboot2_tag_module_t		*mod;
-	u64				next_addr;
-
-	tag = (multiboot2_tag_t *)((u8 *)mb_info + 8);
-
-	while (tag->type != MULTIBOOT2_TAG_TYPE_END) {
-		if (tag->type == MULTIBOOT2_TAG_TYPE_MODULE) {
-			mod = (multiboot2_tag_module_t *)tag;
-			if (strcmp(mod->cmdline, name) == 0) {
-				if (out_start) {
-					*out_start = (void *)(u64)
-					    mod->mod_start;
-				}
-				if (out_size) {
-					*out_size = mod->mod_end -
-					    mod->mod_start;
-				}
-				return (0);
-			}
-		}
-		next_addr = (u64)tag + tag->size;
-		next_addr = (next_addr + 7) & ~7;
-		tag = (multiboot2_tag_t *)next_addr;
-	}
-	return (-1);
+	return (multiboot2_find_module(mb_info, name, out_start,
+	    out_size));
 }
 static u32
 mb2_total_modules_size(multiboot2_info_t *mb_info)
@@ -284,38 +240,6 @@ status_line(const char *label, int ok)
 	} else {
 		printf("\033[31m[FAILED]\033[0m\n");
 	}
-}
-
-static int
-disk_has_type(disk_type_t type)
-{
-	int	count, i;
-	disk_t	*disk;
-
-	count = disk_count();
-	for (i = 0; i < count; i++) {
-		disk = disk_get(i);
-		if (disk && disk->type == type) {
-			return (1);
-		}
-	}
-	return (0);
-}
-
-static disk_t *
-disk_find_type(disk_type_t type)
-{
-	int	count, i;
-	disk_t	*disk;
-
-	count = disk_count();
-	for (i = 0; i < count; i++) {
-		disk = disk_get(i);
-		if (disk && disk->type == type) {
-			return (disk);
-		}
-	}
-	return (NULL);
 }
 
 static int
@@ -643,82 +567,67 @@ void
 kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 {
 	int		safe_mode, debug_mode, disable_apic;
-	void		*ramdisk_pool;
-	u32		ramdisk_pool_sz;
+	void		*module_pool;
+	u32		module_pool_sz;
 	multiboot2_info_t	*mboot2_ptr;
 	multiboot_info_t	*mboot1_ptr;
 	char		cpu_buf[64];
 	char		*p;
 	u64		ram_kb;
 	char		c;
-	disk_t		*selected_disk, *ram_disk;
-#ifdef CONFIG_DISK_PATA
-	disk_t		*pata_disk;
-#endif
-	int		fs_ok, fmt_ok, heap_ok, idt_ok, timer_ok;
+	int		fs_ok, heap_ok, idt_ok, timer_ok;
 	int		pmap_ok, syscall_ok, disk_ok;
-#ifdef CONFIG_DISK_PATA
-	int		pata_ok;
-#endif
-	int		ramdisk_ok, fb_ok, drm_atomic_ok, acpi_ok;
+	int		storage_ok, fb_ok, drm_atomic_ok, acpi_ok;
 	int		power_ok, pci_ok, watchdog_ok;
-	int		mouse_ok, cm_ok;
-	u32		format_blocks;
-	void		*cmseed_mod;
-	u32		cmseed_sz, timer_hz;
-	char		default_timer[16];
+	int		cm_ok;
+	vnode_t		*root_vn;
+	u32		timer_hz;
 	module_copy_ctx_t	mod_ctx;
+	newbus_bootinfo_t	nb_boot;
 
 	safe_mode = (boot_option == 1);
 	debug_mode = (boot_option == 2);
 	disable_apic = ((boot_flags & BOOT_FLAG_DISABLE_APIC) != 0);
 	mboot2_ptr = NULL;
 	mboot1_ptr = NULL;
-	cmseed_mod = NULL;
-	cmseed_sz = 0;
 	timer_hz = 1000;
-	memset(default_timer, 0, sizeof(default_timer));
-	strcpy(default_timer, "apic");
 
-	uart_init();
+	console_early_init();
 	bootmem_init(magic, addr, 0x100000,
     (u64)&kernel_end - KERNEL_VMA);
 	kmem_init();
 
-	if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
-		mboot2_ptr = (multiboot2_info_t *)addr;
-		mb2_find_module(mboot2_ptr, "cmseed",
-		    &cmseed_mod, &cmseed_sz);
-		if (cmseed_mod && cmseed_sz > 0) {
-			if (hivefs_load_pack(cmseed_mod, cmseed_sz) != 0) {
-				printk("[HIVEFS] failed to load cmseed\n");
-			} else if (cm_init() != 0) {
-				printk("[CM] failed to initialize seed\n");
-			}
-		}
-	}
 	stdio_init();
+	memset(&nb_boot, 0, sizeof(nb_boot));
+	nb_boot.magic = (u32)magic;
+	nb_boot.mb2 = (magic == MULTIBOOT2_BOOTLOADER_MAGIC) ?
+	    (void *)addr : NULL;
+	nb_boot.mb1 = (magic == MULTIBOOT_BOOTLOADER_MAGIC) ?
+	    (void *)addr : NULL;
+	nb_boot.timer_hz = timer_hz;
+	nb_boot.disable_apic = disable_apic;
+	nb_boot.debug_mode = debug_mode;
+	newbus_bootstrap(&nb_boot);
 
 	init_idt();
-	pit_init();
 	pmap_init();
-	ramdisk_pool_sz = 0;
+	module_pool_sz = 0;
 	if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
-		ramdisk_pool_sz = mb2_total_modules_size(
+		module_pool_sz = mb2_total_modules_size(
 		    (multiboot2_info_t *)addr);
 	}
-	if (ramdisk_pool_sz < 8 * 512) {
-		ramdisk_pool_sz = 8 * 512;
+	if (module_pool_sz < 8 * 512) {
+		module_pool_sz = 8 * 512;
 	}
-	ramdisk_pool_sz += 1024 * 1024;
-	ramdisk_pool_sz = (ramdisk_pool_sz + PAGE_SIZE - 1) &
+	module_pool_sz += 1024 * 1024;
+	module_pool_sz = (module_pool_sz + PAGE_SIZE - 1) &
 	    ~(PAGE_SIZE - 1);
-	ramdisk_pool = bootmem_alloc(ramdisk_pool_sz, PAGE_SIZE);
-	if (ramdisk_pool) {
-		printk("[RAMDISK] pool allocated: %u bytes "
-		    "at %p\n", ramdisk_pool_sz, ramdisk_pool);
+	module_pool = bootmem_alloc(module_pool_sz, PAGE_SIZE);
+	if (module_pool) {
+		printk("[BOOT] module pool allocated: %u bytes "
+		    "at %p\n", module_pool_sz, module_pool);
 	} else {
-		printk("[RAMDISK] pool allocation failed\n");
+		printk("[BOOT] module pool allocation failed\n");
 	}
 #define KMEM_GROWTH_RESERVE_SIZE	(22 * 1024 * 1024)
 	{
@@ -733,40 +642,34 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 		}
 	}
 	vm_page_init_from_bootmem();
+	nb_boot.module_pool = module_pool;
+	nb_boot.module_pool_size = module_pool_sz;
+	newbus_update_bootinfo(&nb_boot);
 	if (disable_apic) {
 		printk("[BOOT] APIC disabled by boot settings\n");
-	} else {
-		lapic_init();
 	}
+	newbus_configure_pass(NEWBUS_PASS_TIMER);
 	timer_hz = cm_get_u32_default("SYSTEM", "Timer", "Hz", 1000);
+	nb_boot.timer_hz = timer_hz;
+	newbus_update_bootinfo(&nb_boot);
 	timer_init(timer_hz);
 	time_init();
-	et_clocksource_init();
 	vm_object_init();
 	uma_init();
 	enable_sse();
 	trace_init();
 	__asm__ volatile("sti");
 
-	cm_get_string_default("SYSTEM", "Timer", "DefaultTimer",
-	    default_timer, sizeof(default_timer), "apic");
-	if (!disable_apic && strcmp(default_timer, "apic") == 0)
-		apic_timer_init();
-
 	syscall_init();
 	event_init();
 	crypto_rng_init();
 
-	disk_manager_init();
-#ifdef CONFIG_DISK_PATA
-	pata_identify(NULL);
-#endif
-
-	if (ramdisk_pool) {
-		ramdisk_init(ramdisk_pool, ramdisk_pool_sz);
-	}
-
 	boot_magic = (u32)magic;
+	pci_set_verbose_scan(debug_mode);
+	if (debug_mode) {
+		printk("[BOOT] Debug mode: verbose PCI "
+		    "scan enabled\n");
+	}
 
 	if (boot_magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
 		is_multiboot2 = 1;
@@ -776,15 +679,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 		mboot2_ptr = (multiboot2_info_t *)addr;
 		debug_multiboot2_tags(mboot2_ptr);
 
-		drm_boot_init_mb2(mboot2_ptr, 0);
-
-		acpi_init_from_multiboot2(mboot2_ptr);
-		if (!disable_apic) {
-			ioapic_init();
-			smp_init();
-		} else {
-			smp_init_single_cpu();
-		}
+		newbus_configure_pass(NEWBUS_PASS_DISPLAY);
 
 		clear_scr();
 		terminal_init();
@@ -814,7 +709,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 
 		mboot1_ptr = (multiboot_info_t *)addr;
 		debug_multiboot_info(mboot1_ptr);
-		drm_boot_init_mb1(mboot1_ptr, 0);
+		newbus_configure_pass(NEWBUS_PASS_DISPLAY);
 		clear_scr();
 		terminal_init();
 		stdio_set_terminal_mirror(terminal_log_mirror);
@@ -844,26 +739,12 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 		    MULTIBOOT2_BOOTLOADER_MAGIC);
 	}
 
-	pci_set_verbose_scan(debug_mode);
-	if (debug_mode) {
-		printk("[BOOT] Debug mode: verbose PCI "
-		    "scan enabled\n");
-	}
-
-	power_init();
-	drm_virtio_gpu_pci_register();
-	virtio_net_pci_register();
-	net_init();
-	pci_init();
-	watchdog_init();
+	newbus_configure();
 	if (watchdog_device_count() > 0) {
 		if (watchdog_start(WATCHDOG_DEFAULT_TIMEOUT_SEC)
 		    != 0) {
 			panic("[WDT] failed to start watchdog\n");
 		}
-	}
-	if (acpi_is_initialized()) {
-		power_acpi_enable();
 	}
 
 	heap_ok = kmem_is_initialized() &&
@@ -874,10 +755,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	    pmap_get_cr3() != 0;
 	syscall_ok = syscall_is_initialized();
 	disk_ok = disk_manager_is_initialized();
-#ifdef CONFIG_DISK_PATA
-	pata_ok = disk_has_type(DISK_TYPE_PATA);
-#endif
-	ramdisk_ok = disk_has_type(DISK_TYPE_RAM);
+	storage_ok = (disk_count() > 0);
 	fb_ok = drm_is_ready() != 0;
 	drm_atomic_ok = drm_is_ready();
 	acpi_ok = acpi_is_initialized();
@@ -885,6 +763,17 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	pci_ok = pci_is_initialized();
 	watchdog_ok = watchdog_is_initialized() &&
 	    watchdog_device_count() > 0;
+	root_vn = NULL;
+	fs_ok = 0;
+	if (vfs_is_initialized() &&
+	    vfs_resolve("/", &root_vn) == 0 && root_vn != NULL) {
+		fs_ok = 1;
+		vnode_release(root_vn);
+	}
+	cm_ok = 0;
+	if (fs_ok) {
+		cm_ok = (cm_init() == 0);
+	}
 
 	status_line("kmem heap", heap_ok);
 	status_line("idt", idt_ok);
@@ -892,101 +781,27 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	status_line("pmap", pmap_ok);
 	status_line("syscall", syscall_ok);
 	status_line("disk manager", disk_ok);
-#ifdef CONFIG_DISK_PATA
-	status_line("pata identify", pata_ok);
-#endif
-	status_line("ramdisk", ramdisk_ok);
+	status_line("storage devices", storage_ok);
 	status_line("framebuffer", fb_ok);
 	status_line("drm", drm_atomic_ok);
 	status_line("acpi", acpi_ok);
 	status_line("power", power_ok);
 	status_line("pci scan", pci_ok);
 	status_line("watchdog", watchdog_ok);
+	status_line("vfs", vfs_is_initialized());
+	status_line("root filesystem", fs_ok);
+	status_line("cm registry", cm_ok);
 
 	net_test();
 
 	sleep(430);
 
-	keyboard_manager_init();
-	mouse_ok = (ps2_mouse_init() == 0);
-	status_line("ps/2 mouse", mouse_ok);
 	kshell_set_boot_info(is_multiboot2);
 
 	terminal_set_active(1);
 
-	selected_disk = NULL;
-	ram_disk = disk_find_type(DISK_TYPE_RAM);
-
-#ifdef CONFIG_DISK_PATA
-	pata_disk = disk_find_type(DISK_TYPE_PATA);
-
-	if (pata_disk && ram_disk) {
-		printf("\nSelect boot disk:\n");
-		printf("1. Hard Drive (PATA)\n");
-		printf("2. Live USB (RAM Disk)\n");
-
-		while (1) {
-			c = keyboard_getchar();
-			if (c == '1') {
-				selected_disk = pata_disk;
-				printf("Selected PATA (%s)\n",
-				    selected_disk->name);
-				break;
-			} else if (c == '2') {
-				selected_disk = ram_disk;
-				printf("Selected RAM Disk "
-				    "(%s)\n",
-				    selected_disk->name);
-				break;
-			}
-		}
-	} else if (pata_disk) {
-		selected_disk = pata_disk;
-		printf("Selected PATA (%s)\n",
-		    selected_disk->name);
-	} else
-#endif
-	{
-		if (ram_disk) {
-			selected_disk = ram_disk;
-			printf("Selected RAM Disk (%s)\n",
-			    selected_disk->name);
-		}
-	}
-
-	if (!selected_disk) {
-		panic("no boot disk\n");
-	}
-
-	fs_ok = (chainfs_init(selected_disk) == 0);
-	status_line("chainfs init", fs_ok);
 	if (!fs_ok) {
-		printk("[CHAINFS] init failed, formatting "
-		    "disk...\n");
-		format_blocks = 64;
-		if (selected_disk &&
-		    selected_disk->total_sectors > 0) {
-			format_blocks =
-			    selected_disk->total_sectors;
-		}
-		fmt_ok = (chainfs_format(format_blocks,
-		    BOOT_CHAINFS_MAX_FILES) == 0);
-		status_line("chainfs format", fmt_ok);
-		fs_ok = fmt_ok;
-	}
-	status_line("chainfs ready", fs_ok);
-
-	if (fs_ok) {
-		vfs_init();
-		status_line("vfs", vfs_is_initialized());
-		cm_ok = 0;
-		if (vfs_is_initialized()) {
-			cm_ok = (cm_init() == 0);
-			status_line("cm registry", cm_ok);
-		}
-	}
-	if (!fs_ok) {
-		printk("[CHAINFS] filesystem unavailable, "
+		printk("[VFS] root filesystem unavailable, "
 		    "skipping userspace startup\n");
 	}
 
@@ -1045,7 +860,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 		}
 	} else {
 		if (!fs_ok) {
-			printf("\n\033[31mChainFS unavailable. "
+			printf("\n\033[31mRoot filesystem unavailable. "
 			    "Staying in kernel console.\033[0m\n");
 		}
 		if (safe_mode) {

@@ -47,6 +47,7 @@ $space %export ramdisk_init
 
 #include "ramdisk.h"
 #include "../disk.h"
+#include <kernel/drivers/newbus/newbus.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
@@ -213,3 +214,55 @@ ramdisk_init(void *pool, u32 pool_size)
 	    priv->extra_block_count,
 	    priv->max_blocks * SECTORS_PER_BLOCK);
 }
+
+static void
+ramdisk_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "ramdisk", 0) == NULL) {
+		device_add_child(parent, "ramdisk", 0);
+	}
+}
+
+static int
+ramdisk_probe(device_t dev)
+{
+	const newbus_bootinfo_t	*boot;
+
+	(void)dev;
+	boot = newbus_get_bootinfo();
+	if (boot == NULL || boot->module_pool == NULL ||
+	    boot->module_pool_size == 0) {
+		return (-1);
+	}
+	return (80);
+}
+
+static int
+ramdisk_attach(device_t dev)
+{
+	const newbus_bootinfo_t	*boot;
+
+	(void)dev;
+	boot = newbus_get_bootinfo();
+	if (boot == NULL) {
+		return (-1);
+	}
+	ramdisk_init(boot->module_pool, boot->module_pool_size);
+	return (0);
+}
+
+static devclass_t ramdisk_devclass = {
+	.name		= "disk",
+	.maxunit	= 8,
+};
+
+static driver_t ramdisk_driver = {
+	.name		= "ramdisk",
+	.identify	= ramdisk_identify,
+	.probe		= ramdisk_probe,
+	.attach		= ramdisk_attach,
+};
+
+FIRMWARE_DRIVER_MODULE(ramdisk, ramdisk_driver, ramdisk_devclass,
+    NEWBUS_PASS_STORAGE, NEWBUS_ORDER_FIRST);

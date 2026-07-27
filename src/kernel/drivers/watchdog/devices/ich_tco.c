@@ -223,8 +223,18 @@ static pci_driver_t ich_tco_pci_driver = {
 	.remove		= NULL,
 };
 
+static devclass_t ich_tco_devclass = {
+	.name		= "watchdog",
+	.maxunit	= 8,
+};
+
+PCI_DRIVER_MODULE(watchdog_ich_tco, ich_tco_pci_driver,
+    ich_tco_devclass, NEWBUS_PASS_LATE, NEWBUS_ORDER_MIDDLE);
+
 int
 watchdog_ich_tco_init(void)
 {
-	return (pci_register_driver(&ich_tco_pci_driver));
+	drivers_log("[WDT] ich_tco init entry is deprecated; "
+	    "using PCI_DRIVER_MODULE\n");
+	return (0);
 }

@@ -61,6 +61,7 @@ $space %export ps2_mouse_is_ready
 #include <kernel/drivers/input/i8042.h>
 #include <kernel/drivers/input/input.h>
 #include <kernel/drivers/mouse/mouse.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/drivers/timer.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -392,3 +393,66 @@ ps2_mouse_is_ready(void)
 {
 	return (mouse_ready);
 }
+
+static int
+psm_intr(void *arg)
+{
+	(void)arg;
+	ps2_mouse_handler();
+	return (0);
+}
+
+static void
+psm_poll(void *arg)
+{
+	(void)arg;
+	ps2_mouse_poll();
+}
+
+static int
+psm_probe(device_t dev)
+{
+	(void)dev;
+	if (i8042_status() == 0xFF) {
+		return (-1);
+	}
+	return (0);
+}
+
+static int
+psm_attach(device_t dev)
+{
+	resource_t	*irq;
+	int		irq_ok, rid;
+
+	if (ps2_mouse_init() != 0) {
+		return (-1);
+	}
+	irq_ok = 0;
+	rid = 0;
+	irq = bus_alloc_resource_any(dev, SYS_RES_IRQ, &rid, RF_ACTIVE);
+	if (irq != NULL &&
+	    bus_setup_intr(dev, irq, psm_intr, NULL, NULL) == 0) {
+		irq_ok = 1;
+	}
+	if (!irq_ok) {
+		(void)bus_setup_poll(dev, NB_POLL_TIMER, psm_poll, NULL,
+		    NULL);
+	}
+	return (0);
+}
+
+static devclass_t psm_devclass = {
+	.name		= "mouse",
+	.maxunit	= 1,
+};
+
+static driver_t psm_driver = {
+	.name		= "psm",
+	.identify	= NULL,
+	.probe		= psm_probe,
+	.attach		= psm_attach,
+};
+
+DRIVER_MODULE(psm, i8042, psm_driver, psm_devclass,
+    NEWBUS_PASS_INPUT, NEWBUS_ORDER_LATE);
