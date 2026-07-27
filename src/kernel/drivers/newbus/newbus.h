@@ -46,6 +46,13 @@ $define %func newbus_device_count_get as function with args void
 $define %func newbus_device_get as function with args int
 $define %func newbus_driver_count_get as function with args void
 $define %func newbus_driver_module_get as function with args int
+$define %func newbus_config_driver_enabled as function with args const newbus_module_t *
+$define %func newbus_config_device_enabled as function with args device_t
+$define %func newbus_config_bus_enabled as function with args const char *
+$define %func newbus_config_probe_allowed as function with args device_t, const newbus_module_t *
+$define %func newbus_config_driver_get_bool as function with args const char *, const char *, int
+$define %func newbus_config_driver_get_u32 as function with args const char *, const char *, u32
+$define %func newbus_config_driver_get_string as function with args const char *, const char *, char *, u32, const char *
 $define %func bus_alloc_resource as function with args device_t, int, int *, u64, u64, u32
 $define %func bus_setup_intr as function with args device_t, resource_t *, newbus_intr_handler_t, void *, void **
 $define %func newbus_irq_dispatch as function with args u8
@@ -62,6 +69,12 @@ $space %export device_add_child, device_find_child
 $space %export device_get_name, device_get_nameunit
 $space %export newbus_device_count_get, newbus_device_get
 $space %export newbus_driver_count_get, newbus_driver_module_get
+$space %export newbus_config_driver_enabled
+$space %export newbus_config_device_enabled, newbus_config_bus_enabled
+$space %export newbus_config_probe_allowed
+$space %export newbus_config_driver_get_bool
+$space %export newbus_config_driver_get_u32
+$space %export newbus_config_driver_get_string
 $space %export bus_alloc_resource, bus_setup_intr, newbus_irq_dispatch
 $space %export bus_setup_poll, newbus_poll_dispatch
 
@@ -245,6 +258,18 @@ int		newbus_device_count_get(void);
 device_t	newbus_device_get(int index);
 int		newbus_driver_count_get(void);
 const newbus_module_t	*newbus_driver_module_get(int index);
+int		newbus_config_driver_enabled(const newbus_module_t *module);
+int		newbus_config_device_enabled(device_t dev);
+int		newbus_config_bus_enabled(const char *bus_name);
+int		newbus_config_probe_allowed(device_t dev,
+		    const newbus_module_t *module);
+int		newbus_config_driver_get_bool(const char *driver_name,
+		    const char *value, int default_val);
+u32		newbus_config_driver_get_u32(const char *driver_name,
+		    const char *value, u32 default_val);
+int		newbus_config_driver_get_string(const char *driver_name,
+		    const char *value, char *out, u32 out_size,
+		    const char *default_val);
 
 int		newbus_driver_add_module(const newbus_module_t *module);
 device_t	newbus_device_create_root(const char *name, int unit);

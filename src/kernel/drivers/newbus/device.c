@@ -374,6 +374,10 @@ newbus_run_identify(int pass)
 		if (module->pass > pass || module->driver->identify == NULL) {
 			continue;
 		}
+		if (!newbus_config_driver_enabled(module) ||
+		    !newbus_config_bus_enabled(module->bus_name)) {
+			continue;
+		}
 		for (j = 0; j < newbus_device_count; j++) {
 			parent = newbus_devices[j];
 			if (parent->state != DS_ATTACHED) {
@@ -399,6 +403,9 @@ newbus_probe_device(device_t dev, int pass)
 	    dev->state >= DS_PROBED) {
 		return (0);
 	}
+	if (!newbus_config_device_enabled(dev)) {
+		return (0);
+	}
 	parent = dev->parent;
 	if (parent == NULL || parent->state != DS_ATTACHED) {
 		return (0);
@@ -415,6 +422,9 @@ newbus_probe_device(device_t dev, int pass)
 			continue;
 		}
 		if (!newbus_module_matches_device(dev, module)) {
+			continue;
+		}
+		if (!newbus_config_probe_allowed(dev, module)) {
 			continue;
 		}
 		if (module->driver->probe != NULL) {
@@ -454,6 +464,13 @@ newbus_attach_device(device_t dev)
 
 	if (dev == NULL || dev->driver == NULL ||
 	    dev->state != DS_PROBED) {
+		return (0);
+	}
+	if (!newbus_config_probe_allowed(dev, dev->module)) {
+		dev->driver = NULL;
+		dev->devclass = NULL;
+		dev->module = NULL;
+		dev->state = DS_ALIVE;
 		return (0);
 	}
 	ret = 0;

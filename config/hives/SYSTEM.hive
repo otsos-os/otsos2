@@ -18,6 +18,23 @@ hive SYSTEM @access(read=user, add=kusr, edit=kusr) {
 		u32 ApicQuality = 1000
 	}
 
+	key Newbus {
+		bool PolicyEnabled = true
+		bool Verbose = false
+	}
+
+	key Newbus.Drivers {
+		bool DefaultEnabled = true
+	}
+
+	key Newbus.Devices {
+		bool DefaultEnabled = true
+	}
+
+	key Newbus.Buses {
+		bool DefaultEnabled = true
+	}
+
 	key Time {
 		i32 TimezoneOffset = 3
 	}

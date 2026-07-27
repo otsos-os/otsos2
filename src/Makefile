@@ -255,6 +255,7 @@ NEWBUS_MODULE_O = ../bin/newbus_module.o
 NEWBUS_ROOT_O = ../bin/newbus_root.o
 NEWBUS_NEXUS_O = ../bin/newbus_nexus.o
 NEWBUS_PLATFORM_O = ../bin/newbus_platform.o
+NEWBUS_CONFIG_O = ../bin/newbus_config.o
 NEWBUS_RESOURCE_O = ../bin/newbus_resource.o
 NEWBUS_INTR_O = ../bin/newbus_intr.o
 NEWBUS_POLL_O = ../bin/newbus_poll.o
@@ -345,7 +346,7 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(TRACE_O) $(TRACE_PMU_O) $(PMU_O) \
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
-      $(NEWBUS_DEVICE_O) $(NEWBUS_MODULE_O) $(NEWBUS_ROOT_O) $(NEWBUS_NEXUS_O) $(NEWBUS_PLATFORM_O) $(NEWBUS_RESOURCE_O) $(NEWBUS_INTR_O) $(NEWBUS_POLL_O) $(NEWBUS_DEBUG_O) \
+      $(NEWBUS_DEVICE_O) $(NEWBUS_MODULE_O) $(NEWBUS_ROOT_O) $(NEWBUS_NEXUS_O) $(NEWBUS_PLATFORM_O) $(NEWBUS_CONFIG_O) $(NEWBUS_RESOURCE_O) $(NEWBUS_INTR_O) $(NEWBUS_POLL_O) $(NEWBUS_DEBUG_O) \
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
       $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O) \
       $(KSHELL_OBJ) \
@@ -1150,6 +1151,10 @@ $(NEWBUS_NEXUS_O): kernel/drivers/newbus/nexus.c kernel/drivers/newbus/newbus.h
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(NEWBUS_PLATFORM_O): kernel/drivers/newbus/platform.c kernel/drivers/newbus/newbus.h kernel/drivers/acpi/acpi.h kernel/interrupts/apic/lapic.h kernel/interrupts/apic/ioapic.h kernel/smp/smp.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(NEWBUS_CONFIG_O): kernel/drivers/newbus/config.c kernel/drivers/newbus/newbus.h kernel/cm/cm.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

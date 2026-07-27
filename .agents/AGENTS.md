@@ -76,6 +76,10 @@ Monolithic kernel with the following rough layers:
   PCI creates generic function children; drivers claim devices via probe.
   Resources, IRQs, and timer polling must flow through `bus_set_resource`,
   `bus_alloc_resource*`, `bus_setup_intr`, and `bus_setup_poll`.
+  Registry keys under `SYSTEM.Newbus` are a policy/config overlay only:
+  they may enable/disable drivers, buses, or devices and provide driver
+  tunables, but must not become a concrete driver startup list or device
+  discovery source.
   Linker-set registration depends on the `.newbus.drivers` section in
   `src/linker.ld`.
 - `drivers/pmu/` — CPU performance monitoring driver. Owns CPUID/MSR PMU
