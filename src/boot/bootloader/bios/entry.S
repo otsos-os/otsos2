@@ -312,17 +312,17 @@ chs_defaults:
 	movb	$16, chs_heads
 
 chs_have_geom:
-	movw	bios_disk_packet + 8, %ax
-	xorw	%dx, %dx
-	movzbw	chs_spt, %cx
-	divw	%cx
-	incw	%dx
+	movl	bios_disk_packet + 8, %eax
+	xorl	%edx, %edx
+	movzbl	chs_spt, %ecx
+	divl	%ecx
+	incl	%edx
 	movb	%dl, chs_sector
 
-	xorw	%dx, %dx
-	movzbw	chs_heads, %cx
-	divw	%cx
-	cmpw	$1023, %ax
+	xorl	%edx, %edx
+	movzbl	chs_heads, %ecx
+	divl	%ecx
+	cmpl	$1023, %eax
 	ja	chs_bad
 	movw	%ax, chs_cyl
 	movb	%dl, chs_head
