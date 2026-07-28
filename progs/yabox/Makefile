@@ -16,7 +16,7 @@ CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fPIE -fno-stack-protector \
 LDFLAGS ?= -m elf_x86_64 -pie --oformat=elf64-x86-64 \
 	-nostdlib -dynamic-linker /lib/drld --export-dynamic
 
-TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv profile
+TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv mmod profile
 ARCHIVE_TOOLS = unzip
 COMMON = build/common.o
 OBJS = $(TOOLS:%=build/%.o) $(ARCHIVE_TOOLS:%=build/%.o)

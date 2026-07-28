@@ -683,9 +683,9 @@ atkbd_attach(device_t dev)
 		irq_ok = 1;
 	}
 	if (!irq_ok) {
-		(void)bus_setup_poll(dev, NB_POLL_TIMER, atkbd_poll, NULL,
-		    NULL);
+		drivers_log("[PS2] IRQ unavailable so using timer poll\n");
 	}
+	(void)bus_setup_poll(dev, NB_POLL_TIMER, atkbd_poll, NULL, NULL);
 	return (0);
 }
 

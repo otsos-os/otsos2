@@ -129,6 +129,10 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_IPC_CALL		0xB04
 #define	CALL_IPC_CTL		0xB05
 
+#define	CALL_KOFO_LOAD		0xC00
+#define	CALL_KOFO_INFO		0xC01
+#define	CALL_KOFO_UNLOAD	0xC02
+
 #define	CALL_PROC_GETPID	0x408
 #define	CALL_PROC_GETPPID	0x409
 #define	CALL_PROC_THREAD_EXIT	0x40A

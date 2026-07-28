@@ -57,6 +57,10 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 		string Dest = "/bin/mv"
 	}
 
+	key Modules.mmod {
+		string Dest = "/bin/mmod"
+	}
+
 	key Modules.unzip {
 		string Dest = "/bin/unzip"
 	}
@@ -139,5 +143,9 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 
 	key Modules.native-so {
 		string Dest = "/lib/native.so"
+	}
+
+	key Modules.hello-driver {
+		string Dest = "/lib/modules/hello-driver.kofo"
 	}
 }

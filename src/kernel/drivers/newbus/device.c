@@ -30,11 +30,14 @@ $define %type driver_t as newbus driver descriptor
 $define %type devclass_t as newbus device class descriptor
 $define %type newbus_driver_entry_t as registered linker module wrapper
 
-$define %func newbus_driver_add_module as function with args const newbus_module_t *
+$define %func newbus_driver_add_module as function with args module
+$define %func newbus_driver_remove_module as function with args module
+$define %func newbus_driver_range_busy as function with args memory range
 $define %func newbus_device_create_root as function with args const char *, int
 $define %func newbus_device_set_driver as procedure with args device_t, driver_t *, devclass_t *
 $define %func device_add_child as function with args device_t, const char *, int
 $define %func newbus_configure_pass as procedure with args int
+$define %func newbus_reprobe as procedure with args void
 $define %func newbus_shutdown as procedure with args void
 
 */
@@ -44,9 +47,11 @@ $define %func newbus_shutdown as procedure with args void
 $space %internal newbus_alloc_device, newbus_assign_unit
 $space %internal newbus_run_identify, newbus_probe_device
 $space %internal newbus_attach_device, newbus_configure_one_pass
-$space %export newbus_driver_add_module, newbus_device_create_root
+$space %export newbus_driver_add_module, newbus_driver_remove_module
+$space %export newbus_driver_range_busy, newbus_device_create_root
 $space %export newbus_device_set_driver, device_add_child
-$space %export newbus_configure_pass, newbus_configure, newbus_shutdown
+$space %export newbus_configure_pass, newbus_configure
+$space %export newbus_reprobe, newbus_shutdown
 
 */
 
@@ -136,6 +141,115 @@ newbus_driver_add_module(const newbus_module_t *module)
 		    module->pass, module->order);
 	}
 	return (0);
+}
+
+static int
+newbus_ptr_in_range(const void *ptr, const void *base, size_t size)
+{
+	u64	p, start, end;
+
+	if (ptr == NULL || base == NULL || size == 0) {
+		return (0);
+	}
+	p = (u64)ptr;
+	start = (u64)base;
+	end = start + (u64)size;
+	if (end < start) {
+		return (0);
+	}
+	return (p >= start && p < end);
+}
+
+int
+newbus_driver_range_busy(const void *base, size_t size)
+{
+	const newbus_module_t	*module;
+	device_t		dev;
+	int			i;
+
+	for (i = 0; i < newbus_driver_count; i++) {
+		module = newbus_drivers[i].module;
+		if (newbus_ptr_in_range(module, base, size) ||
+		    (module != NULL &&
+		    (newbus_ptr_in_range(module->driver, base, size) ||
+		    newbus_ptr_in_range(module->devclass, base, size)))) {
+			return (1);
+		}
+	}
+	for (i = 0; i < newbus_device_count; i++) {
+		dev = newbus_devices[i];
+		if (dev == NULL) {
+			continue;
+		}
+		if (newbus_ptr_in_range(dev->module, base, size) ||
+		    newbus_ptr_in_range(dev->driver, base, size) ||
+		    newbus_ptr_in_range(dev->devclass, base, size)) {
+			return (1);
+		}
+	}
+	return (0);
+}
+
+int
+newbus_driver_remove_module(const newbus_module_t *module)
+{
+	device_t	dev;
+	int		ret;
+	int		i, j;
+
+	if (module == NULL) {
+		return (-1);
+	}
+	for (i = 0; i < newbus_device_count; i++) {
+		dev = newbus_devices[i];
+		if (dev == NULL) {
+			continue;
+		}
+		if (dev->module != module &&
+		    (module->driver == NULL || dev->driver != module->driver)) {
+			continue;
+		}
+		if (dev->state == DS_ATTACHED) {
+			if (dev->driver == NULL || dev->driver->detach == NULL) {
+				return (-1);
+			}
+		}
+	}
+	for (i = 0; i < newbus_device_count; i++) {
+		dev = newbus_devices[i];
+		if (dev == NULL) {
+			continue;
+		}
+		if (dev->module != module &&
+		    (module->driver == NULL || dev->driver != module->driver)) {
+			continue;
+		}
+		if (dev->state == DS_ATTACHED) {
+			ret = dev->driver->detach(dev);
+			if (ret != 0) {
+				return (-1);
+			}
+		}
+		dev->driver = NULL;
+		dev->devclass = NULL;
+		dev->module = NULL;
+		dev->state = DS_ALIVE;
+		newbus_generation++;
+	}
+	for (i = 0; i < newbus_driver_count; i++) {
+		if (newbus_drivers[i].module != module) {
+			continue;
+		}
+		for (j = i + 1; j < newbus_driver_count; j++) {
+			newbus_drivers[j - 1] = newbus_drivers[j];
+		}
+		memset(&newbus_drivers[newbus_driver_count - 1], 0,
+		    sizeof(newbus_drivers[0]));
+		newbus_driver_count--;
+		newbus_generation++;
+		return (0);
+	}
+	return (-1);
 }
 
 device_t
@@ -555,6 +669,19 @@ void
 newbus_configure(void)
 {
 	newbus_configure_pass(NEWBUS_PASS_LATE);
+}
+
+void
+newbus_reprobe(void)
+{
+	if (newbus_root_device == NULL) {
+		return;
+	}
+	if (newbus_configured_pass < 0) {
+		newbus_configure_pass(NEWBUS_PASS_LATE);
+		return;
+	}
+	newbus_configure_one_pass(newbus_configured_pass);
 }
 
 void

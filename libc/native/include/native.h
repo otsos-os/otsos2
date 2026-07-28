@@ -8,6 +8,7 @@ $define %type api_net_iface as native interface snapshot
 $define %type api_net_msg as native network message descriptor
 $define %type api_reg_value as native registry value IO descriptor
 $define %type api_reg_entry as native registry enumeration entry
+$define %type api_kofo_info as native KOFO module metadata
 $define %type api_trace_probe as native trace probe metadata
 $define %type api_trace_program as native trace program descriptor
 $define %type api_trace_record as native trace record
@@ -28,6 +29,7 @@ $define %func ipcCall as function with args int, api_ipc_call *
 $define %func regOpen as function with args const char *, const char *, uint32_t
 $define %func regGet as function with args int, api_reg_value *
 $define %func regUpd as function with args uint32_t
+$define %func kofoLoad as function with args const char *, uint32_t
 $define %func traceOpen as function with args uint32_t
 $define %func traceRead as function with args int, api_trace_read *
 $define %func traceLoad as function with args int, api_trace_load *
@@ -60,6 +62,7 @@ $space %export drmRapiFillRect, drmRapiGlyph, drmRapiScroll, drmRapiBlit
 $space %export drmDriverList, drmDriverSwitch
 $space %export traceOpen, traceClose, traceRead, traceCtl, traceInfo
 $space %export traceLoad, traceReadAggs, traceMark
+$space %export kofoLoad, kofoInfo, kofoUnload
 
 */
 
@@ -231,6 +234,9 @@ $space %export traceLoad, traceReadAggs, traceMark
 #define CALL_IPC_RECV		0xB03
 #define CALL_IPC_CALL		0xB04
 #define CALL_IPC_CTL		0xB05
+#define CALL_KOFO_LOAD		0xC00
+#define CALL_KOFO_INFO		0xC01
+#define CALL_KOFO_UNLOAD	0xC02
 #define CALL_TRACE_OPEN		0x900
 #define CALL_TRACE_CLOSE	0x901
 #define CALL_TRACE_READ		0x902
@@ -313,6 +319,14 @@ $space %export traceLoad, traceReadAggs, traceMark
 #define API_REG_CONSUMER_NET		1
 #define API_REG_CONSUMER_SCHEDULER	2
 #define API_REG_CONSUMER_KUSR		3
+
+#define API_KOFO_NAME_MAX	32
+#define API_KOFO_VERSION_MAX	32
+#define API_KOFO_PATH_MAX	128
+#define API_KOFO_STATE_EMPTY	0
+#define API_KOFO_STATE_LOADING	1
+#define API_KOFO_STATE_LOADED	2
+#define API_KOFO_STATE_UNLOADING	3
 
 #define API_TRACE_MAX_CPUS		32
 #define API_TRACE_MAX_PROVIDERS		16
@@ -806,6 +820,24 @@ struct api_reg_entry {
 	char		name[32];
 };
 
+struct api_kofo_info {
+	uint32_t	size;
+	uint32_t	id;
+	uint32_t	state;
+	uint32_t	flags;
+	uint64_t	image_base;
+	uint64_t	image_size;
+	uint32_t	section_count;
+	uint32_t	symbol_count;
+	uint32_t	import_count;
+	uint32_t	reloc_count;
+	uint32_t	driver_count;
+	uint32_t	pad;
+	char		name[API_KOFO_NAME_MAX];
+	char		version[API_KOFO_VERSION_MAX];
+	char		path[API_KOFO_PATH_MAX];
+};
+
 struct api_key_event {
 	uint64_t	timestamp;
 	uint16_t	key;
@@ -1226,6 +1258,10 @@ int	regGetIpv4(int reg, const char *name, uint32_t *out);
 int	regSetIpv4(int reg, const char *name, uint32_t value);
 int	regGetString(int reg, const char *name, char *buf, size_t size);
 int	regSetString(int reg, const char *name, const char *value);
+
+int	kofoLoad(const char *path, uint32_t flags);
+int	kofoInfo(uint32_t id, struct api_kofo_info *info);
+int	kofoUnload(uint32_t id, uint32_t flags);
 
 long	personality(long mode);
 

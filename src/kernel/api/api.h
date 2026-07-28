@@ -388,6 +388,32 @@ struct api_net_msg {
 #define	API_REG_CONSUMER_SCHEDULER	2
 #define	API_REG_CONSUMER_KUSR		3
 
+#define	API_KOFO_NAME_MAX	32
+#define	API_KOFO_VERSION_MAX	32
+#define	API_KOFO_PATH_MAX	128
+#define	API_KOFO_STATE_EMPTY	0
+#define	API_KOFO_STATE_LOADING	1
+#define	API_KOFO_STATE_LOADED	2
+#define	API_KOFO_STATE_UNLOADING	3
+
+struct api_kofo_info {
+	u32	size;
+	u32	id;
+	u32	state;
+	u32	flags;
+	u64	image_base;
+	u64	image_size;
+	u32	section_count;
+	u32	symbol_count;
+	u32	import_count;
+	u32	reloc_count;
+	u32	driver_count;
+	u32	pad;
+	char	name[API_KOFO_NAME_MAX];
+	char	version[API_KOFO_VERSION_MAX];
+	char	path[API_KOFO_PATH_MAX];
+};
+
 struct api_reg_value {
 	const char	*name;
 	void		*data;
@@ -952,6 +978,9 @@ void api_session_fork(struct process *parent, struct process *child);
 int api_futex_wait(u64 uaddr, u32 expected_val);
 int api_futex_wake(u64 uaddr, u32 max_waiters);
 int api_sys_random(u8 *buf, u32 len);
+int api_kofo_load(const char *path, u32 flags);
+int api_kofo_info(u32 id, struct api_kofo_info *info);
+int api_kofo_unload(u32 id, u32 flags);
 int api_timeinfo(struct api_timeinfo *buf);
 int api_time(void);
 int api_term_power(struct api_term_power *args);

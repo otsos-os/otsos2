@@ -404,6 +404,16 @@ void syscall_handler(registers_t *regs) {
   case CALL_IPC_CTL:
     regs->rax = (u64)api_ipc_ctl((int)arg1, (u32)arg2, (void *)arg3);
     break;
+  case CALL_KOFO_LOAD:
+    regs->rax = (u64)api_kofo_load((const char *)arg1, (u32)arg2);
+    break;
+  case CALL_KOFO_INFO:
+    regs->rax = (u64)api_kofo_info((u32)arg1,
+        (struct api_kofo_info *)arg2);
+    break;
+  case CALL_KOFO_UNLOAD:
+    regs->rax = (u64)api_kofo_unload((u32)arg1, (u32)arg2);
+    break;
   case CALL_TRACE_OPEN:
     regs->rax = (u64)api_trace_open((u32)arg1);
     break;

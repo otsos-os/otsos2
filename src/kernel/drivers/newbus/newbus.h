@@ -38,6 +38,10 @@ $define %func newbus_bootstrap as procedure with args newbus_bootinfo_t *
 $define %func newbus_register_linker_modules as procedure with args void
 $define %func newbus_configure_pass as procedure with args int
 $define %func newbus_configure as procedure with args void
+$define %func newbus_reprobe as procedure with args void
+$define %func newbus_driver_add_module as function with args module
+$define %func newbus_driver_remove_module as function with args module
+$define %func newbus_driver_range_busy as function with args memory range
 $define %func device_add_child as function with args device_t, const char *, int
 $define %func device_find_child as function with args device_t, const char *, int
 $define %func device_get_name as function with args device_t
@@ -64,7 +68,9 @@ $define %func newbus_poll_dispatch as procedure with args u32
 /* !SPACE!
 
 $space %export newbus_bootstrap, newbus_register_linker_modules
-$space %export newbus_configure_pass, newbus_configure
+$space %export newbus_configure_pass, newbus_configure, newbus_reprobe
+$space %export newbus_driver_add_module, newbus_driver_remove_module
+$space %export newbus_driver_range_busy
 $space %export device_add_child, device_find_child
 $space %export device_get_name, device_get_nameunit
 $space %export newbus_device_count_get, newbus_device_get
@@ -251,6 +257,7 @@ const newbus_bootinfo_t	*newbus_get_bootinfo(void);
 void		newbus_register_linker_modules(void);
 void		newbus_configure_pass(int pass);
 void		newbus_configure(void);
+void		newbus_reprobe(void);
 void		newbus_shutdown(void);
 void		newbus_dump_tree(void);
 void		newbus_dump_drivers(void);
@@ -272,6 +279,8 @@ int		newbus_config_driver_get_string(const char *driver_name,
 		    const char *default_val);
 
 int		newbus_driver_add_module(const newbus_module_t *module);
+int		newbus_driver_remove_module(const newbus_module_t *module);
+int		newbus_driver_range_busy(const void *base, size_t size);
 device_t	newbus_device_create_root(const char *name, int unit);
 void		newbus_device_set_driver(device_t dev, driver_t *driver,
 		    devclass_t *devclass);

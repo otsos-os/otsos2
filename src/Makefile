@@ -3,6 +3,7 @@ CC = clang
 ZIG = zig
 PYTHON ?= python3
 LD = ld.lld
+NM ?= llvm-nm
 AS = nasm
 QEMU = qemu-system-x86_64
 XORRISO = xorriso
@@ -62,9 +63,18 @@ NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
 NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 DLD_BIN = ../libc/LibExec/dld/drld
 YABOX_DIR = $(PROGS_DIR)/yabox
-YABOX_TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv unzip profile
+YABOX_TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv mmod unzip profile
 CMSEED_BIN = ../bin/cmseed
 BOOT_HIVE = ../config/hives/BOOT.hive
+KOFO_PACK = ../tools/kofo_pack.py
+KOFO_KSYMTAB_GEN = ../tools/kofo_ksymtab.py
+HELLO_DRIVER_KO = ../bin/hello-driver.ko
+HELLO_DRIVER_KOFO = ../bin/hello-driver.kofo
+KOFO_MODULE_CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fno-pic \
+	-fno-stack-protector -g0 -O2 -fno-omit-frame-pointer \
+	-fno-builtin -fno-asynchronous-unwind-tables -mno-red-zone \
+	-mcmodel=large -mno-sse -mno-mmx -mno-sse2 -mno-avx \
+	-mno-80387 -I. -Ikernel -Ikernel/drivers/video
 HIVE_SOURCES := $(sort $(wildcard ../config/hives/*.hive))
 LIBC_ENABLED := $(shell sh ../tools/toml_get.sh config.toml libc enabled true)
 MULTIBOOT_MODULES := $(shell $(PYTHON) ../tools/hivec.py --list-boot-modules $(BOOT_HIVE))
@@ -218,6 +228,9 @@ PIPE_O = ../bin/pipe.o
 DATA_DIR_O = ../bin/data_dir.o
 CLONE_O = ../bin/clone.o
 SYSCALL_O = ../bin/syscall.o
+KOFO_O = ../bin/kofo.o
+KOFO_KSYMTAB_C = ../bin/kofo_ksymtab.c
+KOFO_KSYMTAB_O = ../bin/kofo_ksymtab.o
 UNAME_O = ../bin/uname.o
 MEMINFO_O = ../bin/meminfo.o
 CPUINFO_O = ../bin/cpuinfo.o
@@ -341,9 +354,9 @@ CLOCKSOURCE_O = ../bin/clocksource.o
 ET_CLOCKSOURCE_O = ../bin/et_clocksource.o
 CMOS_RTC_O = ../bin/cmos_rtc.o
 
-OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDIO_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
+OBJ_NO_KSYMTAB = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDIO_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
       $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(I8042_O) $(INPUT_CORE_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(API_NET_O) $(API_REG_O) $(API_TRACE_O) $(IPC_O) $(API_IPC_O) $(PIPE_O) $(DATA_DIR_O) $(CLONE_O) $(SYSCALL_O) \
-      $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(SESSION_O) $(THREAD_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(FS_META_O) $(MOUNT_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
+      $(KOFO_O) $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(SESSION_O) $(THREAD_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(FS_META_O) $(MOUNT_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(TRACE_O) $(TRACE_PMU_O) $(PMU_O) \
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
@@ -367,6 +380,8 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(INPUT_O) \
       $(TIME_O) $(CLOCKSOURCE_O) $(ET_CLOCKSOURCE_O) $(CMOS_RTC_O)
 
+OBJ = $(OBJ_NO_KSYMTAB) $(KOFO_KSYMTAB_O)
+
 .PHONY: all ask_version check_build_tools check_run_tools check_bios_run_tools kvm
 
 all: check_build_tools ask_version $(ISO_IMAGE)
@@ -376,7 +391,7 @@ cmseed: $(CMSEED_BIN)
 
 check_build_tools:
 	@set -e; \
-	for tool in "$(CC)" "$(LD)" "$(AS)" "$(ZIG)" "$(PYTHON)" \
+	for tool in "$(CC)" "$(LD)" "$(NM)" "$(AS)" "$(ZIG)" "$(PYTHON)" \
 		"$(BIOS_OBJCOPY)" "$(XORRISO)" llvm-size perl tar stat \
 		truncate dd mformat mmd mcopy zip; do \
 		if ! command -v "$$tool" >/dev/null 2>&1; then \
@@ -606,6 +621,17 @@ $(CMSEED_BIN): $(HIVE_SOURCES) ../tools/hivec.py
 	@echo "  HIVE    $@"
 	@$(PYTHON) ../tools/hivec.py -o $@ $(HIVE_SOURCES)
 
+$(HELLO_DRIVER_KO): kernel/drivers/hello.c kernel/drivers/newbus/newbus.h
+	@mkdir -p $(dir $@)
+	@echo "  CC      $<"
+	@$(CC) $(KOFO_MODULE_CFLAGS) -c $< -o $@
+
+$(HELLO_DRIVER_KOFO): $(HELLO_DRIVER_KO) $(KOFO_PACK)
+	@echo "  KOFO    $@"
+	@$(PYTHON) $(KOFO_PACK) --name hello-driver --version 0.1 \
+	    --driver hello-driver --bus pseudo --class test --pass 110 \
+	    --order 100 -o $@ $<
+
 $(ISO_IMAGE): check_build_tools $(BIOS_BOOT_IMAGE) $(UEFI_ESP_IMAGE) $(MAKEISO)
 	@echo "  ISO     $(ISO_IMAGE)"
 	@$(PYTHON) $(MAKEISO) --output $(ISO_IMAGE) \
@@ -658,7 +684,7 @@ $(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BU
 		exit 1; \
 	fi
 
-$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SRAPI_DEMO_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
+$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SRAPI_DEMO_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(HELLO_DRIVER_KOFO) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
 	@rm -rf $(BIOS_PAYLOAD_DIR)
 	@mkdir -p $(BIOS_PAYLOAD_DIR)
 	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
@@ -670,7 +696,7 @@ $(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $
 			yes) src=$(YES_BIN);; \
 			fetch) src=$(FETCH_BIN);; \
 			sh) src=$(SHELL_BIN);; \
-			ls|cat|touch|pwd|whoami|rm|mkdir|rmdir|cp|mv|unzip|profile) src=$(YABOX_DIR)/$$m;; \
+			ls|cat|touch|pwd|whoami|rm|mkdir|rmdir|cp|mv|mmod|unzip|profile) src=$(YABOX_DIR)/$$m;; \
 			oven) src=$(OVEN_BIN);; \
 			cursord) src=$(CURSORD_BIN);; \
 			srapi_demo) src=$(SRAPI_DEMO_BIN);; \
@@ -691,6 +717,7 @@ $(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $
 			ld-musl) src=$(LDSO_BIN);; \
 			drld) src=$(DLD_BIN);; \
 			native-so) src=$(NATIVE_SO);; \
+			hello-driver) src=$(HELLO_DRIVER_KOFO);; \
 		esac; \
 		if [ -n "$$src" ] && [ -f "$$src" ]; then \
 			cp "$$src" "$(BIOS_PAYLOAD_DIR)/$$m"; \
@@ -756,6 +783,14 @@ $(UEFI_ESP_IMAGE): $(UEFI_BOOTX64) $(BIOS_BOOTPACK) | $(UEFI_BUILD_DIR)
 $(KERNEL_BIN): $(OBJ)
 	@echo "  LLD      $@"
 	@$(LD) $(LDFLAGS) $(OBJ) -o $@
+
+$(KOFO_KSYMTAB_C): $(OBJ_NO_KSYMTAB) $(KOFO_KSYMTAB_GEN)
+	@echo "  KSYMTAB $@"
+	@$(PYTHON) $(KOFO_KSYMTAB_GEN) --nm $(NM) -o $@ $(OBJ_NO_KSYMTAB)
+
+$(KOFO_KSYMTAB_O): $(KOFO_KSYMTAB_C) kernel/kofo.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(BOOT_O): boot/boot.s linker.ld
 	@echo "  AS      $<"
@@ -953,6 +988,10 @@ $(OPEN_O): kernel/api/open.c
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(SYSCALL_O): kernel/syscall.c kernel/api/api.h kernel/api/shm.h kernel/trace/trace.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(KOFO_O): kernel/kofo.c kernel/kofo.h kernel/api/api.h kernel/drivers/newbus/newbus.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1572,5 +1611,6 @@ debug: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 clean:
 	@echo "  CLEAN"
 	@rm -f ../bin/*.o ../bin/kernel.bin ../bin/kernel.map \
+	    $(KOFO_KSYMTAB_C) $(HELLO_DRIVER_KO) $(HELLO_DRIVER_KOFO) \
 	    $(CMSEED_BIN) $(ISO_IMAGE) $(DISK_IMG)
 	@rm -rf $(BIOS_BUILD_DIR) $(UEFI_BUILD_DIR)
