@@ -11,8 +11,10 @@ $define %type api_reg_entry as native registry enumeration entry
 $define %type api_trace_probe as native trace probe metadata
 $define %type api_trace_program as native trace program descriptor
 $define %type api_trace_record as native trace record
+$define %type api_term_mouse as struct with console mouse state args
 $define %type kevent as struct with native event data
 $define %func termWrite as function with args const void *, size_t
+$define %func termMouse as function with args api_term_mouse *
 $define %func dataOpen as function with args const char *, int
 $define %func dataDir as function with args uint32_t, const char *, const char *
 $define %func fsMnt as function with args mount tuple
@@ -36,7 +38,7 @@ $define %func traceMark as function with args uint32_t, five uint64_t
 
 /* !SPACE!
 
-$space %export termRead, termReadFlags, termWrite, termPrint
+$space %export termRead, termReadFlags, termWrite, termPrint, termMouse
 $space %export dataOpen, dataClose, dataRead, dataWrite, dataReadFull
 $space %export dataWriteFull, dataSeek, dataPipe, dataDir
 $space %export fsChdir, fsGetcwd, fsListdir, fsStat, fsRename, fsUnlink
@@ -72,8 +74,15 @@ $space %export traceLoad, traceReadAggs, traceMark
 #define CALL_TERM_INFO		0x102
 #define CALL_TERM_MODE		0x103
 #define CALL_TERM_POWER		0x111
+#define CALL_TERM_MOUSE		0x112
 #define TERM_READ_IGNORE_SIGINT	0x00000001
 #define TERM_READ_NO_ECHO	0x00000002
+
+#define API_TERM_POWER_GET	0
+#define API_TERM_POWER_CHANGE	1
+#define API_TERM_POWER_RESET	2
+#define API_TERM_MOUSE_UPDATE	0
+#define API_TERM_MOUSE_VISIBLE	0x00000001
 
 #define API_TERM_ACTIVE		(-1)
 #define API_TERM_MODE_GET	0
@@ -151,6 +160,10 @@ $space %export traceLoad, traceReadAggs, traceMark
 #define API_TERM_CC_VEOL2	16
 
 #define API_TERM_SPEED_B38400	0000015
+
+#define TERM_STATE_ACTIVE	0
+#define TERM_STATE_SUSPENDED	1
+#define TERM_STATE_DISABLED	2
 #define CALL_INPUT_READ		0x120
 #define CALL_INPUT_POLL		0x121
 #define CALL_INPUT_FLUSH	0x122
@@ -837,6 +850,15 @@ struct api_term_power {
 	int	flags;
 };
 
+struct api_term_mouse {
+	int	op;
+	int	tty;
+	int	flags;
+	int	x;
+	int	y;
+	int	buttons;
+};
+
 struct api_term_mode {
 	int	op;
 	int	tty;
@@ -1059,6 +1081,7 @@ ssize_t	termWrite(const void *buf, size_t count);
 ssize_t	termPrint(const char *text);
 int	termInfo(struct api_term_info *info);
 int	termPower(struct api_term_power *args);
+int	termMouse(struct api_term_mouse *args);
 int	termMode(struct api_term_mode *args);
 int	termGetMode(struct api_term_mode *mode);
 int	termSetMode(const struct api_term_mode *mode);

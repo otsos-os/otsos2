@@ -102,6 +102,8 @@ typedef struct {
 #define API_TERM_POWER_GET	0
 #define API_TERM_POWER_CHANGE	1
 #define API_TERM_POWER_RESET	2
+#define API_TERM_MOUSE_UPDATE	0
+#define API_TERM_MOUSE_VISIBLE	0x00000001
 
 #define API_TERM_ACTIVE		(-1)
 #define API_TERM_MODE_GET	0
@@ -189,6 +191,15 @@ struct api_term_power {
 	int	tty;
 	int	state;
 	int	flags;
+};
+
+struct api_term_mouse {
+	int	op;
+	int	tty;
+	int	flags;
+	int	x;
+	int	y;
+	int	buttons;
 };
 
 struct api_term_mode {
@@ -945,6 +956,7 @@ int api_timeinfo(struct api_timeinfo *buf);
 int api_time(void);
 int api_term_power(struct api_term_power *args);
 int api_term_info(struct api_term_info *info);
+int api_term_mouse(struct api_term_mouse *args);
 int api_term_mode(struct api_term_mode *args);
 int api_input_read(struct api_key_event *buf, u32 count, u32 flags);
 int api_input_poll(void);

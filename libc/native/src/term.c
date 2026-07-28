@@ -2,8 +2,10 @@
 
 $define %type api_term_info as struct with terminal size and state
 $define %type api_term_mode as struct with terminal line discipline flags
+$define %type api_term_mouse as struct with console mouse state args
 $define %func termWrite as function with args const void *, size_t
 $define %func termRead as function with args void *, size_t
+$define %func termMouse as function with args struct api_term_mouse *
 $define %func termMode as function with args struct api_term_mode *
 $define %func termGetMode as function with args struct api_term_mode *
 $define %func termSetMode as function with args const struct api_term_mode *
@@ -15,7 +17,8 @@ $define %func termRestoreMode as function with args const struct api_term_mode *
 /* !SPACE!
 
 $space %export termRead, termReadFlags, termWrite, termPrint
-$space %export termInfo, termPower, termMode, termGetMode, termSetMode
+$space %export termInfo, termPower, termMouse, termMode
+$space %export termGetMode, termSetMode
 $space %export termEnterRaw, termRestoreMode
 
 */
@@ -85,6 +88,12 @@ int
 termPower(struct api_term_power *args)
 {
 	return (__sysret_int(__syscall1(CALL_TERM_POWER, (long)args)));
+}
+
+int
+termMouse(struct api_term_mouse *args)
+{
+	return (__sysret_int(__syscall1(CALL_TERM_MOUSE, (long)args)));
 }
 
 int

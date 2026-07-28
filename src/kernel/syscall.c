@@ -159,6 +159,9 @@ void syscall_handler(registers_t *regs) {
   case CALL_TERM_POWER:
     regs->rax = (u64)api_term_power((struct api_term_power *)arg1);
     break;
+  case CALL_TERM_MOUSE:
+    regs->rax = (u64)api_term_mouse((struct api_term_mouse *)arg1);
+    break;
   case CALL_INPUT_READ:
     regs->rax = (u64)api_input_read((struct api_key_event *)arg1,
                                     (u32)arg2, (u32)arg3);

@@ -162,6 +162,7 @@ void	terminal_flush_input_active(void);
 void	terminal_flush_input_idx(int idx);
 void	*terminal_get_input_channel(void);
 int	terminal_drain_output(int idx);
+int	terminal_mouse_update(int idx, int enabled, int x, int y, int buttons);
 int	terminal_power_get(int index);
 int	terminal_power_set(int index, int state);
 int	terminal_power_reset(int index);

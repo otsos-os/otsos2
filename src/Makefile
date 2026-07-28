@@ -332,6 +332,7 @@ SYS_O = ../bin/sys.o
 API_TIME_O = ../bin/api_time.o
 TERM_POWER_O = ../bin/term_power.o
 TERM_INFO_O = ../bin/term_info.o
+TERM_MOUSE_O = ../bin/term_mouse.o
 TERM_MODE_O = ../bin/term_mode.o
 INPUT_O = ../bin/input.o
 
@@ -361,7 +362,8 @@ OBJ = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDI
       $(POSIX_O) $(POSIX_IO_O) $(POSIX_PROC_O) $(POSIX_FS_O) \
       $(POSIX_MEM_O) $(POSIX_SOCKET_O) $(POSIX_SIGNAL_O) $(SIGNAL_O) \
       $(PROC_PID_O) $(PROC_PERM_O) $(THREAD_API_O) $(FUTEX_O) $(SYS_O) \
-      $(API_TIME_O) $(TERM_POWER_O) $(TERM_INFO_O) $(TERM_MODE_O) \
+      $(API_TIME_O) $(TERM_POWER_O) $(TERM_INFO_O) $(TERM_MOUSE_O) \
+      $(TERM_MODE_O) \
       $(INPUT_O) \
       $(TIME_O) $(CLOCKSOURCE_O) $(ET_CLOCKSOURCE_O) $(CMOS_RTC_O)
 
@@ -1372,6 +1374,10 @@ $(TERM_POWER_O): kernel/api/term_power.c kernel/api/api.h kernel/console/termina
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(TERM_INFO_O): kernel/api/term_info.c kernel/api/api.h kernel/console/terminal.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(TERM_MOUSE_O): kernel/api/term_mouse.c kernel/api/api.h kernel/console/terminal.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

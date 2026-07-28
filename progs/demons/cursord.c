@@ -26,6 +26,7 @@
 
 /* !DEFINES!
 
+$define %type cursor_output as struct with cursor backend state
 $define %func daemonize as function with args void
 $define %func clamp_cursor as function with args int, int
 $define %func attach_input as function with args int
@@ -35,6 +36,8 @@ $define %func cursor_outline as function with args int, int
 $define %func put_cursor_pixel as procedure with args pixels, position, color
 $define %func draw_cursor as procedure with args uint32_t *
 $define %func commit_cursor as function with args uint32_t, uint32_t, int, int
+$define %func send_terminal_mouse as function with args int, int, int, int, int
+$define %func sync_cursor_output as function with args output state, drm, pos, buttons
 $define %func main as start with args int, char **, char **
 
 */
@@ -44,6 +47,7 @@ $define %func main as start with args int, char **, char **
 $space %internal daemonize, clamp_cursor, attach_input, arm_frame_timer
 $space %internal cursor_shape, cursor_outline
 $space %internal put_cursor_pixel, draw_cursor, commit_cursor
+$space %internal send_terminal_mouse, sync_cursor_output
 $space %export main
 
 */
@@ -60,6 +64,17 @@ $space %export main
 #define	CURSOR_INPUT_IDENT	0
 #define	CURSOR_TIMER_IDENT	1
 #define	CURSOR_FRAME_MS		16
+
+struct cursor_output {
+	int	drm_visible;
+	int	drm_x;
+	int	drm_y;
+	int	term_mouse_visible;
+	int	term_mouse_tty;
+	int	term_mouse_x;
+	int	term_mouse_y;
+	int	term_mouse_buttons;
+};
 
 static void
 log_msg(const char *msg)
@@ -232,17 +247,102 @@ commit_cursor(uint32_t plane, uint32_t fb, int x, int y)
 	return (drmAtomicCommit(reqs, 9, 0));
 }
 
+static int
+send_terminal_mouse(int tty, int visible, int x, int y, int buttons)
+{
+	struct api_term_mouse	mouse;
+
+	memset(&mouse, 0, sizeof(mouse));
+	mouse.op = API_TERM_MOUSE_UPDATE;
+	mouse.tty = tty;
+	mouse.flags = visible ? API_TERM_MOUSE_VISIBLE : 0;
+	mouse.x = x;
+	mouse.y = y;
+	mouse.buttons = buttons;
+	return (termMouse(&mouse));
+}
+
+static int
+sync_cursor_output(struct cursor_output *output, uint32_t plane, uint32_t fb,
+    int x, int y, int buttons)
+{
+	struct api_term_info	term;
+	int			ret, use_term;
+
+	if (!output) {
+		return (-1);
+	}
+
+	memset(&term, 0, sizeof(term));
+	use_term = 0;
+	if (termInfo(&term) == 0 && term.state == TERM_STATE_ACTIVE) {
+		use_term = 1;
+	}
+
+	if (use_term) {
+		if (output->term_mouse_visible &&
+		    output->term_mouse_tty != term.tty) {
+			(void)send_terminal_mouse(output->term_mouse_tty, 0,
+			    output->term_mouse_x, output->term_mouse_y,
+			    output->term_mouse_buttons);
+			output->term_mouse_visible = 0;
+		}
+
+		if (!output->term_mouse_visible ||
+		    output->term_mouse_x != x || output->term_mouse_y != y ||
+		    output->term_mouse_buttons != buttons) {
+			ret = send_terminal_mouse(term.tty, 1, x, y, buttons);
+			if (ret != 0) {
+				use_term = 0;
+			} else {
+				output->term_mouse_visible = 1;
+				output->term_mouse_tty = term.tty;
+				output->term_mouse_x = x;
+				output->term_mouse_y = y;
+				output->term_mouse_buttons = buttons;
+			}
+		}
+	}
+
+	if (use_term) {
+		if (output->drm_visible != 0) {
+			(void)commit_cursor(plane, 0, x, y);
+			output->drm_visible = 0;
+		}
+		return (0);
+	}
+
+	if (output->term_mouse_visible) {
+		(void)send_terminal_mouse(output->term_mouse_tty, 0,
+		    output->term_mouse_x, output->term_mouse_y,
+		    output->term_mouse_buttons);
+		output->term_mouse_visible = 0;
+	}
+
+	if (output->drm_visible != 1 || output->drm_x != x ||
+	    output->drm_y != y) {
+		(void)commit_cursor(plane, fb, x, y);
+		output->drm_visible = 1;
+		output->drm_x = x;
+		output->drm_y = y;
+	}
+
+	return (0);
+}
+
 int
 main(int argc, char **argv, char **envp)
 {
 	struct api_drm_objects	objects;
 	struct api_drm_info	info;
 	struct kevent		events[CURSOR_EVENT_BATCH];
+	struct cursor_output	output;
 	struct api_input_event	*input;
 	void			*cursor_pixels;
 	uint32_t		gem, fb;
 	int			i, kq, n, x, y, target_x, target_y, dx, dy;
 	int			max_x, max_y, raw_x, raw_y, have_raw;
+	int			buttons, button_changed;
 	int			pending, timer_armed, timer_ready;
 
 	(void)argc;
@@ -296,9 +396,14 @@ main(int argc, char **argv, char **envp)
 	raw_x = 0;
 	raw_y = 0;
 	have_raw = 0;
+	buttons = 0;
 	pending = 0;
 	timer_armed = 0;
-	(void)commit_cursor(objects.cursor_plane_id, fb, x, y);
+	memset(&output, 0, sizeof(output));
+	output.drm_visible = -1;
+	output.drm_x = -1;
+	output.drm_y = -1;
+	output.term_mouse_tty = API_TERM_ACTIVE;
 
 	kq = eventKqueue();
 	if (kq < 0) {
@@ -309,6 +414,12 @@ main(int argc, char **argv, char **envp)
 	if (attach_input(kq) < 0) {
 		log_msg("cursord: input event attach failed\n");
 		return (1);
+	}
+
+	(void)sync_cursor_output(&output, objects.cursor_plane_id, fb, x, y,
+	    buttons);
+	if (arm_frame_timer(kq) == 0) {
+		timer_armed = 1;
 	}
 
 	log_msg("cursord: started\n");
@@ -345,28 +456,28 @@ main(int argc, char **argv, char **envp)
 			}
 			raw_x = input->x;
 			raw_y = input->y;
-			if (dx == 0 && dy == 0) {
+			button_changed = buttons != (int)input->buttons;
+			buttons = (int)input->buttons;
+			if (dx == 0 && dy == 0 && !button_changed) {
 				continue;
 			}
-			target_x = clamp_cursor(target_x + dx, max_x);
-			target_y = clamp_cursor(target_y + dy, max_y);
+			if (dx != 0 || dy != 0) {
+				target_x = clamp_cursor(target_x + dx, max_x);
+				target_y = clamp_cursor(target_y + dy, max_y);
+			}
 			pending = 1;
 		}
-		if (pending && !timer_armed && !timer_ready) {
-			if (arm_frame_timer(kq) == 0) {
-				timer_armed = 1;
-			} else {
-				timer_ready = 1;
-			}
-		}
-		if (timer_ready && pending) {
-			if (target_x != x || target_y != y) {
+		if (timer_ready) {
+			if (pending && (target_x != x || target_y != y)) {
 				x = target_x;
 				y = target_y;
-				(void)commit_cursor(objects.cursor_plane_id,
-				    fb, x, y);
 			}
+			(void)sync_cursor_output(&output,
+			    objects.cursor_plane_id, fb, x, y, buttons);
 			pending = 0;
+		}
+		if (!timer_armed && arm_frame_timer(kq) == 0) {
+			timer_armed = 1;
 		}
 	}
 

@@ -40,6 +40,10 @@ $define %type terminal_input_queue_t as struct with keyboard input ring
 $define %func terminal_state_is_valid as function with args int
 $define %func terminal_con as function with args void
 $define %func terminal_draw_cell as procedure with args int, int, char, u8
+$define %func terminal_redraw_cell as procedure with args state ptr, int, int
+$define %func terminal_mouse_blink_interval as function with args void
+$define %func terminal_mouse_cell_from_pixel as function with args int, int, int
+$define %func terminal_mouse_update as function with args int, int, int, int, int
 $define %func terminal_set_hw_cursor as procedure with args const state ptr
 $define %func terminal_ansi_sgr as procedure with args state ptr, int ptr, int
 $define %func terminal_erase_line as procedure with args state ptr, int, int
@@ -91,6 +95,8 @@ $define %func terminal_power_suspend_all as function with args void
 /* !SPACE!
 
 $space %internal terminal_state_is_valid, terminal_con, terminal_draw_cell
+$space %internal terminal_redraw_cell, terminal_mouse_blink_interval
+$space %internal terminal_mouse_cell_from_pixel
 $space %internal terminal_set_hw_cursor, terminal_ansi_sgr
 $space %internal terminal_erase_line, terminal_erase_display
 $space %internal terminal_ansi_param, terminal_ansi_execute
@@ -111,6 +117,7 @@ $space %export terminal_set_active, terminal_restore_active_display
 $space %export terminal_update, terminal_flush_input_active
 $space %export terminal_flush_input_idx, terminal_get_input_channel
 $space %export terminal_drain_output
+$space %export terminal_mouse_update
 $space %export terminal_power_get, terminal_power_set, terminal_power_reset
 $space %export terminal_power_suspend_all
 
@@ -134,6 +141,9 @@ $space %export terminal_power_suspend_all
 
 #define	TERM_COUNT		10
 #define	TERM_LINE_BUF_SIZE	256
+#define	TERM_MOUSE_BLINK_DIV	2
+#define	TERM_CELL_W		8
+#define	TERM_CELL_H		16
 
 static void	terminal_lazy_init(void);
 void		terminal_update(void);
@@ -144,6 +154,12 @@ typedef struct {
 	int		height;
 	int		cursor_x;
 	int		cursor_y;
+	int		mouse_enabled;
+	int		mouse_blink_visible;
+	int		mouse_cell_x;
+	int		mouse_cell_y;
+	int		mouse_buttons;
+	u64		mouse_next_tick;
 	u8		color;
 	u32		fg_rgb;
 	int		ansi_state;
@@ -204,7 +220,8 @@ terminal_draw_cell(int x, int y, char c, u8 color)
 {
 	kms_console_t	*con;
 	terminal_state_t *tty;
-	u32		 rgb;
+	u32		 fg;
+	u32		 bg;
 
 	con = terminal_con();
 	if (!con) {
@@ -213,11 +230,71 @@ terminal_draw_cell(int x, int y, char c, u8 color)
 
 	tty = &terminals[terminal_active];
 	if (tty->fg_rgb != 0xFFFFFFFF) {
-		rgb = tty->fg_rgb;
+		fg = tty->fg_rgb;
 	} else {
-		rgb = console_palette[color & 0x0F];
+		fg = console_palette[color & 0x0F];
 	}
-	rapi_console_glyph(con, (u32)(x * 8), (u32)(y * 16), c, rgb, 0x000000);
+	bg = 0x000000;
+	if (tty->mouse_enabled && tty->mouse_blink_visible &&
+	    tty->mouse_cell_x == x && tty->mouse_cell_y == y) {
+		bg = fg == 0x000000 ? 0xFFFFFF : fg;
+		fg = 0x000000;
+	}
+	rapi_console_glyph(con, (u32)(x * TERM_CELL_W),
+	    (u32)(y * TERM_CELL_H), c, fg, bg);
+}
+
+static void
+terminal_redraw_cell(const terminal_state_t *tty, int x, int y)
+{
+	const terminal_state_t	*self;
+	u16			 cell;
+	char			 c;
+	u8			 color;
+
+	self = tty;
+	if (!self || !self->cells) {
+		return;
+	}
+	if (x < 0 || y < 0 || x >= self->width || y >= self->height) {
+		return;
+	}
+	cell = self->cells[y * self->width + x];
+	c = (char)(cell & 0xFF);
+	color = (u8)((cell >> 8) & 0xFF);
+	terminal_draw_cell(x, y, c, color);
+}
+
+static u64
+terminal_mouse_blink_interval(void)
+{
+	u64	freq;
+	u64	interval;
+
+	freq = timer_get_frequency();
+	interval = freq / TERM_MOUSE_BLINK_DIV;
+	if (interval == 0) {
+		interval = 1;
+	}
+	return (interval);
+}
+
+static int
+terminal_mouse_cell_from_pixel(int pixel, int cell_size, int max)
+{
+	int	cell;
+
+	if (pixel < 0) {
+		return (0);
+	}
+	if (cell_size <= 0 || max <= 0) {
+		return (0);
+	}
+	cell = pixel / cell_size;
+	if (cell > max) {
+		cell = max;
+	}
+	return (cell);
 }
 
 static void
@@ -522,9 +599,6 @@ static void
 terminal_redraw(const terminal_state_t *tty)
 {
 	const terminal_state_t	*self;
-	u16			 cell;
-	char			 c;
-	u8			 color;
 	int			 y;
 	int			 x;
 
@@ -535,10 +609,7 @@ terminal_redraw(const terminal_state_t *tty)
 
 	for (y = 0; y < self->height; y++) {
 		for (x = 0; x < self->width; x++) {
-			cell = self->cells[y * self->width + x];
-			c = (char)(cell & 0xFF);
-			color = (u8)((cell >> 8) & 0xFF);
-			terminal_draw_cell(x, y, c, color);
+			terminal_redraw_cell(self, x, y);
 		}
 	}
 	if (g_con) {
@@ -578,6 +649,10 @@ terminal_scroll(terminal_state_t *tty, int active)
 	}
 
 	if (active) {
+		if (self->mouse_enabled) {
+			terminal_redraw(self);
+			return;
+		}
 		con = terminal_con();
 		if (con) {
 			rapi_console_scroll_up(con, 16, 0x000000);
@@ -782,6 +857,59 @@ terminal_get_input_channel(void)
 	return (terminal_input_channel);
 }
 
+int
+terminal_mouse_update(int idx, int enabled, int x, int y, int buttons)
+{
+	terminal_state_t	*term;
+	int			 old_enabled;
+	int			 old_visible;
+	int			 old_x;
+	int			 old_y;
+	int			 cell_x;
+	int			 cell_y;
+
+	terminal_lazy_init();
+	if (idx < 0 || idx >= TERM_COUNT) {
+		return (-API_ERR_INVAL);
+	}
+
+	term = &terminals[idx];
+	if (term->width <= 0 || term->height <= 0) {
+		return (-API_ERR_INVAL);
+	}
+
+	old_enabled = term->mouse_enabled;
+	old_visible = term->mouse_blink_visible;
+	old_x = term->mouse_cell_x;
+	old_y = term->mouse_cell_y;
+	cell_x = terminal_mouse_cell_from_pixel(x, TERM_CELL_W,
+	    term->width - 1);
+	cell_y = terminal_mouse_cell_from_pixel(y, TERM_CELL_H,
+	    term->height - 1);
+
+	term->mouse_enabled = enabled ? 1 : 0;
+	term->mouse_blink_visible = enabled ? 1 : 0;
+	term->mouse_cell_x = cell_x;
+	term->mouse_cell_y = cell_y;
+	term->mouse_buttons = buttons;
+	term->mouse_next_tick =
+	    timer_get_ticks() + terminal_mouse_blink_interval();
+
+	if (idx == terminal_active && term->state == TERM_STATE_ACTIVE) {
+		if (old_enabled && old_visible) {
+			terminal_redraw_cell(term, old_x, old_y);
+		}
+		if (term->mouse_enabled) {
+			terminal_redraw_cell(term, cell_x, cell_y);
+		}
+		if (g_con) {
+			kms_console_flush(g_con);
+		}
+	}
+
+	return (0);
+}
+
 void
 terminal_flush_input_idx(int idx)
 {
@@ -836,7 +964,25 @@ terminal_restore_active_display(void)
 void
 terminal_update(void)
 {
+	terminal_state_t	*term;
+	u64			 now;
 	int	target;
+
+	term = &terminals[terminal_active];
+	if (term->state == TERM_STATE_ACTIVE && term->mouse_enabled) {
+		now = timer_get_ticks();
+		if (now >= term->mouse_next_tick) {
+			term->mouse_blink_visible =
+			    term->mouse_blink_visible ? 0 : 1;
+			term->mouse_next_tick =
+			    now + terminal_mouse_blink_interval();
+			terminal_redraw_cell(term, term->mouse_cell_x,
+			    term->mouse_cell_y);
+			if (g_con) {
+				kms_console_flush(g_con);
+			}
+		}
+	}
 
 	if (terminal_indicator_active &&
 	    timer_get_ticks() >= terminal_indicator_end_time) {
@@ -950,6 +1096,12 @@ terminal_init(void)
 		term->height = height;
 		term->cursor_x = 0;
 		term->cursor_y = 0;
+		term->mouse_enabled = 0;
+		term->mouse_blink_visible = 0;
+		term->mouse_cell_x = 0;
+		term->mouse_cell_y = 0;
+		term->mouse_buttons = 0;
+		term->mouse_next_tick = 0;
 		term->color = 0x07;
 		term->ansi_state = 0;
 		term->fg_rgb = 0xFFFFFFFF;
@@ -1073,6 +1225,12 @@ terminal_reinit(void)
 		}
 		if (term->cursor_y >= new_h) {
 			term->cursor_y = 0;
+		}
+		if (term->mouse_cell_x >= new_w) {
+			term->mouse_cell_x = new_w - 1;
+		}
+		if (term->mouse_cell_y >= new_h) {
+			term->mouse_cell_y = new_h - 1;
 		}
 	}
 
@@ -1571,6 +1729,12 @@ terminal_reset_one(int index)
 
 	term->cursor_x = 0;
 	term->cursor_y = 0;
+	term->mouse_enabled = 0;
+	term->mouse_blink_visible = 0;
+	term->mouse_cell_x = 0;
+	term->mouse_cell_y = 0;
+	term->mouse_buttons = 0;
+	term->mouse_next_tick = 0;
 	term->color = 0x07;
 	term->fg_rgb = 0xFFFFFFFF;
 	term->ansi_state = 0;
