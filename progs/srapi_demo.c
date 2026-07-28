@@ -1,8 +1,11 @@
 /* !DEFINES!
 
 $define %type demo_vertex as fixed point colored 2D vertex
+$define %type demo_terminal_guard as saved terminal power state
 $define %func sleep_ms as procedure with args int
 $define %func now_ms as function with args void
+$define %func demo_terminal_suspend as procedure with args guard
+$define %func demo_terminal_restore as procedure with args guard
 $define %func color_cycle as function with args frame, phase
 $define %func input_color as function with args old color, input event
 $define %func update_input_color as function with args device, old color
@@ -18,6 +21,7 @@ $define %func main as start with args int, char **, char **
 /* !SPACE!
 
 $space %internal sleep_ms, now_ms, color_cycle, input_color
+$space %internal demo_terminal_suspend, demo_terminal_restore
 $space %internal update_input_color, write_vertices, create_demo_pipeline
 $space %internal add_clear_rect, clear_demo_regions, render_frame
 $space %export main
@@ -45,6 +49,12 @@ struct demo_vertex {
 	int32_t		x;
 	int32_t		y;
 	uint32_t	color;
+};
+
+struct demo_terminal_guard {
+	int	tty;
+	int	state;
+	int	suspended;
 };
 
 static const struct srapi_vm_inst demo_vs[] = {
@@ -104,6 +114,54 @@ now_ms(void)
 		return (0);
 	}
 	return (ti.uptime_sec * 1000ULL + ti.uptime_nsec / 1000000ULL);
+}
+
+static void
+demo_terminal_suspend(struct demo_terminal_guard *guard)
+{
+	struct api_term_info	info;
+	struct api_term_power	power;
+
+	if (!guard) {
+		return;
+	}
+
+	memset(guard, 0, sizeof(*guard));
+	guard->tty = -1;
+	if (termInfo(&info) != 0) {
+		return;
+	}
+
+	guard->tty = info.tty;
+	guard->state = info.state;
+	if (info.state != TERM_STATE_ACTIVE) {
+		return;
+	}
+
+	memset(&power, 0, sizeof(power));
+	power.op = API_TERM_POWER_CHANGE;
+	power.tty = info.tty;
+	power.state = TERM_STATE_SUSPENDED;
+	if (termPower(&power) == 0) {
+		guard->suspended = 1;
+	}
+}
+
+static void
+demo_terminal_restore(struct demo_terminal_guard *guard)
+{
+	struct api_term_power	power;
+
+	if (!guard || !guard->suspended) {
+		return;
+	}
+
+	memset(&power, 0, sizeof(power));
+	power.op = API_TERM_POWER_CHANGE;
+	power.tty = guard->tty;
+	power.state = guard->state;
+	(void)termPower(&power);
+	guard->suspended = 0;
 }
 
 static uint32_t
@@ -361,6 +419,7 @@ main(int argc, char **argv, char **envp)
 	struct srapi_device_desc		ddesc;
 	struct srapi_device_info		info;
 	struct srapi_buffer_desc		bdesc;
+	struct demo_terminal_guard	term_guard;
 	struct demo_vertex		verts[DEMO_VERTEX_COUNT];
 	srapi_instance_t		*instance;
 	srapi_device_t			*device;
@@ -368,6 +427,7 @@ main(int argc, char **argv, char **envp)
 	srapi_pipeline_t		*pipeline;
 	srapi_buffer_t			*vertex_buffer;
 	srapi_cmd_buffer_t		*cmd;
+	const char			*failure;
 	uint64_t			start, now;
 	uint32_t			frame, square_color;
 	int				ret;
@@ -381,6 +441,8 @@ main(int argc, char **argv, char **envp)
 	memset(&ddesc, 0, sizeof(ddesc));
 	memset(&bdesc, 0, sizeof(bdesc));
 	memset(&info, 0, sizeof(info));
+	memset(&term_guard, 0, sizeof(term_guard));
+	term_guard.tty = -1;
 	instance = NULL;
 	device = NULL;
 	vs = NULL;
@@ -388,6 +450,7 @@ main(int argc, char **argv, char **envp)
 	pipeline = NULL;
 	vertex_buffer = NULL;
 	cmd = NULL;
+	failure = NULL;
 
 	ret = srapiCreateInstance(&idesc, &instance);
 	if (ret != SRAPI_OK) {
@@ -422,6 +485,7 @@ main(int argc, char **argv, char **envp)
 		return (1);
 	}
 
+	demo_terminal_suspend(&term_guard);
 	start = now_ms();
 	frame = 0;
 	square_color = 0xff3880ffU;
@@ -430,13 +494,13 @@ main(int argc, char **argv, char **envp)
 		write_vertices(verts, frame, square_color);
 		ret = srapiBufferWrite(vertex_buffer, 0, verts, sizeof(verts));
 		if (ret != SRAPI_OK) {
-			printf("srapi_demo: upload failed %d\n", ret);
+			failure = "upload";
 			break;
 		}
 		ret = render_frame(cmd, pipeline, vertex_buffer, frame,
 		    info.width, info.height);
 		if (ret != SRAPI_OK) {
-			printf("srapi_demo: render failed %d\n", ret);
+			failure = "render";
 			break;
 		}
 		sleep_ms(DEMO_FRAME_MS);
@@ -448,6 +512,7 @@ main(int argc, char **argv, char **envp)
 		}
 	}
 
+	demo_terminal_restore(&term_guard);
 	srapiDestroyCommandBuffer(cmd);
 	srapiDestroyBuffer(vertex_buffer);
 	srapiDestroyPipeline(pipeline);
@@ -455,6 +520,10 @@ main(int argc, char **argv, char **envp)
 	srapiDestroyShader(vs);
 	srapiDestroyDevice(device);
 	srapiDestroyInstance(instance);
+	if (failure) {
+		printf("srapi_demo: %s failed %d\n", failure, ret);
+		return (1);
+	}
 	printf("srapi_demo: done\n");
 	return (0);
 }
