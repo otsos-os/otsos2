@@ -41,12 +41,32 @@ const void *drm_fbdev_get_boot_info(void) {
   return &g_boot;
 }
 
+static const drm_driver_t *
+boot_select_driver(const drm_fbdev_boot_t *boot, const char *preferred)
+{
+  const drm_driver_t *drv;
+
+  if (preferred && preferred[0]) {
+    return drm_driver_select(boot, preferred);
+  }
+
+  drv = drm_driver_get_fbdev();
+  if (drv && (!drv->probe || drv->probe(boot) == 0)) {
+    return drv;
+  }
+  if (drv) {
+    drivers_log("[DRM] boot framebuffer driver probe failed\n");
+  }
+
+  return drm_driver_select(boot, NULL);
+}
+
 static int boot_init_common(const drm_fbdev_boot_t *boot,
                             const char *preferred) {
   if (!boot) {
     return -1;
   }
-  const drm_driver_t *drv = drm_driver_select(boot, preferred);
+  const drm_driver_t *drv = boot_select_driver(boot, preferred);
   if (!drv) {
     drivers_log("[DRM] no suitable driver\n");
     return -1;
