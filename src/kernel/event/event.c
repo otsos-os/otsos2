@@ -564,9 +564,9 @@ process_change(kqueue_t *kq, struct kevent *kev)
 				}
 			}
 
-			printk("[EVENT] added knote "
+			/*printk("[EVENT] added knote "
 			    "ident=%llu filter=%d\n",
-			    kev->ident, kev->filter);
+			    kev->ident, kev->filter);*/
 
 			if (!kn->disabled && ops->event) {
 				pending = ops->event(kn, 0);

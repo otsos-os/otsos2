@@ -98,8 +98,8 @@ filt_timer_attach(knote_t *kn)
 		timer_list[timer_count++] = kn;
 	}
 
-	printk("[EVFILT_TIMER] attach: ident=%llu "
-	    "period=%llu ticks\n", kn->ident, period_ticks);
+	/*printk("[EVFILT_TIMER] attach: ident=%llu "
+	    "period=%llu ticks\n", kn->ident, period_ticks);*/
 
 	return (0);
 }
