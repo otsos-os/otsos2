@@ -14,6 +14,11 @@ $define %func create_demo_pipeline as function with args device, outputs
 $define %func add_clear_rect as function with args cmd, bounds, rect
 $define %func clear_demo_regions as function with args cmd, frame, bounds
 $define %func render_frame as function with args command state, frame
+$define %func read_demo_mode as function with args void
+$define %func run_srapi_demo as function with args void
+$define %func draw_libg_cursor as procedure with args libg context
+$define %func draw_libg_demo as function with args libg context, state
+$define %func run_libg_demo as function with args void
 $define %func main as start with args int, char **, char **
 
 */
@@ -24,6 +29,9 @@ $space %internal sleep_ms, now_ms, color_cycle, input_color
 $space %internal demo_terminal_suspend, demo_terminal_restore
 $space %internal update_input_color, write_vertices, create_demo_pipeline
 $space %internal add_clear_rect, clear_demo_regions, render_frame
+$space %internal read_demo_mode, run_srapi_demo, draw_libg_cursor
+$space %internal draw_libg_demo
+$space %internal run_libg_demo
 $space %export main
 
 */
@@ -33,6 +41,7 @@ $space %export main
  */
 
 #include <native.h>
+#include <libg.h>
 #include <srapi.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -44,6 +53,8 @@ $space %export main
 #define DEMO_DURATION_MS	10000
 #define DEMO_INPUT_BATCH	16
 #define FX(n, d)		SRAPI_FIXED_FROM_RATIO(n, d)
+#define DEMO_MODE_SRAPI		1
+#define DEMO_MODE_LIBG		2
 
 struct demo_vertex {
 	int32_t		x;
@@ -55,6 +66,13 @@ struct demo_terminal_guard {
 	int	tty;
 	int	state;
 	int	suspended;
+};
+
+struct libg_demo_state {
+	char		text[64];
+	int32_t		slider;
+	uint32_t	clicks;
+	uint32_t	frame;
 };
 
 static const struct srapi_vm_inst demo_vs[] = {
@@ -412,8 +430,8 @@ render_frame(srapi_cmd_buffer_t *cmd, srapi_pipeline_t *pipeline,
 	return (srapiSubmit(cmd));
 }
 
-int
-main(int argc, char **argv, char **envp)
+static int
+run_srapi_demo(void)
 {
 	struct srapi_instance_desc	idesc;
 	struct srapi_device_desc		ddesc;
@@ -432,11 +450,6 @@ main(int argc, char **argv, char **envp)
 	uint32_t			frame, square_color;
 	int				ret;
 
-	(void)argc;
-	(void)argv;
-	(void)envp;
-
-	(void)personality(API_PERSONALITY_NATIVE);
 	memset(&idesc, 0, sizeof(idesc));
 	memset(&ddesc, 0, sizeof(ddesc));
 	memset(&bdesc, 0, sizeof(bdesc));
@@ -526,4 +539,273 @@ main(int argc, char **argv, char **envp)
 	}
 	printf("srapi_demo: done\n");
 	return (0);
+}
+
+static int
+read_demo_mode(void)
+{
+	ssize_t	n;
+	char	ch;
+
+	termPrint("srapi_demo\n");
+	termPrint("  1 - SRAPI render test\n");
+	termPrint("  2 - LibG widget test\n");
+	termPrint("select: ");
+	for (;;) {
+		n = termReadFlags(&ch, 1, TERM_READ_IGNORE_SIGINT);
+		if (n <= 0) {
+			termPrint("\n");
+			return (DEMO_MODE_SRAPI);
+		}
+		if (ch == '1') {
+			termPrint("1\n");
+			return (DEMO_MODE_SRAPI);
+		}
+		if (ch == '2') {
+			termPrint("2\n");
+			return (DEMO_MODE_LIBG);
+		}
+	}
+}
+
+static void
+draw_libg_cursor(libg_context_t *ui)
+{
+	int32_t		x, y;
+	uint32_t	buttons, color, shadow;
+
+	libgMousePosition(ui, &x, &y, &buttons);
+	shadow = 0xff050607U;
+	color = (buttons & SRAPI_MOUSE_LEFT) != 0 ? 0xff23a6d5U :
+	    0xfff2f5f8U;
+
+	libgLine(ui, x - 8, y + 1, x - 2, y + 1, shadow);
+	libgLine(ui, x + 2, y + 1, x + 8, y + 1, shadow);
+	libgLine(ui, x + 1, y - 8, x + 1, y - 2, shadow);
+	libgLine(ui, x + 1, y + 2, x + 1, y + 8, shadow);
+	libgStrokeCircle(ui, x + 1, y + 1, 4, shadow);
+
+	libgLine(ui, x - 8, y, x - 2, y, color);
+	libgLine(ui, x + 2, y, x + 8, y, color);
+	libgLine(ui, x, y - 8, x, y - 2, color);
+	libgLine(ui, x, y + 2, x, y + 8, color);
+	libgFillCircle(ui, x, y, 2, color);
+}
+
+static int
+draw_libg_demo(libg_context_t *ui, struct libg_demo_state *state)
+{
+	libg_rect_t	panel, rect;
+	uint32_t	width, height, button_state, field_state, slider_state;
+	int32_t		margin, x, y, right_x, shape_y;
+	char		line[80];
+	int		close_clicked;
+
+	width = libgWidth(ui);
+	height = libgHeight(ui);
+	margin = width >= 640 ? 28 : 14;
+	close_clicked = 0;
+
+	panel.x = margin;
+	panel.y = margin;
+	panel.width = (int32_t)width - margin * 2;
+	panel.height = (int32_t)height - margin * 2;
+	if (panel.width < 260) {
+		panel.width = (int32_t)width;
+		panel.x = 0;
+	}
+	if (panel.height < 220) {
+		panel.height = (int32_t)height;
+		panel.y = 0;
+	}
+
+	libgPanel(ui, panel);
+	rect.x = panel.x + panel.width - 42;
+	rect.y = panel.y + 10;
+	rect.width = 32;
+	rect.height = 28;
+	if (libgButton(ui, 100, rect, "X") & LIBG_WIDGET_CLICKED) {
+		close_clicked = 1;
+	}
+
+	x = panel.x + 20;
+	y = panel.y + 18;
+	libgTextScale(ui, x, y, "TEST", 0xfff2f5f8U, 2);
+	y += 34;
+	libgText(ui, x, y, "GUI ", 0xffa7b0bbU);
+	y += 28;
+
+	rect.x = x;
+	rect.y = y;
+	rect.width = 150;
+	rect.height = 42;
+	button_state = libgButton(ui, 1, rect, "BUTTON");
+	if (button_state & LIBG_WIDGET_CLICKED) {
+		state->clicks++;
+	}
+	snprintf(line, sizeof(line), "CLICKS %u", state->clicks);
+	libgTextScale(ui, x + 170, y + 12, line, 0xfff2f5f8U, 2);
+	y += 60;
+
+	libgText(ui, x, y, "TEXT FIELD", 0xffa7b0bbU);
+	y += 14;
+	rect.x = x;
+	rect.y = y;
+	rect.width = panel.width > 390 ? 320 : panel.width - 40;
+	rect.height = 36;
+	field_state = libgTextField(ui, 2, rect, state->text,
+	    sizeof(state->text));
+	y += 52;
+
+	snprintf(line, sizeof(line), "SLIDER %d", state->slider);
+	libgText(ui, x, y, line, 0xffa7b0bbU);
+	y += 14;
+	rect.x = x;
+	rect.y = y;
+	rect.width = panel.width > 390 ? 320 : panel.width - 40;
+	rect.height = 32;
+	slider_state = libgSlider(ui, 3, rect, 0, 100, &state->slider);
+	y += 54;
+
+	snprintf(line, sizeof(line), "TEXT: %s", state->text);
+	libgText(ui, x, y, line, 0xfff2f5f8U);
+	if (field_state & LIBG_WIDGET_SUBMIT) {
+		libgText(ui, x, y + 14, "ENTER PRESSED", 0xff23a6d5U);
+	} else if (slider_state & LIBG_WIDGET_CHANGED) {
+		libgText(ui, x, y + 14, "SLIDER CHANGED", 0xff23a6d5U);
+	} else {
+		libgText(ui, x, y + 14, "CLICK FIELD TO TYPE", 0xffa7b0bbU);
+	}
+
+	right_x = panel.x + panel.width - 190;
+	if (right_x < x + 350) {
+		right_x = x;
+		shape_y = y + 46;
+	} else {
+		shape_y = panel.y + 92;
+	}
+
+	libgText(ui, right_x, shape_y - 22, "PRIMITIVES", 0xffa7b0bbU);
+	rect.x = right_x;
+	rect.y = shape_y;
+	rect.width = 74;
+	rect.height = 74;
+	libgFillRect(ui, rect, 0xfff2c14eU);
+	libgStrokeRect(ui, rect, 0xff2a3038U);
+	libgFillCircle(ui, right_x + 130, shape_y + 37, 38, 0xff75d97cU);
+	libgStrokeCircle(ui, right_x + 130, shape_y + 37, 38, 0xff2a3038U);
+	libgLine(ui, right_x, shape_y + 100, right_x + 168, shape_y + 132,
+	    0xff23a6d5U);
+	libgLine(ui, right_x, shape_y + 132, right_x + 168, shape_y + 100,
+	    0xffe66a5cU);
+
+	draw_libg_cursor(ui);
+	state->frame++;
+	return (close_clicked);
+}
+
+static int
+run_libg_demo(void)
+{
+	struct srapi_instance_desc	idesc;
+	struct srapi_device_desc		ddesc;
+	struct srapi_device_info		info;
+	struct demo_terminal_guard	term_guard;
+	struct libg_demo_state		state;
+	srapi_instance_t		*instance;
+	srapi_device_t			*device;
+	libg_context_t			*ui;
+	libg_style_t			style;
+	const char			*failure;
+	int				ret, rc, close_requested;
+
+	memset(&idesc, 0, sizeof(idesc));
+	memset(&ddesc, 0, sizeof(ddesc));
+	memset(&info, 0, sizeof(info));
+	memset(&term_guard, 0, sizeof(term_guard));
+	memset(&state, 0, sizeof(state));
+	term_guard.tty = -1;
+	instance = NULL;
+	device = NULL;
+	ui = NULL;
+	failure = NULL;
+	ret = 0;
+
+	ret = srapiCreateInstance(&idesc, &instance);
+	if (ret != SRAPI_OK) {
+		printf("srapi_demo: instance failed %d\n", ret);
+		return (1);
+	}
+	ret = srapiCreateDevice(instance, &ddesc, &device);
+	if (ret != SRAPI_OK) {
+		printf("srapi_demo: device failed %d\n", ret);
+		srapiDestroyInstance(instance);
+		return (1);
+	}
+	ret = srapiDeviceInfo(device, &info);
+	if (ret == SRAPI_OK) {
+		printf("srapi_demo: libg %ux%u %ubpp driver=%s\n",
+		    info.width, info.height, info.bpp, info.driver_name);
+	}
+
+	libgDefaultStyle(&style);
+	rc = libgCreate(device, &style, &ui);
+	if (rc != LIBG_OK) {
+		printf("srapi_demo: libg create failed %d\n", rc);
+		srapiDestroyDevice(device);
+		srapiDestroyInstance(instance);
+		return (1);
+	}
+
+	strncpy(state.text, "hello libg", sizeof(state.text) - 1);
+	state.slider = 50;
+	(void)srapiFlushInput(device);
+
+	demo_terminal_suspend(&term_guard);
+	close_requested = 0;
+	for (;;) {
+		rc = libgBegin(ui, style.background);
+		if (rc != LIBG_OK) {
+			failure = "libg begin";
+			break;
+		}
+		close_requested = draw_libg_demo(ui, &state);
+		rc = libgPresent(ui);
+		if (rc != LIBG_OK) {
+			failure = "libg present";
+			break;
+		}
+		if (close_requested) {
+			break;
+		}
+		sleep_ms(DEMO_FRAME_MS);
+	}
+
+	libgDestroy(ui);
+	srapiDestroyDevice(device);
+	srapiDestroyInstance(instance);
+	demo_terminal_restore(&term_guard);
+	if (failure) {
+		printf("srapi_demo: %s failed %d\n", failure, rc);
+		return (1);
+	}
+	printf("srapi_demo: libg done\n");
+	return (0);
+}
+
+int
+main(int argc, char **argv, char **envp)
+{
+	int	mode;
+
+	(void)argc;
+	(void)argv;
+	(void)envp;
+
+	(void)personality(API_PERSONALITY_NATIVE);
+	mode = read_demo_mode();
+	if (mode == DEMO_MODE_LIBG) {
+		return (run_libg_demo());
+	}
+	return (run_srapi_demo());
 }

@@ -57,6 +57,7 @@ MUSL_LIBC = $(MUSL_DIR)/lib/libc.a
 MUSL_CRT1 = $(MUSL_DIR)/lib/crt1.o
 NATIVE_DIR = ../libc/native
 LIBSRAPI_DIR = ../libc/LibSRAPI
+LIBG_DIR = ../libc/LibG
 LIBELF_DIR = ../libc/LibELF
 LIBEMIT_DIR = ../libc/LibEmit
 LIBSSH_DIR = ../libc/LibSSH
@@ -66,6 +67,7 @@ NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
 NATIVE_HDR = $(NATIVE_DIR)/include/native.h
 LIBSRAPI = $(LIBSRAPI_DIR)/lib/libsrapi.a
+LIBG = $(LIBG_DIR)/lib/libg.a
 LIBAS = $(TOOLCHAIN_AS_DIR)/lib/libas.a
 LIBELF = $(LIBELF_DIR)/lib/libelf.a
 LIBEMIT = $(LIBEMIT_DIR)/lib/libemit.a
@@ -105,6 +107,10 @@ $(NATIVE_LIBC) $(NATIVE_SO) $(NATIVE_CRT0): FORCE
 $(LIBSRAPI): FORCE
 	@echo "  MAKE    LibSRAPI"
 	@$(MAKE) -C $(LIBSRAPI_DIR)
+
+$(LIBG): $(LIBSRAPI) FORCE
+	@echo "  MAKE    LibG"
+	@$(MAKE) -C $(LIBG_DIR)
 
 $(LIBAS): FORCE
 	@echo "  MAKE    progs/toolchain/as"
@@ -146,11 +152,12 @@ $(CURSORD_BIN): $(NATIVE_CRT0) $(CURSORD_OBJS) $(NATIVE_SO)
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
-$(SRAPI_DEMO_BIN): $(NATIVE_CRT0) $(SRAPI_DEMO_OBJS) $(LIBSRAPI) \
+$(SRAPI_DEMO_BIN): $(NATIVE_CRT0) $(SRAPI_DEMO_OBJS) $(LIBG) $(LIBSRAPI) \
     $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO)
 	@echo "  LLD      $@"
 	@$(LD) $(NATIVE_DYN_LDFLAGS) $(NATIVE_CRT0) $(SRAPI_DEMO_OBJS) \
-	    $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO) -o $@
+	    $(LIBG) $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) \
+	    $(NATIVE_SO) -o $@
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
@@ -275,10 +282,12 @@ demons/cursord.o: demons/cursord.c $(NATIVE_HDR)
 	@echo "  CC      $< (native libc)"
 	@$(CC) $(CFLAGS) -fPIE -I$(NATIVE_DIR)/include -c $< -o $@
 
-srapi_demo.o: srapi_demo.c $(NATIVE_HDR) $(LIBSRAPI_DIR)/include/srapi.h
-	@echo "  CC      $< (LibSRAPI)"
+srapi_demo.o: srapi_demo.c $(NATIVE_HDR) $(LIBSRAPI_DIR)/include/srapi.h \
+    $(LIBG_DIR)/include/libg.h $(LIBG_DIR)/include/font.h
+	@echo "  CC      $< (LibSRAPI/LibG)"
 	@$(CC) $(CFLAGS) -fPIE -I$(NATIVE_DIR)/include \
-	    -I$(LIBSRAPI_DIR)/include -c $< -o $@
+	    -I$(LIBSRAPI_DIR)/include -I$(LIBG_DIR)/include \
+	    -c $< -o $@
 
 musl_test.o: musl_test.c
 	@echo "  CC      $< (musl)"
@@ -292,5 +301,6 @@ clean:
 	$(MAKE) -C $(TOOLCHAIN_AS_DIR) clean
 	$(MAKE) -C $(TOOLCHAIN_LD_DIR) clean
 	$(MAKE) -C $(LIBSRAPI_DIR) clean
+	$(MAKE) -C $(LIBG_DIR) clean
 
 .PHONY: all clean yabox FORCE
