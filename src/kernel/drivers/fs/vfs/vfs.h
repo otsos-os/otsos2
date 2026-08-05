@@ -179,6 +179,7 @@ typedef struct vnode {
 			    u32, u32 *);
 	int		(*ioctl_fn)(struct vnode *, u64, void *);
 	int		(*readlink_fn)(struct vnode *, char *, size_t);
+	void		(*release_fn)(struct vnode *);
 } vnode_t;
 
 struct vfs_back_ops;

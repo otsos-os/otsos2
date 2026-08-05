@@ -35,6 +35,8 @@ $define %func newbus_driver_remove_module as function with args module
 $define %func newbus_driver_range_busy as function with args memory range
 $define %func newbus_device_create_root as function with args const char *, int
 $define %func newbus_device_set_driver as procedure with args device_t, driver_t *, devclass_t *
+$define %func newbus_device_find_name as function with args const char *
+$define %func newbus_device_find_nameunit as function with args const char *
 $define %func device_add_child as function with args device_t, const char *, int
 $define %func newbus_configure_pass as procedure with args int
 $define %func newbus_reprobe as procedure with args void
@@ -50,12 +52,14 @@ $space %internal newbus_attach_device, newbus_configure_one_pass
 $space %export newbus_driver_add_module, newbus_driver_remove_module
 $space %export newbus_driver_range_busy, newbus_device_create_root
 $space %export newbus_device_set_driver, device_add_child
+$space %export newbus_device_find_name, newbus_device_find_nameunit
 $space %export newbus_configure_pass, newbus_configure
 $space %export newbus_reprobe, newbus_shutdown
 
 */
 
 #include <kernel/drivers/newbus/newbus.h>
+#include <kernel/smp/smp.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -412,6 +416,48 @@ device_set_ivars(device_t dev, void *ivars)
 	if (dev != NULL) {
 		dev->ivars = ivars;
 	}
+}
+
+device_t
+newbus_device_find_name(const char *name)
+{
+	device_t	dev;
+	int		i;
+
+	if (name == NULL || name[0] == '\0') {
+		return (NULL);
+	}
+	dev = NULL;
+	smp_lock();
+	for (i = 0; i < newbus_device_count; i++) {
+		if (strcmp(newbus_devices[i]->name, name) == 0) {
+			dev = newbus_devices[i];
+			break;
+		}
+	}
+	smp_unlock();
+	return (dev);
+}
+
+device_t
+newbus_device_find_nameunit(const char *nameunit)
+{
+	device_t	dev;
+	int		i;
+
+	if (nameunit == NULL || nameunit[0] == '\0') {
+		return (NULL);
+	}
+	dev = NULL;
+	smp_lock();
+	for (i = 0; i < newbus_device_count; i++) {
+		if (strcmp(newbus_devices[i]->nameunit, nameunit) == 0) {
+			dev = newbus_devices[i];
+			break;
+		}
+	}
+	smp_unlock();
+	return (dev);
 }
 
 static int

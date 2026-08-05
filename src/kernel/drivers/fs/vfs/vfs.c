@@ -341,6 +341,9 @@ vnode_release(vnode_t *vn)
 		return;
 	}
 
+	if (vn->release_fn) {
+		vn->release_fn(vn);
+	}
 	if (vn->data_owned && vn->data) {
 		kmem_free(vn->data);
 	}

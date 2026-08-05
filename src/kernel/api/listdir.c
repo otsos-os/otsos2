@@ -25,6 +25,7 @@
  */
 
 #include <kernel/drivers/fs/vfs/vfs.h>
+#include <kernel/drivers/newbus/driver_ns.h>
 #include <kernel/api/api.h>
 #include <kernel/other/restrict.h>
 #include <kernel/useraddr.h>
@@ -106,6 +107,7 @@ int
 api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries)
 {
 	vfs_dirent_t	entries[API_FS_LISTDIR_BATCH];
+	vfs_dirent_t	root_entry;
 	vnode_t		*vn;
 	size_t		user_size;
 	u32		listed, count, want, i;
@@ -140,12 +142,19 @@ api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries)
 	}
 
 	vn = NULL;
-	ret = vfs_resolve(kpath, &vn);
-	if (ret != 0) {
-		return (ret);
-	}
-	if (vn == NULL) {
-		return (-API_ERR_NOT_FOUND);
+	if (driver_ns_is_path(kpath)) {
+		vn = driver_ns_lookup(kpath);
+		if (vn == NULL) {
+			return (-API_ERR_NOT_FOUND);
+		}
+	} else {
+		ret = vfs_resolve(kpath, &vn);
+		if (ret != 0) {
+			return (ret);
+		}
+		if (vn == NULL) {
+			return (-API_ERR_NOT_FOUND);
+		}
 	}
 	if (vn->type != VDIR) {
 		vnode_release(vn);
@@ -176,6 +185,14 @@ api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries)
 			copy_dirent_to_user(&buf[listed + i], &entries[i]);
 		}
 		listed += count;
+	}
+
+	if (strcmp(kpath, "/") == 0 && listed < max_entries) {
+		memset(&root_entry, 0, sizeof(root_entry));
+		memcpy(root_entry.name, "Driver", 7);
+		root_entry.type = VDIR;
+		copy_dirent_to_user(&buf[listed], &root_entry);
+		listed++;
 	}
 
 	vnode_release(vn);

@@ -72,6 +72,15 @@ Monolithic kernel with the following rough layers:
   `PSEUDO_DRIVER_MODULE`; attach ordering is controlled by pass/order. Keep
   `kernel.c`, `interrupts/handlers.c`, `drivers/newbus/nexus.c`, PCI core, DRM
   core, VFS core, and DevFS registries free of concrete driver enumeration.
+  Drivers may also expose named I/O interfaces via
+  `newbus_interface_register`/`newbus_interface_unregister`
+  (`src/kernel/drivers/newbus/interface.c`); an interface is a per-device
+  table of read/write/ioctl/stat callbacks. Open interface handles pin the
+  interface so a KOFO module cannot be unloaded while a vnode references it.
+  `src/kernel/drivers/newbus/driver_ns.c` provides the native-only `/Driver`
+  namespace: `/Driver/<device>/<interface>` resolves to newbus interfaces from
+  the native API layer (open/listdir/stat). It is deliberately not mounted in
+  VFS and is invisible to the POSIX personality, which keeps using `/dev`.
   Nexus creates only generic buses (`firmware`, `platform`, `isa`, `pseudo`);
   PCI creates generic function children; drivers claim devices via probe.
   Resources, IRQs, and timer polling must flow through `bus_set_resource`,
@@ -376,6 +385,10 @@ User need to test, dont run test manually, ask user.
   links or large files. POSIX personality uses the VFS and devfs on top of it.
 - POSIX personality is opt-in per process via `CALL_PERSONALITY` (`0xFFFF`);
   default is native `PERSONALITY_OTSOS`.
+- `/Driver` is a native-ABI-only object namespace over newbus; do not mount it
+  in VFS and do not expose it to POSIX syscalls. POSIX programs use `/dev`.
+  `vnode_t.release_fn` is the generic vnode destructor hook used by the
+  namespace to release pinned interface handles.
 - POSIX `mremap(2)` is implemented in `api/posix/posix_mem.c` on top of
   VMA clipping/relocation helpers in `mm/vm/vm_map.c`; `MREMAP_DONTUNMAP`
   deliberately returns `EINVAL` because its Linux userfaultfd semantics are not

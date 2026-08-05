@@ -33,6 +33,7 @@ $define %type resource_t as allocated bus resource
 $define %type newbus_module_t as linker-set driver declaration
 $define %type newbus_bootinfo_t as boot-discovered firmware resource state
 $define %type newbus_device_state_t as device lifecycle state enum
+$define %type newbus_interface_t as named driver I/O interface table
 
 $define %func newbus_bootstrap as procedure with args newbus_bootinfo_t *
 $define %func newbus_register_linker_modules as procedure with args void
@@ -50,6 +51,15 @@ $define %func newbus_device_count_get as function with args void
 $define %func newbus_device_get as function with args int
 $define %func newbus_driver_count_get as function with args void
 $define %func newbus_driver_module_get as function with args int
+$define %func newbus_interface_register as function with args device_t, interface
+$define %func newbus_interface_unregister as function with args device_t, interface
+$define %func newbus_interface_count as function with args device_t
+$define %func newbus_interface_get as function with args device_t, int
+$define %func newbus_interface_find as function with args device_t, const char *
+$define %func newbus_interface_open as function with args device_t, const char *
+$define %func newbus_interface_close as procedure with args int
+$define %func newbus_device_find_name as function with args const char *
+$define %func newbus_device_find_nameunit as function with args const char *
 $define %func newbus_config_driver_enabled as function with args const newbus_module_t *
 $define %func newbus_config_device_enabled as function with args device_t
 $define %func newbus_config_bus_enabled as function with args const char *
@@ -75,6 +85,11 @@ $space %export device_add_child, device_find_child
 $space %export device_get_name, device_get_nameunit
 $space %export newbus_device_count_get, newbus_device_get
 $space %export newbus_driver_count_get, newbus_driver_module_get
+$space %export newbus_interface_register, newbus_interface_unregister
+$space %export newbus_interface_count, newbus_interface_get
+$space %export newbus_interface_find, newbus_interface_open
+$space %export newbus_interface_close
+$space %export newbus_device_find_name, newbus_device_find_nameunit
 $space %export newbus_config_driver_enabled
 $space %export newbus_config_device_enabled, newbus_config_bus_enabled
 $space %export newbus_config_probe_allowed
@@ -90,6 +105,7 @@ $space %export bus_setup_poll, newbus_poll_dispatch
 #define KERNEL_DRIVERS_NEWBUS_NEWBUS_H
 
 #include <mlibc/mlibc.h>
+#include <kernel/drivers/fs/vfs/vfs.h>
 
 #define	NEWBUS_MAX_DEVICES		256
 #define	NEWBUS_MAX_DRIVERS		256
@@ -97,6 +113,7 @@ $space %export bus_setup_poll, newbus_poll_dispatch
 #define	NEWBUS_MAX_FAILED_MODULES	8
 #define	NEWBUS_MAX_INTR_HANDLERS	128
 #define	NEWBUS_MAX_POLL_HOOKS		128
+#define	NEWBUS_MAX_INTERFACES		256
 #define	NEWBUS_NAME_MAX		32
 #define	NEWBUS_NAMEUNIT_MAX	48
 
@@ -226,6 +243,16 @@ struct newbus_driver {
 	void		*priv;
 };
 
+typedef struct newbus_interface {
+	const char	*name;
+	int		(*read)(device_t dev, void *buf, u64 count,
+			    u64 offset);
+	int		(*write)(device_t dev, const void *buf, u64 count,
+			    u64 offset);
+	int		(*ioctl)(device_t dev, u64 cmd, void *arg);
+	int		(*stat)(device_t dev, posix_stat_t *st);
+} newbus_interface_t;
+
 #define	NEWBUS_SECTION	__attribute__((used, section(".newbus.drivers")))
 
 #define	DRIVER_MODULE(modname, busname, drv_sym, devclass_sym, passv, orderv) \
@@ -301,6 +328,20 @@ void		*device_get_softc(device_t dev);
 void		device_set_softc(device_t dev, void *softc);
 void		*device_get_ivars(device_t dev);
 void		device_set_ivars(device_t dev, void *ivars);
+device_t	newbus_device_find_name(const char *name);
+device_t	newbus_device_find_nameunit(const char *nameunit);
+
+int		newbus_interface_register(device_t dev,
+		    const newbus_interface_t *iface);
+int		newbus_interface_unregister(device_t dev,
+		    const newbus_interface_t *iface);
+int		newbus_interface_count(device_t dev);
+const newbus_interface_t	*newbus_interface_get(device_t dev,
+		    int index);
+const newbus_interface_t	*newbus_interface_find(device_t dev,
+		    const char *name);
+int		newbus_interface_open(device_t dev, const char *name);
+void		newbus_interface_close(int handle);
 
 int		bus_set_resource(device_t dev, int type, int rid,
 		    u64 start, u64 count, u32 flags);

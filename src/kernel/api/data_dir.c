@@ -44,6 +44,7 @@ $space %export api_data_dir
 
 #include <kernel/api/api.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
+#include <kernel/drivers/newbus/driver_ns.h>
 #include <kernel/other/restrict.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
@@ -90,6 +91,9 @@ api_data_dir(u32 op, const char *path, const char *newpath)
 	if (restrict_kusr_check(kpath)) {
 		return (-API_ERR_PERM);
 	}
+	if (driver_ns_is_path(kpath)) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
 
 	switch (op) {
 	case API_DATA_DIR_MKDIR:
@@ -111,6 +115,9 @@ api_data_dir(u32 op, const char *path, const char *newpath)
 		}
 		if (restrict_kusr_check(knewpath)) {
 			return (-API_ERR_PERM);
+		}
+		if (driver_ns_is_path(knewpath)) {
+			return (-API_ERR_NOT_SUPPORTED);
 		}
 		ret = vfs_rename(kpath, knewpath);
 		if (ret != 0) {

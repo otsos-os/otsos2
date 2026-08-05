@@ -25,6 +25,7 @@
  */
 
 #include <kernel/drivers/fs/vfs/vfs.h>
+#include <kernel/drivers/newbus/driver_ns.h>
 #include <kernel/api/api.h>
 #include <kernel/other/restrict.h>
 #include <kernel/process.h>
@@ -132,21 +133,34 @@ api_data_open(const char *path, int flags)
 	}
 
 	vn = NULL;
-	ret = vfs_resolve(kpath, &vn);
-	if (ret != 0 || vn == NULL) {
-		if (!(flags & API_OPEN_CREATE)) {
+	if (driver_ns_is_path(kpath)) {
+		vn = driver_ns_lookup(kpath);
+		if (vn == NULL) {
 			kmem_free(kpath);
-			return (ret != 0 ? ret : -API_ERR_NOT_FOUND);
+			return (-API_ERR_NOT_FOUND);
 		}
-		ret = vfs_create_file(kpath);
-		if (ret != 0) {
+		if (flags & (API_OPEN_CREATE | API_OPEN_TRUNC)) {
+			vnode_release(vn);
 			kmem_free(kpath);
-			return (ret);
+			return (-API_ERR_NOT_SUPPORTED);
 		}
+	} else {
 		ret = vfs_resolve(kpath, &vn);
 		if (ret != 0 || vn == NULL) {
-			kmem_free(kpath);
-			return (ret != 0 ? ret : -API_ERR_IO);
+			if (!(flags & API_OPEN_CREATE)) {
+				kmem_free(kpath);
+				return (ret != 0 ? ret : -API_ERR_NOT_FOUND);
+			}
+			ret = vfs_create_file(kpath);
+			if (ret != 0) {
+				kmem_free(kpath);
+				return (ret);
+			}
+			ret = vfs_resolve(kpath, &vn);
+			if (ret != 0 || vn == NULL) {
+				kmem_free(kpath);
+				return (ret != 0 ? ret : -API_ERR_IO);
+			}
 		}
 	}
 
