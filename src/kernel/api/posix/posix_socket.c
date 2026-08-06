@@ -118,7 +118,9 @@ $space %export posix_socket_fd_readable, posix_socket_fd_writable
 #include <kernel/api/errno.h>
 #include <kernel/api/posix/posix.h>
 #include <kernel/api/posix/posix_socket.h>
+#include <kernel/api/api.h>
 #include <kernel/drivers/net/unix_sock.h>
+#include <kernel/entity/entity.h>
 #include <kernel/net/endpoint.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
@@ -349,6 +351,23 @@ posix_socket_install(posix_socket_t *sock, int flags, int cloexec)
 	proc->posix_fds[fd].flags = POSIX_O_RDWR | flags;
 	proc->posix_fds[fd].offset = 0;
 	proc->posix_fds[fd].vnode = vn;
+	{
+		entity_id_t	id;
+
+		id = entity_io_create_raw(ENTITY_ARCH_FILE, 0);
+		if (id == 0) {
+			proc->posix_fds[fd].used = 0;
+			proc->posix_fds[fd].vnode = NULL;
+			vnode_release(vn);
+			return (-POSIX_ENOMEM);
+		}
+		entity_io_set_ptr(id, ENTITY_IO_PTR_BACKING, vn);
+		entity_io_set_ptr(id, ENTITY_IO_PTR_PATH, NULL);
+		entity_io_set_i32(id, ENTITY_IO_I32_OFFSET, 0);
+		entity_io_set_i32(id, ENTITY_IO_I32_FLAGS,
+		    POSIX_O_RDWR);
+		proc->posix_fds[fd].entity = (u64)id;
+	}
 	return (fd);
 }
 
@@ -370,6 +389,11 @@ posix_socket_uninstall(int fd)
 		if (pfd->vnode->type == VSOCK) {
 			posix_socket_close(pfd->vnode);
 		}
+	}
+	if (pfd->entity != 0) {
+		entity_release((entity_id_t)pfd->entity);
+		pfd->entity = 0;
+	} else if (pfd->vnode) {
 		vnode_release(pfd->vnode);
 	}
 	pfd->used = 0;
@@ -377,6 +401,7 @@ posix_socket_uninstall(int fd)
 	pfd->flags = 0;
 	pfd->offset = 0;
 	pfd->vnode = NULL;
+	pfd->entity = 0;
 }
 
 static int

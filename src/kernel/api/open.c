@@ -24,14 +24,39 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type int as 32 bit signed
+$define %type entity_id as 64 bit packed archetype/generation/index
+$define %type vnode as VFS vnode
+
+$define %func copy_user_path as function with args const char *
+$define %func api_flags_valid as function with args int
+$define %func api_flags_to_access as function with args int
+$define %func api_data_open as function with args const char *, int
+
+*/
+
+/* !SPACE!
+
+$space %internal copy_user_path, api_flags_valid, api_flags_to_access
+$space %export api_data_open
+
+*/
+
+#include <kernel/api/api.h>
+#include <kernel/api/errno.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/newbus/driver_ns.h>
-#include <kernel/api/api.h>
+#include <kernel/entity/entity.h>
 #include <kernel/other/restrict.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
-#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
+#include <mm/kmem.h>
 
 static char *
 copy_user_path(const char *path)
@@ -45,7 +70,6 @@ copy_user_path(const char *path)
 	if (!is_user_address(path, 1)) {
 		return (NULL);
 	}
-
 	len = 0;
 	while (len < 255) {
 		if (!is_user_address(path + len, 1)) {
@@ -59,7 +83,6 @@ copy_user_path(const char *path)
 	if (len == 255) {
 		return (NULL);
 	}
-
 	buf = (char *)kmem_calloc(len + 1, 1);
 	if (!buf) {
 		return (NULL);
@@ -70,49 +93,42 @@ copy_user_path(const char *path)
 }
 
 static int
-api_find_free_handle(void)
-{
-	api_handle_t	*handles;
-	int		i;
-
-	handles = api_get_handle_table();
-	for (i = 0; i < MAX_HANDLES; i++) {
-		if (!handles[i].used) {
-			return (i);
-		}
-	}
-	return (-API_ERR_HANDLES_FULL);
-}
-
-static int
 api_flags_valid(int flags)
 {
 	if ((flags & API_OPEN_RW) == 0) {
 		return (0);
 	}
-
 	if ((flags & (API_OPEN_CREATE | API_OPEN_TRUNC | API_OPEN_APPEND)) &&
 	    !(flags & API_OPEN_WRITE)) {
 		return (0);
 	}
-
 	return (1);
+}
+
+static u32
+api_flags_to_access(int flags)
+{
+	u32	access;
+
+	access = 0;
+	if (flags & API_OPEN_READ) {
+		access |= ENTITY_ACCESS_READ;
+	}
+	if (flags & API_OPEN_WRITE) {
+		access |= ENTITY_ACCESS_WRITE;
+	}
+	return (access);
 }
 
 int
 api_data_open(const char *path, int flags)
 {
-	api_handle_t	*handles;
-	api_object_t	*objects;
 	char		*kpath;
+	char		*kpath_copy;
 	vnode_t		*vn;
-	int		handle;
-	int		object_index;
-	int		ret;
+	entity_id_t	id;
 	posix_stat_t	st;
-
-	handles = api_get_handle_table();
-	objects = api_get_object_table();
+	int		handle, ret, path_len;
 
 	kpath = copy_user_path(path);
 	if (!kpath || kpath[0] == 0) {
@@ -121,17 +137,14 @@ api_data_open(const char *path, int flags)
 		}
 		return (-API_ERR_BAD_ADDR);
 	}
-
 	if (!api_flags_valid(flags)) {
 		kmem_free(kpath);
 		return (-API_ERR_BAD_VALUE);
 	}
-
 	if (restrict_kusr_check(kpath)) {
 		kmem_free(kpath);
 		return (-API_ERR_PERM);
 	}
-
 	vn = NULL;
 	if (driver_ns_is_path(kpath)) {
 		vn = driver_ns_lookup(kpath);
@@ -149,7 +162,8 @@ api_data_open(const char *path, int flags)
 		if (ret != 0 || vn == NULL) {
 			if (!(flags & API_OPEN_CREATE)) {
 				kmem_free(kpath);
-				return (ret != 0 ? ret : -API_ERR_NOT_FOUND);
+				return (ret != 0 ? ret :
+				    -API_ERR_NOT_FOUND);
 			}
 			ret = vfs_create_file(kpath);
 			if (ret != 0) {
@@ -163,20 +177,17 @@ api_data_open(const char *path, int flags)
 			}
 		}
 	}
-
 	if (vn->type == VDIR) {
 		vnode_release(vn);
 		kmem_free(kpath);
 		return (-API_ERR_IS_DIR);
 	}
-
 	if (vn->type == VCHR && strcmp(vn->name, "fb0") == 0 &&
 	    !proc_has_privilege(process_current())) {
 		vnode_release(vn);
 		kmem_free(kpath);
 		return (-API_ERR_PERM);
 	}
-
 	if ((flags & API_OPEN_TRUNC) && vn->type != VCHR) {
 		ret = vfs_truncate(kpath, 0);
 		if (ret != 0) {
@@ -186,53 +197,44 @@ api_data_open(const char *path, int flags)
 		}
 		vn->size = 0;
 	}
-
-	handle = api_find_free_handle();
-	if (handle < 0) {
+	id = entity_io_create_raw(
+	    vn->type == VCHR ? ENTITY_ARCH_VNODE : ENTITY_ARCH_FILE,
+	    0);
+	if (id == 0) {
 		vnode_release(vn);
 		kmem_free(kpath);
-		return (handle);
+		return (-API_ERR_NO_MEMORY);
 	}
-
-	object_index = api_alloc_object();
-	if (object_index < 0) {
+	kpath_copy = (char *)kmem_calloc(255, 1);
+	if (!kpath_copy) {
+		entity_destroy(id);
 		vnode_release(vn);
 		kmem_free(kpath);
-		return (object_index);
+		return (-API_ERR_NO_MEMORY);
 	}
-
-	objects[object_index].flags = flags;
-	objects[object_index].vn = vn;
-	objects[object_index].type =
-	    (vn->type == VCHR) ? API_OBJECT_VNODE : API_OBJECT_FILE;
-
+	path_len = (int)strlen(kpath);
+	if (path_len > 254) {
+		path_len = 254;
+	}
+	memcpy(kpath_copy, kpath, path_len);
+	entity_io_set_ptr(id, ENTITY_IO_PTR_BACKING, vn);
+	entity_io_set_ptr(id, ENTITY_IO_PTR_PATH, kpath_copy);
+	entity_io_set_i32(id, ENTITY_IO_I32_FLAGS, (s32)flags);
 	if (flags & API_OPEN_APPEND) {
 		if (vnode_stat(vn, &st) == 0) {
-			objects[object_index].offset = (u32)st.st_size;
+			entity_io_set_i32(id, ENTITY_IO_I32_OFFSET,
+			    (s32)st.st_size);
 		} else {
-			objects[object_index].offset = 0;
+			entity_io_set_i32(id, ENTITY_IO_I32_OFFSET, 0);
 		}
 	} else {
-		objects[object_index].offset = 0;
+		entity_io_set_i32(id, ENTITY_IO_I32_OFFSET, 0);
 	}
-
-	memset(objects[object_index].path, 0,
-	    sizeof(objects[object_index].path));
-	{
-		int	path_len;
-
-		path_len = strlen(kpath);
-		if (path_len >= (int)sizeof(objects[object_index].path)) {
-			path_len = (int)sizeof(objects[object_index].path) - 1;
-		}
-		memcpy(objects[object_index].path, kpath, path_len);
-	}
-
+	handle = entity_io_attach(id, api_flags_to_access(flags));
 	kmem_free(kpath);
-
-	handles[handle].used = 1;
-	handles[handle].flags = flags;
-	handles[handle].object_index = object_index;
-
+	if (handle < 0) {
+		entity_destroy(id);
+		return (handle);
+	}
 	return (handle);
 }

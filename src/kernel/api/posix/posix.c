@@ -26,6 +26,7 @@
 
 #include <kernel/api/posix/posix.h>
 #include <kernel/api/posix/posix_socket.h>
+#include <kernel/api/api.h>
 #include <kernel/api/signal.h>
 #include <kernel/console/terminal.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
@@ -621,9 +622,22 @@ posix_copy_fds(struct process *dst, const struct process *src)
 	for (i = 0; i < MAX_POSIX_FDS; i++) {
 		dst->posix_fds[i] = src->posix_fds[i];
 		if (src->posix_fds[i].used && src->posix_fds[i].vnode) {
-			if (src->posix_fds[i].vnode->type == VSOCK)
-				posix_socket_hold(src->posix_fds[i].vnode);
-			vnode_acquire(src->posix_fds[i].vnode);
+			if (src->posix_fds[i].entity != 0) {
+				entity_retain(
+				    (entity_id_t)src->posix_fds[i].entity);
+				dst->posix_fds[i].entity =
+				    src->posix_fds[i].entity;
+				if (src->posix_fds[i].vnode->type == VSOCK) {
+					posix_socket_hold(
+					    src->posix_fds[i].vnode);
+				}
+			} else {
+				if (src->posix_fds[i].vnode->type == VSOCK) {
+					posix_socket_hold(
+					    src->posix_fds[i].vnode);
+				}
+				vnode_acquire(src->posix_fds[i].vnode);
+			}
 		}
 	}
 
@@ -648,12 +662,20 @@ posix_cleanup_process(struct process *proc)
 
 	for (i = 0; i < MAX_POSIX_FDS; i++) {
 		if (proc->posix_fds[i].used && proc->posix_fds[i].vnode) {
-			if (proc->posix_fds[i].vnode->type == VSOCK)
+			if (proc->posix_fds[i].vnode->type == VSOCK) {
 				posix_socket_close(proc->posix_fds[i].vnode);
-			vnode_release(proc->posix_fds[i].vnode);
+			}
+			if (proc->posix_fds[i].entity != 0) {
+				entity_release(
+				    (entity_id_t)proc->posix_fds[i].entity);
+				proc->posix_fds[i].entity = 0;
+			} else {
+				vnode_release(proc->posix_fds[i].vnode);
+			}
 		}
 		proc->posix_fds[i].used = 0;
 		proc->posix_fds[i].vnode = NULL;
+		proc->posix_fds[i].entity = 0;
 	}
 
 	for (i = 0; i < MAX_POSIX_SIGS; i++) {

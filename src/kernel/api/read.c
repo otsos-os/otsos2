@@ -24,8 +24,34 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/console/terminal.h>
+/* !DEFINES!
+
+$define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type u64 as 64 bit unsigned
+$define %type s32 as 32 bit signed
+$define %type int as 32 bit signed
+$define %type process as struct with process control block
+$define %type entity_id as 64 bit packed archetype/generation/index
+$define %type pipe as struct with pipe ring buffer
+$define %type vnode as VFS vnode
+
+$define %func api_term_read as function with args buffer, count, flags
+$define %func api_data_read as function with args handle, buffer, count
+
+*/
+
+/* !SPACE!
+
+$space %export api_term_read, api_data_read
+
+*/
+
 #include <kernel/api/api.h>
+#include <kernel/api/errno.h>
+#include <kernel/console/terminal.h>
+#include <kernel/entity/entity.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
@@ -38,85 +64,77 @@ api_term_read(void *buf, u32 count, u32 flags)
 	if (count == 0) {
 		return (0);
 	}
-
 	if (!is_user_address(buf, count)) {
-		printk("[DEBUG] api_term_read: invalid user buffer %p (%d)\n",
-		    buf, (int)count);
-		thread_t *td = thread_current();
+		thread_t	*td;
+
+		td = thread_current();
 		if (td && (td->context.cs & 3) == 3) {
 			process_exit(-1);
 		}
 		return (-API_ERR_BAD_ADDR);
 	}
-
 	return (terminal_read(buf, count, flags));
 }
 
 int
 api_data_read(int handle, void *buf, u32 count)
 {
-	api_handle_t	*handles;
-	api_object_t	*objects;
-	int		object_index;
-	int		n;
+	process_t	*proc;
+	entity_id_t	id;
+	vnode_t		*vn;
+	pipe_t		*p;
+	u32		access;
+	u16		arch;
+	s32		offset;
+	int		n, ret;
 
-	handles = api_get_handle_table();
-	objects = api_get_object_table();
-
-	if (handle < 0 || handle >= MAX_HANDLES) {
-		printk("[DEBUG] api_data_read: invalid handle %d\n",
-		    handle);
+	proc = process_current();
+	ret = entity_handle_lookup(proc, handle, &id, &access);
+	if (ret != 0) {
 		return (-API_ERR_BAD_HANDLE);
 	}
-
-	if (!handles[handle].used) {
+	if ((access & ENTITY_ACCESS_READ) == 0) {
 		return (-API_ERR_BAD_HANDLE);
 	}
-
 	if (count == 0) {
 		return (0);
 	}
-
 	if (!is_user_address(buf, count)) {
-		printk("[DEBUG] api_data_read: invalid user buffer %p (%d)\n",
-		    buf, (int)count);
-		thread_t *td = thread_current();
+		thread_t	*td;
+
+		td = thread_current();
 		if (td && (td->context.cs & 3) == 3) {
 			process_exit(-1);
 		}
 		return (-API_ERR_BAD_ADDR);
 	}
 	if (!user_range_fault_in(buf, count, 1)) {
-		printk("[DEBUG] api_data_read: cannot fault user buffer %p (%d)\n",
-		    buf, (int)count);
 		return (-API_ERR_BAD_ADDR);
 	}
-
-	if (!(handles[handle].flags & API_OPEN_READ)) {
+	arch = entity_arch(id);
+	if (arch == ENTITY_ARCH_PIPE) {
+		p = (pipe_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+		if (!p) {
+			return (-API_ERR_BAD_HANDLE);
+		}
+		return (pipe_read(p, buf, count));
+	}
+	if (arch != ENTITY_ARCH_FILE && arch != ENTITY_ARCH_VNODE) {
 		return (-API_ERR_BAD_HANDLE);
 	}
-
-	object_index = handles[handle].object_index;
-	if (object_index < 0 || object_index >= MAX_DATA_OBJECTS ||
-	    !objects[object_index].used) {
+	vn = (vnode_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+	if (!vn) {
 		return (-API_ERR_BAD_HANDLE);
 	}
-
-	if (objects[object_index].type == API_OBJECT_PIPE) {
-		return (pipe_read((pipe_t *)objects[object_index].pipe,
-		    buf, count));
+	ret = entity_io_i32(id, ENTITY_IO_I32_OFFSET, &offset);
+	if (ret != 0) {
+		return (ret);
 	}
-
-	if (objects[object_index].vn == NULL) {
-		return (-API_ERR_BAD_HANDLE);
-	}
-
-	n = vnode_read(objects[object_index].vn, buf, count,
-	    objects[object_index].offset);
+	n = vnode_read(vn, buf, count, (u64)offset);
 	if (n < 0) {
 		return (n);
 	}
-
-	objects[object_index].offset += (u32)n;
+	offset += (s32)n;
+	entity_io_set_i32(id, ENTITY_IO_I32_OFFSET, offset);
 	return (n);
 }

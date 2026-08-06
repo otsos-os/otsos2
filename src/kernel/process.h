@@ -99,8 +99,9 @@ typedef struct process {
   u64 mmap_base;
   vma_t *vma_list;    /* sorted list of virtual memory areas */
 
-  /* File descriptors */
-  api_handle_t handles[MAX_HANDLES];
+	/* Entity handle table (index-linked, global store) */
+	int		entity_handle_count;
+	int		entity_handle_head;
 
 	/* POSIX personality state */
 	int		personality;

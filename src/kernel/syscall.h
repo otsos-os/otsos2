@@ -133,6 +133,15 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_KOFO_INFO		0xC01
 #define	CALL_KOFO_UNLOAD	0xC02
 
+#define	CALL_ENTITY_CREATE	0xD00
+#define	CALL_ENTITY_OPEN	0xD01
+#define	CALL_ENTITY_CLOSE	0xD02
+#define	CALL_ENTITY_DUP		0xD03
+#define	CALL_ENTITY_STAT	0xD04
+#define	CALL_ENTITY_LIST	0xD05
+#define	CALL_ENTITY_CTL		0xD06
+#define	CALL_ENTITY_QUERY	0xD07
+
 #define	CALL_PROC_GETPID	0x408
 #define	CALL_PROC_GETPPID	0x409
 #define	CALL_PROC_THREAD_EXIT	0x40A

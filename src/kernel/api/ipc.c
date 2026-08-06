@@ -5,7 +5,7 @@
  * modification, are permitted provided that the following conditions are met:
  *
  * 1. Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimer.
+ * this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
@@ -26,15 +26,22 @@
 
 /* !DEFINES!
 
-$define %type ipc_endpoint_t as IPC endpoint state
+$define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type u64 as 64 bit unsigned
+$define %type int as 32 bit signed
+$define %type entity_id as 64 bit packed archetype/generation/index
+$define %type ipc_endpoint as native IPC endpoint state
 $define %type api_ipc_message as native IPC message descriptor
 $define %type api_ipc_call as native IPC call descriptor
+
 $define %func ipc_copy_name as function with args const char *, char *
-$define %func ipc_handle_alloc as function with args ipc_endpoint_t *, u32
+$define %func ipc_handle_alloc as function with args ipc_endpoint *, u32
 $define %func ipc_handle_get as function with args int
 $define %func api_ipc_create as function with args const char *, u32, u32
 $define %func api_ipc_connect as function with args const char *, u32
-$define %func api_ipc_send as function with args int, const api_ipc_message *
+$define %func api_ipc_send as function with args int, api_ipc_message *
 $define %func api_ipc_recv as function with args int, api_ipc_message *, u32
 $define %func api_ipc_call as function with args int, api_ipc_call *
 $define %func api_ipc_ctl as function with args int, u32, void *
@@ -50,7 +57,10 @@ $space %export api_ipc_recv, api_ipc_call, api_ipc_ctl
 */
 
 #include <kernel/api/api.h>
+#include <kernel/api/errno.h>
+#include <kernel/entity/entity.h>
 #include <kernel/ipc/ipc.h>
+#include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
 
@@ -78,56 +88,51 @@ ipc_copy_name(const char *user, char *name)
 static int
 ipc_handle_alloc(ipc_endpoint_t *endpoint, u32 flags)
 {
-	api_handle_t	*handles;
-	api_object_t	*objects;
-	int		object_index;
+	entity_id_t	id;
 	int		handle;
 
-	handles = api_get_handle_table();
-	objects = api_get_object_table();
-	handle = -1;
-	for (object_index = 0; object_index < MAX_HANDLES; object_index++) {
-		if (!handles[object_index].used) {
-			handle = object_index;
-			break;
-		}
+	if (!endpoint) {
+		return (-API_ERR_BAD_HANDLE);
 	}
+	id = entity_io_create_raw(ENTITY_ARCH_IPC, 0);
+	if (id == 0) {
+		return (-API_ERR_NO_MEMORY);
+	}
+	entity_io_set_ptr(id, ENTITY_IO_PTR_BACKING, endpoint);
+	handle = entity_io_attach(id, ENTITY_ACCESS_READ |
+	    ENTITY_ACCESS_WRITE);
 	if (handle < 0) {
-		return (-API_ERR_HANDLES_FULL);
+		entity_destroy(id);
+		return (handle);
 	}
-	object_index = api_alloc_object();
-	if (object_index < 0) {
-		return (object_index);
-	}
-	objects[object_index].type = API_OBJECT_IPC;
-	objects[object_index].ipc = endpoint;
-	objects[object_index].flags = API_OPEN_RW;
-	handles[handle].used = 1;
-	handles[handle].flags = API_OPEN_RW | (int)flags;
-	handles[handle].object_index = object_index;
+	(void)flags;
 	return (handle);
 }
 
 static ipc_endpoint_t *
 ipc_handle_get(int handle)
 {
-	api_handle_t	*handles;
-	api_object_t	*objects;
-	int		object_index;
+	process_t	*proc;
+	entity_id_t	id;
+	ipc_endpoint_t	*endpoint;
+	u32		access;
+	int		ret;
 
-	handles = api_get_handle_table();
-	objects = api_get_object_table();
-	if (handle < 0 || handle >= MAX_HANDLES || !handles[handle].used) {
+	proc = process_current();
+	ret = entity_handle_lookup(proc, handle, &id, &access);
+	if (ret != 0) {
 		return (NULL);
 	}
-	object_index = handles[handle].object_index;
-	if (object_index < 0 || object_index >= MAX_DATA_OBJECTS ||
-	    !objects[object_index].used ||
-	    objects[object_index].type != API_OBJECT_IPC) {
+	if (entity_arch(id) != ENTITY_ARCH_IPC) {
 		return (NULL);
 	}
-	ipc_endpoint_retain((ipc_endpoint_t *)objects[object_index].ipc);
-	return ((ipc_endpoint_t *)objects[object_index].ipc);
+	endpoint = (ipc_endpoint_t *)entity_io_ptr(id,
+	    ENTITY_IO_PTR_BACKING);
+	if (!endpoint) {
+		return (NULL);
+	}
+	ipc_endpoint_retain(endpoint);
+	return (endpoint);
 }
 
 int

@@ -44,7 +44,10 @@ Monolithic kernel with the following rough layers:
    network, DRM/KMS, and display backends.
 6. Syscalls (`src/kernel/syscall.c`, `src/kernel/api/*`) — native ABI plus
    optional Linux/POSIX personality layer.
-7. Userspace (`init/`, `progs/`, `ports/`) — small freestanding programs loaded as
+7. Entity manager (`src/kernel/entity/`) — data-oriented entity store with
+   parallel SoA columns, per-process handle tables, and a native-only
+   `/Entity` namespace.
+8. Userspace (`init/`, `progs/`, `ports/`) — small freestanding programs loaded as
    Multiboot modules and copied into `/bin` by the kernel.
 
 ## Main Subsystems
@@ -122,6 +125,14 @@ Monolithic kernel with the following rough layers:
   kernel aggregations, PMU samples from `drivers/pmu`, and syscall/IRQ/
   scheduler/kqueue tracepoints. Runtime toggles live in the `SYSTEM` registry
   hive.
+- `entity/` — data-oriented entity manager: `entity.c` (SoA store, IDs,
+  refcounts), `entity_handle.c` (per-process handle tables), `entity_ns.c`
+  (native `/Entity` namespace), plus `api/entity.c` syscall handlers and
+  `api/entity_io.c` (archetype release hooks + IO helpers). Legacy
+  `api_handle_t`/`api_object_t` tables are removed: native data/net/ipc/reg
+  syscalls and the POSIX fd layer are backed by entity handles. kqueue ids
+  and `EVFILT_ENTITY` are entity-aware. Handles are `(generation << 16) | slot`;
+  entity IDs pack archetype/generation/index.
 - `kshell/` — optional kernel debug shell; runtime command metadata and prompt
   live in the `SYSTEM` registry hive.
 - `crypto/` — SHA-256, HMAC-SHA256, PBKDF2, ChaCha20, RNG, plus `kusr`
@@ -389,6 +400,11 @@ User need to test, dont run test manually, ask user.
   in VFS and do not expose it to POSIX syscalls. POSIX programs use `/dev`.
   `vnode_t.release_fn` is the generic vnode destructor hook used by the
   namespace to release pinned interface handles.
+- `/Entity` is the native-ABI-only entity namespace; it is not mounted in VFS
+  and must stay invisible to the POSIX personality. Entity syscalls live in
+  the `0xD00` block and are implemented in `kernel/api/entity.c`.
+- Do not reintroduce per-subsystem handle/object tables; new resources must
+  register an archetype and go through `entity_io_*` / `entity_handle_*`.
 - POSIX `mremap(2)` is implemented in `api/posix/posix_mem.c` on top of
   VMA clipping/relocation helpers in `mm/vm/vm_map.c`; `MREMAP_DONTUNMAP`
   deliberately returns `EINVAL` because its Linux userfaultfd semantics are not

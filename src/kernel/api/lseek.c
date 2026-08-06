@@ -24,62 +24,82 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type s32 as 32 bit signed
+$define %type int as 32 bit signed
+$define %type entity_id as 64 bit packed archetype/generation/index
+$define %type process as struct with process control block
+$define %type vnode as VFS vnode
+
+$define %func api_data_seek as function with args int, long, int
+
+*/
+
+/* !SPACE!
+
+$space %export api_data_seek
+
+*/
+
 #include <kernel/api/api.h>
+#include <kernel/api/errno.h>
+#include <kernel/entity/entity.h>
+#include <kernel/process.h>
+#include <mlibc/mlibc.h>
 
 long
 api_data_seek(int handle, long offset, int whence)
 {
-	api_handle_t	*handles;
-	api_object_t	*objects;
-	int		object_index, ret;
+	process_t	*proc;
+	entity_id_t	id;
+	vnode_t		*vn;
 	posix_stat_t	st;
+	u32		access;
+	u16		arch;
+	s32		cur;
 	long long	new_off;
+	int		ret;
 
-	handles = api_get_handle_table();
-	objects = api_get_object_table();
-
-	if (handle < 0 || handle >= MAX_HANDLES) {
+	proc = process_current();
+	ret = entity_handle_lookup(proc, handle, &id, &access);
+	if (ret != 0) {
 		return (-API_ERR_BAD_HANDLE);
 	}
-	if (!handles[handle].used) {
-		return (-API_ERR_BAD_HANDLE);
-	}
-
-	object_index = handles[handle].object_index;
-	if (object_index < 0 || object_index >= MAX_DATA_OBJECTS) {
+	arch = entity_arch(id);
+	if (arch == ENTITY_ARCH_PIPE) {
 		return (-API_ERR_NOT_SEEKABLE);
 	}
-	if (!objects[object_index].used) {
+	if (arch != ENTITY_ARCH_FILE && arch != ENTITY_ARCH_VNODE) {
 		return (-API_ERR_BAD_HANDLE);
 	}
-
-	if (objects[object_index].type == API_OBJECT_PIPE) {
-		return (-API_ERR_NOT_SEEKABLE);
-	}
-
-	if (objects[object_index].type == API_OBJECT_VNODE &&
-	    (objects[object_index].vn == NULL ||
-	    strcmp(objects[object_index].vn->name, "fb0") != 0)) {
-		return (-API_ERR_NOT_SEEKABLE);
-	}
-
-	if (objects[object_index].vn == NULL) {
+	vn = (vnode_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+	if (!vn) {
 		return (-API_ERR_BAD_HANDLE);
 	}
-
-	ret = vnode_stat(objects[object_index].vn, &st);
+	if (arch == ENTITY_ARCH_VNODE &&
+	    (vn->name[0] == '\0' ||
+	    strcmp(vn->name, "fb0") != 0)) {
+		return (-API_ERR_NOT_SEEKABLE);
+	}
+	ret = vnode_stat(vn, &st);
 	if (ret != 0) {
 		return (ret);
 	}
-
+	ret = entity_io_i32(id, ENTITY_IO_I32_OFFSET, &cur);
+	if (ret != 0) {
+		return (ret);
+	}
 	new_off = 0;
 	switch (whence) {
 	case API_SEEK_SET:
 		new_off = (long long)offset;
 		break;
 	case API_SEEK_CUR:
-		new_off = (long long)objects[object_index].offset +
-		    (long long)offset;
+		new_off = (long long)cur + (long long)offset;
 		break;
 	case API_SEEK_END:
 		new_off = (long long)st.st_size + (long long)offset;
@@ -87,11 +107,9 @@ api_data_seek(int handle, long offset, int whence)
 	default:
 		return (-API_ERR_BAD_VALUE);
 	}
-
 	if (new_off < 0) {
 		return (-API_ERR_BAD_VALUE);
 	}
-
-	objects[object_index].offset = (u32)new_off;
-	return ((long)objects[object_index].offset);
+	entity_io_set_i32(id, ENTITY_IO_I32_OFFSET, (s32)new_off);
+	return ((long)new_off);
 }

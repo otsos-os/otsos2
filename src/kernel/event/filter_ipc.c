@@ -47,28 +47,24 @@ $space %export filter_ipc_ops
 #include <kernel/api/api.h>
 #include <kernel/event/event.h>
 #include <kernel/ipc/ipc.h>
+#include <kernel/process.h>
 
 static ipc_endpoint_t *
 filt_ipc_endpoint(knote_t *kn)
 {
-	api_handle_t	*handles;
-	api_object_t	*objects;
-	int		fd, object_index;
+	process_t	*proc;
+	entity_id_t	id;
+	u32		access;
 
-	fd = (int)kn->ident;
-	handles = api_get_handle_table();
-	objects = api_get_object_table();
-	if (!handles || fd < 0 || fd >= MAX_HANDLES ||
-	    !handles[fd].used) {
+	proc = process_current();
+	if (entity_handle_lookup(proc, (int)kn->ident, &id, &access) != 0) {
 		return (NULL);
 	}
-	object_index = handles[fd].object_index;
-	if (object_index < 0 || object_index >= MAX_DATA_OBJECTS ||
-	    !objects[object_index].used ||
-	    objects[object_index].type != API_OBJECT_IPC) {
+	if (entity_arch(id) != ENTITY_ARCH_IPC) {
 		return (NULL);
 	}
-	return ((ipc_endpoint_t *)objects[object_index].ipc);
+	return ((ipc_endpoint_t *)entity_io_ptr(id,
+	    ENTITY_IO_PTR_BACKING));
 }
 
 static int

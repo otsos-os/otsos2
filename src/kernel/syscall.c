@@ -414,6 +414,35 @@ void syscall_handler(registers_t *regs) {
   case CALL_KOFO_UNLOAD:
     regs->rax = (u64)api_kofo_unload((u32)arg1, (u32)arg2);
     break;
+  case CALL_ENTITY_CREATE:
+    regs->rax = (u64)api_entity_create(
+        (const struct api_entity_create_args *)arg1);
+    break;
+  case CALL_ENTITY_OPEN:
+    regs->rax = (u64)api_entity_open((const char *)arg1, (u32)arg2);
+    break;
+  case CALL_ENTITY_CLOSE:
+    regs->rax = (u64)api_entity_close((int)arg1);
+    break;
+  case CALL_ENTITY_DUP:
+    regs->rax = (u64)api_entity_dup((int)arg1, (u32)arg2);
+    break;
+  case CALL_ENTITY_STAT:
+    regs->rax = (u64)api_entity_stat((int)arg1,
+        (struct api_entity_stat *)arg2);
+    break;
+  case CALL_ENTITY_LIST:
+    regs->rax = (u64)api_entity_list(
+        (const struct api_entity_list *)arg1);
+    break;
+  case CALL_ENTITY_CTL:
+    regs->rax = (u64)api_entity_ctl((int)arg1, (u32)arg2,
+        (void *)arg3);
+    break;
+  case CALL_ENTITY_QUERY:
+    regs->rax = (u64)api_entity_query(
+        (const struct api_entity_query *)arg1);
+    break;
   case CALL_TRACE_OPEN:
     regs->rax = (u64)api_trace_open((u32)arg1);
     break;

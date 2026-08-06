@@ -33,8 +33,8 @@ $define %type char as 8 bit signed
 $define %type knote_t as struct with registered event state
 $define %type kevent as struct with event ident, filter, flags, fflags, data, udata
 $define %type filter_ops_t as struct with filter callbacks vtable
-$define %type api_handle_t as struct with handle table entry
-$define %type api_object_t as struct with object table entry
+$define %type entity_id as 64 bit packed archetype/generation/index
+$define %type net_endpoint as native network endpoint state
 $define %type pipe_t as struct with pipe ring buffer
 $define %type net_endpoint_t as native network endpoint state
 
@@ -68,25 +68,21 @@ static int
 filt_read_attach(knote_t *kn)
 {
 	int			fd;
-	api_handle_t		*handles;
+	process_t		*proc;
+	entity_id_t		id;
+	u32			access;
+	int			ret;
 
 	fd = (int)kn->ident;
 
 	if (fd == 0) {
 		return (0);
 	}
-
-	handles = api_get_handle_table();
-	if (!handles) {
+	proc = process_current();
+	ret = entity_handle_lookup(proc, fd, &id, &access);
+	if (ret != 0) {
 		return (-API_ERR_BAD_HANDLE);
 	}
-
-	if (fd < 0 || fd >= MAX_HANDLES || !handles[fd].used) {
-		printk("[EVFILT_READ] attach: bad fd %d\n",
-		    fd);
-		return (-API_ERR_BAD_HANDLE);
-	}
-
 	return (0);
 }
 
@@ -100,16 +96,17 @@ static int
 filt_read_event(knote_t *kn, u32 nevents)
 {
 	int			fd;
-	api_handle_t		*handles;
-	api_object_t		*objects;
-	int			obj_idx;
-	api_object_t		*obj;
+	entity_id_t		id;
+	u32			access;
+	u16			arch;
 	pipe_t			*p;
 	struct process		*proc;
 	posix_fd_t		*pfd;
 	int			idx;
 	int			avail;
+	int			ret;
 
+	(void)nevents;
 	fd = (int)kn->ident;
 
 	proc = process_current();
@@ -150,23 +147,13 @@ filt_read_event(knote_t *kn, u32 nevents)
 		return (0);
 	}
 
-	handles = api_get_handle_table();
-	if (!handles || fd < 0 || fd >= MAX_HANDLES ||
-	    !handles[fd].used) {
+	ret = entity_handle_lookup(proc, fd, &id, &access);
+	if (ret != 0) {
 		return (0);
 	}
-
-	objects = api_get_object_table();
-	obj_idx = handles[fd].object_index;
-	if (obj_idx < 0 || obj_idx >= MAX_DATA_OBJECTS ||
-	    !objects[obj_idx].used) {
-		return (0);
-	}
-
-	obj = &objects[obj_idx];
-
-	if (obj->type == API_OBJECT_PIPE) {
-		p = (pipe_t *)obj->pipe;
+	arch = entity_arch(id);
+	if (arch == ENTITY_ARCH_PIPE) {
+		p = (pipe_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
 		if (!p) {
 			return (0);
 		}
@@ -182,17 +169,19 @@ filt_read_event(knote_t *kn, u32 nevents)
 		return (0);
 	}
 
-	if (obj->type == API_OBJECT_NET) {
-		if (net_endpoint_readable(
-		    (net_endpoint_t *)obj->net)) {
-			kn->data = net_endpoint_pending_bytes(
-			    (net_endpoint_t *)obj->net);
+	if (arch == ENTITY_ARCH_NET) {
+		net_endpoint_t	*ep;
+
+		ep = (net_endpoint_t *)entity_io_ptr(id,
+		    ENTITY_IO_PTR_BACKING);
+		if (ep && net_endpoint_readable(ep)) {
+			kn->data = net_endpoint_pending_bytes(ep);
 			return (1);
 		}
 		return (0);
 	}
 
-	if (obj->type == API_OBJECT_FILE) {
+	if (arch == ENTITY_ARCH_FILE || arch == ENTITY_ARCH_VNODE) {
 		kn->data = 1;
 		return (1);
 	}

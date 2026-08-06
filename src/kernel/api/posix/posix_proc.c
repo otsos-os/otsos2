@@ -25,6 +25,7 @@
  */
 
 #include <kernel/api/posix/posix.h>
+#include <kernel/api/posix/posix_socket.h>
 #include <kernel/api/api.h>
 #include <kernel/api/auxv.h>
 #include <kernel/api/session.h>
@@ -1135,7 +1136,15 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 	for (i = 0; i < MAX_POSIX_FDS; i++) {
 		if (proc->posix_fds[i].used &&
 		    proc->posix_fds[i].cloexec) {
-			if (proc->posix_fds[i].vnode) {
+			if (proc->posix_fds[i].vnode &&
+			    proc->posix_fds[i].vnode->type == VSOCK) {
+				posix_socket_close(proc->posix_fds[i].vnode);
+			}
+			if (proc->posix_fds[i].entity != 0) {
+				entity_release(
+				    (entity_id_t)proc->posix_fds[i].entity);
+				proc->posix_fds[i].entity = 0;
+			} else if (proc->posix_fds[i].vnode) {
 				vnode_release(proc->posix_fds[i].vnode);
 			}
 			proc->posix_fds[i].used = 0;

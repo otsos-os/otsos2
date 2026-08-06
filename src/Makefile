@@ -231,6 +231,11 @@ SYSCALL_O = ../bin/syscall.o
 KOFO_O = ../bin/kofo.o
 KOFO_KSYMTAB_C = ../bin/kofo_ksymtab.c
 KOFO_KSYMTAB_O = ../bin/kofo_ksymtab.o
+ENTITY_O = ../bin/entity.o
+ENTITY_HANDLE_O = ../bin/entity_handle.o
+ENTITY_NS_O = ../bin/entity_ns.o
+API_ENTITY_O = ../bin/api_entity.o
+API_ENTITY_IO_O = ../bin/api_entity_io.o
 UNAME_O = ../bin/uname.o
 MEMINFO_O = ../bin/meminfo.o
 CPUINFO_O = ../bin/cpuinfo.o
@@ -325,6 +330,7 @@ EVENT_USER_O = ../bin/event_user.o
 EVENT_KBD_O = ../bin/event_kbd.o
 EVENT_IPC_O = ../bin/event_ipc.o
 EVENT_INPUT_O = ../bin/event_input.o
+EVENT_ENTITY_O = ../bin/event_entity.o
 
 VFS_O = ../bin/vfs.o
 VFS_BACK_O = ../bin/vfs_back.o
@@ -358,7 +364,8 @@ CMOS_RTC_O = ../bin/cmos_rtc.o
 
 OBJ_NO_KSYMTAB = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDIO_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) \
       $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(I8042_O) $(INPUT_CORE_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(API_NET_O) $(API_REG_O) $(API_TRACE_O) $(IPC_O) $(API_IPC_O) $(PIPE_O) $(DATA_DIR_O) $(CLONE_O) $(SYSCALL_O) \
-      $(KOFO_O) $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(SESSION_O) $(THREAD_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(FS_META_O) $(MOUNT_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
+      $(KOFO_O) $(ENTITY_O) $(ENTITY_HANDLE_O) $(ENTITY_NS_O) $(API_ENTITY_O) $(API_ENTITY_IO_O) \
+      $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(SESSION_O) $(THREAD_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(FS_META_O) $(MOUNT_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(TRACE_O) $(TRACE_PMU_O) $(PMU_O) \
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
@@ -373,6 +380,7 @@ OBJ_NO_KSYMTAB = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UAR
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
       $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
       $(EVENT_KBD_O) $(EVENT_IPC_O) $(EVENT_INPUT_O) \
+      $(EVENT_ENTITY_O) \
       $(VFS_O) $(VFS_BACK_O) $(DEVFS_O) $(HIVEFS_O) $(LINK_O) \
       $(POSIX_O) $(POSIX_IO_O) $(POSIX_PROC_O) $(POSIX_FS_O) \
       $(POSIX_MEM_O) $(POSIX_SOCKET_O) $(POSIX_SIGNAL_O) $(SIGNAL_O) \
@@ -791,6 +799,33 @@ $(KOFO_KSYMTAB_C): $(OBJ_NO_KSYMTAB) $(KOFO_KSYMTAB_GEN)
 	@$(PYTHON) $(KOFO_KSYMTAB_GEN) --nm $(NM) -o $@ $(OBJ_NO_KSYMTAB)
 
 $(KOFO_KSYMTAB_O): $(KOFO_KSYMTAB_C) kernel/kofo.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(ENTITY_O): kernel/entity/entity.c kernel/entity/entity.h \
+    kernel/drivers/newbus/newbus.h kernel/process.h kernel/smp/smp.h \
+    kernel/drivers/timer.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(ENTITY_HANDLE_O): kernel/entity/entity_handle.c kernel/entity/entity.h \
+    kernel/process.h kernel/smp/smp.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(ENTITY_NS_O): kernel/entity/entity_ns.c kernel/entity/entity.h \
+    kernel/api/api.h kernel/smp/smp.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(API_ENTITY_O): kernel/api/entity.c kernel/api/api.h kernel/entity/entity.h \
+    kernel/process.h kernel/useraddr.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(API_ENTITY_IO_O): kernel/api/entity_io.c kernel/api/api.h \
+    kernel/entity/entity.h kernel/process.h kernel/drivers/fs/vfs/vfs.h \
+    kernel/net/endpoint.h kernel/ipc/ipc.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1417,6 +1452,11 @@ $(EVENT_IPC_O): kernel/event/filter_ipc.c kernel/event/event.h kernel/ipc/ipc.h
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(EVENT_INPUT_O): kernel/event/filter_input.c kernel/event/event.h kernel/drivers/input/input.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(EVENT_ENTITY_O): kernel/event/filter_entity.c kernel/event/event.h \
+    kernel/api/api.h kernel/entity/entity.h kernel/process.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

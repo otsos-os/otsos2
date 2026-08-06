@@ -37,7 +37,7 @@ $define %type knote_t as struct with registered event state
 $define %type filter_ops_t as struct with filter callbacks vtable
 $define %type process_t as struct with process control block
 $define %type pipe_t as struct with pipe ring buffer
-$define %type api_object_t as struct with object table entry
+$define %type entity_id as 64 bit packed archetype/generation/index
 $define %type net_endpoint_t as native network endpoint state
 $define %type ipc_endpoint_t as native IPC endpoint state
 
@@ -232,6 +232,7 @@ event_init(void)
 		extern const filter_ops_t filter_kbd_ops;
 		extern const filter_ops_t filter_ipc_ops;
 		extern const filter_ops_t filter_input_ops;
+		extern const filter_ops_t filter_entity_ops;
 
 		filter_register(&filter_read_ops);
 		filter_register(&filter_write_ops);
@@ -242,8 +243,10 @@ event_init(void)
 		filter_register(&filter_kbd_ops);
 		filter_register(&filter_ipc_ops);
 		filter_register(&filter_input_ops);
+		filter_register(&filter_entity_ops);
 	}
 
+	entity_event_set_notify(event_notify_entity);
 	event_initialized = 1;
 	printk("[EVENT] Event subsystem initialized "
 	    "(%d kqueue slots)\n", MAX_KQUEUES);
@@ -252,13 +255,15 @@ event_init(void)
 int
 kqueue_create(void)
 {
-	int	i;
+	int	i, handle;
 
 	if (!event_initialized) {
 		return (-1);
 	}
 
 	for (i = 0; i < MAX_KQUEUES; i++) {
+		entity_id_t	id;
+
 		if (!kqueue_pool[i].used) {
 			memset(&kqueue_pool[i], 0,
 			    sizeof(kqueue_t));
@@ -267,13 +272,29 @@ kqueue_create(void)
 			    process_current();
 			kqueue_pool[i].wait_channel =
 			    &kqueue_pool[i];
+			id = entity_io_create_raw(ENTITY_ARCH_KQUEUE, 0);
+			if (id == 0) {
+				kqueue_pool[i].used = 0;
+				return (-1);
+			}
+			entity_io_set_ptr(id, ENTITY_IO_PTR_BACKING,
+			    &kqueue_pool[i]);
+			handle = entity_io_attach(id,
+			    ENTITY_ACCESS_READ | ENTITY_ACCESS_WRITE);
+			if (handle < 0) {
+				entity_destroy(id);
+				kqueue_pool[i].used = 0;
+				return (handle);
+			}
+			kqueue_pool[i].entity = id;
+			kqueue_pool[i].entity_handle = handle;
 			printk("[EVENT] Created kqueue idx=%d "
 			    "owner_pid=%d\n", i,
 			    process_current() ?
 			    (int)process_current()->pid : 0);
 			trace_kqueue_create(i, kqueue_pool[i].owner ?
 			    kqueue_pool[i].owner->pid : 0);
-			return (i);
+			return (handle);
 		}
 	}
 
@@ -328,19 +349,58 @@ kqueue_destroy_internal(int kq_idx, int force)
 int
 kqueue_destroy(int kq_idx)
 {
-	return (kqueue_destroy_internal(kq_idx, 0));
+	process_t	*owner;
+	kqueue_t	*kq;
+
+	kq = kqueue_get(kq_idx);
+	if (!kq) {
+		return (-1);
+	}
+	owner = process_current();
+	if (owner && kq->owner != owner) {
+		return (-API_ERR_PERM);
+	}
+	return (entity_handle_free(owner, kq_idx));
 }
 
 kqueue_t *
 kqueue_get(int kq_idx)
 {
-	if (kq_idx < 0 || kq_idx >= MAX_KQUEUES) {
+	process_t	*proc;
+	entity_id_t	id;
+	kqueue_t	*kq;
+	u32		access;
+	int		ret;
+
+	proc = process_current();
+	ret = entity_handle_lookup(proc, kq_idx, &id, &access);
+	if (ret != 0) {
 		return (NULL);
 	}
-	if (!kqueue_pool[kq_idx].used) {
+	if (entity_arch(id) != ENTITY_ARCH_KQUEUE) {
 		return (NULL);
 	}
-	return (&kqueue_pool[kq_idx]);
+	kq = (kqueue_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+	if (!kq || !kq->used) {
+		return (NULL);
+	}
+	return (kq);
+}
+
+void
+kqueue_entity_release(entity_id_t entity)
+{
+	kqueue_t	*kq;
+	int		idx;
+
+	kq = (kqueue_t *)entity_io_ptr(entity, ENTITY_IO_PTR_BACKING);
+	if (!kq) {
+		return;
+	}
+	idx = (int)(kq - kqueue_pool);
+	if (idx >= 0 && idx < MAX_KQUEUES && kq->used) {
+		kqueue_destroy_internal(idx, 1);
+	}
 }
 
 static knote_t *
@@ -836,144 +896,112 @@ event_fork_process(struct process *parent, struct process *child)
 	(void)child;
 }
 
+struct event_entity_ctx {
+	u16	arch;
+	void	*ptr;
+	s16	filter;
+	u32	fflags;
+};
+
+static int
+event_entity_notify_cb(int handle, entity_id_t id, u32 access, void *ctx)
+{
+	struct event_entity_ctx	*ec;
+
+	(void)access;
+	ec = (struct event_entity_ctx *)ctx;
+	if (entity_arch(id) != ec->arch) {
+		return (0);
+	}
+	if (entity_io_ptr(id, ENTITY_IO_PTR_BACKING) != ec->ptr) {
+		return (0);
+	}
+	knote_notify_all(ec->filter, (u64)handle, ec->fflags, 0);
+	return (0);
+}
+
+static void
+event_entity_notify(u16 arch, void *ptr, s16 filter, u32 fflags)
+{
+	struct event_entity_ctx	ec;
+	int			i;
+
+	if (!event_initialized || !ptr) {
+		return;
+	}
+	ec.arch = arch;
+	ec.ptr = ptr;
+	ec.filter = filter;
+	ec.fflags = fflags;
+	for (i = 0; i < MAX_PROCESSES; i++) {
+		process_t	*proc;
+
+		proc = &process_table[i];
+		if (proc->pid == 0) {
+			continue;
+		}
+		entity_handle_foreach(proc, event_entity_notify_cb, &ec);
+	}
+}
+
 void
 event_notify_pipe_change(pipe_t *p)
 {
-	api_object_t	*objects;
-	int		obj_idx, pid_slot, fd;
-
-	if (!event_initialized || !p) {
-		return;
-	}
-
-	objects = api_get_object_table();
-	if (!objects) {
-		return;
-	}
-
-	for (obj_idx = 0; obj_idx < MAX_DATA_OBJECTS; obj_idx++) {
-		if (!objects[obj_idx].used ||
-		    objects[obj_idx].type != API_OBJECT_PIPE) {
-			continue;
-		}
-		if (objects[obj_idx].pipe != p) {
-			continue;
-		}
-
-		for (pid_slot = 0; pid_slot < MAX_PROCESSES;
-		    pid_slot++) {
-			process_t	*proc;
-			thread_t	*td;
-
-			proc = &process_table[pid_slot];
-			if (proc->pid == 0) {
-				continue;
-			}
-
-			td = proc->main_thread;
-			if (!td || td->state == PROC_STATE_UNUSED) {
-				continue;
-			}
-
-			for (fd = 0; fd < MAX_HANDLES; fd++) {
-				if (!proc->handles[fd].used ||
-				    proc->handles[fd].object_index
-				    != obj_idx) {
-					continue;
-				}
-				knote_notify_all(EVFILT_READ,
-				    (u64)fd, 0, 0);
-				knote_notify_all(EVFILT_WRITE,
-				    (u64)fd, 0, 0);
-			}
-		}
-	}
+	event_entity_notify(ENTITY_ARCH_PIPE, p, EVFILT_READ, 0);
+	event_entity_notify(ENTITY_ARCH_PIPE, p, EVFILT_WRITE, 0);
 }
 
 void
 event_notify_net_change(struct net_endpoint *ep)
 {
-	api_object_t	*objects;
-	int		obj_idx, pid_slot, fd;
-
-	if (!event_initialized || !ep) {
-		return;
-	}
-
-	objects = api_get_object_table();
-	if (!objects) {
-		return;
-	}
-
-	for (obj_idx = 0; obj_idx < MAX_DATA_OBJECTS; obj_idx++) {
-		if (!objects[obj_idx].used ||
-		    objects[obj_idx].type != API_OBJECT_NET) {
-			continue;
-		}
-		if (objects[obj_idx].net != ep) {
-			continue;
-		}
-
-		for (pid_slot = 0; pid_slot < MAX_PROCESSES;
-		    pid_slot++) {
-			process_t	*proc;
-			thread_t	*td;
-
-			proc = &process_table[pid_slot];
-			if (proc->pid == 0) {
-				continue;
-			}
-
-			td = proc->main_thread;
-			if (!td || td->state == PROC_STATE_UNUSED) {
-				continue;
-			}
-
-			for (fd = 0; fd < MAX_HANDLES; fd++) {
-				if (!proc->handles[fd].used ||
-				    proc->handles[fd].object_index
-				    != obj_idx) {
-					continue;
-				}
-				knote_notify_all(EVFILT_READ,
-				    (u64)fd, 0, 0);
-				knote_notify_all(EVFILT_WRITE,
-				    (u64)fd, 0, 0);
-			}
-		}
-	}
+	event_entity_notify(ENTITY_ARCH_NET, ep, EVFILT_READ, 0);
+	event_entity_notify(ENTITY_ARCH_NET, ep, EVFILT_WRITE, 0);
 }
 
 void
 event_notify_ipc_change(struct ipc_endpoint *endpoint)
 {
-	api_object_t	*objects;
-	int		obj_idx, pid_slot, fd;
+	event_entity_notify(ENTITY_ARCH_IPC, endpoint, EVFILT_IPC,
+	    NOTE_IPC_ALL);
+}
 
-	if (!event_initialized || !endpoint) {
+struct event_entity_id_ctx {
+	entity_id_t	id;
+	u32		fflags;
+};
+
+static int
+event_entity_id_cb(int handle, entity_id_t id, u32 access, void *ctx)
+{
+	struct event_entity_id_ctx	*ec;
+
+	(void)access;
+	ec = (struct event_entity_id_ctx *)ctx;
+	if (id != ec->id) {
+		return (0);
+	}
+	knote_notify_all(EVFILT_ENTITY, (u64)handle, ec->fflags, 0);
+	return (0);
+}
+
+void
+event_notify_entity(u64 entity, u32 fflags)
+{
+	struct event_entity_id_ctx	ec;
+	int				i;
+
+	if (!event_initialized) {
 		return;
 	}
-	objects = api_get_object_table();
-	for (obj_idx = 0; obj_idx < MAX_DATA_OBJECTS; obj_idx++) {
-		if (!objects[obj_idx].used ||
-		    objects[obj_idx].type != API_OBJECT_IPC ||
-		    objects[obj_idx].ipc != endpoint) {
+	ec.id = (entity_id_t)entity;
+	ec.fflags = fflags;
+	for (i = 0; i < MAX_PROCESSES; i++) {
+		process_t	*proc;
+
+		proc = &process_table[i];
+		if (proc->pid == 0) {
 			continue;
 		}
-		for (pid_slot = 0; pid_slot < MAX_PROCESSES; pid_slot++) {
-			process_t *proc;
-
-			proc = &process_table[pid_slot];
-			if (proc->pid == 0) {
-				continue;
-			}
-			for (fd = 0; fd < MAX_HANDLES; fd++) {
-				if (proc->handles[fd].used &&
-				    proc->handles[fd].object_index == obj_idx) {
-					knote_notify_all(EVFILT_IPC, (u64)fd,
-					    NOTE_IPC_ALL, 0);
-				}
-			}
-		}
+		entity_handle_foreach(proc, event_entity_id_cb, &ec);
 	}
 }

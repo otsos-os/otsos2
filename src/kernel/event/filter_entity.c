@@ -26,24 +26,76 @@
 
 /* !DEFINES!
 
+$define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type u64 as 64 bit unsigned
 $define %type int as 32 bit signed
-$define %func api_data_close as function with args int
+$define %type knote as registered event state
+$define %type kevent as native event descriptor
+$define %type filter_ops as filter callback table
+$define %type entity_id as 64 bit packed archetype/generation/index
+
+$define %func filt_entity_attach as function with args knote *
+$define %func filt_entity_detach as procedure with args knote *
+$define %func filt_entity_event as function with args knote *, u32
+$define %func filt_entity_touch as procedure with args knote *, kevent *
 
 */
 
 /* !SPACE!
 
-$space %export api_data_close
+$space %internal filt_entity_attach, filt_entity_detach
+$space %internal filt_entity_event, filt_entity_touch
+$space %export filter_entity_ops
 
 */
 
 #include <kernel/api/api.h>
 #include <kernel/entity/entity.h>
+#include <kernel/event/event.h>
 #include <kernel/process.h>
 #include <mlibc/mlibc.h>
 
-int
-api_data_close(int handle)
+static int
+filt_entity_attach(knote_t *kn)
 {
-	return (entity_handle_free(process_current(), handle));
+	process_t	*proc;
+	entity_id_t	id;
+	u32		access;
+
+	proc = process_current();
+	if (entity_handle_lookup(proc, (int)kn->ident, &id, &access) != 0) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	return (0);
 }
+
+static void
+filt_entity_detach(knote_t *kn)
+{
+	(void)kn;
+}
+
+static int
+filt_entity_event(knote_t *kn, u32 nevents)
+{
+	(void)nevents;
+	return (1);
+}
+
+static void
+filt_entity_touch(knote_t *kn, struct kevent *kev)
+{
+	(void)kn;
+	(void)kev;
+}
+
+const filter_ops_t filter_entity_ops = {
+	.filter	= EVFILT_ENTITY,
+	.name	= "entity",
+	.attach	= filt_entity_attach,
+	.detach	= filt_entity_detach,
+	.event	= filt_entity_event,
+	.touch	= filt_entity_touch,
+};

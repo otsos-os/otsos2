@@ -15,8 +15,9 @@ LIB = lib/libc.a
 SHARED = lib/native.so
 CRT0 = lib/crt0.o
 
-SRC = src/ctype.c src/data.c src/drm.c src/errno.c src/event.c src/fs.c \
-      src/futex.c src/input.c src/ipc.c src/kofo.c src/malloc.c src/mem.c src/net.c src/proc.c \
+SRC = src/ctype.c src/data.c src/drm.c src/entity.c src/errno.c src/event.c \
+      src/fs.c src/futex.c src/input.c src/ipc.c src/kofo.c src/malloc.c \
+      src/mem.c src/net.c src/proc.c \
       src/reg.c src/start.c src/stdio.c src/stdlib.c src/string.c src/sys.c \
       src/syscall.c src/term.c src/trace.c
 OBJ = $(SRC:src/%.c=obj/%.o)

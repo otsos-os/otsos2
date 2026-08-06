@@ -94,8 +94,9 @@ $space %export event_notify_net_change, event_notify_ipc_change
 #define	EVFILT_KBD	(-7)
 #define	EVFILT_IPC	(-9)
 #define	EVFILT_INPUT	(-10)
+#define	EVFILT_ENTITY	(-11)
 
-#define	EVFILT_SYSCOUNT	10
+#define	EVFILT_SYSCOUNT	11
 
 #define	EV_ADD		0x0001
 #define	EV_DELETE	0x0002
@@ -203,6 +204,8 @@ typedef struct knote {
 typedef struct kqueue {
 	int			used;
 	struct process		*owner;
+	u64			entity;
+	int			entity_handle;
 	knote_t			knotes[MAX_KNOTES];
 	knote_t			*ready_head;
 	knote_t			*ready_tail;
@@ -214,6 +217,7 @@ void	event_init(void);
 int	kqueue_create(void);
 int	kqueue_destroy(int kq_idx);
 kqueue_t *kqueue_get(int kq_idx);
+void	kqueue_entity_release(u64 entity);
 int	kevent_process(int kq_idx, struct kevent *changelist,
     int nchanges, struct kevent *eventlist, int nevents,
     s64 timeout_ms);
@@ -234,6 +238,7 @@ void	event_notify_signal(u32 pid, int sig);
 void	event_notify_pipe_change(struct pipe *p);
 void	event_notify_net_change(struct net_endpoint *ep);
 void	event_notify_ipc_change(struct ipc_endpoint *endpoint);
+void	event_notify_entity(u64 entity, u32 fflags);
 
 void	proc_sleep(void *channel);
 void	proc_wakeup(void *channel);

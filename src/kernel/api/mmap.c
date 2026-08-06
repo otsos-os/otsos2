@@ -142,30 +142,30 @@ static u64 mmap_anon(process_t *proc, u64 length, u32 prot, u32 flags,
 /* File-backed mapping: pages are read by vm_map_fault(). */
 static u64 mmap_file(process_t *proc, u64 length, u32 prot, u32 flags,
                      u64 addr, int fd, u64 offset) {
-  api_handle_t *handles = api_get_handle_table();
-  api_object_t *objects = api_get_object_table();
+  entity_id_t id;
+  u32 access;
+  vnode_t *vn;
+  void *path;
+  int ret;
 
-  if (fd < 0 || fd >= MAX_HANDLES || !handles[fd].used) {
+  ret = entity_handle_lookup(proc, fd, &id, &access);
+  if (ret != 0) {
     return (u64)(-API_ERR_BAD_HANDLE);
   }
-  int oi = handles[fd].object_index;
-  if (oi < 0 || oi >= MAX_DATA_OBJECTS || !objects[oi].used) {
-    return (u64)(-API_ERR_BAD_HANDLE);
-  }
-  if (objects[oi].type != API_OBJECT_FILE) {
+  if (entity_arch(id) != ENTITY_ARCH_FILE) {
     return (u64)(-API_ERR_NO_DEVICE);
   }
-
-  if (objects[oi].vn == NULL) {
+  vn = (vnode_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+  path = entity_io_ptr(id, ENTITY_IO_PTR_PATH);
+  if (vn == NULL || path == NULL) {
     return (u64)(-API_ERR_BAD_HANDLE);
   }
 
   posix_stat_t st;
-  if (vnode_stat(objects[oi].vn, &st) != 0) {
+  if (vnode_stat(vn, &st) != 0) {
     return (u64)(-API_ERR_NOT_FOUND);
   }
 
-  u32 file_size = (u32)st.st_size;
   u64 aligned = align_up(length, PAGE_SIZE);
 
   if (flags & API_MAP_FIXED) {
@@ -180,7 +180,7 @@ static u64 mmap_file(process_t *proc, u64 length, u32 prot, u32 flags,
   }
 
   vm_object_t *obj = vm_object_create(VM_OBJ_FILE, aligned,
-                                      (void *)objects[oi].path);
+                                      path);
   if (!obj) {
     return (u64)(-API_ERR_NO_MEMORY);
   }

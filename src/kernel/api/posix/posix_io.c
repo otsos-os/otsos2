@@ -27,6 +27,7 @@
 #include <kernel/api/posix/posix.h>
 #include <kernel/api/posix/posix_socket.h>
 #include <kernel/api/api.h>
+#include <kernel/entity/entity.h>
 #include <kernel/signal.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
@@ -49,6 +50,74 @@ void
 posix_poll_notify(void)
 {
 	proc_wakeup(&posix_poll_wait_channel);
+}
+
+static entity_id_t
+posix_entity_install(vnode_t *vn, int posix_flags)
+{
+	entity_id_t	id;
+
+	if (!vn) {
+		return (0);
+	}
+	id = entity_io_create_raw(
+	    vn->type == VCHR ? ENTITY_ARCH_VNODE : ENTITY_ARCH_FILE, 0);
+	if (id == 0) {
+		return (0);
+	}
+	entity_io_set_ptr(id, ENTITY_IO_PTR_BACKING, vn);
+	entity_io_set_ptr(id, ENTITY_IO_PTR_PATH, NULL);
+	entity_io_set_i32(id, ENTITY_IO_I32_OFFSET, 0);
+	entity_io_set_i32(id, ENTITY_IO_I32_FLAGS, (s32)posix_flags);
+	return (id);
+}
+
+static void
+posix_entity_cleanup(struct process *proc, posix_fd_t *pfd)
+{
+	if (!proc || !pfd) {
+		return;
+	}
+	if (pfd->entity != 0) {
+		entity_release((entity_id_t)pfd->entity);
+		pfd->entity = 0;
+	} else if (pfd->vnode) {
+		vnode_release(pfd->vnode);
+	}
+}
+
+static void
+posix_fd_release(struct process *proc, posix_fd_t *pfd)
+{
+	pipe_t	*pipe;
+
+	if (!proc || !pfd || !pfd->used) {
+		return;
+	}
+	if (pfd->vnode) {
+		if (pfd->vnode->type == VPIPE && pfd->vnode->data) {
+			pipe = (pipe_t *)pfd->vnode->data;
+			if (pfd->flags & POSIX_O_WRONLY) {
+				if (pipe->writers > 0) {
+					pipe->writers--;
+				}
+			} else if (pipe->readers > 0) {
+				pipe->readers--;
+			}
+			proc_wakeup((void *)pipe);
+			posix_poll_notify();
+		}
+		if (pfd->vnode->type == VSOCK) {
+			posix_socket_close(pfd->vnode);
+		}
+	}
+	posix_entity_cleanup(proc, pfd);
+	pfd->used = 0;
+	pfd->vnode = NULL;
+	pfd->offset = 0;
+	pfd->flags = 0;
+	pfd->cloexec = 0;
+	pfd->entity = 0;
 }
 
 static char *
@@ -348,6 +417,15 @@ posix_do_open(const char *path, int posix_flags, u64 mode)
 		vnode_release(vn);
 		return ((s64)fd);
 	}
+	{
+		entity_id_t	eid;
+
+		eid = posix_entity_install(vn, (int)posix_flags);
+		if (eid == 0) {
+			return (-POSIX_ENOMEM);
+		}
+		proc->posix_fds[fd].entity = (u64)eid;
+	}
 
 	proc->posix_fds[fd].used = 1;
 	proc->posix_fds[fd].cloexec =
@@ -490,7 +568,6 @@ posix_close(u64 fd_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 {
 	struct process	*proc;
 	posix_fd_t	*pfd;
-	pipe_t		*pipe;
 	int		fd;
 
 	(void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)regs;
@@ -506,30 +583,7 @@ posix_close(u64 fd_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 		return (-POSIX_EBADF);
 	}
 
-	if (pfd->vnode) {
-		if (pfd->vnode->type == VPIPE && pfd->vnode->data) {
-			pipe = (pipe_t *)pfd->vnode->data;
-			if (pfd->flags & POSIX_O_WRONLY) {
-				if (pipe->writers > 0) {
-					pipe->writers--;
-				}
-			} else if (pipe->readers > 0) {
-				pipe->readers--;
-			}
-			proc_wakeup((void *)pipe);
-			posix_poll_notify();
-		}
-		if (pfd->vnode->type == VSOCK)
-			posix_socket_close(pfd->vnode);
-		vnode_release(pfd->vnode);
-	}
-
-	pfd->used = 0;
-	pfd->vnode = NULL;
-	pfd->offset = 0;
-	pfd->flags = 0;
-	pfd->cloexec = 0;
-
+	posix_fd_release(proc, pfd);
 	return (0);
 }
 
@@ -1898,6 +1952,30 @@ posix_pipe2(u64 pipefd_u, u64 flags_u, u64 a3, u64 a4, u64 a5,
 		return ((s64)fd_write);
 	}
 
+	{
+		entity_id_t	eid_read;
+		entity_id_t	eid_write;
+
+		eid_read = posix_entity_install(vn_read,
+		    POSIX_O_RDONLY);
+		if (eid_read == 0) {
+			vnode_release(vn_write);
+			proc->posix_fds[fd_read].used = 0;
+			kmem_free(p);
+			return (-POSIX_ENOMEM);
+		}
+		eid_write = posix_entity_install(vn_write,
+		    POSIX_O_WRONLY);
+		if (eid_write == 0) {
+			entity_release(eid_read);
+			proc->posix_fds[fd_read].used = 0;
+			kmem_free(p);
+			return (-POSIX_ENOMEM);
+		}
+		proc->posix_fds[fd_read].entity = (u64)eid_read;
+		proc->posix_fds[fd_write].entity = (u64)eid_write;
+	}
+
 	proc->posix_fds[fd_write].used = 1;
 	proc->posix_fds[fd_write].cloexec =
 	    (flags & POSIX_O_CLOEXEC) ? 1 : 0;
@@ -1938,9 +2016,16 @@ posix_dup(u64 fd_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 
 	proc->posix_fds[new_fd] = *pfd;
 	proc->posix_fds[new_fd].cloexec = 0;
-	if (pfd->vnode) {
-		if (pfd->vnode->type == VSOCK)
+	if (pfd->entity != 0) {
+		entity_retain((entity_id_t)pfd->entity);
+		proc->posix_fds[new_fd].entity = pfd->entity;
+		if (pfd->vnode && pfd->vnode->type == VSOCK) {
 			posix_socket_hold(pfd->vnode);
+		}
+	} else if (pfd->vnode) {
+		if (pfd->vnode->type == VSOCK) {
+			posix_socket_hold(pfd->vnode);
+		}
 		vnode_acquire(pfd->vnode);
 	}
 
@@ -1979,28 +2064,25 @@ posix_dup2(u64 oldfd_u, u64 newfd_u, u64 a3, u64 a4, u64 a5, u64 a6,
 
 	new_pfd = &proc->posix_fds[newfd];
 	if (new_pfd->used) {
-		if (new_pfd->vnode) {
-			if (new_pfd->vnode->type == VSOCK)
-				posix_socket_close(new_pfd->vnode);
-			vnode_release(new_pfd->vnode);
-		}
+		posix_fd_release(proc, new_pfd);
 	}
 
 	*new_pfd = *old_pfd;
 	new_pfd->cloexec = 0;
-	if (old_pfd->vnode) {
-		if (old_pfd->vnode->type == VSOCK)
+	if (old_pfd->entity != 0) {
+		entity_retain((entity_id_t)old_pfd->entity);
+		new_pfd->entity = old_pfd->entity;
+		if (old_pfd->vnode && old_pfd->vnode->type == VSOCK) {
 			posix_socket_hold(old_pfd->vnode);
+		}
+	} else if (old_pfd->vnode) {
+		if (old_pfd->vnode->type == VSOCK) {
+			posix_socket_hold(old_pfd->vnode);
+		}
 		vnode_acquire(old_pfd->vnode);
 	}
 
 	return ((s64)newfd);
-}
-static void
-dup3_vsock_cleanup(vnode_t *vn)
-{
-	if (vn && vn->type == VSOCK)
-		posix_socket_close(vn);
 }
 static void
 dup3_vsock_hold(vnode_t *vn)
@@ -2042,15 +2124,18 @@ posix_dup3(u64 oldfd_u, u64 newfd_u, u64 flags_u, u64 a4, u64 a5,
 
 	new_pfd = &proc->posix_fds[newfd];
 	if (new_pfd->used) {
-		if (new_pfd->vnode) {
-			dup3_vsock_cleanup(new_pfd->vnode);
-			vnode_release(new_pfd->vnode);
-		}
+		posix_fd_release(proc, new_pfd);
 	}
 
 	*new_pfd = *old_pfd;
 	new_pfd->cloexec = (flags & POSIX_O_CLOEXEC) ? 1 : 0;
-	if (old_pfd->vnode) {
+	if (old_pfd->entity != 0) {
+		entity_retain((entity_id_t)old_pfd->entity);
+		new_pfd->entity = old_pfd->entity;
+		if (old_pfd->vnode && old_pfd->vnode->type == VSOCK) {
+			posix_socket_hold(old_pfd->vnode);
+		}
+	} else if (old_pfd->vnode) {
 		dup3_vsock_hold(old_pfd->vnode);
 		vnode_acquire(old_pfd->vnode);
 	}
@@ -2089,9 +2174,16 @@ posix_fcntl(u64 fd_u, u64 cmd_u, u64 arg_u, u64 a4, u64 a5, u64 a6,
 		}
 		proc->posix_fds[new_fd] = *pfd;
 		proc->posix_fds[new_fd].cloexec = 0;
-		if (pfd->vnode) {
-			if (pfd->vnode->type == VSOCK)
+		if (pfd->entity != 0) {
+			entity_retain((entity_id_t)pfd->entity);
+			proc->posix_fds[new_fd].entity = pfd->entity;
+			if (pfd->vnode && pfd->vnode->type == VSOCK) {
 				posix_socket_hold(pfd->vnode);
+			}
+		} else if (pfd->vnode) {
+			if (pfd->vnode->type == VSOCK) {
+				posix_socket_hold(pfd->vnode);
+			}
 			vnode_acquire(pfd->vnode);
 		}
 		return ((s64)new_fd);

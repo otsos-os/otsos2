@@ -24,9 +24,39 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <kernel/console/terminal.h>
+/* !DEFINES!
+
+$define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type u64 as 64 bit unsigned
+$define %type s32 as 32 bit signed
+$define %type int as 32 bit signed
+$define %type process as struct with process control block
+$define %type entity_id as 64 bit packed archetype/generation/index
+$define %type pipe as struct with pipe ring buffer
+$define %type vnode as VFS vnode
+
+$define %func api_init as procedure with args void
+$define %func api_init_process as procedure with args process *
+$define %func api_copy_handles as procedure with args process *, process *
+$define %func api_release_handles as procedure with args process *
+$define %func api_term_write as function with args buffer, count
+$define %func api_data_write as function with args handle, buffer, count
+
+*/
+
+/* !SPACE!
+
+$space %export api_init, api_init_process, api_copy_handles
+$space %export api_release_handles, api_term_write, api_data_write
+
+*/
+
 #include <kernel/api/api.h>
-#include <kernel/net/endpoint.h>
+#include <kernel/api/errno.h>
+#include <kernel/console/terminal.h>
+#include <kernel/entity/entity.h>
 #include <kernel/ipc/ipc.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
@@ -34,111 +64,11 @@
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
-static api_handle_t	kernel_handles[MAX_HANDLES];
-static api_object_t	api_objects[MAX_DATA_OBJECTS];
-
-api_handle_t *
-api_get_handle_table(void)
-{
-	process_t	*proc;
-
-	proc = process_current();
-	if (proc) {
-		return (proc->handles);
-	}
-	return (kernel_handles);
-}
-
-api_object_t *
-api_get_object_table(void)
-{
-	return (api_objects);
-}
-
-int
-api_alloc_object(void)
-{
-	int	i;
-
-	for (i = 0; i < MAX_DATA_OBJECTS; i++) {
-		if (!api_objects[i].used) {
-			api_objects[i].used = 1;
-			api_objects[i].refcount = 1;
-			api_objects[i].offset = 0;
-			api_objects[i].flags = 0;
-			api_objects[i].type = API_OBJECT_FILE;
-			api_objects[i].pipe = NULL;
-			api_objects[i].net = NULL;
-			api_objects[i].ipc = NULL;
-			api_objects[i].vn = NULL;
-			memset(api_objects[i].path, 0,
-			    sizeof(api_objects[i].path));
-			return (i);
-		}
-	}
-	return (-API_ERR_OBJECTS_FULL);
-}
-
-void
-api_release_object(int index)
-{
-	if (index < 0 || index >= MAX_DATA_OBJECTS) {
-		return;
-	}
-	if (!api_objects[index].used) {
-		return;
-	}
-
-	api_objects[index].refcount--;
-	if (api_objects[index].refcount <= 0) {
-		if (api_objects[index].type == API_OBJECT_PIPE &&
-		    api_objects[index].pipe) {
-			pipe_t	*p;
-
-			p = (pipe_t *)api_objects[index].pipe;
-			if (api_objects[index].flags & API_OPEN_WRITE) {
-				if (p->writers > 0) {
-					p->writers--;
-				}
-			} else {
-				if (p->readers > 0) {
-					p->readers--;
-				}
-			}
-			if (p->readers == 0 && p->writers == 0) {
-				kmem_free(p);
-			}
-		}
-
-		if (api_objects[index].type == API_OBJECT_NET &&
-		    api_objects[index].net) {
-			net_endpoint_close(
-			    (net_endpoint_t *)api_objects[index].net);
-			api_objects[index].net = NULL;
-		}
-		if (api_objects[index].type == API_OBJECT_IPC &&
-		    api_objects[index].ipc) {
-			ipc_endpoint_release(
-			    (ipc_endpoint_t *)api_objects[index].ipc);
-			api_objects[index].ipc = NULL;
-		}
-
-		if (api_objects[index].vn) {
-			vnode_release(api_objects[index].vn);
-			api_objects[index].vn = NULL;
-		}
-
-		memset(&api_objects[index], 0, sizeof(api_objects[index]));
-	}
-}
-
 void
 api_init(void)
 {
-	printk("[API] Initializing handle tables at %p\n",
-	    kernel_handles);
-	memset(kernel_handles, 0, sizeof(kernel_handles));
-	memset(api_objects, 0, sizeof(api_objects));
+	printk("[API] Initializing native API (entity-backed)\n");
+	entity_io_init();
 	ipc_init();
 }
 
@@ -148,54 +78,28 @@ api_init_process(struct process *proc)
 	if (!proc) {
 		return;
 	}
-	memcpy(proc->handles, kernel_handles, sizeof(kernel_handles));
+	entity_handle_init_process(proc);
 }
 
 void
 api_copy_handles(struct process *dst, const struct process *src)
 {
-	int	i;
-
 	if (!dst || !src) {
 		return;
 	}
-	memcpy(dst->handles, src->handles, sizeof(dst->handles));
-	for (i = 0; i < MAX_HANDLES; i++) {
-		if (!dst->handles[i].used) {
-			continue;
-		}
-		int	object_index;
-
-		object_index = dst->handles[i].object_index;
-		if (object_index >= 0 && object_index < MAX_DATA_OBJECTS &&
-		    api_objects[object_index].used) {
-			api_objects[object_index].refcount++;
-		}
+	if (entity_handle_copy_all(dst, src) != 0) {
+		printk("[API] entity handle copy failed "
+		    "(pid %d -> pid %d)\n", src->pid, dst->pid);
 	}
 }
 
 void
 api_release_handles(struct process *proc)
 {
-	int	i;
-
 	if (!proc) {
 		return;
 	}
-	for (i = 0; i < MAX_HANDLES; i++) {
-		if (!proc->handles[i].used) {
-			continue;
-		}
-		int	object_index;
-
-		object_index = proc->handles[i].object_index;
-		if (object_index >= 0) {
-			api_release_object(object_index);
-		}
-		proc->handles[i].used = 0;
-		proc->handles[i].flags = 0;
-		proc->handles[i].object_index = -1;
-	}
+	entity_handle_release_all(proc);
 }
 
 int
@@ -204,7 +108,6 @@ api_term_write(const void *buf, u32 count)
 	if (count == 0) {
 		return (0);
 	}
-
 	if (!is_user_address(buf, count)) {
 		thread_t	*td;
 
@@ -214,33 +117,33 @@ api_term_write(const void *buf, u32 count)
 		}
 		return (-API_ERR_BAD_ADDR);
 	}
-
 	return (terminal_write(buf, count));
 }
 
 int
 api_data_write(int handle, const void *buf, u32 count)
 {
-	api_handle_t	*handles;
-	api_object_t	*objects;
-	int		object_index;
-	int		n;
+	process_t	*proc;
+	entity_id_t	id;
+	vnode_t		*vn;
+	pipe_t		*p;
+	posix_stat_t	st;
+	u32		access;
+	u16		arch;
+	s32		offset, flags;
+	int		n, ret;
 
-	handles = api_get_handle_table();
-	objects = api_get_object_table();
-
-	if (handle < 0 || handle >= MAX_HANDLES) {
+	proc = process_current();
+	ret = entity_handle_lookup(proc, handle, &id, &access);
+	if (ret != 0) {
 		return (-API_ERR_BAD_HANDLE);
 	}
-
-	if (!handles[handle].used) {
+	if ((access & ENTITY_ACCESS_WRITE) == 0) {
 		return (-API_ERR_BAD_HANDLE);
 	}
-
 	if (count == 0) {
 		return (0);
 	}
-
 	if (!is_user_address(buf, count)) {
 		thread_t	*td;
 
@@ -250,40 +153,39 @@ api_data_write(int handle, const void *buf, u32 count)
 		}
 		return (-API_ERR_BAD_ADDR);
 	}
-
-	if (!(handles[handle].flags & API_OPEN_WRITE)) {
+	arch = entity_arch(id);
+	if (arch == ENTITY_ARCH_PIPE) {
+		p = (pipe_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+		if (!p) {
+			return (-API_ERR_BAD_HANDLE);
+		}
+		return (pipe_write(p, buf, count));
+	}
+	if (arch != ENTITY_ARCH_FILE && arch != ENTITY_ARCH_VNODE) {
 		return (-API_ERR_BAD_HANDLE);
 	}
-
-	object_index = handles[handle].object_index;
-	if (object_index < 0 || object_index >= MAX_DATA_OBJECTS ||
-	    !objects[object_index].used) {
+	vn = (vnode_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+	if (!vn) {
 		return (-API_ERR_BAD_HANDLE);
 	}
-
-	if (objects[object_index].type == API_OBJECT_PIPE) {
-		return (pipe_write((pipe_t *)objects[object_index].pipe,
-		    buf, count));
+	ret = entity_io_i32(id, ENTITY_IO_I32_OFFSET, &offset);
+	if (ret != 0) {
+		return (ret);
 	}
-
-	if (objects[object_index].vn == NULL) {
-		return (-API_ERR_BAD_HANDLE);
+	ret = entity_io_i32(id, ENTITY_IO_I32_FLAGS, &flags);
+	if (ret != 0) {
+		return (ret);
 	}
-
-	if (handles[handle].flags & API_OPEN_APPEND) {
-		posix_stat_t	st;
-
-		if (vnode_stat(objects[object_index].vn, &st) == 0) {
-			objects[object_index].offset = (u32)st.st_size;
+	if (flags & API_OPEN_APPEND) {
+		if (vnode_stat(vn, &st) == 0) {
+			offset = (s32)st.st_size;
 		}
 	}
-
-	n = vnode_write(objects[object_index].vn, buf, count,
-	    objects[object_index].offset);
+	n = vnode_write(vn, buf, count, (u64)offset);
 	if (n < 0) {
 		return (n);
 	}
-
-	objects[object_index].offset += (u32)n;
+	offset += (s32)n;
+	entity_io_set_i32(id, ENTITY_IO_I32_OFFSET, offset);
 	return (n);
 }

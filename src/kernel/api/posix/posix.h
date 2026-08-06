@@ -473,6 +473,7 @@ typedef struct posix_fd {
 	int		flags;
 	u64		offset;
 	vnode_t		*vnode;
+	u64		entity;
 } posix_fd_t;
 
 typedef struct posix_pollfd {

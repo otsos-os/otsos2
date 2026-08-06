@@ -1,50 +1,3 @@
-/* !DEFINES!
-
-$define %type u32 as 32 bit unsigned
-$define %type int as 32 bit signed
-$define %type char as 8 bit signed
-$define %type api_handle_t as process handle table entry
-$define %type api_object_t as global API object table entry
-$define %type api_reg_value as native registry value IO descriptor
-$define %type api_reg_entry as native registry enumeration entry
-
-$define %func api_reg_copy_string as function with args const char *, int
-$define %func api_reg_find_free_handle as function with args void
-$define %func api_reg_flags_valid as function with args u32
-$define %func api_reg_type_valid as function with args u32
-$define %func api_reg_is_kusr as function with args void
-$define %func api_reg_get_object as function with args int, object, flags
-$define %func api_reg_object_hive as function with args api_object_t *
-$define %func api_reg_object_key as function with args api_object_t *
-$define %func api_reg_join_key as function with args base, child, out
-$define %func api_reg_parent_key as function with args key, out, out_size
-$define %func api_reg_check_write_open as function with args hive, key, kusr
-$define %func api_reg_install as function with args hive, key, flags
-$define %func api_reg_open as function with args hive, key, flags
-$define %func api_reg_close as function with args int
-$define %func api_reg_get as function with args int, api_reg_value *
-$define %func api_reg_set as function with args int, api_reg_value *
-$define %func api_reg_create_key as function with args int, const char *
-$define %func api_reg_delete_key as function with args int, const char *
-$define %func api_reg_delete_value as function with args int, const char *
-$define %func api_reg_enum as function with args int, api_reg_entry *
-$define %func api_reg_upd as function with args u32
-
-*/
-
-/* !SPACE!
-
-$space %internal api_reg_copy_string, api_reg_find_free_handle
-$space %internal api_reg_flags_valid, api_reg_type_valid, api_reg_is_kusr
-$space %internal api_reg_get_object, api_reg_object_hive
-$space %internal api_reg_object_key, api_reg_join_key, api_reg_install
-$space %internal api_reg_parent_key, api_reg_check_write_open
-$space %export api_reg_open, api_reg_close, api_reg_get, api_reg_set
-$space %export api_reg_create_key, api_reg_delete_key
-$space %export api_reg_delete_value, api_reg_enum, api_reg_upd
-
-*/
-
 /*
  * Copyright (c) 2026, otsos team
  *
@@ -52,7 +5,7 @@ $space %export api_reg_delete_value, api_reg_enum, api_reg_upd
  * modification, are permitted provided that the following conditions are met:
  *
  * 1. Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimer.
+ * this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
@@ -71,8 +24,57 @@ $space %export api_reg_delete_value, api_reg_enum, api_reg_upd
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* !DEFINES!
+
+$define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type int as 32 bit signed
+$define %type entity_id as 64 bit packed archetype/generation/index
+$define %type api_reg_value as native registry value IO descriptor
+$define %type api_reg_entry as native registry enumeration entry
+$define %type cm_entry as registry key or value enumeration record
+
+$define %func api_reg_copy_string as function with args const char *, int
+$define %func api_reg_flags_valid as function with args u32
+$define %func api_reg_type_valid as function with args u32
+$define %func api_reg_is_kusr as function with args void
+$define %func api_reg_get_entity as function with args int, u64 *, u32 *
+$define %func api_reg_object_hive as function with args entity_id
+$define %func api_reg_object_key as function with args entity_id
+$define %func api_reg_join_key as function with args base, child, out, size
+$define %func api_reg_parent_key as function with args key, out, out_size
+$define %func api_reg_check_write_open as function with args hive, key, kusr
+$define %func api_reg_install as function with args hive, key, flags
+$define %func api_reg_open as function with args hive, key, flags
+$define %func api_reg_close as function with args int
+$define %func api_reg_get as function with args int, api_reg_value *
+$define %func api_reg_set as function with args int, api_reg_value *
+$define %func api_reg_create_key as function with args int, const char *
+$define %func api_reg_delete_key as function with args int, const char *
+$define %func api_reg_delete_value as function with args int, const char *
+$define %func api_reg_enum as function with args int, api_reg_entry *
+$define %func api_reg_upd as function with args u32
+
+*/
+
+/* !SPACE!
+
+$space %internal api_reg_copy_string, api_reg_flags_valid
+$space %internal api_reg_type_valid, api_reg_is_kusr
+$space %internal api_reg_get_entity, api_reg_object_hive
+$space %internal api_reg_object_key, api_reg_join_key, api_reg_install
+$space %internal api_reg_parent_key, api_reg_check_write_open
+$space %export api_reg_open, api_reg_close, api_reg_get, api_reg_set
+$space %export api_reg_create_key, api_reg_delete_key
+$space %export api_reg_delete_value, api_reg_enum, api_reg_upd
+
+*/
+
 #include <kernel/api/api.h>
+#include <kernel/api/errno.h>
 #include <kernel/cm/cm.h>
+#include <kernel/entity/entity.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
@@ -94,7 +96,6 @@ api_reg_copy_string(const char *src, int allow_null)
 		buf = (char *)kmem_calloc(1, 1);
 		return (buf);
 	}
-
 	for (len = 0; len < API_REG_MAX_STRING; len++) {
 		if (!is_user_address(src + len, 1)) {
 			return (NULL);
@@ -106,7 +107,6 @@ api_reg_copy_string(const char *src, int allow_null)
 	if (len == API_REG_MAX_STRING) {
 		return (NULL);
 	}
-
 	buf = (char *)kmem_calloc(len + 1, 1);
 	if (!buf) {
 		return (NULL);
@@ -116,21 +116,6 @@ api_reg_copy_string(const char *src, int allow_null)
 	}
 	buf[len] = '\0';
 	return (buf);
-}
-
-static int
-api_reg_find_free_handle(void)
-{
-	api_handle_t	*handles;
-	int		i;
-
-	handles = api_get_handle_table();
-	for (i = 3; i < MAX_HANDLES; i++) {
-		if (!handles[i].used) {
-			return (i);
-		}
-	}
-	return (-API_ERR_HANDLES_FULL);
 }
 
 static int
@@ -170,54 +155,55 @@ api_reg_is_kusr(void)
 }
 
 static int
-api_reg_get_object(int handle, api_object_t **out_obj, int *out_flags)
+api_reg_get_entity(int handle, entity_id_t *id, u32 *flags)
 {
-	api_handle_t	*handles;
-	api_object_t	*objects;
-	int		object_index;
+	process_t	*proc;
+	u32		access;
+	int		ret;
 
-	if (!out_obj) {
+	if (!id) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	*out_obj = NULL;
-	if (out_flags) {
-		*out_flags = 0;
+	*id = 0;
+	if (flags) {
+		*flags = 0;
 	}
-
-	if (handle < 0 || handle >= MAX_HANDLES) {
+	proc = process_current();
+	ret = entity_handle_lookup(proc, handle, id, &access);
+	if (ret != 0) {
 		return (-API_ERR_BAD_HANDLE);
 	}
-
-	handles = api_get_handle_table();
-	if (!handles[handle].used) {
+	if (entity_arch(*id) != ENTITY_ARCH_REG) {
 		return (-API_ERR_BAD_HANDLE);
 	}
-
-	object_index = handles[handle].object_index;
-	objects = api_get_object_table();
-	if (object_index < 0 || object_index >= MAX_DATA_OBJECTS ||
-	    !objects[object_index].used ||
-	    objects[object_index].type != API_OBJECT_REG) {
-		return (-API_ERR_BAD_HANDLE);
-	}
-
-	*out_obj = &objects[object_index];
-	if (out_flags) {
-		*out_flags = handles[handle].flags;
+	if (flags) {
+		*flags = access;
 	}
 	return (0);
 }
 
 static const char *
-api_reg_object_hive(api_object_t *obj)
+api_reg_object_hive(entity_id_t id)
 {
-	return (obj->path);
+	char	*buf;
+
+	buf = (char *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+	if (!buf) {
+		return ("");
+	}
+	return (buf);
 }
 
 static const char *
-api_reg_object_key(api_object_t *obj)
+api_reg_object_key(entity_id_t id)
 {
-	return (obj->path + strlen(obj->path) + 1);
+	char	*buf;
+
+	buf = (char *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+	if (!buf) {
+		return ("");
+	}
+	return (buf + strlen(buf) + 1);
 }
 
 static int
@@ -228,7 +214,6 @@ api_reg_join_key(const char *base, const char *child, char *out, u32 out_size)
 	if (!base || !child || child[0] == '\0' || !out || out_size == 0) {
 		return (-API_ERR_BAD_VALUE);
 	}
-
 	base_len = (u32)strlen(base);
 	child_len = (u32)strlen(child);
 	need = child_len + 1;
@@ -238,7 +223,6 @@ api_reg_join_key(const char *base, const char *child, char *out, u32 out_size)
 	if (need > out_size) {
 		return (-API_ERR_TOO_BIG);
 	}
-
 	out[0] = '\0';
 	if (base_len != 0) {
 		strcpy(out, base);
@@ -260,7 +244,6 @@ api_reg_parent_key(const char *key, char *out, u32 out_size)
 	if (!key || key[0] == '\0') {
 		return (0);
 	}
-
 	len = (u32)strlen(key);
 	parent_len = 0;
 	for (i = len; i > 0; i--) {
@@ -305,11 +288,10 @@ api_reg_check_write_open(const char *hive, const char *key, int is_kusr)
 static int
 api_reg_install(const char *hive, const char *key, u32 flags)
 {
-	api_handle_t	*handles;
-	api_object_t	*objects;
-	api_object_t	*obj;
-	u32		hive_len, key_len;
-	int		handle, object_index;
+	entity_id_t	id;
+	char		*buf;
+	u32		hive_len, key_len, access;
+	int		handle;
 
 	hive_len = (u32)strlen(hive);
 	key_len = (u32)strlen(key);
@@ -319,30 +301,30 @@ api_reg_install(const char *hive, const char *key, u32 flags)
 	if (hive_len + 1 + key_len + 1 > 256) {
 		return (-API_ERR_TOO_BIG);
 	}
-
-	handle = api_reg_find_free_handle();
+	id = entity_io_create_raw(ENTITY_ARCH_REG, 0);
+	if (id == 0) {
+		return (-API_ERR_NO_MEMORY);
+	}
+	buf = (char *)kmem_calloc(hive_len + 1 + key_len + 1, 1);
+	if (!buf) {
+		entity_destroy(id);
+		return (-API_ERR_NO_MEMORY);
+	}
+	memcpy(buf, hive, hive_len);
+	memcpy(buf + hive_len + 1, key, key_len);
+	entity_io_set_ptr(id, ENTITY_IO_PTR_BACKING, buf);
+	access = 0;
+	if (flags & API_REG_OPEN_READ) {
+		access |= ENTITY_ACCESS_READ;
+	}
+	if (flags & API_REG_OPEN_WRITE) {
+		access |= ENTITY_ACCESS_WRITE;
+	}
+	handle = entity_io_attach(id, access);
 	if (handle < 0) {
+		entity_destroy(id);
 		return (handle);
 	}
-
-	object_index = api_alloc_object();
-	if (object_index < 0) {
-		return (object_index);
-	}
-
-	handles = api_get_handle_table();
-	objects = api_get_object_table();
-	obj = &objects[object_index];
-
-	obj->type = API_OBJECT_REG;
-	obj->flags = (int)flags;
-	memset(obj->path, 0, sizeof(obj->path));
-	memcpy(obj->path, hive, hive_len);
-	memcpy(obj->path + hive_len + 1, key, key_len);
-
-	handles[handle].used = 1;
-	handles[handle].flags = (int)flags;
-	handles[handle].object_index = object_index;
 	return (handle);
 }
 
@@ -357,7 +339,6 @@ api_reg_open(const char *uhive, const char *ukey, u32 flags)
 	if (!api_reg_flags_valid(flags)) {
 		return (-API_ERR_BAD_VALUE);
 	}
-
 	hive = api_reg_copy_string(uhive, 0);
 	key = api_reg_copy_string(ukey, 1);
 	if (!hive || !key) {
@@ -369,7 +350,6 @@ api_reg_open(const char *uhive, const char *ukey, u32 flags)
 		}
 		return (-API_ERR_BAD_ADDR);
 	}
-
 	is_kusr = api_reg_is_kusr();
 	ret = cm_key_exists(hive, key);
 	if (ret != 0 && (flags & API_REG_OPEN_CREATE) &&
@@ -405,7 +385,6 @@ api_reg_open(const char *uhive, const char *ukey, u32 flags)
 			return (ret);
 		}
 	}
-
 	ret = api_reg_install(hive, key, flags);
 	kmem_free(hive);
 	kmem_free(key);
@@ -415,14 +394,13 @@ api_reg_open(const char *uhive, const char *ukey, u32 flags)
 int
 api_reg_close(int handle)
 {
-	api_object_t	*obj;
+	entity_id_t	id;
 	int		ret;
 
-	ret = api_reg_get_object(handle, &obj, NULL);
+	ret = api_reg_get_entity(handle, &id, NULL);
 	if (ret != 0) {
 		return (ret);
 	}
-	(void)obj;
 	return (api_data_close(handle));
 }
 
@@ -430,41 +408,39 @@ int
 api_reg_get(int handle, struct api_reg_value *uvalue)
 {
 	struct api_reg_value	value;
-	api_object_t		*obj;
+	entity_id_t		id;
 	char			*name;
 	u32			type, need, got;
-	int			flags, is_kusr, ret;
+	u32			flags;
+	int			is_kusr, ret;
 
-	ret = api_reg_get_object(handle, &obj, &flags);
+	ret = api_reg_get_entity(handle, &id, &flags);
 	if (ret != 0) {
 		return (ret);
 	}
-	if ((flags & API_REG_OPEN_READ) == 0) {
+	if ((flags & ENTITY_ACCESS_READ) == 0) {
 		return (-API_ERR_ACCESS);
 	}
 	if (!uvalue || !is_user_address(uvalue, sizeof(*uvalue)) ||
 	    !user_range_fault_in(uvalue, sizeof(*uvalue), 1)) {
 		return (-API_ERR_BAD_ADDR);
 	}
-
 	memcpy(&value, uvalue, sizeof(value));
 	name = api_reg_copy_string(value.name, 0);
 	if (!name) {
 		return (-API_ERR_BAD_ADDR);
 	}
-
 	is_kusr = api_reg_is_kusr();
-	ret = cm_check_access(api_reg_object_hive(obj),
-	    api_reg_object_key(obj), name, CM_ACCESS_READ, is_kusr);
+	ret = cm_check_access(api_reg_object_hive(id),
+	    api_reg_object_key(id), name, CM_ACCESS_READ, is_kusr);
 	if (ret != 0) {
 		kmem_free(name);
 		return (ret);
 	}
-
 	type = 0;
 	need = 0;
-	ret = cm_value_info(api_reg_object_hive(obj), api_reg_object_key(obj),
-	    name, &type, &need);
+	ret = cm_value_info(api_reg_object_hive(id),
+	    api_reg_object_key(id), name, &type, &need);
 	if (ret != 0) {
 		kmem_free(name);
 		return (ret);
@@ -473,7 +449,6 @@ api_reg_get(int handle, struct api_reg_value *uvalue)
 		kmem_free(name);
 		return (-API_ERR_FILE_TOO_BIG);
 	}
-
 	value.type = type;
 	value.bytes = need;
 	if (!value.data || value.size == 0) {
@@ -491,10 +466,9 @@ api_reg_get(int handle, struct api_reg_value *uvalue)
 		kmem_free(name);
 		return (-API_ERR_BAD_ADDR);
 	}
-
 	got = 0;
-	ret = cm_read_value(api_reg_object_hive(obj),
-	    api_reg_object_key(obj), name, value.data, value.size, &got);
+	ret = cm_read_value(api_reg_object_hive(id),
+	    api_reg_object_key(id), name, value.data, value.size, &got);
 	if (ret == 0) {
 		value.bytes = got;
 		memcpy(uvalue, &value, sizeof(value));
@@ -508,23 +482,23 @@ int
 api_reg_set(int handle, const struct api_reg_value *uvalue)
 {
 	struct api_reg_value	value;
-	api_object_t		*obj;
+	entity_id_t		id;
 	char			*name;
 	u32			old_type, old_size;
-	int			flags, is_kusr, ret;
+	u32			flags;
+	int			is_kusr, ret;
 
-	ret = api_reg_get_object(handle, &obj, &flags);
+	ret = api_reg_get_entity(handle, &id, &flags);
 	if (ret != 0) {
 		return (ret);
 	}
-	if ((flags & API_REG_OPEN_WRITE) == 0) {
+	if ((flags & ENTITY_ACCESS_WRITE) == 0) {
 		return (-API_ERR_ACCESS);
 	}
 	if (!uvalue || !is_user_address(uvalue, sizeof(*uvalue)) ||
 	    !user_range_fault_in(uvalue, sizeof(*uvalue), 0)) {
 		return (-API_ERR_BAD_ADDR);
 	}
-
 	memcpy(&value, uvalue, sizeof(value));
 	if (value.flags != 0 || !api_reg_type_valid(value.type) ||
 	    value.size > API_REG_MAX_VALUE_SIZE) {
@@ -535,33 +509,31 @@ api_reg_set(int handle, const struct api_reg_value *uvalue)
 	    !user_range_fault_in(value.data, value.size, 0))) {
 		return (-API_ERR_BAD_ADDR);
 	}
-
 	name = api_reg_copy_string(value.name, 0);
 	if (!name) {
 		return (-API_ERR_BAD_ADDR);
 	}
-
 	is_kusr = api_reg_is_kusr();
 	old_type = 0;
 	old_size = 0;
-	ret = cm_value_info(api_reg_object_hive(obj),
-	    api_reg_object_key(obj), name, &old_type, &old_size);
+	ret = cm_value_info(api_reg_object_hive(id),
+	    api_reg_object_key(id), name, &old_type, &old_size);
 	if (ret == 0) {
-		ret = cm_check_access(api_reg_object_hive(obj),
-		    api_reg_object_key(obj), name, CM_ACCESS_EDIT,
+		ret = cm_check_access(api_reg_object_hive(id),
+		    api_reg_object_key(id), name, CM_ACCESS_EDIT,
 		    is_kusr);
 	} else if (ret == -API_ERR_NOT_FOUND) {
-		ret = cm_check_access(api_reg_object_hive(obj),
-		    api_reg_object_key(obj), NULL, CM_ACCESS_ADD,
+		ret = cm_check_access(api_reg_object_hive(id),
+		    api_reg_object_key(id), NULL, CM_ACCESS_ADD,
 		    is_kusr);
 	}
 	if (ret != 0) {
 		kmem_free(name);
 		return (ret);
 	}
-
-	ret = cm_set_value(api_reg_object_hive(obj), api_reg_object_key(obj),
-	    name, value.type, value.data, value.size);
+	ret = cm_set_value(api_reg_object_hive(id),
+	    api_reg_object_key(id), name, value.type, value.data,
+	    value.size);
 	kmem_free(name);
 	return (ret);
 }
@@ -569,34 +541,34 @@ api_reg_set(int handle, const struct api_reg_value *uvalue)
 int
 api_reg_create_key(int handle, const char *uname)
 {
-	api_object_t	*obj;
+	entity_id_t	id;
 	char		*name;
 	char		key[256];
-	int		flags, is_kusr, ret;
+	u32		flags;
+	int		is_kusr, ret;
 
-	ret = api_reg_get_object(handle, &obj, &flags);
+	ret = api_reg_get_entity(handle, &id, &flags);
 	if (ret != 0) {
 		return (ret);
 	}
-	if ((flags & API_REG_OPEN_WRITE) == 0) {
+	if ((flags & ENTITY_ACCESS_WRITE) == 0) {
 		return (-API_ERR_ACCESS);
 	}
-
 	name = api_reg_copy_string(uname, 0);
 	if (!name) {
 		return (-API_ERR_BAD_ADDR);
 	}
 	is_kusr = api_reg_is_kusr();
-	ret = cm_check_access(api_reg_object_hive(obj),
-	    api_reg_object_key(obj), NULL, CM_ACCESS_ADD, is_kusr);
+	ret = cm_check_access(api_reg_object_hive(id),
+	    api_reg_object_key(id), NULL, CM_ACCESS_ADD, is_kusr);
 	if (ret != 0) {
 		kmem_free(name);
 		return (ret);
 	}
-	ret = api_reg_join_key(api_reg_object_key(obj), name, key,
+	ret = api_reg_join_key(api_reg_object_key(id), name, key,
 	    sizeof(key));
 	if (ret == 0) {
-		ret = cm_create_key(api_reg_object_hive(obj), key);
+		ret = cm_create_key(api_reg_object_hive(id), key);
 	}
 	kmem_free(name);
 	return (ret);
@@ -605,31 +577,31 @@ api_reg_create_key(int handle, const char *uname)
 int
 api_reg_delete_key(int handle, const char *uname)
 {
-	api_object_t	*obj;
+	entity_id_t	id;
 	char		*name;
 	char		key[256];
-	int		flags, is_kusr, ret;
+	u32		flags;
+	int		is_kusr, ret;
 
-	ret = api_reg_get_object(handle, &obj, &flags);
+	ret = api_reg_get_entity(handle, &id, &flags);
 	if (ret != 0) {
 		return (ret);
 	}
-	if ((flags & API_REG_OPEN_WRITE) == 0) {
+	if ((flags & ENTITY_ACCESS_WRITE) == 0) {
 		return (-API_ERR_ACCESS);
 	}
-
 	name = api_reg_copy_string(uname, 0);
 	if (!name) {
 		return (-API_ERR_BAD_ADDR);
 	}
-	ret = api_reg_join_key(api_reg_object_key(obj), name, key,
+	ret = api_reg_join_key(api_reg_object_key(id), name, key,
 	    sizeof(key));
 	if (ret == 0) {
 		is_kusr = api_reg_is_kusr();
-		ret = cm_check_access(api_reg_object_hive(obj), key,
+		ret = cm_check_access(api_reg_object_hive(id), key,
 		    NULL, CM_ACCESS_EDIT, is_kusr);
 		if (ret == 0) {
-			ret = cm_delete_key(api_reg_object_hive(obj), key);
+			ret = cm_delete_key(api_reg_object_hive(id), key);
 		}
 	}
 	kmem_free(name);
@@ -639,28 +611,28 @@ api_reg_delete_key(int handle, const char *uname)
 int
 api_reg_delete_value(int handle, const char *uname)
 {
-	api_object_t	*obj;
+	entity_id_t	id;
 	char		*name;
-	int		flags, is_kusr, ret;
+	u32		flags;
+	int		is_kusr, ret;
 
-	ret = api_reg_get_object(handle, &obj, &flags);
+	ret = api_reg_get_entity(handle, &id, &flags);
 	if (ret != 0) {
 		return (ret);
 	}
-	if ((flags & API_REG_OPEN_WRITE) == 0) {
+	if ((flags & ENTITY_ACCESS_WRITE) == 0) {
 		return (-API_ERR_ACCESS);
 	}
-
 	name = api_reg_copy_string(uname, 0);
 	if (!name) {
 		return (-API_ERR_BAD_ADDR);
 	}
 	is_kusr = api_reg_is_kusr();
-	ret = cm_check_access(api_reg_object_hive(obj),
-	    api_reg_object_key(obj), name, CM_ACCESS_EDIT, is_kusr);
+	ret = cm_check_access(api_reg_object_hive(id),
+	    api_reg_object_key(id), name, CM_ACCESS_EDIT, is_kusr);
 	if (ret == 0) {
-		ret = cm_delete_value(api_reg_object_hive(obj),
-		    api_reg_object_key(obj), name);
+		ret = cm_delete_value(api_reg_object_hive(id),
+		    api_reg_object_key(id), name);
 	}
 	kmem_free(name);
 	return (ret);
@@ -670,39 +642,37 @@ int
 api_reg_enum(int handle, struct api_reg_entry *uentry)
 {
 	struct api_reg_entry	entry;
-	api_object_t		*obj;
+	entity_id_t		id;
 	cm_entry_t		cm_entry;
 	u32			index;
-	int			flags, is_kusr, ret;
+	u32			flags;
+	int			is_kusr, ret;
 
-	ret = api_reg_get_object(handle, &obj, &flags);
+	ret = api_reg_get_entity(handle, &id, &flags);
 	if (ret != 0) {
 		return (ret);
 	}
-	if ((flags & API_REG_OPEN_READ) == 0) {
+	if ((flags & ENTITY_ACCESS_READ) == 0) {
 		return (-API_ERR_ACCESS);
 	}
 	if (!uentry || !is_user_address(uentry, sizeof(*uentry)) ||
 	    !user_range_fault_in(uentry, sizeof(*uentry), 1)) {
 		return (-API_ERR_BAD_ADDR);
 	}
-
 	memcpy(&entry, uentry, sizeof(entry));
 	index = entry.index;
 	is_kusr = api_reg_is_kusr();
-	ret = cm_check_access(api_reg_object_hive(obj),
-	    api_reg_object_key(obj), NULL, CM_ACCESS_READ, is_kusr);
+	ret = cm_check_access(api_reg_object_hive(id),
+	    api_reg_object_key(id), NULL, CM_ACCESS_READ, is_kusr);
 	if (ret != 0) {
 		return (ret);
 	}
-
 	memset(&cm_entry, 0, sizeof(cm_entry));
-	ret = cm_enum_entry(api_reg_object_hive(obj),
-	    api_reg_object_key(obj), index, &cm_entry);
+	ret = cm_enum_entry(api_reg_object_hive(id),
+	    api_reg_object_key(id), index, &cm_entry);
 	if (ret <= 0) {
 		return (ret);
 	}
-
 	memset(&entry, 0, sizeof(entry));
 	entry.index = index;
 	entry.kind = cm_entry.kind;

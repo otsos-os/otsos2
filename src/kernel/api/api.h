@@ -31,36 +31,15 @@
 #include <kernel/api/errno.h>
 #include <kernel/api/input_abi.h>
 #include <kernel/api/session.h>
+#include <kernel/entity/entity.h>
 #include <kernel/drivers/keyboard/keycodes.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/video/drm/kms/property.h>
 #include <mlibc/mlibc.h>
 
-#define MAX_HANDLES 32
-#define MAX_DATA_OBJECTS 64
-
 struct process;
 struct api_ipc_message;
 struct api_ipc_call;
-
-typedef struct {
-  int used;
-  int flags;
-  int object_index;
-} api_handle_t;
-
-typedef struct {
-  int used;
-  int refcount;
-  int type;
-  char path[256];
-  u32 offset;
-  int flags;
-  void *pipe;
-  void *net;
-  void *ipc;
-  vnode_t *vn;
-} api_object_t;
 
 #define API_OPEN_READ 0x0001
 #define API_OPEN_WRITE 0x0002
@@ -90,12 +69,6 @@ typedef struct {
 #define API_CLONE_VM 0x00000100
 #define API_CLONE_THREAD 0x00010000
 
-#define API_OBJECT_FILE 0
-#define API_OBJECT_PIPE 1
-#define API_OBJECT_VNODE 2
-#define API_OBJECT_NET 3
-#define API_OBJECT_REG 4
-#define API_OBJECT_IPC 5
 #define MMAP_BASE 0x0000001000000000ULL
 #define MMAP_LIMIT 0x00007FFF00000000ULL
 
@@ -959,10 +932,6 @@ void api_init(void);
 void api_init_process(struct process *proc);
 void api_copy_handles(struct process *dst, const struct process *src);
 void api_release_handles(struct process *proc);
-api_handle_t *api_get_handle_table(void);
-api_object_t *api_get_object_table(void);
-int api_alloc_object(void);
-void api_release_object(int index);
 int api_proc_getpid(void);
 int api_proc_getppid(void);
 int api_proc_gettid(void);
@@ -1020,5 +989,95 @@ int api_trace_ctl(int trace, u32 op, void *arg);
 int api_trace_info(u32 op, void *arg);
 int api_trace_mark(u32 id, u64 a0, u64 a1, u64 a2, u64 a3, u64 a4);
 void api_trace_cleanup_process(struct process *proc);
+
+/* Entity manager (native object namespace) */
+#define	API_ENTITY_NAME_MAX		64
+#define	API_ENTITY_LIST_MAX_ENTRIES	256
+
+#define	ENTITY_IO_PTR_BACKING		0
+#define	ENTITY_IO_PTR_PATH		1
+#define	ENTITY_IO_I32_OFFSET		0
+#define	ENTITY_IO_I32_FLAGS		1
+
+#define	ENTITY_CTL_GET_INFO		1
+#define	ENTITY_CTL_GET_DATA		2
+#define	ENTITY_CTL_SET_DATA		3
+#define	ENTITY_CTL_GET_I32		4
+#define	ENTITY_CTL_SET_I32		5
+#define	ENTITY_CTL_BIND			6
+#define	ENTITY_CTL_UNBIND		7
+#define	ENTITY_CTL_DELETE		8
+
+struct api_entity_create_args {
+	u16		archetype;
+	u16		flags;
+	u32		access;
+	const char	*name;
+};
+
+struct api_entity_stat {
+	u64		id;
+	u16		archetype;
+	u16		state;
+	u32		flags;
+	s32		refs;
+	u32		owner_pid;
+	u32		uid;
+	u32		gid;
+	u32		euid;
+	u32		egid;
+	u64		size;
+	u64		created;
+	char		name[API_ENTITY_NAME_MAX];
+};
+
+struct api_entity_entry {
+	u64		id;
+	u16		archetype;
+	u16		state;
+	u32		owner_pid;
+	char		name[API_ENTITY_NAME_MAX];
+};
+
+struct api_entity_data {
+	u32		index;
+	u32		pad;
+	u64		value;
+};
+
+struct api_entity_list {
+	const char		*path;
+	struct api_entity_entry	*entries;
+	u32			max_entries;
+	u32			count;
+};
+
+struct api_entity_query {
+	u16			archetype;
+	u16			pad;
+	u32			start;
+	struct api_entity_entry	*entries;
+	u32			max_entries;
+	u32			count;
+};
+
+int api_entity_create(const struct api_entity_create_args *uargs);
+int api_entity_open(const char *uname, u32 access);
+int api_entity_close(int handle);
+int api_entity_dup(int handle, u32 access);
+int api_entity_stat(int handle, struct api_entity_stat *ustat);
+int api_entity_list(const struct api_entity_list *ulist);
+int api_entity_query(const struct api_entity_query *uquery);
+int api_entity_ctl(int handle, u32 op, void *uarg);
+
+/* Entity-backed IO helpers used by the native API layer */
+void	entity_io_init(void);
+entity_id_t entity_io_create_raw(u16 arch, u32 flags);
+int	entity_io_attach(entity_id_t id, u32 access);
+int	entity_io_open_id(entity_id_t id, u32 access);
+void	*entity_io_ptr(entity_id_t id, u32 index);
+int	entity_io_set_ptr(entity_id_t id, u32 index, void *ptr);
+int	entity_io_i32(entity_id_t id, u32 index, s32 *value);
+int	entity_io_set_i32(entity_id_t id, u32 index, s32 value);
 
 #endif

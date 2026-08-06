@@ -35,6 +35,22 @@ $define %func traceRead as function with args int, api_trace_read *
 $define %func traceLoad as function with args int, api_trace_load *
 $define %func traceReadAggs as function with args int, api_trace_aggs *
 $define %func traceMark as function with args uint32_t, five uint64_t
+$define %func entityCreateEx as function with args archetype, flags, access, name
+$define %func entityCreate as function with args archetype, access, name
+$define %func entityOpen as function with args const char *, uint32_t
+$define %func entityClose as function with args int
+$define %func entityDup as function with args int, uint32_t
+$define %func entityStat as function with args int, api_entity_stat *
+$define %func entityList as function with args path, entries, max
+$define %func entityQuery as function with args archetype, start, entries, max
+$define %func entityCtl as function with args int, uint32_t, void *
+$define %func entityGetData as function with args int, uint32_t, uint64_t *
+$define %func entitySetData as function with args int, uint32_t, uint64_t
+$define %func entityGetI32 as function with args int, uint32_t, int32_t *
+$define %func entitySetI32 as function with args int, uint32_t, int32_t
+$define %func entityBind as function with args int, const char *
+$define %func entityUnbind as function with args int
+$define %func entityDelete as function with args int
 
 */
 
@@ -63,6 +79,10 @@ $space %export drmDriverList, drmDriverSwitch
 $space %export traceOpen, traceClose, traceRead, traceCtl, traceInfo
 $space %export traceLoad, traceReadAggs, traceMark
 $space %export kofoLoad, kofoInfo, kofoUnload
+$space %export entityCreateEx, entityCreate, entityOpen, entityClose
+$space %export entityDup, entityStat, entityList, entityQuery, entityCtl
+$space %export entityGetData, entitySetData, entityGetI32, entitySetI32
+$space %export entityBind, entityUnbind, entityDelete
 
 */
 
@@ -237,6 +257,14 @@ $space %export kofoLoad, kofoInfo, kofoUnload
 #define CALL_KOFO_LOAD		0xC00
 #define CALL_KOFO_INFO		0xC01
 #define CALL_KOFO_UNLOAD	0xC02
+#define CALL_ENTITY_CREATE	0xD00
+#define CALL_ENTITY_OPEN	0xD01
+#define CALL_ENTITY_CLOSE	0xD02
+#define CALL_ENTITY_DUP		0xD03
+#define CALL_ENTITY_STAT	0xD04
+#define CALL_ENTITY_LIST	0xD05
+#define CALL_ENTITY_CTL		0xD06
+#define CALL_ENTITY_QUERY	0xD07
 #define CALL_TRACE_OPEN		0x900
 #define CALL_TRACE_CLOSE	0x901
 #define CALL_TRACE_READ		0x902
@@ -327,6 +355,80 @@ $space %export kofoLoad, kofoInfo, kofoUnload
 #define API_KOFO_STATE_LOADING	1
 #define API_KOFO_STATE_LOADED	2
 #define API_KOFO_STATE_UNLOADING	3
+
+#define API_ENTITY_NAME_MAX		64
+#define API_ENTITY_LIST_MAX_ENTRIES	256
+
+#define ENTITY_ACCESS_READ		0x00000001
+#define ENTITY_ACCESS_WRITE		0x00000002
+#define ENTITY_ACCESS_EXEC		0x00000004
+#define ENTITY_ACCESS_ALL		(ENTITY_ACCESS_READ | \
+					    ENTITY_ACCESS_WRITE | \
+					    ENTITY_ACCESS_EXEC)
+#define ENTITY_ACCESS_DEFAULT		(ENTITY_ACCESS_READ | \
+					    ENTITY_ACCESS_WRITE)
+
+#define ENTITY_CTL_GET_INFO		1
+#define ENTITY_CTL_GET_DATA		2
+#define ENTITY_CTL_SET_DATA		3
+#define ENTITY_CTL_GET_I32		4
+#define ENTITY_CTL_SET_I32		5
+#define ENTITY_CTL_BIND			6
+#define ENTITY_CTL_UNBIND		7
+#define ENTITY_CTL_DELETE		8
+
+struct api_entity_create_args {
+	uint16_t	archetype;
+	uint16_t	flags;
+	uint32_t	access;
+	const char	*name;
+};
+
+struct api_entity_stat {
+	uint64_t	id;
+	uint16_t	archetype;
+	uint16_t	state;
+	uint32_t	flags;
+	int32_t		refs;
+	uint32_t	owner_pid;
+	uint32_t	uid;
+	uint32_t	gid;
+	uint32_t	euid;
+	uint32_t	egid;
+	uint64_t	size;
+	uint64_t	created;
+	char		name[API_ENTITY_NAME_MAX];
+};
+
+struct api_entity_entry {
+	uint64_t	id;
+	uint16_t	archetype;
+	uint16_t	state;
+	uint32_t	owner_pid;
+	char		name[API_ENTITY_NAME_MAX];
+};
+
+struct api_entity_data {
+	uint32_t	index;
+	uint32_t	pad;
+	uint64_t	value;
+};
+
+struct api_entity_list {
+	const char		*path;
+	struct api_entity_entry	*entries;
+	uint32_t		max_entries;
+	uint32_t		count;
+};
+
+struct api_entity_query {
+	uint16_t		archetype;
+	uint16_t		pad;
+	uint32_t		start;
+	struct api_entity_entry	*entries;
+	uint32_t		max_entries;
+	uint32_t		count;
+};
 
 #define API_TRACE_MAX_CPUS		32
 #define API_TRACE_MAX_PROVIDERS		16
@@ -445,6 +547,7 @@ $space %export kofoLoad, kofoInfo, kofoUnload
 #define EVFILT_KBD		(-7)
 #define EVFILT_IPC		(-9)
 #define EVFILT_INPUT		(-10)
+#define EVFILT_ENTITY		(-11)
 
 #define EV_ADD			0x0001
 #define EV_DELETE		0x0002
@@ -1262,6 +1365,26 @@ int	regSetString(int reg, const char *name, const char *value);
 int	kofoLoad(const char *path, uint32_t flags);
 int	kofoInfo(uint32_t id, struct api_kofo_info *info);
 int	kofoUnload(uint32_t id, uint32_t flags);
+
+int	entityCreate(uint16_t archetype, uint32_t access, const char *name);
+int	entityCreateEx(uint16_t archetype, uint16_t flags, uint32_t access,
+	    const char *name);
+int	entityOpen(const char *name, uint32_t access);
+int	entityClose(int handle);
+int	entityDup(int handle, uint32_t access);
+int	entityStat(int handle, struct api_entity_stat *stat);
+int	entityList(const char *path, struct api_entity_entry *entries,
+	    uint32_t max_entries);
+int	entityQuery(uint16_t archetype, uint32_t start,
+	    struct api_entity_entry *entries, uint32_t max_entries);
+int	entityCtl(int handle, uint32_t op, void *arg);
+int	entityGetData(int handle, uint32_t index, uint64_t *value);
+int	entitySetData(int handle, uint32_t index, uint64_t value);
+int	entityGetI32(int handle, uint32_t index, int32_t *value);
+int	entitySetI32(int handle, uint32_t index, int32_t value);
+int	entityBind(int handle, const char *name);
+int	entityUnbind(int handle);
+int	entityDelete(int handle);
 
 long	personality(long mode);
 
