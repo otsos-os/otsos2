@@ -367,11 +367,6 @@ kmem_free_internal(void *ptr)
 	header = (header_t *)((char *)ptr - KMEM_REDZONE_SZ -
 	    sizeof(header_t));
 
-	if ((char *)header < kmem_heap_start ||
-	    (char *)header >= kmem_heap_end) {
-		printk("KFREE: invalid pointer %p\n", ptr);
-		return;
-	}
 	if (header->magic != KMEM_MAGIC) {
 		printk("KFREE: invalid pointer or heap "
 		    "corrupt %p\n", ptr);
@@ -443,7 +438,8 @@ kmem_realloc_internal(void *ptr, size_t size)
 		return (NULL);
 	}
 
-	header = (header_t *)((char *)ptr - sizeof(header_t));
+	header = (header_t *)((char *)ptr - KMEM_REDZONE_SZ -
+	    sizeof(header_t));
 	if (header->magic != KMEM_MAGIC) {
 		return (NULL);
 	}
@@ -503,6 +499,7 @@ kmem_alloc_aligned_internal(size_t size, size_t align)
 	total_size = payload_size + (2 * KMEM_REDZONE_SZ);
 	current = kmem_heap_head;
 
+rescan:
 	while (current != NULL) {
 		if (current->is_free) {
 			data_start = (u64)current +
@@ -563,9 +560,49 @@ kmem_alloc_aligned_internal(size_t size, size_t align)
 		current = current->next;
 	}
 
-	printk("KMALLOC_ALIGNED FAILED! size=%d "
-	    "align=%d\n", (int)size, (int)align);
-	return (NULL);
+	{
+		size_t		grow_needed;
+		void		*new_area;
+		header_t	*hdr;
+
+		grow_needed = total_size + sizeof(header_t) + align;
+		grow_needed = (grow_needed + 4095) & ~(size_t)4095;
+		if (growth_pool_remaining >= grow_needed) {
+			new_area = growth_pool_ptr;
+			growth_pool_ptr += grow_needed;
+			growth_pool_remaining -= grow_needed;
+		} else {
+			new_area = bootmem_alloc(grow_needed, 4096);
+			if (new_area) {
+				vm_page_reserve_range(
+				    (u64)new_area - KERNEL_VMA,
+				    grow_needed);
+			}
+		}
+		if (!new_area) {
+			printk("KMALLOC_ALIGNED FAILED! size=%d "
+			    "align=%d\n", (int)size, (int)align);
+			return (NULL);
+		}
+		printk("[KMEM] grow aligned: new_area=%p "
+		    "grow_needed=%d phys=%p\n", new_area,
+		    (int)grow_needed,
+		    (void *)((u64)new_area - KERNEL_VMA));
+
+		hdr = (header_t *)new_area;
+		hdr->magic = KMEM_MAGIC;
+		hdr->is_free = 1;
+		hdr->size = grow_needed - sizeof(header_t);
+		hdr->payload_size = 0;
+		hdr->next = kmem_heap_head;
+		hdr->prev = NULL;
+		if (kmem_heap_head != NULL) {
+			kmem_heap_head->prev = hdr;
+		}
+		kmem_heap_head = hdr;
+		current = hdr;
+		goto rescan;
+	}
 }
 
 static size_t
