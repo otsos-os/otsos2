@@ -72,6 +72,12 @@ $define %func bus_setup_intr as function with args device_t, resource_t *, newbu
 $define %func newbus_irq_dispatch as function with args u8
 $define %func bus_setup_poll as function with args device_t, u32, newbus_poll_handler_t, void *, void **
 $define %func newbus_poll_dispatch as procedure with args u32
+$define %func newbus_entity_init as procedure with args void
+$define %func newbus_entity_device_sync as procedure with args device_t
+$define %func newbus_interface_read_entity as function with args entity id, buffer, count, offset
+$define %func newbus_interface_write_entity as function with args entity id, buffer, count, offset
+$define %func newbus_interface_ioctl_entity as function with args entity id, command, argument
+$define %func newbus_interface_stat_entity as function with args entity id, size
 
 */
 
@@ -98,6 +104,9 @@ $space %export newbus_config_driver_get_u32
 $space %export newbus_config_driver_get_string
 $space %export bus_alloc_resource, bus_setup_intr, newbus_irq_dispatch
 $space %export bus_setup_poll, newbus_poll_dispatch
+$space %export newbus_entity_init, newbus_entity_device_sync
+$space %export newbus_interface_read_entity, newbus_interface_write_entity
+$space %export newbus_interface_ioctl_entity, newbus_interface_stat_entity
 
 */
 
@@ -106,6 +115,7 @@ $space %export bus_setup_poll, newbus_poll_dispatch
 
 #include <mlibc/mlibc.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
+#include <kernel/entity/entity.h>
 
 #define	NEWBUS_MAX_DEVICES		256
 #define	NEWBUS_MAX_DRIVERS		256
@@ -222,8 +232,10 @@ struct newbus_device {
 	void			*ivars;
 	const newbus_module_t	*failed_modules[NEWBUS_MAX_FAILED_MODULES];
 	int			failed_module_count;
+	int			index;
 	resource_t		resources[NEWBUS_MAX_RESOURCES];
 	int			resource_count;
+	u64			entity;
 };
 
 struct newbus_devclass {
@@ -367,5 +379,15 @@ int		bus_setup_poll(device_t dev, u32 event,
 		    void **cookiep);
 int		bus_teardown_poll(device_t dev, void *cookie);
 void		newbus_poll_dispatch(u32 event);
+
+void		newbus_entity_init(void);
+void		newbus_entity_device_sync(device_t dev);
+int		newbus_interface_read_entity(entity_id_t id, void *buf,
+		    u64 count, u64 offset);
+int		newbus_interface_write_entity(entity_id_t id,
+		    const void *buf, u64 count, u64 offset);
+int		newbus_interface_ioctl_entity(entity_id_t id, u64 cmd,
+		    void *arg);
+int		newbus_interface_stat_entity(entity_id_t id, u64 *size);
 
 #endif

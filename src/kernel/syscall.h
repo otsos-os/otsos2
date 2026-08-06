@@ -141,6 +141,9 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_ENTITY_LIST	0xD05
 #define	CALL_ENTITY_CTL		0xD06
 #define	CALL_ENTITY_QUERY	0xD07
+#define	CALL_ENTITY_READ	0xD08
+#define	CALL_ENTITY_WRITE	0xD09
+#define	CALL_ENTITY_SEEK	0xD0A
 
 #define	CALL_PROC_GETPID	0x408
 #define	CALL_PROC_GETPPID	0x409

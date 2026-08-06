@@ -26,6 +26,10 @@ $define %func entitySetI32 as function with args int, uint32_t, int32_t
 $define %func entityBind as function with args int, const char *
 $define %func entityUnbind as function with args int
 $define %func entityDelete as function with args int
+$define %func entityRead as function with args int, void *, size_t
+$define %func entityWrite as function with args int, const void *, size_t
+$define %func entitySeek as function with args int, long, int
+$define %func entityIoctl as function with args int, uint64_t, void *
 
 */
 
@@ -35,6 +39,7 @@ $space %export entityCreateEx, entityCreate, entityOpen, entityClose
 $space %export entityDup, entityStat, entityList, entityQuery, entityCtl
 $space %export entityGetData, entitySetData, entityGetI32, entitySetI32
 $space %export entityBind, entityUnbind, entityDelete
+$space %export entityRead, entityWrite, entitySeek, entityIoctl
 
 */
 
@@ -211,4 +216,41 @@ int
 entityDelete(int handle)
 {
 	return (entityCtl(handle, ENTITY_CTL_DELETE, NULL));
+}
+
+ssize_t
+entityRead(int handle, void *buf, size_t count)
+{
+	if (!__count_ok(count)) {
+		return (-1);
+	}
+	return (__sysret(__syscall3(CALL_ENTITY_READ, (long)handle,
+	    (long)buf, (long)count)));
+}
+
+ssize_t
+entityWrite(int handle, const void *buf, size_t count)
+{
+	if (!__count_ok(count)) {
+		return (-1);
+	}
+	return (__sysret(__syscall3(CALL_ENTITY_WRITE, (long)handle,
+	    (long)buf, (long)count)));
+}
+
+long
+entitySeek(int handle, long offset, int whence)
+{
+	return (__sysret(__syscall3(CALL_ENTITY_SEEK, (long)handle,
+	    offset, (long)whence)));
+}
+
+int
+entityIoctl(int handle, uint64_t cmd, void *arg)
+{
+	struct api_entity_ioctl	io;
+
+	io.cmd = cmd;
+	io.arg = (uint64_t)arg;
+	return (entityCtl(handle, ENTITY_CTL_IOCTL, &io));
 }

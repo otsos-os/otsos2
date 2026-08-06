@@ -46,6 +46,7 @@ $define %func entity_access_valid as function with args u32
 $define %func entity_fill_stat as procedure with args entity id, stat
 $define %func entity_fill_entry as procedure with args entity id, entry
 $define %func entity_query_cb as function with args entity id, void *
+$define %func entity_ns_kernel_reserved as function with args const char *
 $define %func api_entity_create as function with args create args
 $define %func api_entity_open as function with args const char *, u32
 $define %func api_entity_close as function with args int
@@ -54,6 +55,9 @@ $define %func api_entity_stat as function with args int, stat *
 $define %func api_entity_list as function with args list *
 $define %func api_entity_query as function with args query *
 $define %func api_entity_ctl as function with args int, u32, void *
+$define %func api_entity_read as function with args int, buffer, count
+$define %func api_entity_write as function with args int, buffer, count
+$define %func api_entity_seek as function with args int, offset, whence
 
 */
 
@@ -61,9 +65,11 @@ $define %func api_entity_ctl as function with args int, u32, void *
 
 $space %internal entity_copy_user_string, entity_access_valid
 $space %internal entity_fill_stat, entity_fill_entry, entity_query_cb
+$space %internal entity_ns_kernel_reserved
 $space %export api_entity_create, api_entity_open, api_entity_close
 $space %export api_entity_dup, api_entity_stat, api_entity_list
 $space %export api_entity_query, api_entity_ctl
+$space %export api_entity_read, api_entity_write, api_entity_seek
 
 */
 
@@ -71,6 +77,7 @@ $space %export api_entity_query, api_entity_ctl
 #include <kernel/api/errno.h>
 #include <kernel/entity/entity.h>
 #include <kernel/process.h>
+#include <kernel/thread.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
 
@@ -79,6 +86,12 @@ typedef struct entity_query_ctx {
 	u32			max_entries;
 	u32			*count;
 } entity_query_ctx_t;
+
+static int
+entity_ns_kernel_reserved(const char *name)
+{
+	return (strncmp(name, "/Entity/Interface/Driver/", 25) == 0);
+}
 
 static int
 entity_copy_user_string(const char *user, char *buf, u32 bufsize)
@@ -184,9 +197,14 @@ api_entity_create(const struct api_entity_create_args *uargs)
 	if (args.archetype == 0 || args.archetype > ENTITY_ARCH_MAX) {
 		return (-API_ERR_BAD_VALUE);
 	}
+	if (args.archetype == ENTITY_ARCH_NB_DEVICE ||
+	    args.archetype == ENTITY_ARCH_NB_INTERFACE) {
+		return (-API_ERR_PERM);
+	}
 	if (!entity_access_valid(args.access)) {
 		return (-API_ERR_BAD_VALUE);
 	}
+	proc = process_current();
 	name[0] = '\0';
 	if (args.name) {
 		ret = entity_copy_user_string(args.name, name,
@@ -197,8 +215,11 @@ api_entity_create(const struct api_entity_create_args *uargs)
 		if (name[0] != '\0' && !entity_ns_is_path(name)) {
 			return (-API_ERR_BAD_VALUE);
 		}
+		if (name[0] != '\0' && entity_ns_kernel_reserved(name) &&
+		    (proc == NULL || !proc->kusr_auth)) {
+			return (-API_ERR_PERM);
+		}
 	}
-	proc = process_current();
 	uid = proc ? proc->uid : 0;
 	gid = proc ? proc->gid : 0;
 	euid = proc ? proc->euid : 0;
@@ -376,6 +397,95 @@ api_entity_query(const struct api_entity_query *uquery)
 }
 
 int
+api_entity_read(int handle, void *buf, u32 count)
+{
+	process_t	*proc;
+	entity_id_t	id;
+	u32		access;
+	int		ret;
+
+	proc = process_current();
+	ret = entity_handle_lookup(proc, handle, &id, &access);
+	if (ret != 0) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	if ((access & ENTITY_ACCESS_READ) == 0) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	if (count == 0) {
+		return (0);
+	}
+	if (!is_user_address(buf, count)) {
+		thread_t	*td;
+
+		td = thread_current();
+		if (td && (td->context.cs & 3) == 3) {
+			process_exit(-1);
+		}
+		return (-API_ERR_BAD_ADDR);
+	}
+	if (!user_range_fault_in(buf, count, 1)) {
+		return (-API_ERR_BAD_ADDR);
+	}
+	return (entity_io_read(id, buf, count));
+}
+
+int
+api_entity_write(int handle, const void *buf, u32 count)
+{
+	process_t	*proc;
+	entity_id_t	id;
+	u32		access;
+	int		ret;
+
+	proc = process_current();
+	ret = entity_handle_lookup(proc, handle, &id, &access);
+	if (ret != 0) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	if ((access & ENTITY_ACCESS_WRITE) == 0) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	if (count == 0) {
+		return (0);
+	}
+	if (!is_user_address(buf, count)) {
+		thread_t	*td;
+
+		td = thread_current();
+		if (td && (td->context.cs & 3) == 3) {
+			process_exit(-1);
+		}
+		return (-API_ERR_BAD_ADDR);
+	}
+	if (!user_range_fault_in(buf, count, 0)) {
+		return (-API_ERR_BAD_ADDR);
+	}
+	return (entity_io_write(id, buf, count));
+}
+
+long
+api_entity_seek(int handle, long offset, int whence)
+{
+	process_t	*proc;
+	entity_id_t	id;
+	s64		new_off;
+	u32		access;
+	int		ret;
+
+	proc = process_current();
+	ret = entity_handle_lookup(proc, handle, &id, &access);
+	if (ret != 0) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	ret = entity_io_seek(id, (s64)offset, whence, &new_off);
+	if (ret != 0) {
+		return (ret);
+	}
+	return ((long)new_off);
+}
+
+int
 api_entity_ctl(int handle, u32 op, void *uarg)
 {
 	process_t	*proc;
@@ -480,6 +590,12 @@ api_entity_ctl(int handle, u32 op, void *uarg)
 		if ((access & ENTITY_ACCESS_WRITE) == 0) {
 			return (-API_ERR_ACCESS);
 		}
+		if (entity_arch(id) == ENTITY_ARCH_NB_DEVICE ||
+		    entity_arch(id) == ENTITY_ARCH_NB_INTERFACE) {
+			if (!proc || !proc->kusr_auth) {
+				return (-API_ERR_PERM);
+			}
+		}
 		ret = entity_access(proc, id, ENTITY_ACCESS_WRITE);
 		if (ret != 0) {
 			return (ret);
@@ -492,11 +608,21 @@ api_entity_ctl(int handle, u32 op, void *uarg)
 		if (!entity_ns_is_path(name)) {
 			return (-API_ERR_BAD_VALUE);
 		}
+		if (entity_ns_kernel_reserved(name) &&
+		    (proc == NULL || !proc->kusr_auth)) {
+			return (-API_ERR_PERM);
+		}
 		return (entity_ns_bind(name, id));
 	}
 	case ENTITY_CTL_UNBIND:
 		if ((access & ENTITY_ACCESS_WRITE) == 0) {
 			return (-API_ERR_ACCESS);
+		}
+		if (entity_arch(id) == ENTITY_ARCH_NB_DEVICE ||
+		    entity_arch(id) == ENTITY_ARCH_NB_INTERFACE) {
+			if (!proc || !proc->kusr_auth) {
+				return (-API_ERR_PERM);
+			}
 		}
 		ret = entity_access(proc, id, ENTITY_ACCESS_WRITE);
 		if (ret != 0) {
@@ -507,6 +633,12 @@ api_entity_ctl(int handle, u32 op, void *uarg)
 		if ((access & ENTITY_ACCESS_WRITE) == 0) {
 			return (-API_ERR_ACCESS);
 		}
+		if (entity_arch(id) == ENTITY_ARCH_NB_DEVICE ||
+		    entity_arch(id) == ENTITY_ARCH_NB_INTERFACE) {
+			if (!proc || !proc->kusr_auth) {
+				return (-API_ERR_PERM);
+			}
+		}
 		ret = entity_access(proc, id, ENTITY_ACCESS_WRITE);
 		if (ret != 0) {
 			return (ret);
@@ -516,6 +648,19 @@ api_entity_ctl(int handle, u32 op, void *uarg)
 			return (ret);
 		}
 		return (entity_handle_drop(proc, handle, 0));
+	case ENTITY_CTL_IOCTL: {
+		struct api_entity_ioctl	io;
+
+		if ((access & ENTITY_ACCESS_WRITE) == 0) {
+			return (-API_ERR_ACCESS);
+		}
+		if (!uarg || !is_user_address(uarg, sizeof(io)) ||
+		    !user_range_fault_in(uarg, sizeof(io), 0)) {
+			return (-API_ERR_BAD_ADDR);
+		}
+		memcpy(&io, uarg, sizeof(io));
+		return (entity_io_ioctl(id, io.cmd, (void *)io.arg));
+	}
 	default:
 		return (-API_ERR_NOT_SUPPORTED);
 	}

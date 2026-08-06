@@ -52,6 +52,24 @@ $define %func entity_io_ptr as function with args entity id, index
 $define %func entity_io_set_ptr as function with args entity id, index, pointer
 $define %func entity_io_i32 as function with args entity id, index, s32 *
 $define %func entity_io_set_i32 as function with args entity id, index, s32
+$define %func entity_io_vnode_read as function with args entity id, buffer, count, offset
+$define %func entity_io_vnode_write as function with args entity id, buffer, count, offset
+$define %func entity_io_vnode_seek as function with args entity id, offset, whence, result
+$define %func entity_io_vnode_ioctl as function with args entity id, command, argument
+$define %func entity_io_vnode_stat as function with args entity id, size
+$define %func entity_io_pipe_read as function with args entity id, buffer, count, offset
+$define %func entity_io_pipe_write as function with args entity id, buffer, count, offset
+$define %func entity_io_pipe_seek as function with args entity id, offset, whence, result
+$define %func entity_io_pipe_ioctl as function with args entity id, command, argument
+$define %func entity_io_pipe_stat as function with args entity id, size
+$define %func entity_io_nb_read as function with args entity id, buffer, count, offset
+$define %func entity_io_nb_write as function with args entity id, buffer, count, offset
+$define %func entity_io_nb_ioctl as function with args entity id, command, argument
+$define %func entity_io_nb_stat as function with args entity id, size
+$define %func entity_io_read as function with args entity id, buffer, count
+$define %func entity_io_write as function with args entity id, buffer, count
+$define %func entity_io_seek as function with args entity id, offset, whence, result
+$define %func entity_io_ioctl as function with args entity id, command, argument
 
 */
 
@@ -60,9 +78,19 @@ $define %func entity_io_set_i32 as function with args entity id, index, s32
 $space %internal entity_io_release_pipe, entity_io_release_file
 $space %internal entity_io_release_net, entity_io_release_ipc
 $space %internal entity_io_release_reg
+$space %internal entity_io_vnode_read, entity_io_vnode_write
+$space %internal entity_io_vnode_seek, entity_io_vnode_ioctl
+$space %internal entity_io_vnode_stat
+$space %internal entity_io_pipe_read, entity_io_pipe_write
+$space %internal entity_io_pipe_seek, entity_io_pipe_ioctl
+$space %internal entity_io_pipe_stat
+$space %internal entity_io_nb_read, entity_io_nb_write
+$space %internal entity_io_nb_ioctl, entity_io_nb_stat
 $space %export entity_io_init, entity_io_create_raw, entity_io_attach
 $space %export entity_io_open_id, entity_io_ptr, entity_io_set_ptr
 $space %export entity_io_i32, entity_io_set_i32
+$space %export entity_io_read, entity_io_write, entity_io_seek
+$space %export entity_io_ioctl
 
 */
 
@@ -70,6 +98,7 @@ $space %export entity_io_i32, entity_io_set_i32
 #include <kernel/api/errno.h>
 #include <kernel/console/terminal.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/entity/entity.h>
 #include <kernel/event/event.h>
 #include <kernel/ipc/ipc.h>
@@ -151,6 +180,230 @@ entity_io_release_reg(entity_id_t id)
 	}
 }
 
+static int
+entity_io_vnode_read(entity_id_t id, void *buf, u64 count, u64 offset)
+{
+	vnode_t	*vn;
+
+	vn = (vnode_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+	if (vn == NULL) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	return (vnode_read(vn, buf, count, offset));
+}
+
+static int
+entity_io_vnode_write(entity_id_t id, const void *buf, u64 count,
+    u64 offset)
+{
+	posix_stat_t	st;
+	vnode_t		*vn;
+	s32		flags;
+	int		ret;
+
+	vn = (vnode_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+	if (vn == NULL) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	ret = entity_io_i32(id, ENTITY_IO_I32_FLAGS, &flags);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (flags & API_OPEN_APPEND) {
+		if (vnode_stat(vn, &st) == 0) {
+			offset = (u64)st.st_size;
+		}
+	}
+	return (vnode_write(vn, buf, count, offset));
+}
+
+static int
+entity_io_vnode_seek(entity_id_t id, s64 offset, int whence, s64 *result)
+{
+	posix_stat_t	st;
+	vnode_t		*vn;
+	u64		cur;
+	s64		new_off;
+	int		ret;
+
+	vn = (vnode_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+	if (vn == NULL) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	if (entity_arch(id) == ENTITY_ARCH_VNODE &&
+	    (vn->name[0] == '\0' || strcmp(vn->name, "fb0") != 0)) {
+		return (-API_ERR_NOT_SEEKABLE);
+	}
+	ret = entity_get_data(id, ENTITY_IO_DATA_OFFSET, &cur);
+	if (ret != 0) {
+		return (ret);
+	}
+	new_off = 0;
+	switch (whence) {
+	case API_SEEK_SET:
+		new_off = offset;
+		break;
+	case API_SEEK_CUR:
+		new_off = (s64)cur + offset;
+		break;
+	case API_SEEK_END:
+		if (vnode_stat(vn, &st) != 0) {
+			return (-API_ERR_NOT_SUPPORTED);
+		}
+		new_off = (s64)st.st_size + offset;
+		break;
+	default:
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (new_off < 0) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	*result = new_off;
+	return (0);
+}
+
+static int
+entity_io_vnode_ioctl(entity_id_t id, u64 cmd, void *arg)
+{
+	vnode_t	*vn;
+
+	vn = (vnode_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+	if (vn == NULL) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	return (vnode_ioctl(vn, cmd, arg));
+}
+
+static int
+entity_io_vnode_stat(entity_id_t id, u64 *size)
+{
+	posix_stat_t	st;
+	vnode_t		*vn;
+
+	vn = (vnode_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+	if (vn == NULL || size == NULL) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	if (vnode_stat(vn, &st) != 0) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
+	*size = (u64)st.st_size;
+	return (0);
+}
+
+static int
+entity_io_pipe_read(entity_id_t id, void *buf, u64 count, u64 offset)
+{
+	pipe_t	*p;
+
+	(void)offset;
+	p = (pipe_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+	if (p == NULL) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	return (pipe_read(p, buf, (u32)count));
+}
+
+static int
+entity_io_pipe_write(entity_id_t id, const void *buf, u64 count,
+    u64 offset)
+{
+	pipe_t	*p;
+
+	(void)offset;
+	p = (pipe_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+	if (p == NULL) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	return (pipe_write(p, buf, (u32)count));
+}
+
+static int
+entity_io_pipe_ioctl(entity_id_t id, u64 cmd, void *arg)
+{
+	(void)id;
+	(void)cmd;
+	(void)arg;
+	return (-API_ERR_NOT_SUPPORTED);
+}
+
+static int
+entity_io_pipe_seek(entity_id_t id, s64 offset, int whence, s64 *result)
+{
+	(void)id;
+	(void)offset;
+	(void)whence;
+	(void)result;
+	return (-API_ERR_NOT_SEEKABLE);
+}
+
+static int
+entity_io_pipe_stat(entity_id_t id, u64 *size)
+{
+	(void)id;
+	if (size == NULL) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	*size = 0;
+	return (0);
+}
+
+static int
+entity_io_nb_read(entity_id_t id, void *buf, u64 count, u64 offset)
+{
+	return (newbus_interface_read_entity(id, buf, count, offset));
+}
+
+static int
+entity_io_nb_write(entity_id_t id, const void *buf, u64 count, u64 offset)
+{
+	return (newbus_interface_write_entity(id, buf, count, offset));
+}
+
+static int
+entity_io_nb_ioctl(entity_id_t id, u64 cmd, void *arg)
+{
+	return (newbus_interface_ioctl_entity(id, cmd, arg));
+}
+
+static int
+entity_io_nb_stat(entity_id_t id, u64 *size)
+{
+	return (newbus_interface_stat_entity(id, size));
+}
+
+static const entity_io_ops_t entity_io_file_ops = {
+	.read	= entity_io_vnode_read,
+	.write	= entity_io_vnode_write,
+	.seek	= entity_io_vnode_seek,
+	.ioctl	= entity_io_vnode_ioctl,
+	.stat	= entity_io_vnode_stat,
+};
+
+static const entity_io_ops_t entity_io_vnode_ops = {
+	.read	= entity_io_vnode_read,
+	.write	= entity_io_vnode_write,
+	.seek	= entity_io_vnode_seek,
+	.ioctl	= entity_io_vnode_ioctl,
+	.stat	= entity_io_vnode_stat,
+};
+
+static const entity_io_ops_t entity_io_pipe_ops = {
+	.read	= entity_io_pipe_read,
+	.write	= entity_io_pipe_write,
+	.seek	= entity_io_pipe_seek,
+	.ioctl	= entity_io_pipe_ioctl,
+	.stat	= entity_io_pipe_stat,
+};
+
+static const entity_io_ops_t entity_io_nb_ops = {
+	.read	= entity_io_nb_read,
+	.write	= entity_io_nb_write,
+	.seek	= NULL,
+	.ioctl	= entity_io_nb_ioctl,
+	.stat	= entity_io_nb_stat,
+};
+
 void
 entity_io_init(void)
 {
@@ -171,6 +424,12 @@ entity_io_init(void)
 	entity_arch_release_register(ENTITY_ARCH_TRACE,
 	    api_trace_entity_release);
 	terminal_entity_register_all();
+	entity_arch_io_register(ENTITY_ARCH_FILE, &entity_io_file_ops);
+	entity_arch_io_register(ENTITY_ARCH_VNODE, &entity_io_vnode_ops);
+	entity_arch_io_register(ENTITY_ARCH_PIPE, &entity_io_pipe_ops);
+	entity_arch_io_register(ENTITY_ARCH_NB_INTERFACE,
+	    &entity_io_nb_ops);
+	newbus_entity_init();
 }
 
 entity_id_t
@@ -241,4 +500,115 @@ int
 entity_io_set_i32(entity_id_t id, u32 index, s32 value)
 {
 	return (entity_set_i32(id, index, value));
+}
+
+int
+entity_io_read(entity_id_t id, void *buf, u64 count)
+{
+	const entity_io_ops_t	*ops;
+	u64			offset;
+	int			n, ret;
+
+	ops = entity_arch_io_get(entity_arch(id));
+	if (ops == NULL || ops->read == NULL) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
+	ret = entity_get_data(id, ENTITY_IO_DATA_OFFSET, &offset);
+	if (ret != 0) {
+		return (ret);
+	}
+	n = ops->read(id, buf, count, offset);
+	if (n > 0) {
+		entity_set_data(id, ENTITY_IO_DATA_OFFSET,
+		    offset + (u64)n);
+	}
+	return (n);
+}
+
+int
+entity_io_write(entity_id_t id, const void *buf, u64 count)
+{
+	const entity_io_ops_t	*ops;
+	u64			offset;
+	int			n, ret;
+
+	ops = entity_arch_io_get(entity_arch(id));
+	if (ops == NULL || ops->write == NULL) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
+	ret = entity_get_data(id, ENTITY_IO_DATA_OFFSET, &offset);
+	if (ret != 0) {
+		return (ret);
+	}
+	n = ops->write(id, buf, count, offset);
+	if (n > 0) {
+		entity_set_data(id, ENTITY_IO_DATA_OFFSET,
+		    offset + (u64)n);
+	}
+	return (n);
+}
+
+int
+entity_io_seek(entity_id_t id, s64 offset, int whence, s64 *new_offset)
+{
+	const entity_io_ops_t	*ops;
+	u64			cur;
+	u64			size;
+	s64			value;
+	int			ret;
+
+	if (new_offset == NULL) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	ops = entity_arch_io_get(entity_arch(id));
+	if (ops == NULL) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
+	ret = entity_get_data(id, ENTITY_IO_DATA_OFFSET, &cur);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (ops->seek != NULL) {
+		ret = ops->seek(id, offset, whence, &value);
+		if (ret != 0) {
+			return (ret);
+		}
+	} else {
+		value = 0;
+		switch (whence) {
+		case API_SEEK_SET:
+			value = offset;
+			break;
+		case API_SEEK_CUR:
+			value = (s64)cur + offset;
+			break;
+		case API_SEEK_END:
+			if (ops->stat == NULL ||
+			    ops->stat(id, &size) != 0) {
+				return (-API_ERR_NOT_SUPPORTED);
+			}
+			value = (s64)size + offset;
+			break;
+		default:
+			return (-API_ERR_BAD_VALUE);
+		}
+	}
+	if (value < 0) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	entity_set_data(id, ENTITY_IO_DATA_OFFSET, (u64)value);
+	*new_offset = value;
+	return (0);
+}
+
+int
+entity_io_ioctl(entity_id_t id, u64 cmd, void *arg)
+{
+	const entity_io_ops_t	*ops;
+
+	ops = entity_arch_io_get(entity_arch(id));
+	if (ops == NULL || ops->ioctl == NULL) {
+		return (-API_ERR_NOT_SUPPORTED);
+	}
+	return (ops->ioctl(id, cmd, arg));
 }

@@ -50,7 +50,6 @@ $space %export api_data_open
 #include <kernel/api/api.h>
 #include <kernel/api/errno.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
-#include <kernel/drivers/newbus/driver_ns.h>
 #include <kernel/entity/entity.h>
 #include <kernel/other/restrict.h>
 #include <kernel/process.h>
@@ -145,36 +144,21 @@ api_data_open(const char *path, int flags)
 		kmem_free(kpath);
 		return (-API_ERR_PERM);
 	}
-	vn = NULL;
-	if (driver_ns_is_path(kpath)) {
-		vn = driver_ns_lookup(kpath);
-		if (vn == NULL) {
+	ret = vfs_resolve(kpath, &vn);
+	if (ret != 0 || vn == NULL) {
+		if (!(flags & API_OPEN_CREATE)) {
 			kmem_free(kpath);
-			return (-API_ERR_NOT_FOUND);
+			return (ret != 0 ? ret : -API_ERR_NOT_FOUND);
 		}
-		if (flags & (API_OPEN_CREATE | API_OPEN_TRUNC)) {
-			vnode_release(vn);
+		ret = vfs_create_file(kpath);
+		if (ret != 0) {
 			kmem_free(kpath);
-			return (-API_ERR_NOT_SUPPORTED);
+			return (ret);
 		}
-	} else {
 		ret = vfs_resolve(kpath, &vn);
 		if (ret != 0 || vn == NULL) {
-			if (!(flags & API_OPEN_CREATE)) {
-				kmem_free(kpath);
-				return (ret != 0 ? ret :
-				    -API_ERR_NOT_FOUND);
-			}
-			ret = vfs_create_file(kpath);
-			if (ret != 0) {
-				kmem_free(kpath);
-				return (ret);
-			}
-			ret = vfs_resolve(kpath, &vn);
-			if (ret != 0 || vn == NULL) {
-				kmem_free(kpath);
-				return (ret != 0 ? ret : -API_ERR_IO);
-			}
+			kmem_free(kpath);
+			return (ret != 0 ? ret : -API_ERR_IO);
 		}
 	}
 	if (vn->type == VDIR) {
@@ -222,13 +206,13 @@ api_data_open(const char *path, int flags)
 	entity_io_set_i32(id, ENTITY_IO_I32_FLAGS, (s32)flags);
 	if (flags & API_OPEN_APPEND) {
 		if (vnode_stat(vn, &st) == 0) {
-			entity_io_set_i32(id, ENTITY_IO_I32_OFFSET,
-			    (s32)st.st_size);
+			entity_set_data(id, ENTITY_IO_DATA_OFFSET,
+			    (u64)st.st_size);
 		} else {
-			entity_io_set_i32(id, ENTITY_IO_I32_OFFSET, 0);
+			entity_set_data(id, ENTITY_IO_DATA_OFFSET, 0);
 		}
 	} else {
-		entity_io_set_i32(id, ENTITY_IO_I32_OFFSET, 0);
+		entity_set_data(id, ENTITY_IO_DATA_OFFSET, 0);
 	}
 	handle = entity_io_attach(id, api_flags_to_access(flags));
 	kmem_free(kpath);

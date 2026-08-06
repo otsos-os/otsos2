@@ -67,6 +67,8 @@ $define %func entity_access as function with args process *, entity id, u32
 $define %func entity_foreach as function with args archetype, start, callback
 $define %func entity_dump as procedure with args void
 $define %func entity_event_set_notify as procedure with args callback
+$define %func entity_arch_io_register as function with args archetype, ops
+$define %func entity_arch_io_get as function with args archetype
 
 */
 
@@ -85,6 +87,8 @@ $space %export entity_get_data, entity_set_data
 $space %export entity_get_i32, entity_set_i32
 $space %export entity_name, entity_access, entity_foreach, entity_dump
 $space %export entity_event_set_notify
+$space %export entity_arch_io_register
+$space %export entity_arch_io_get
 
 */
 
@@ -124,6 +128,7 @@ static u32		entity_free_head;
 static u32		entity_count;
 static const char	*entity_arch_names[ENTITY_MAX_ARCHETYPES];
 static entity_release_fn	entity_arch_release[ENTITY_MAX_ARCHETYPES];
+static const entity_io_ops_t	*entity_arch_io[ENTITY_MAX_ARCHETYPES];
 static void	(*entity_event_notify)(entity_id_t id, u32 fflags);
 
 static void
@@ -243,6 +248,7 @@ entity_init(void)
 	memset(entity_name_off_col, 0, sizeof(entity_name_off_col));
 	memset(entity_arch_names, 0, sizeof(entity_arch_names));
 	memset(entity_arch_release, 0, sizeof(entity_arch_release));
+	memset(entity_arch_io, 0, sizeof(entity_arch_io));
 	entity_handle_init();
 
 	entity_free_head = 0;
@@ -271,6 +277,7 @@ entity_init(void)
 	entity_arch_names[ENTITY_ARCH_TTY] = "tty";
 	entity_arch_names[ENTITY_ARCH_DRM] = "drm";
 	entity_arch_names[ENTITY_ARCH_PTY] = "pty";
+	entity_arch_names[ENTITY_ARCH_NB_DEVICE] = "nb_device";
 	entity_initialized = 1;
 	drivers_log("[ENTITY] initialized: %d slots, %d handles, "
 	    "%d namespace nodes\n", ENTITY_MAX_ENTITIES,
@@ -287,6 +294,32 @@ entity_arch_release_register(u16 arch, entity_release_fn fn)
 	entity_arch_release[arch] = fn;
 	smp_unlock();
 	return (0);
+}
+
+int
+entity_arch_io_register(u16 arch, const entity_io_ops_t *ops)
+{
+	if (arch == 0 || arch > ENTITY_ARCH_MAX) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	smp_lock();
+	entity_arch_io[arch] = ops;
+	smp_unlock();
+	return (0);
+}
+
+const entity_io_ops_t *
+entity_arch_io_get(u16 arch)
+{
+	const entity_io_ops_t	*ops;
+
+	if (arch == 0 || arch > ENTITY_ARCH_MAX) {
+		return (NULL);
+	}
+	smp_lock();
+	ops = entity_arch_io[arch];
+	smp_unlock();
+	return (ops);
 }
 
 int
@@ -368,7 +401,7 @@ entity_destroy(entity_id_t id)
 	}
 	if (entity_state_col[index] == ENTITY_STATE_ACTIVE) {
 		entity_state_col[index] = ENTITY_STATE_DELETED;
-		entity_ns_unbind_id(id);
+		entity_ns_unbind_all_id(id);
 	}
 	smp_unlock();
 	entity_trace_notify(id, ENTITY_EVENT_STATE | ENTITY_EVENT_DESTROY);
@@ -422,7 +455,7 @@ entity_release(entity_id_t id)
 	if (entity_arch_release[entity_arch_col[index]] != NULL) {
 		entity_arch_release[entity_arch_col[index]](id);
 	}
-	entity_ns_unbind_id(id);
+	entity_ns_unbind_all_id(id);
 	entity_used[index] = 0;
 	entity_count--;
 	entity_free_push((u32)index);

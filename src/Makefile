@@ -279,7 +279,6 @@ NEWBUS_INTR_O = ../bin/newbus_intr.o
 NEWBUS_POLL_O = ../bin/newbus_poll.o
 NEWBUS_DEBUG_O = ../bin/newbus_debug.o
 NEWBUS_INTERFACE_O = ../bin/newbus_interface.o
-NEWBUS_DRIVER_NS_O = ../bin/newbus_driver_ns.o
 PCI_CORE_O = ../bin/pci_core.o
 PCI_SCAN_O = ../bin/pci_scan.o
 PCI_CONFIG_O = ../bin/pci_config.o
@@ -369,7 +368,7 @@ OBJ_NO_KSYMTAB = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UAR
       $(TRACE_O) $(TRACE_PMU_O) $(PMU_O) \
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
-      $(NEWBUS_DEVICE_O) $(NEWBUS_MODULE_O) $(NEWBUS_ROOT_O) $(NEWBUS_NEXUS_O) $(NEWBUS_PLATFORM_O) $(NEWBUS_CONFIG_O) $(NEWBUS_RESOURCE_O) $(NEWBUS_INTR_O) $(NEWBUS_POLL_O) $(NEWBUS_DEBUG_O) $(NEWBUS_INTERFACE_O) $(NEWBUS_DRIVER_NS_O) \
+      $(NEWBUS_DEVICE_O) $(NEWBUS_MODULE_O) $(NEWBUS_ROOT_O) $(NEWBUS_NEXUS_O) $(NEWBUS_PLATFORM_O) $(NEWBUS_CONFIG_O) $(NEWBUS_RESOURCE_O) $(NEWBUS_INTR_O) $(NEWBUS_POLL_O) $(NEWBUS_DEBUG_O) $(NEWBUS_INTERFACE_O) \
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
       $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O) \
       $(KSHELL_OBJ) \
@@ -1020,7 +1019,7 @@ $(WRITE_O): kernel/api/write.c kernel/console/terminal.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(OPEN_O): kernel/api/open.c kernel/drivers/newbus/driver_ns.h
+$(OPEN_O): kernel/api/open.c kernel/api/api.h kernel/drivers/fs/vfs/vfs.h kernel/entity/entity.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1080,7 +1079,7 @@ $(PIPE_O): kernel/api/pipe.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(DATA_DIR_O): kernel/api/data_dir.c kernel/api/api.h kernel/drivers/fs/vfs/vfs.h kernel/drivers/newbus/driver_ns.h kernel/other/restrict.h kernel/useraddr.h
+$(DATA_DIR_O): kernel/api/data_dir.c kernel/api/api.h kernel/drivers/fs/vfs/vfs.h kernel/other/restrict.h kernel/useraddr.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1136,11 +1135,11 @@ $(GETCWD_O): kernel/api/getcwd.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(LISTDIR_O): kernel/api/listdir.c kernel/drivers/fs/vfs/vfs.h kernel/drivers/newbus/driver_ns.h
+$(LISTDIR_O): kernel/api/listdir.c kernel/drivers/fs/vfs/vfs.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(FS_META_O): kernel/api/fs_meta.c kernel/api/api.h kernel/drivers/fs/vfs/vfs.h kernel/drivers/newbus/driver_ns.h
+$(FS_META_O): kernel/api/fs_meta.c kernel/api/api.h kernel/drivers/fs/vfs/vfs.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1252,13 +1251,7 @@ $(NEWBUS_DEBUG_O): kernel/drivers/newbus/debug.c kernel/drivers/newbus/newbus.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(NEWBUS_INTERFACE_O): kernel/drivers/newbus/interface.c kernel/drivers/newbus/newbus.h kernel/smp/smp.h
-	@echo "  CC      $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-
-$(NEWBUS_DRIVER_NS_O): kernel/drivers/newbus/driver_ns.c \
-    kernel/drivers/newbus/driver_ns.h kernel/drivers/newbus/newbus.h \
-    kernel/drivers/fs/vfs/vfs.h kernel/smp/smp.h
+$(NEWBUS_INTERFACE_O): kernel/drivers/newbus/interface.c kernel/drivers/newbus/newbus.h kernel/entity/entity.h kernel/smp/smp.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

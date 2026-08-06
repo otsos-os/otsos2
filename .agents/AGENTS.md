@@ -78,12 +78,16 @@ Monolithic kernel with the following rough layers:
   Drivers may also expose named I/O interfaces via
   `newbus_interface_register`/`newbus_interface_unregister`
   (`src/kernel/drivers/newbus/interface.c`); an interface is a per-device
-  table of read/write/ioctl/stat callbacks. Open interface handles pin the
-  interface so a KOFO module cannot be unloaded while a vnode references it.
-  `src/kernel/drivers/newbus/driver_ns.c` provides the native-only `/Driver`
-  namespace: `/Driver/<device>/<interface>` resolves to newbus interfaces from
-  the native API layer (open/listdir/stat). It is deliberately not mounted in
-  VFS and is invisible to the POSIX personality, which keeps using `/dev`.
+  table of read/write/ioctl/stat callbacks. Each registered interface and
+  each visible device gets a persistent entity: devices live at
+  `/Entity/Interface/Driver/<devunit>` and interfaces at
+  `/Entity/Interface/Driver/<devunit>/<iface>`. The namespace is
+  native-ABI-only, is not mounted in VFS, and is invisible to the POSIX
+  personality, which keeps using `/dev`. Entity handles to an interface pin
+  it so a KOFO module cannot be unloaded while the entity is referenced.
+  I/O on these entities goes through the entity arch ops table
+  (`entity_arch_io_register`) and the native entity syscalls
+  `entityRead`/`entityWrite`/`entitySeek`/`entityIoctl`.
   Nexus creates only generic buses (`firmware`, `platform`, `isa`, `pseudo`);
   PCI creates generic function children; drivers claim devices via probe.
   Resources, IRQs, and timer polling must flow through `bus_set_resource`,
@@ -133,13 +137,18 @@ Monolithic kernel with the following rough layers:
   syscalls and the POSIX fd layer are backed by entity handles. kqueue ids
   and `EVFILT_ENTITY` are entity-aware; SHM segments and trace sessions are
   registered as entities (`ENTITY_ARCH_SHM`, `ENTITY_ARCH_TRACE`). GEM
-  buffers, KOFO modules, newbus interfaces, DRM KMS objects, TTYs, processes
-  and threads are registered as observable entities (`ENTITY_ARCH_GEM`,
-  `ENTITY_ARCH_KOFO`, `ENTITY_ARCH_NB_INTERFACE`, `ENTITY_ARCH_DRM`,
-  `ENTITY_ARCH_TTY`, `ENTITY_ARCH_PTY`, `ENTITY_ARCH_PROCESS`,
-  `ENTITY_ARCH_THREAD`). GEM, KOFO and newbus interface handles are entity
-  kernel handles (pid 0) with raw-slot fallback before entity init. Handles
-  are `(generation << 16) | slot`; entity IDs pack archetype/generation/index.
+  buffers, KOFO modules, newbus devices/interfaces, DRM KMS objects, TTYs,
+  processes and threads are registered as observable entities
+  (`ENTITY_ARCH_GEM`, `ENTITY_ARCH_KOFO`, `ENTITY_ARCH_NB_INTERFACE`,
+  `ENTITY_ARCH_NB_DEVICE`, `ENTITY_ARCH_DRM`, `ENTITY_ARCH_TTY`,
+  `ENTITY_ARCH_PTY`, `ENTITY_ARCH_PROCESS`, `ENTITY_ARCH_THREAD`). GEM, KOFO
+  and newbus handles are entity kernel handles (pid 0) with raw-slot fallback
+  before entity init. Handles are `(generation << 16) | slot`; entity IDs
+  pack archetype/generation/index. Entity I/O (read/write/seek/ioctl) is
+  dispatched through per-archetype `entity_io_ops_t` tables registered with
+  `entity_arch_io_register`; `api/entity_io.c` owns the dispatcher and the
+  FILE/VNODE/PIPE handlers, `drivers/newbus/interface.c` owns the newbus
+  handlers.
   Access policy is runtime-configurable via `SYSTEM.Entity.EnforceOwnership`.
 - `kshell/` — optional kernel debug shell; runtime command metadata and prompt
   live in the `SYSTEM` registry hive.
@@ -404,10 +413,9 @@ User need to test, dont run test manually, ask user.
   links or large files. POSIX personality uses the VFS and devfs on top of it.
 - POSIX personality is opt-in per process via `CALL_PERSONALITY` (`0xFFFF`);
   default is native `PERSONALITY_OTSOS`.
-- `/Driver` is a native-ABI-only object namespace over newbus; do not mount it
-  in VFS and do not expose it to POSIX syscalls. POSIX programs use `/dev`.
-  `vnode_t.release_fn` is the generic vnode destructor hook used by the
-  namespace to release pinned interface handles.
+-Newbus devices/interfaces are entities
+  bound under `/Entity/Interface/Driver/...`; do not mount them in VFS and do
+  not expose them to POSIX syscalls. POSIX programs use `/dev`.
 - `/Entity` is the native-ABI-only entity namespace; it is not mounted in VFS
   and must stay invisible to the POSIX personality. Entity syscalls live in
   the `0xD00` block and are implemented in `kernel/api/entity.c`.

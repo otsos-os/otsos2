@@ -45,6 +45,7 @@ $define %func entity_ns_name_of as function with args entity_id
 $define %func entity_ns_bind as function with args const char *, entity_id
 $define %func entity_ns_unbind as function with args const char *
 $define %func entity_ns_unbind_id as function with args entity_id
+$define %func entity_ns_unbind_all_id as function with args entity_id
 $define %func entity_ns_lookup as function with args const char *, u64 *
 $define %func entity_ns_list as function with args path, entries, count
 
@@ -58,6 +59,7 @@ $space %internal entity_ns_free_slot
 $space %export entity_ns_init
 $space %export entity_ns_is_path, entity_ns_name_of
 $space %export entity_ns_bind, entity_ns_unbind, entity_ns_unbind_id
+$space %export entity_ns_unbind_all_id
 $space %export entity_ns_lookup, entity_ns_list
 
 */
@@ -293,6 +295,29 @@ entity_ns_unbind_id(entity_id_t id)
 }
 
 int
+entity_ns_unbind_all_id(entity_id_t id)
+{
+	int	slot;
+	int	count;
+
+	if (id == 0) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	count = 0;
+	smp_lock();
+	for (;;) {
+		slot = entity_ns_find_entity(id);
+		if (slot < 0) {
+			break;
+		}
+		entity_ns_free_slot((u32)slot);
+		count++;
+	}
+	smp_unlock();
+	return (count > 0 ? 0 : -API_ERR_NOT_FOUND);
+}
+
+int
 entity_ns_lookup(const char *path, entity_id_t *id)
 {
 	char	canon[ENTITY_PATH_MAX];
@@ -388,6 +413,16 @@ entity_ns_list(const char *path, struct api_entity_entry *entries,
 			}
 		}
 		if (seen) {
+			if (entries[j].id == 0 && *comp_end == '\0' &&
+			    entity_ns_entity[i] != 0) {
+				entries[j].id = entity_ns_entity[i];
+				entries[j].archetype =
+				    entity_arch(entity_ns_entity[i]);
+				entries[j].state =
+				    entity_state(entity_ns_entity[i]);
+				entries[j].owner_pid =
+				    entity_owner(entity_ns_entity[i]);
+			}
 			continue;
 		}
 		memset(&entries[out], 0, sizeof(entries[out]));

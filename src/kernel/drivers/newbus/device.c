@@ -93,6 +93,7 @@ newbus_alloc_device(const char *name, int unit)
 	dev->state = DS_ALIVE;
 	snprintf(dev->nameunit, sizeof(dev->nameunit), "%s%d",
 	    dev->name, dev->unit);
+	dev->index = newbus_device_count;
 	newbus_devices[newbus_device_count++] = dev;
 	newbus_generation++;
 	return (dev);
@@ -238,6 +239,7 @@ newbus_driver_remove_module(const newbus_module_t *module)
 		dev->devclass = NULL;
 		dev->module = NULL;
 		dev->state = DS_ALIVE;
+		newbus_entity_device_sync(dev);
 		newbus_generation++;
 	}
 	for (i = 0; i < newbus_driver_count; i++) {
@@ -656,6 +658,7 @@ newbus_attach_device(device_t dev)
 	dev->state = DS_ATTACHED;
 	drivers_log("[NEWBUS] attached %s to %s\n",
 	    dev->nameunit, dev->driver->name);
+	newbus_entity_device_sync(dev);
 	newbus_generation++;
 	return (1);
 }

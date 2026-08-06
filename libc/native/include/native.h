@@ -51,6 +51,10 @@ $define %func entitySetI32 as function with args int, uint32_t, int32_t
 $define %func entityBind as function with args int, const char *
 $define %func entityUnbind as function with args int
 $define %func entityDelete as function with args int
+$define %func entityRead as function with args int, void *, size_t
+$define %func entityWrite as function with args int, const void *, size_t
+$define %func entitySeek as function with args int, long, int
+$define %func entityIoctl as function with args int, uint64_t, void *
 
 */
 
@@ -83,6 +87,7 @@ $space %export entityCreateEx, entityCreate, entityOpen, entityClose
 $space %export entityDup, entityStat, entityList, entityQuery, entityCtl
 $space %export entityGetData, entitySetData, entityGetI32, entitySetI32
 $space %export entityBind, entityUnbind, entityDelete
+$space %export entityRead, entityWrite, entitySeek, entityIoctl
 
 */
 
@@ -265,6 +270,9 @@ $space %export entityBind, entityUnbind, entityDelete
 #define CALL_ENTITY_LIST	0xD05
 #define CALL_ENTITY_CTL		0xD06
 #define CALL_ENTITY_QUERY	0xD07
+#define CALL_ENTITY_READ	0xD08
+#define CALL_ENTITY_WRITE	0xD09
+#define CALL_ENTITY_SEEK	0xD0A
 #define CALL_TRACE_OPEN		0x900
 #define CALL_TRACE_CLOSE	0x901
 #define CALL_TRACE_READ		0x902
@@ -376,6 +384,7 @@ $space %export entityBind, entityUnbind, entityDelete
 #define ENTITY_CTL_BIND			6
 #define ENTITY_CTL_UNBIND		7
 #define ENTITY_CTL_DELETE		8
+#define ENTITY_CTL_IOCTL		9
 
 struct api_entity_create_args {
 	uint16_t	archetype;
@@ -428,6 +437,11 @@ struct api_entity_query {
 	struct api_entity_entry	*entries;
 	uint32_t		max_entries;
 	uint32_t		count;
+};
+
+struct api_entity_ioctl {
+	uint64_t		cmd;
+	uint64_t		arg;
 };
 
 #define API_TRACE_MAX_CPUS		32
@@ -1385,6 +1399,10 @@ int	entitySetI32(int handle, uint32_t index, int32_t value);
 int	entityBind(int handle, const char *name);
 int	entityUnbind(int handle);
 int	entityDelete(int handle);
+ssize_t	entityRead(int handle, void *buf, size_t count);
+ssize_t	entityWrite(int handle, const void *buf, size_t count);
+long	entitySeek(int handle, long offset, int whence);
+int	entityIoctl(int handle, uint64_t cmd, void *arg);
 
 long	personality(long mode);
 

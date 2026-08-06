@@ -48,7 +48,6 @@ $space %export api_fs_stat, api_fs_rename, api_fs_unlink
 
 #include <kernel/api/api.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
-#include <kernel/drivers/newbus/driver_ns.h>
 #include <kernel/other/restrict.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
@@ -102,20 +101,12 @@ api_fs_stat(const char *path, struct api_fs_stat *buf)
 		return (-API_ERR_PERM);
 	}
 
-	vn = NULL;
-	if (driver_ns_is_path(kpath)) {
-		vn = driver_ns_lookup(kpath);
-		if (vn == NULL) {
-			return (-API_ERR_NOT_FOUND);
-		}
-	} else {
-		ret = vfs_resolve(kpath, &vn);
-		if (ret != 0) {
-			return (ret);
-		}
-		if (vn == NULL) {
-			return (-API_ERR_NOT_FOUND);
-		}
+	ret = vfs_resolve(kpath, &vn);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (vn == NULL) {
+		return (-API_ERR_NOT_FOUND);
 	}
 	ret = vnode_stat(vn, &st);
 	if (ret != 0) {
@@ -158,9 +149,6 @@ api_fs_rename(const char *oldpath, const char *newpath)
 	if (restrict_kusr_check(kold) || restrict_kusr_check(knew)) {
 		return (-API_ERR_PERM);
 	}
-	if (driver_ns_is_path(kold) || driver_ns_is_path(knew)) {
-		return (-API_ERR_NOT_SUPPORTED);
-	}
 	ret = vfs_rename(kold, knew);
 	if (ret != 0) {
 		return (ret);
@@ -180,9 +168,6 @@ api_fs_unlink(const char *path)
 	}
 	if (restrict_kusr_check(kpath)) {
 		return (-API_ERR_PERM);
-	}
-	if (driver_ns_is_path(kpath)) {
-		return (-API_ERR_NOT_SUPPORTED);
 	}
 	ret = vfs_unlink(kpath);
 	if (ret != 0) {

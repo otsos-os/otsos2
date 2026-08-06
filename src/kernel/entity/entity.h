@@ -80,8 +80,13 @@ $define %func entity_ns_name_of as function with args entity id
 $define %func entity_ns_bind as function with args const char *, entity id
 $define %func entity_ns_unbind as function with args const char *
 $define %func entity_ns_unbind_id as function with args entity id
+$define %func entity_ns_unbind_all_id as function with args entity id
 $define %func entity_ns_lookup as function with args const char *, u64 *
 $define %func entity_ns_list as function with args path, entries, count
+
+$define %type entity_io_ops as table of entity I/O callbacks
+$define %func entity_arch_io_register as function with args archetype, ops
+$define %func entity_arch_io_get as function with args archetype
 
 */
 
@@ -105,7 +110,10 @@ $space %export entity_handle_drop
 $space %export entity_handle_foreach
 $space %export entity_ns_is_path, entity_ns_init, entity_ns_name_of
 $space %export entity_ns_bind, entity_ns_unbind
-$space %export entity_ns_unbind_id, entity_ns_lookup, entity_ns_list
+$space %export entity_ns_unbind_id, entity_ns_unbind_all_id
+$space %export entity_ns_lookup, entity_ns_list
+$space %export entity_arch_io_register
+$space %export entity_arch_io_get
 
 */
 
@@ -117,7 +125,7 @@ $space %export entity_ns_unbind_id, entity_ns_lookup, entity_ns_list
 #define	ENTITY_MAX_ENTITIES		2048
 #define	ENTITY_MAX_ARCHETYPES		64
 #define	ENTITY_MAX_HANDLES		1024
-#define	ENTITY_MAX_NS_NODES		2048
+#define	ENTITY_MAX_NS_NODES		4096
 #define	ENTITY_NAME_MAX			64
 #define	ENTITY_PATH_MAX			256
 #define	ENTITY_DATA_COUNT		8
@@ -142,6 +150,7 @@ $space %export entity_ns_unbind_id, entity_ns_lookup, entity_ns_list
 #define	ENTITY_ARCH_TTY			16
 #define	ENTITY_ARCH_DRM			17
 #define	ENTITY_ARCH_PTY			18
+#define	ENTITY_ARCH_NB_DEVICE		19
 #define	ENTITY_ARCH_MAX			63
 
 #define	ENTITY_STATE_ACTIVE		1
@@ -170,6 +179,16 @@ struct api_entity_entry;
 
 typedef u64 entity_id_t;
 typedef void (*entity_release_fn)(entity_id_t id);
+
+typedef struct entity_io_ops {
+	int	(*read)(entity_id_t id, void *buf, u64 count, u64 offset);
+	int	(*write)(entity_id_t id, const void *buf, u64 count,
+		    u64 offset);
+	int	(*seek)(entity_id_t id, s64 offset, int whence,
+		    s64 *result);
+	int	(*ioctl)(entity_id_t id, u64 cmd, void *arg);
+	int	(*stat)(entity_id_t id, u64 *size);
+} entity_io_ops_t;
 
 static inline u16
 entity_id_archetype(entity_id_t id)
@@ -250,8 +269,12 @@ const char *entity_ns_name_of(entity_id_t id);
 int	entity_ns_bind(const char *name, entity_id_t id);
 int	entity_ns_unbind(const char *name);
 int	entity_ns_unbind_id(entity_id_t id);
+int	entity_ns_unbind_all_id(entity_id_t id);
 int	entity_ns_lookup(const char *name, entity_id_t *id);
 int	entity_ns_list(const char *path, struct api_entity_entry *entries,
 	    u32 max_entries, u32 *count);
+
+int	entity_arch_io_register(u16 arch, const entity_io_ops_t *ops);
+const entity_io_ops_t	*entity_arch_io_get(u16 arch);
 
 #endif

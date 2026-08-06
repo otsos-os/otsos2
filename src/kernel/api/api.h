@@ -926,6 +926,9 @@ int api_fs_mnt(const char *source, const char *target, const char *fstype,
     u64 flags, const void *data);
 int api_fs_umnt(const char *target, u64 flags);
 int api_proc_list(struct api_proc_info *buf, u32 max_entries);
+int api_entity_read(int handle, void *buf, u32 count);
+int api_entity_write(int handle, const void *buf, u32 count);
+long api_entity_seek(int handle, long offset, int whence);
 int api_kusr_auth(const char *password);
 int api_drm_call(u64 op, void *arg);
 void api_init(void);
@@ -996,7 +999,7 @@ void api_trace_cleanup_process(struct process *proc);
 
 #define	ENTITY_IO_PTR_BACKING		0
 #define	ENTITY_IO_PTR_PATH		1
-#define	ENTITY_IO_I32_OFFSET		0
+#define	ENTITY_IO_DATA_OFFSET		2
 #define	ENTITY_IO_I32_FLAGS		1
 
 #define	ENTITY_CTL_GET_INFO		1
@@ -1007,6 +1010,7 @@ void api_trace_cleanup_process(struct process *proc);
 #define	ENTITY_CTL_BIND			6
 #define	ENTITY_CTL_UNBIND		7
 #define	ENTITY_CTL_DELETE		8
+#define	ENTITY_CTL_IOCTL		9
 
 struct api_entity_create_args {
 	u16		archetype;
@@ -1061,6 +1065,11 @@ struct api_entity_query {
 	u32			count;
 };
 
+struct api_entity_ioctl {
+	u64			cmd;
+	u64			arg;
+};
+
 int api_entity_create(const struct api_entity_create_args *uargs);
 int api_entity_open(const char *uname, u32 access);
 int api_entity_close(int handle);
@@ -1079,6 +1088,11 @@ void	*entity_io_ptr(entity_id_t id, u32 index);
 int	entity_io_set_ptr(entity_id_t id, u32 index, void *ptr);
 int	entity_io_i32(entity_id_t id, u32 index, s32 *value);
 int	entity_io_set_i32(entity_id_t id, u32 index, s32 value);
+int	entity_io_read(entity_id_t id, void *buf, u64 count);
+int	entity_io_write(entity_id_t id, const void *buf, u64 count);
+int	entity_io_seek(entity_id_t id, s64 offset, int whence,
+	    s64 *new_offset);
+int	entity_io_ioctl(entity_id_t id, u64 cmd, void *arg);
 void	api_trace_entity_release(entity_id_t entity);
 
 #endif

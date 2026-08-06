@@ -4,6 +4,7 @@ $define %type api_entity_stat as native entity stat descriptor
 $define %type uint64_t as 64 bit unsigned
 $define %func ecat_resolve as function with args const char *, char *, size_t
 $define %func ecat_path as function with args const char *
+$define %func ecat_read_path as function with args const char *
 $define %func main as start with args int, char **, char **
 
 */
@@ -11,6 +12,7 @@ $define %func main as start with args int, char **, char **
 /* !SPACE!
 
 $space %internal ecat_resolve, ecat_path
+$space %internal ecat_read_path
 $space %export main
 
 */
@@ -102,19 +104,64 @@ ecat_path(const char *path)
 	return (0);
 }
 
+static int
+ecat_read_path(const char *path)
+{
+	char			buf[256];
+	char			full[YBX_PATH_MAX];
+	ssize_t			n;
+	int			handle;
+
+	if (ecat_resolve(path, full, sizeof(full)) != 0) {
+		ybx_error("ecat", path, errno);
+		return (1);
+	}
+	handle = entityOpen(full, ENTITY_ACCESS_READ);
+	if (handle < 0) {
+		ybx_error("ecat", full, errno);
+		return (1);
+	}
+	for (;;) {
+		n = entityRead(handle, buf, sizeof(buf) - 1);
+		if (n < 0) {
+			ybx_error("ecat", full, errno);
+			entityClose(handle);
+			return (1);
+		}
+		if (n == 0) {
+			break;
+		}
+		buf[n] = '\0';
+		printf("%s", buf);
+	}
+	entityClose(handle);
+	return (0);
+}
+
 int
 main(int argc, char **argv, char **envp)
 {
-	int	i, status;
+	int	i, read_mode, status;
 
 	(void)envp;
 	if (argc < 2) {
-		fprintf(stderr, "usage: ecat <entity-path>\n");
+		fprintf(stderr, "usage: ecat [-r] <entity-path>\n");
+		return (1);
+	}
+	read_mode = 0;
+	i = 1;
+	if (strcmp(argv[1], "-r") == 0 || strcmp(argv[1], "--read") == 0) {
+		read_mode = 1;
+		i = 2;
+	}
+	if (i >= argc) {
+		fprintf(stderr, "usage: ecat [-r] <entity-path>\n");
 		return (1);
 	}
 	status = 0;
-	for (i = 1; i < argc; i++) {
-		if (ecat_path(argv[i]) != 0) {
+	for (; i < argc; i++) {
+		if (read_mode ? ecat_read_path(argv[i]) != 0 :
+		    ecat_path(argv[i]) != 0) {
 			status = 1;
 		}
 	}

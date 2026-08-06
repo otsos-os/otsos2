@@ -363,7 +363,7 @@ posix_socket_install(posix_socket_t *sock, int flags, int cloexec)
 		}
 		entity_io_set_ptr(id, ENTITY_IO_PTR_BACKING, vn);
 		entity_io_set_ptr(id, ENTITY_IO_PTR_PATH, NULL);
-		entity_io_set_i32(id, ENTITY_IO_I32_OFFSET, 0);
+		entity_set_data(id, ENTITY_IO_DATA_OFFSET, 0);
 		entity_io_set_i32(id, ENTITY_IO_I32_FLAGS,
 		    POSIX_O_RDWR);
 		proc->posix_fds[fd].entity = (u64)id;

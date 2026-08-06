@@ -443,6 +443,18 @@ void syscall_handler(registers_t *regs) {
     regs->rax = (u64)api_entity_query(
         (const struct api_entity_query *)arg1);
     break;
+  case CALL_ENTITY_READ:
+    regs->rax = (u64)api_entity_read((int)arg1, (void *)arg2,
+                                    (u32)arg3);
+    break;
+  case CALL_ENTITY_WRITE:
+    regs->rax = (u64)api_entity_write((int)arg1, (const void *)arg2,
+                                     (u32)arg3);
+    break;
+  case CALL_ENTITY_SEEK:
+    regs->rax = (u64)api_entity_seek((int)arg1, (long)arg2,
+                                    (int)arg3);
+    break;
   case CALL_TRACE_OPEN:
     regs->rax = (u64)api_trace_open((u32)arg1);
     break;
