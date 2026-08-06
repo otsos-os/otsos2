@@ -132,7 +132,9 @@ entity_handle_slot(const struct process *proc, int handle, u64 *id,
 	u32	gen;
 
 	if (!proc || handle < 0) {
-		return (-API_ERR_BAD_HANDLE);
+		if (handle < 0) {
+			return (-API_ERR_BAD_HANDLE);
+		}
 	}
 	slot = ((u32)handle) & ENTITY_HANDLE_MASK;
 	gen = ((u32)handle) >> 16;
@@ -140,7 +142,8 @@ entity_handle_slot(const struct process *proc, int handle, u64 *id,
 		return (-API_ERR_BAD_HANDLE);
 	}
 	if (!entity_handle_used[slot] ||
-	    entity_handle_pid[slot] != proc->pid ||
+	    (proc ? entity_handle_pid[slot] != proc->pid :
+	    entity_handle_pid[slot] != 0) ||
 	    entity_handle_gen[slot] != gen) {
 		return (-API_ERR_BAD_HANDLE);
 	}
@@ -169,7 +172,7 @@ entity_handle_alloc(struct process *proc, entity_id_t id, u32 access)
 	u32	slot;
 	u32	gen;
 
-	if (!proc || id == 0 || access == 0) {
+	if (id == 0 || access == 0) {
 		return (-API_ERR_BAD_VALUE);
 	}
 	smp_lock();
@@ -188,12 +191,14 @@ entity_handle_alloc(struct process *proc, entity_id_t id, u32 access)
 		gen = 1;
 	}
 	entity_handle_used[slot] = 1;
-	entity_handle_pid[slot] = proc->pid;
+	entity_handle_pid[slot] = proc ? proc->pid : 0;
 	entity_handle_id[slot] = id;
 	entity_handle_flags[slot] = access;
 	entity_handle_gen[slot] = gen;
 	entity_handle_count++;
-	entity_handle_link(proc, slot);
+	if (proc) {
+		entity_handle_link(proc, slot);
+	}
 	entity_retain(id);
 	smp_unlock();
 	return ((int)((gen << 16) | slot));
@@ -213,7 +218,7 @@ entity_handle_drop(struct process *proc, int handle, int release)
 	u32		slot;
 	u32		gen;
 
-	if (!proc || handle < 0) {
+	if (handle < 0) {
 		return (-API_ERR_BAD_HANDLE);
 	}
 	slot = ((u32)handle) & ENTITY_HANDLE_MASK;
@@ -221,13 +226,16 @@ entity_handle_drop(struct process *proc, int handle, int release)
 	smp_lock();
 	if (slot >= ENTITY_MAX_HANDLES ||
 	    !entity_handle_used[slot] ||
-	    entity_handle_pid[slot] != proc->pid ||
+	    (proc ? entity_handle_pid[slot] != proc->pid :
+	    entity_handle_pid[slot] != 0) ||
 	    entity_handle_gen[slot] != gen) {
 		smp_unlock();
 		return (-API_ERR_BAD_HANDLE);
 	}
 	id = entity_handle_id[slot];
-	entity_handle_unlink(slot);
+	if (proc) {
+		entity_handle_unlink(slot);
+	}
 	entity_handle_used[slot] = 0;
 	entity_handle_pid[slot] = 0;
 	entity_handle_id[slot] = 0;
@@ -235,9 +243,11 @@ entity_handle_drop(struct process *proc, int handle, int release)
 	entity_handle_next[slot] = entity_handle_free_head;
 	entity_handle_free_head = slot;
 	entity_handle_count--;
-	proc->entity_handle_count--;
-	if (proc->entity_handle_count < 0) {
-		proc->entity_handle_count = 0;
+	if (proc) {
+		proc->entity_handle_count--;
+		if (proc->entity_handle_count < 0) {
+			proc->entity_handle_count = 0;
+		}
 	}
 	smp_unlock();
 	if (release) {

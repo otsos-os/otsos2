@@ -89,11 +89,13 @@ $space %export entity_event_set_notify
 */
 
 #include <kernel/api/errno.h>
+#include <kernel/cm/cm.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/drivers/newbus/newbus.h>
 #include <kernel/entity/entity.h>
 #include <kernel/process.h>
 #include <kernel/smp/smp.h>
+#include <kernel/trace/trace.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -124,6 +126,31 @@ static u32		entity_count;
 static const char	*entity_arch_names[ENTITY_MAX_ARCHETYPES];
 static entity_release_fn	entity_arch_release[ENTITY_MAX_ARCHETYPES];
 static void	(*entity_event_notify)(entity_id_t id, u32 fflags);
+
+static void
+entity_trace_notify(entity_id_t id, u32 fflags)
+{
+	u64	args[TRACE_MAX_ARGS];
+	u32	probe;
+
+	if (!trace_is_initialized()) {
+		return;
+	}
+	memset(args, 0, sizeof(args));
+	args[0] = id;
+	args[1] = entity_arch(id);
+	args[2] = fflags;
+	args[3] = (u64)entity_refs(id);
+	probe = TRACE_PROBE_ENTITY_RELEASE;
+	if (fflags & ENTITY_EVENT_CREATE) {
+		probe = TRACE_PROBE_ENTITY_CREATE;
+	} else if (fflags & ENTITY_EVENT_DESTROY) {
+		probe = TRACE_PROBE_ENTITY_DESTROY;
+	} else if (fflags & ENTITY_EVENT_RETAIN) {
+		probe = TRACE_PROBE_ENTITY_RETAIN;
+	}
+	trace_probe_fire(probe, 0, NULL, args);
+}
 
 static int
 entity_slot(entity_id_t id)
@@ -234,10 +261,23 @@ entity_init(void)
 	entity_arch_names[ENTITY_ARCH_IPC] = "ipc";
 	entity_arch_names[ENTITY_ARCH_REG] = "reg";
 	entity_arch_names[ENTITY_ARCH_KQUEUE] = "kqueue";
+	entity_arch_names[ENTITY_ARCH_SHM] = "shm";
+	entity_arch_names[ENTITY_ARCH_TRACE] = "trace";
+	entity_arch_names[ENTITY_ARCH_GEM] = "gem";
+	entity_arch_names[ENTITY_ARCH_KOFO] = "kofo";
+	entity_arch_names[ENTITY_ARCH_NB_INTERFACE] = "nb_interface";
+	entity_arch_names[ENTITY_ARCH_PROCESS] = "process";
+	entity_arch_names[ENTITY_ARCH_THREAD] = "thread";
+	entity_arch_names[ENTITY_ARCH_TTY] = "tty";
+	entity_arch_names[ENTITY_ARCH_DRM] = "drm";
+	entity_arch_names[ENTITY_ARCH_PTY] = "pty";
 	entity_initialized = 1;
 	drivers_log("[ENTITY] initialized: %d slots, %d handles, "
 	    "%d namespace nodes\n", ENTITY_MAX_ENTITIES,
 	    ENTITY_MAX_HANDLES, ENTITY_MAX_NS_NODES);
+	if (cm_get_bool_default("SYSTEM", "Entity", "Debug", 0)) {
+		printk("[ENTITY] debug mode enabled\n");
+	}
 }
 
 int
@@ -303,6 +343,7 @@ entity_create(u16 arch, u32 flags, u32 owner_pid, u32 uid, u32 gid,
 	entity_count++;
 	id = entity_id_make(arch, gen, index);
 	smp_unlock();
+	entity_trace_notify(id, ENTITY_EVENT_CREATE);
 	if (entity_event_notify) {
 		entity_event_notify(id, ENTITY_EVENT_CREATE);
 	}
@@ -333,6 +374,7 @@ entity_destroy(entity_id_t id)
 		entity_ns_unbind_id(id);
 	}
 	smp_unlock();
+	entity_trace_notify(id, ENTITY_EVENT_STATE | ENTITY_EVENT_DESTROY);
 	if (entity_event_notify) {
 		entity_event_notify(id, ENTITY_EVENT_STATE |
 		    ENTITY_EVENT_DESTROY);
@@ -352,6 +394,7 @@ entity_retain(entity_id_t id)
 		entity_refs_col[index]++;
 	}
 	smp_unlock();
+	entity_trace_notify(id, ENTITY_EVENT_RETAIN);
 	if (entity_event_notify) {
 		entity_event_notify(id, ENTITY_EVENT_RETAIN);
 	}
@@ -373,6 +416,7 @@ entity_release(entity_id_t id)
 	}
 	if (entity_refs_col[index] != 0) {
 		smp_unlock();
+		entity_trace_notify(id, ENTITY_EVENT_RELEASE);
 		if (entity_event_notify) {
 			entity_event_notify(id, ENTITY_EVENT_RELEASE);
 		}
@@ -386,6 +430,7 @@ entity_release(entity_id_t id)
 	entity_count--;
 	entity_free_push((u32)index);
 	smp_unlock();
+	entity_trace_notify(id, ENTITY_EVENT_RELEASE | ENTITY_EVENT_DESTROY);
 	if (entity_event_notify) {
 		entity_event_notify(id, ENTITY_EVENT_RELEASE |
 		    ENTITY_EVENT_DESTROY);
@@ -662,6 +707,10 @@ entity_access(const struct process *proc, entity_id_t id, u32 want)
 
 	(void)want;
 	if (!proc) {
+		return (0);
+	}
+	if (!cm_get_bool_default("SYSTEM", "Entity",
+	    "EnforceOwnership", 1)) {
 		return (0);
 	}
 	smp_lock();

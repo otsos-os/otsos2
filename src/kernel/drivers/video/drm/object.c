@@ -25,6 +25,7 @@
  */
 #include <drm/drm.h>
 #include <drm/object.h>
+#include <kernel/entity/entity.h>
 #include <mlibc/mlibc.h>
 
 #define OBJ_TABLE_SIZE 256
@@ -34,6 +35,7 @@ typedef struct {
   drm_object_type_t type;
   void *ptr;
   u32 index;
+  u64 entity;
 } obj_entry_t;
 
 static obj_entry_t g_obj_table[OBJ_TABLE_SIZE];
@@ -51,6 +53,14 @@ drm_id_t drm_object_register(drm_object_type_t type, void *ptr, u32 index) {
       g_obj_table[idx].type = type;
       g_obj_table[idx].ptr = ptr;
       g_obj_table[idx].index = index;
+      if (entity_is_initialized()) {
+        g_obj_table[idx].entity = entity_create(ENTITY_ARCH_DRM, 0,
+            0, 0, 0, 0, 0, 1);
+        if (g_obj_table[idx].entity != 0) {
+          entity_set_i32(g_obj_table[idx].entity, 0, (s32)type);
+          entity_set_i32(g_obj_table[idx].entity, 1, (s32)index);
+        }
+      }
       g_obj_next = (idx + 1) % OBJ_TABLE_SIZE;
       return id;
     }
@@ -101,6 +111,10 @@ int drm_object_unregister(drm_id_t id) {
   if (e->id != id) {
     return DRM_ERR_NOENT;
   }
+  if (e->entity != 0) {
+    entity_destroy(e->entity);
+    e->entity = 0;
+  }
   e->id = DRM_ID_NONE;
   e->type = 0;
   e->ptr = NULL;
@@ -108,6 +122,12 @@ int drm_object_unregister(drm_id_t id) {
 }
 
 void drm_object_reset_all(void) {
+  for (int i = 0; i < OBJ_TABLE_SIZE; i++) {
+    if (g_obj_table[i].entity != 0) {
+      entity_destroy(g_obj_table[i].entity);
+      g_obj_table[i].entity = 0;
+    }
+  }
   memset(g_obj_table, 0, sizeof(g_obj_table));
   g_obj_next = 0;
 }

@@ -218,7 +218,8 @@ static const char *g_trace_provider_names[TRACE_PROVIDER_COUNT] = {
 	"irq",
 	"sched",
 	"event",
-	"user"
+	"user",
+	"entity"
 };
 
 static const char *g_trace_provider_registry_names[TRACE_PROVIDER_COUNT] = {
@@ -229,7 +230,8 @@ static const char *g_trace_provider_registry_names[TRACE_PROVIDER_COUNT] = {
 	"Irq",
 	"Sched",
 	"Event",
-	"User"
+	"User",
+	"Entity"
 };
 
 static const trace_arg_desc_t trace_args_boot[] = {
@@ -302,6 +304,13 @@ static const trace_arg_desc_t trace_args_user_mark[] = {
 	{ "a4", TRACE_ARG_U64, 0 }
 };
 
+static const trace_arg_desc_t trace_args_entity[] = {
+	{ "entity", TRACE_ARG_ID, 0 },
+	{ "archetype", TRACE_ARG_ID, 0 },
+	{ "fflags", TRACE_ARG_FLAGS, 0 },
+	{ "refs", TRACE_ARG_U64, 0 }
+};
+
 static const trace_probe_desc_t g_trace_probes[TRACE_PROBE_COUNT] = {
 	{
 		TRACE_PROBE_CORE_BOOT, TRACE_PROVIDER_CORE, 0,
@@ -370,6 +379,22 @@ static const trace_probe_desc_t g_trace_probes[TRACE_PROBE_COUNT] = {
 	{
 		TRACE_PROBE_USER_MARK, TRACE_PROVIDER_USER, 0,
 		"user", "", "mark", trace_args_user_mark, 6
+	},
+	{
+		TRACE_PROBE_ENTITY_CREATE, TRACE_PROVIDER_ENTITY, 0,
+		"kernel", "entity", "create", trace_args_entity, 4
+	},
+	{
+		TRACE_PROBE_ENTITY_DESTROY, TRACE_PROVIDER_ENTITY, 0,
+		"kernel", "entity", "destroy", trace_args_entity, 4
+	},
+	{
+		TRACE_PROBE_ENTITY_RETAIN, TRACE_PROVIDER_ENTITY, 0,
+		"kernel", "entity", "retain", trace_args_entity, 4
+	},
+	{
+		TRACE_PROBE_ENTITY_RELEASE, TRACE_PROVIDER_ENTITY, 0,
+		"kernel", "entity", "release", trace_args_entity, 4
 	}
 };
 

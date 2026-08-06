@@ -108,6 +108,7 @@ typedef enum {
 typedef struct thread {
 	int			used;
 	u32			tid;
+	u64			entity;
 	struct process		*proc;
 	process_state_t		state;
 	cpu_context_t		context;

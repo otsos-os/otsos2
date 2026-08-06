@@ -87,6 +87,8 @@ typedef struct api_trace_handle {
 	int	session_id;
 	u32	owner_pid;
 	u32	flags;
+	entity_id_t	entity;
+	int	entity_handle;
 } api_trace_handle_t;
 
 typedef char api_trace_record_size_check[
@@ -126,13 +128,36 @@ api_trace_copy_name(char *dst, u32 size, const char *src)
 }
 
 static int
-api_trace_alloc_handle(void)
+api_trace_alloc_handle(process_t *proc)
 {
-	int	i;
+	int	i, handle;
 
 	for (i = 0; i < API_TRACE_MAX_HANDLES; i++) {
 		if (!g_api_trace_handles[i].used) {
-			return (i);
+			entity_id_t	id;
+
+			id = entity_io_create_raw(ENTITY_ARCH_TRACE, 0);
+			if (id == 0) {
+				return (-API_ERR_NO_MEMORY);
+			}
+			entity_io_set_ptr(id, ENTITY_IO_PTR_BACKING,
+			    &g_api_trace_handles[i]);
+			handle = entity_io_attach(id,
+			    ENTITY_ACCESS_READ | ENTITY_ACCESS_WRITE);
+			if (handle < 0) {
+				entity_destroy(id);
+				return (handle);
+			}
+			memset(&g_api_trace_handles[i], 0,
+			    sizeof(g_api_trace_handles[i]));
+			g_api_trace_handles[i].used = 1;
+			g_api_trace_handles[i].entity = id;
+			g_api_trace_handles[i].entity_handle = handle;
+			if (proc) {
+				g_api_trace_handles[i].owner_pid =
+				    proc->pid;
+			}
+			return (handle);
 		}
 	}
 	return (-API_ERR_HANDLES_FULL);
@@ -143,15 +168,23 @@ api_trace_get_handle(int trace)
 {
 	api_trace_handle_t	*handle;
 	process_t		*proc;
+	entity_id_t		id;
+	u32			access;
+	int			ret;
 
-	if (trace < 0 || trace >= API_TRACE_MAX_HANDLES) {
-		return (NULL);
-	}
-	handle = &g_api_trace_handles[trace];
-	if (!handle->used) {
-		return (NULL);
-	}
 	proc = process_current();
+	ret = entity_handle_lookup(proc, trace, &id, &access);
+	if (ret != 0) {
+		return (NULL);
+	}
+	if (entity_arch(id) != ENTITY_ARCH_TRACE) {
+		return (NULL);
+	}
+	handle = (api_trace_handle_t *)entity_io_ptr(id,
+	    ENTITY_IO_PTR_BACKING);
+	if (!handle || !handle->used) {
+		return (NULL);
+	}
 	if (proc == NULL || handle->owner_pid != proc->pid) {
 		return (NULL);
 	}
@@ -428,22 +461,21 @@ api_trace_open(u32 flags)
 	if ((flags & API_TRACE_OPEN_KNOWN) != 0 && !privileged) {
 		return (-API_ERR_PERM);
 	}
-	trace = api_trace_alloc_handle();
+	trace = api_trace_alloc_handle(proc);
 	if (trace < 0) {
 		return (trace);
 	}
+	handle = api_trace_get_handle(trace);
+	if (handle == NULL) {
+		return (-API_ERR_NO_MEMORY);
+	}
 	session = trace_session_open(flags, proc ? proc->pid : 0, privileged);
 	if (session < 0) {
+		entity_handle_free(proc, trace);
 		return (-API_ERR_BUSY);
 	}
-	handle = &g_api_trace_handles[trace];
-	memset(handle, 0, sizeof(*handle));
-	handle->used = 1;
 	handle->session_id = session;
 	handle->flags = flags;
-	if (proc != NULL) {
-		handle->owner_pid = proc->pid;
-	}
 	return (trace);
 }
 
@@ -458,6 +490,7 @@ api_trace_close(int trace)
 	}
 	trace_session_close(handle->session_id);
 	memset(handle, 0, sizeof(*handle));
+	entity_handle_free(process_current(), trace);
 	return (0);
 }
 
@@ -627,4 +660,18 @@ api_trace_cleanup_process(struct process *proc)
 		trace_session_close(handle->session_id);
 		memset(handle, 0, sizeof(*handle));
 	}
+}
+
+void
+api_trace_entity_release(entity_id_t entity)
+{
+	api_trace_handle_t	*handle;
+
+	handle = (api_trace_handle_t *)entity_io_ptr(entity,
+	    ENTITY_IO_PTR_BACKING);
+	if (!handle || !handle->used) {
+		return;
+	}
+	trace_session_close(handle->session_id);
+	memset(handle, 0, sizeof(*handle));
 }

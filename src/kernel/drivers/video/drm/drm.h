@@ -85,6 +85,7 @@ struct drm_gem_buffer {
   u64 size;
   u32 refcount;
   u32 handle;
+  u64 entity;
 };
 
 struct drm_framebuffer {

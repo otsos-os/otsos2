@@ -68,6 +68,7 @@ $space %export entity_io_i32, entity_io_set_i32
 
 #include <kernel/api/api.h>
 #include <kernel/api/errno.h>
+#include <kernel/console/terminal.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/entity/entity.h>
 #include <kernel/event/event.h>
@@ -167,6 +168,9 @@ entity_io_init(void)
 	    entity_io_release_reg);
 	entity_arch_release_register(ENTITY_ARCH_KQUEUE,
 	    kqueue_entity_release);
+	entity_arch_release_register(ENTITY_ARCH_TRACE,
+	    api_trace_entity_release);
+	terminal_entity_register_all();
 }
 
 entity_id_t

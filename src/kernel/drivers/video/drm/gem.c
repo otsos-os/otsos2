@@ -9,7 +9,7 @@
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
+ *    and/or other materials provided with the distribution.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -25,6 +25,8 @@
  */
 #include <drm/drm.h>
 #include <drm/gem.h>
+#include <kernel/api/api.h>
+#include <kernel/entity/entity.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -55,7 +57,6 @@ drm_handle_t drm_gem_create(u64 size) {
     return 0;
   }
 
-  /* Page-aligned for mmap friendliness. */
   u64 aligned = (size + 4095) & ~4095ULL;
   void *data = kmem_alloc_aligned(aligned, 4096);
   if (!data) {
@@ -68,23 +69,62 @@ drm_handle_t drm_gem_create(u64 size) {
   buf->data = (u8 *)data;
   buf->size = aligned;
   buf->refcount = 1;
+  buf->entity = 0;
+
+  if (entity_is_initialized()) {
+    entity_id_t id = entity_create(ENTITY_ARCH_GEM, 0, 0, 0, 0, 0, 0, 1);
+    if (id != 0) {
+      int handle;
+
+      entity_io_set_ptr(id, ENTITY_IO_PTR_BACKING, buf);
+      handle = entity_handle_alloc(NULL, id, ENTITY_ACCESS_READ |
+          ENTITY_ACCESS_WRITE);
+      if (handle >= 0) {
+        entity_release(id);
+        buf->entity = id;
+        buf->handle = (drm_handle_t)handle;
+        return buf->handle;
+      }
+      entity_destroy(id);
+    }
+  }
+
   buf->handle = (drm_handle_t)slot + 1;
   return buf->handle;
 }
 
-drm_gem_buffer_t *drm_gem_lookup(drm_handle_t handle) {
+static drm_gem_buffer_t *
+gem_raw_lookup(drm_handle_t handle)
+{
+  u32 idx;
+
   if (handle == 0) {
     return NULL;
   }
-  u32 idx = handle - 1;
+  idx = (u32)handle - 1;
   if (idx >= GEM_MAX_BUFFERS) {
     return NULL;
   }
-  drm_gem_buffer_t *buf = &g_gem_table[idx];
-  if (buf->handle != handle) {
+  if (g_gem_table[idx].handle != handle) {
     return NULL;
   }
-  return buf;
+  return (&g_gem_table[idx]);
+}
+
+drm_gem_buffer_t *drm_gem_lookup(drm_handle_t handle) {
+  entity_id_t id;
+  u32 access;
+  int ret;
+
+  if (handle == 0) {
+    return NULL;
+  }
+  ret = entity_handle_lookup(NULL, (int)handle, &id, &access);
+  if (ret == 0 && entity_arch(id) == ENTITY_ARCH_GEM) {
+    return ((drm_gem_buffer_t *)entity_io_ptr(id,
+        ENTITY_IO_PTR_BACKING));
+  }
+  return (gem_raw_lookup(handle));
 }
 
 void *drm_gem_vaddr(drm_handle_t handle) {
@@ -106,6 +146,9 @@ int drm_gem_close(drm_handle_t handle) {
     buf->refcount--;
     return DRM_OK;
   }
+  if (buf->entity != 0) {
+    entity_handle_free(NULL, (int)handle);
+  }
   if (buf->data) {
     kmem_free(buf->data);
   }
@@ -113,5 +156,6 @@ int drm_gem_close(drm_handle_t handle) {
   buf->size = 0;
   buf->refcount = 0;
   buf->handle = 0;
+  buf->entity = 0;
   return DRM_OK;
 }

@@ -131,8 +131,16 @@ Monolithic kernel with the following rough layers:
   `api/entity_io.c` (archetype release hooks + IO helpers). Legacy
   `api_handle_t`/`api_object_t` tables are removed: native data/net/ipc/reg
   syscalls and the POSIX fd layer are backed by entity handles. kqueue ids
-  and `EVFILT_ENTITY` are entity-aware. Handles are `(generation << 16) | slot`;
-  entity IDs pack archetype/generation/index.
+  and `EVFILT_ENTITY` are entity-aware; SHM segments and trace sessions are
+  registered as entities (`ENTITY_ARCH_SHM`, `ENTITY_ARCH_TRACE`). GEM
+  buffers, KOFO modules, newbus interfaces, DRM KMS objects, TTYs, processes
+  and threads are registered as observable entities (`ENTITY_ARCH_GEM`,
+  `ENTITY_ARCH_KOFO`, `ENTITY_ARCH_NB_INTERFACE`, `ENTITY_ARCH_DRM`,
+  `ENTITY_ARCH_TTY`, `ENTITY_ARCH_PTY`, `ENTITY_ARCH_PROCESS`,
+  `ENTITY_ARCH_THREAD`). GEM, KOFO and newbus interface handles are entity
+  kernel handles (pid 0) with raw-slot fallback before entity init. Handles
+  are `(generation << 16) | slot`; entity IDs pack archetype/generation/index.
+  Access policy is runtime-configurable via `SYSTEM.Entity.EnforceOwnership`.
 - `kshell/` — optional kernel debug shell; runtime command metadata and prompt
   live in the `SYSTEM` registry hive.
 - `crypto/` — SHA-256, HMAC-SHA256, PBKDF2, ChaCha20, RNG, plus `kusr`

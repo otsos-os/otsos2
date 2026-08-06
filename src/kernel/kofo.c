@@ -52,6 +52,7 @@ $space %export api_kofo_load, api_kofo_info, api_kofo_unload
 #include <kernel/api/errno.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/newbus/newbus.h>
+#include <kernel/entity/entity.h>
 #include <kernel/kofo.h>
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
@@ -84,6 +85,7 @@ typedef struct kofo_module {
 	char		name[API_KOFO_NAME_MAX];
 	char		version[API_KOFO_VERSION_MAX];
 	char		path[API_KOFO_PATH_MAX];
+	u64		entity;
 } kofo_module_t;
 
 typedef struct kofo_load_ctx {
@@ -584,6 +586,28 @@ kofo_find_slot_by_id(u32 id)
 }
 
 static kofo_module_t *
+kofo_entity_lookup(u32 handle, u32 *access_out)
+{
+	entity_id_t	id;
+	kofo_module_t	*mod;
+	u32		access;
+
+	if (entity_is_initialized() &&
+	    entity_handle_lookup(NULL, (int)handle, &id, &access) == 0 &&
+	    entity_arch(id) == ENTITY_ARCH_KOFO) {
+		mod = (kofo_module_t *)entity_io_ptr(id,
+		    ENTITY_IO_PTR_BACKING);
+		if (mod && mod->used) {
+			if (access_out) {
+				*access_out = access;
+			}
+			return (mod);
+		}
+	}
+	return (kofo_find_slot_by_id(handle));
+}
+
+static kofo_module_t *
 kofo_alloc_slot(void)
 {
 	u32	i;
@@ -734,6 +758,27 @@ api_kofo_load(const char *path, u32 flags)
 	kmem_free(kpath);
 	kofo_free_ctx(&ctx);
 	mod->state = KOFO_STATE_LOADED;
+	if (entity_is_initialized()) {
+		entity_id_t	eid;
+		int		handle;
+
+		eid = entity_create(ENTITY_ARCH_KOFO, 0, 0, 0, 0, 0, 0, 1);
+		if (eid != 0) {
+			entity_io_set_ptr(eid, ENTITY_IO_PTR_BACKING, mod);
+			handle = entity_handle_alloc(NULL, eid,
+			    ENTITY_ACCESS_READ | ENTITY_ACCESS_WRITE);
+			if (handle >= 0) {
+				entity_release(eid);
+				mod->entity = eid;
+				drivers_log("[KOFO] loaded %s id=%u "
+				    "image=%p size=%u\n",
+				    mod->name, mod->id, mod->image,
+				    (u32)mod->image_size);
+				return (handle);
+			}
+			entity_destroy(eid);
+		}
+	}
 	drivers_log("[KOFO] loaded %s id=%u image=%p size=%u\n",
 	    mod->name, mod->id, mod->image, (u32)mod->image_size);
 	return ((int)mod->id);
@@ -751,7 +796,7 @@ api_kofo_info(u32 id, struct api_kofo_info *info)
 	if (!user_range_fault_in(info, sizeof(*info), 1)) {
 		return (-API_ERR_BAD_ADDR);
 	}
-	mod = kofo_find_slot_by_id(id);
+	mod = kofo_entity_lookup(id, NULL);
 	if (mod == NULL) {
 		return (-API_ERR_NOT_FOUND);
 	}
@@ -786,7 +831,7 @@ api_kofo_unload(u32 id, u32 flags)
 	if (!proc_has_privilege(process_current())) {
 		return (-API_ERR_PERM);
 	}
-	mod = kofo_find_slot_by_id(id);
+	mod = kofo_entity_lookup(id, NULL);
 	if (mod == NULL) {
 		return (-API_ERR_NOT_FOUND);
 	}
@@ -804,6 +849,9 @@ api_kofo_unload(u32 id, u32 flags)
 		return (-API_ERR_BUSY);
 	}
 	drivers_log("[KOFO] unloaded %s id=%u\n", mod->name, mod->id);
+	if (mod->entity != 0) {
+		entity_handle_free(NULL, (int)id);
+	}
 	kmem_free(mod->image);
 	memset(mod, 0, sizeof(*mod));
 	return (0);

@@ -145,6 +145,7 @@ struct termios {
 int	terminal_read(void *buf, u32 count, u32 flags);
 int	terminal_write(const void *buf, u32 count);
 void	terminal_init(void);
+void	terminal_entity_register_all(void);
 int	terminal_is_initialized(void);
 void	terminal_reinit(void);
 void	terminal_putc_from_kernel(char c);

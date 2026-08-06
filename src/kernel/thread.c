@@ -79,6 +79,7 @@ $space %internal thread_fpu_init_context, thread_fpu_save
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/event/event.h>
+#include <kernel/entity/entity.h>
 #include <kernel/smp/smp.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -232,6 +233,11 @@ thread_create(process_t *proc, u64 rip, u64 rsp, u64 cs, u64 ss)
 	td->running_cpu = -1;
 	td->fpu_valid = 0;
 	thread_fpu_init_context(&td->fpu_context);
+	if (entity_is_initialized()) {
+		td->entity = entity_create(ENTITY_ARCH_THREAD, 0,
+		    proc->pid, proc->uid, proc->gid, proc->euid,
+		    proc->egid, proc->kusr_auth);
+	}
 
 	td->state = PROC_STATE_RUNNABLE;
 
@@ -441,6 +447,10 @@ thread_destroy(thread_t *td)
 		kmem_free(kstack_base);
 	}
 
+	if (td->entity != 0) {
+		entity_destroy(td->entity);
+		td->entity = 0;
+	}
 	memset(td, 0, sizeof(thread_t));
 }
 

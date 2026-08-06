@@ -62,6 +62,7 @@ hive SYSTEM @access(read=user, add=kusr, edit=kusr) {
 		bool Sched = true
 		bool Event = true
 		bool User = true
+		bool Entity = true
 	}
 
 	key Trace.Pmu {
@@ -72,6 +73,11 @@ hive SYSTEM @access(read=user, add=kusr, edit=kusr) {
 		bool CacheMisses = true
 		bool BranchInstructions = true
 		bool BranchMisses = true
+	}
+
+	key Entity {
+		bool Debug = false
+		bool EnforceOwnership = true
 	}
 
 	key Kshell {

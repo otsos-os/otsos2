@@ -1079,5 +1079,6 @@ void	*entity_io_ptr(entity_id_t id, u32 index);
 int	entity_io_set_ptr(entity_id_t id, u32 index, void *ptr);
 int	entity_io_i32(entity_id_t id, u32 index, s32 *value);
 int	entity_io_set_i32(entity_id_t id, u32 index, s32 value);
+void	api_trace_entity_release(entity_id_t entity);
 
 #endif

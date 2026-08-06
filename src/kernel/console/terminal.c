@@ -127,6 +127,7 @@ $space %export terminal_power_suspend_all
 #include <kernel/api/posix/posix.h>
 #include <kernel/console/palette.h>
 #include <kernel/console/terminal.h>
+#include <kernel/entity/entity.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/drivers/uart/uart.h>
@@ -1149,6 +1150,24 @@ int
 terminal_is_initialized(void)
 {
 	return (terminal_initialized);
+}
+
+void
+terminal_entity_register_all(void)
+{
+	int	i;
+
+	if (!terminal_initialized) {
+		return;
+	}
+	for (i = 0; i < TERM_COUNT; i++) {
+		entity_id_t	id;
+
+		id = entity_create(ENTITY_ARCH_TTY, 0, 0, 0, 0, 0, 0, 1);
+		if (id != 0) {
+			entity_set_i32(id, 0, (s32)i);
+		}
+	}
 }
 
 void

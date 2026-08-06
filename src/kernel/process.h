@@ -64,6 +64,7 @@ typedef struct vma {
 typedef struct process {
   u32 pid;                     /* Process ID */
   u32 ppid;                    /* Parent Process ID */
+  u64 entity;                  /* entity registry id */
   char name[PROCESS_NAME_LEN]; /* Process name */
 
   /* Memory */

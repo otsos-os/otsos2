@@ -24,6 +24,7 @@
  */
 
 #include <kernel/console/pty.h>
+#include <kernel/entity/entity.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/api/posix/posix.h>
 #include <kernel/event/event.h>
@@ -39,6 +40,7 @@
 
 typedef struct pty_pair {
 	int		id;
+	u64		entity;
 	int		open_master;
 	int		open_slave;
 	int		locked;
@@ -108,6 +110,10 @@ pty_alloc(void)
 		if (p->id == 0) {
 			memset(p, 0, sizeof(*p));
 			p->id = i + 1;
+			if (entity_is_initialized()) {
+				p->entity = entity_create(ENTITY_ARCH_PTY, 0,
+				    0, 0, 0, 0, 0, 1);
+			}
 			pty_default_termios(&p->term);
 			p->ws.ws_row = 24;
 			p->ws.ws_col = 80;

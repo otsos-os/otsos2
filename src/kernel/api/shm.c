@@ -84,6 +84,10 @@ shm_free_if_dead(shm_segment_t *seg)
 		return;
 	}
 
+	if (seg->entity != 0) {
+		entity_destroy(seg->entity);
+		seg->entity = 0;
+	}
 	if (seg->object != NULL) {
 		vm_object_unref(seg->object);
 	}
@@ -190,6 +194,14 @@ shm_get_or_create(u64 key, u64 size, int flags, int *error)
 	if (free_seg->object == NULL) {
 		if (error != NULL)
 			*error = -API_ERR_NO_MEMORY;
+		return (NULL);
+	}
+	free_seg->entity = entity_io_create_raw(ENTITY_ARCH_SHM, 0);
+	if (free_seg->entity == 0) {
+		vm_object_unref(free_seg->object);
+		if (error != NULL) {
+			*error = -API_ERR_NO_MEMORY;
+		}
 		return (NULL);
 	}
 

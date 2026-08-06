@@ -72,6 +72,7 @@ typedef struct shm_segment {
 	int		used;
 	int		removed;
 	int		id;
+	u64		entity;
 	u32		mode;
 	u32		refs;
 	u32		attaches;

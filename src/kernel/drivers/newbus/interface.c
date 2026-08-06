@@ -52,6 +52,8 @@ $space %export newbus_interface_close
 */
 
 #include <kernel/drivers/newbus/newbus.h>
+#include <kernel/entity/entity.h>
+#include <kernel/process.h>
 #include <kernel/smp/smp.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdio.h>
@@ -60,6 +62,7 @@ typedef struct newbus_interface_entry {
 	device_t			dev;
 	const newbus_interface_t	*iface;
 	u32				open_count;
+	u64				entity;
 	int				used;
 } newbus_interface_entry_t;
 
@@ -243,6 +246,35 @@ newbus_interface_open(device_t dev, const char *name)
 		}
 		if (strcmp(newbus_interface_slots[i].iface->name,
 		    name) == 0) {
+			if (newbus_interface_slots[i].open_count == 0) {
+				entity_id_t	id;
+				int		handle;
+
+				if (entity_is_initialized()) {
+					id = entity_create(
+					    ENTITY_ARCH_NB_INTERFACE, 0,
+					    0, 0, 0, 0, 0, 1);
+					if (id != 0) {
+						entity_io_set_ptr(id,
+						    ENTITY_IO_PTR_BACKING,
+						    &newbus_interface_slots[i]);
+						handle = entity_handle_alloc(
+						    NULL, id,
+						    ENTITY_ACCESS_READ |
+						    ENTITY_ACCESS_WRITE);
+						if (handle >= 0) {
+							entity_release(id);
+							newbus_interface_slots[i].
+							    entity = id;
+							newbus_interface_slots[i].
+							    open_count++;
+							smp_unlock();
+							return (handle);
+						}
+						entity_destroy(id);
+					}
+				}
+			}
 			newbus_interface_slots[i].open_count++;
 			smp_unlock();
 			return (i);
@@ -255,11 +287,37 @@ newbus_interface_open(device_t dev, const char *name)
 void
 newbus_interface_close(int handle)
 {
+	entity_id_t	id;
+	u32		access;
+	int		slot;
+	int		entity_mode;
+
 	smp_lock();
-	if (handle >= 0 && handle < NEWBUS_MAX_INTERFACES &&
+	slot = -1;
+	entity_mode = 0;
+	if (entity_is_initialized() &&
+	    entity_handle_lookup(NULL, handle, &id, &access) == 0 &&
+	    entity_arch(id) == ENTITY_ARCH_NB_INTERFACE) {
+		newbus_interface_entry_t	*entry;
+
+		entry = (newbus_interface_entry_t *)entity_io_ptr(id,
+		    ENTITY_IO_PTR_BACKING);
+		if (entry && entry->used && entry->open_count > 0) {
+			entry->open_count--;
+			if (entry->open_count == 0) {
+				entry->entity = 0;
+			}
+		}
+		slot = 1;
+		entity_mode = 1;
+	} else if (handle >= 0 && handle < NEWBUS_MAX_INTERFACES &&
 	    newbus_interface_slots[handle].used &&
 	    newbus_interface_slots[handle].open_count > 0) {
 		newbus_interface_slots[handle].open_count--;
+		slot = 1;
+	}
+	if (slot > 0 && entity_mode) {
+		entity_handle_free(NULL, handle);
 	}
 	smp_unlock();
 }

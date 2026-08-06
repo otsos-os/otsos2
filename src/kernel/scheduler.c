@@ -55,6 +55,7 @@ $space %export scheduler_cm_update, scheduler_tick
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <mm/vm/pmap.h>
 #include <kernel/cm/cm.h>
+#include <kernel/entity/entity.h>
 #include <kernel/process.h>
 #include <kernel/scheduler.h>
 #include <kernel/smp/smp.h>
@@ -202,6 +203,11 @@ scheduler_assign_process(process_t *proc)
 		proc->preferred_cpu = -1;
 	}
 	proc->last_cpu = -1;
+	if (entity_is_initialized() && proc->entity == 0) {
+		proc->entity = entity_create(ENTITY_ARCH_PROCESS, 0,
+		    proc->pid, proc->uid, proc->gid, proc->euid,
+		    proc->egid, proc->kusr_auth);
+	}
 	printk("[SCHED] PID %d preferred_cpu=%d\n", proc->pid,
 	    proc->preferred_cpu);
 }

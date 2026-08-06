@@ -69,6 +69,7 @@ $space %export process_get, process_create, process_create_kernel
 #include <kernel/thread.h>
 #include <kernel/console/terminal.h>
 #include <kernel/event/event.h>
+#include <kernel/entity/entity.h>
 #include <kernel/smp/smp.h>
 #include <mm/vm/vm_map.h>
 #include <mlibc/stdio.h>
@@ -266,6 +267,10 @@ process_exit(int code)
 		    "with code %d)", code);
 	}
 
+	if (proc->entity != 0) {
+		entity_destroy(proc->entity);
+		proc->entity = 0;
+	}
 	proc->exit_code = code;
 
 	thread_kill_all(proc);
@@ -393,6 +398,11 @@ process_kill(u32 pid)
 	if (proc->main_thread &&
 	    proc->main_thread->state == PROC_STATE_ZOMBIE) {
 		return (0);
+	}
+
+	if (proc->entity != 0) {
+		entity_destroy(proc->entity);
+		proc->entity = 0;
 	}
 
 	if (proc == process_current()) {

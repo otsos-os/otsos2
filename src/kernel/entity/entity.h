@@ -131,6 +131,16 @@ $space %export entity_ns_unbind_id, entity_ns_lookup, entity_ns_list
 #define	ENTITY_ARCH_IPC			6
 #define	ENTITY_ARCH_REG			7
 #define	ENTITY_ARCH_KQUEUE		8
+#define	ENTITY_ARCH_SHM			9
+#define	ENTITY_ARCH_TRACE		10
+#define	ENTITY_ARCH_GEM			11
+#define	ENTITY_ARCH_KOFO		12
+#define	ENTITY_ARCH_NB_INTERFACE	13
+#define	ENTITY_ARCH_PROCESS		14
+#define	ENTITY_ARCH_THREAD		15
+#define	ENTITY_ARCH_TTY			16
+#define	ENTITY_ARCH_DRM			17
+#define	ENTITY_ARCH_PTY			18
 #define	ENTITY_ARCH_MAX			63
 
 #define	ENTITY_STATE_ACTIVE		1
