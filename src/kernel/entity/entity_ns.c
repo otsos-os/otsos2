@@ -34,8 +34,6 @@ $define %type int as 32 bit signed
 $define %type entity_id as 64 bit packed archetype/generation/index
 $define %type api_entity_entry as struct with entity list entry
 
-$define %func entity_str_put as function with args const char *, u32 *
-$define %func entity_str_get as function with args u32
 $define %func entity_ns_component_valid as function with args const char *, int
 $define %func entity_ns_canonical as function with args const char *, char *, u32
 $define %func entity_ns_find_name as function with args const char *
@@ -54,7 +52,6 @@ $define %func entity_ns_list as function with args path, entries, count
 
 /* !SPACE!
 
-$space %internal entity_str_put, entity_str_get
 $space %internal entity_ns_component_valid, entity_ns_canonical
 $space %internal entity_ns_find_name, entity_ns_find_entity
 $space %internal entity_ns_free_slot
@@ -76,39 +73,9 @@ $space %export entity_ns_lookup, entity_ns_list
 
 static u32	entity_ns_used[ENTITY_MAX_NS_NODES];
 static u64	entity_ns_entity[ENTITY_MAX_NS_NODES];
-static u32	entity_ns_name_off[ENTITY_MAX_NS_NODES];
+static char	entity_ns_names[ENTITY_MAX_NS_NODES][ENTITY_PATH_MAX];
 static u32	entity_ns_free_next[ENTITY_MAX_NS_NODES];
 static u32	entity_ns_free_head;
-
-static char	entity_str_arena[ENTITY_STRING_ARENA_SIZE];
-static u32	entity_str_next;
-
-static int
-entity_str_put(const char *src, u32 *off)
-{
-	u32	len;
-
-	if (!src || !off) {
-		return (-API_ERR_BAD_VALUE);
-	}
-	len = (u32)strlen(src);
-	if (len + 1 > ENTITY_STRING_ARENA_SIZE - entity_str_next) {
-		return (-API_ERR_NO_SPACE);
-	}
-	*off = entity_str_next;
-	memcpy(entity_str_arena + entity_str_next, src, len + 1);
-	entity_str_next += len + 1;
-	return (0);
-}
-
-static const char *
-entity_str_get(u32 off)
-{
-	if (off >= ENTITY_STRING_ARENA_SIZE) {
-		return (NULL);
-	}
-	return (entity_str_arena + off);
-}
 
 static int
 entity_ns_component_valid(const char *comp, int len)
@@ -185,13 +152,8 @@ entity_ns_find_name(const char *name)
 	u32	i;
 
 	for (i = 0; i < ENTITY_MAX_NS_NODES; i++) {
-		const char	*stored;
-
-		if (!entity_ns_used[i]) {
-			continue;
-		}
-		stored = entity_str_get(entity_ns_name_off[i]);
-		if (stored && strcmp(stored, name) == 0) {
+		if (entity_ns_used[i] &&
+		    strcmp(entity_ns_names[i], name) == 0) {
 			return ((int)i);
 		}
 	}
@@ -216,7 +178,7 @@ entity_ns_free_slot(u32 slot)
 {
 	entity_ns_used[slot] = 0;
 	entity_ns_entity[slot] = 0;
-	entity_ns_name_off[slot] = 0;
+	memset(entity_ns_names[slot], 0, sizeof(entity_ns_names[slot]));
 	entity_ns_free_next[slot] = entity_ns_free_head;
 	entity_ns_free_head = slot;
 }
@@ -228,15 +190,13 @@ entity_ns_init(void)
 
 	memset(entity_ns_used, 0, sizeof(entity_ns_used));
 	memset(entity_ns_entity, 0, sizeof(entity_ns_entity));
-	memset(entity_ns_name_off, 0, sizeof(entity_ns_name_off));
+	memset(entity_ns_names, 0, sizeof(entity_ns_names));
 	memset(entity_ns_free_next, 0, sizeof(entity_ns_free_next));
-	memset(entity_str_arena, 0, sizeof(entity_str_arena));
 	entity_ns_free_head = 0;
 	for (i = 0; i < ENTITY_MAX_NS_NODES - 1; i++) {
 		entity_ns_free_next[i] = i + 1;
 	}
 	entity_ns_free_next[ENTITY_MAX_NS_NODES - 1] = ENTITY_NS_NONE;
-	entity_str_next = 0;
 }
 
 int
@@ -259,14 +219,13 @@ entity_ns_name_of(entity_id_t id)
 	if (slot < 0) {
 		return (NULL);
 	}
-	return (entity_str_get(entity_ns_name_off[(u32)slot]));
+	return (entity_ns_names[(u32)slot]);
 }
 
 int
 entity_ns_bind(const char *path, entity_id_t id)
 {
 	char	canon[ENTITY_PATH_MAX];
-	u32	name_off;
 	u32	slot;
 	int	ret;
 
@@ -286,16 +245,13 @@ entity_ns_bind(const char *path, entity_id_t id)
 		smp_unlock();
 		return (-API_ERR_NO_SPACE);
 	}
-	if (entity_str_put(canon, &name_off) != 0) {
-		smp_unlock();
-		return (-API_ERR_NO_SPACE);
-	}
 	slot = entity_ns_free_head;
 	entity_ns_free_head = entity_ns_free_next[slot];
 	entity_ns_free_next[slot] = ENTITY_NS_NONE;
 	entity_ns_used[slot] = 1;
 	entity_ns_entity[slot] = id;
-	entity_ns_name_off[slot] = name_off;
+	memset(entity_ns_names[slot], 0, sizeof(entity_ns_names[slot]));
+	memcpy(entity_ns_names[slot], canon, strlen(canon) + 1);
 	smp_unlock();
 	return (0);
 }
@@ -407,8 +363,8 @@ entity_ns_list(const char *path, struct api_entity_entry *entries,
 		if (!entity_ns_used[i]) {
 			continue;
 		}
-		name = entity_str_get(entity_ns_name_off[i]);
-		if (!name || strncmp(name, prefix, prefix_len) != 0) {
+		name = entity_ns_names[i];
+		if (strncmp(name, prefix, prefix_len) != 0) {
 			continue;
 		}
 		rest = name + prefix_len;

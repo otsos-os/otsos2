@@ -118,7 +118,6 @@ $space %export entity_ns_unbind_id, entity_ns_lookup, entity_ns_list
 #define	ENTITY_MAX_ARCHETYPES		64
 #define	ENTITY_MAX_HANDLES		1024
 #define	ENTITY_MAX_NS_NODES		2048
-#define	ENTITY_STRING_ARENA_SIZE	(64 * 1024)
 #define	ENTITY_NAME_MAX			64
 #define	ENTITY_PATH_MAX			256
 #define	ENTITY_DATA_COUNT		8
