@@ -75,11 +75,6 @@ hive SYSTEM @access(read=user, add=kusr, edit=kusr) {
 		bool BranchMisses = true
 	}
 
-	key Entity {
-		bool Debug = false
-		bool EnforceOwnership = true
-	}
-
 	key Kshell {
 		bool Enabled = true
 		string Prompt = "kshell> "

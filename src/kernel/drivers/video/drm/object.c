@@ -27,6 +27,7 @@
 #include <drm/object.h>
 #include <kernel/entity/entity.h>
 #include <mlibc/mlibc.h>
+#include <mlibc/stdio.h>
 
 #define OBJ_TABLE_SIZE 256
 
@@ -57,8 +58,13 @@ drm_id_t drm_object_register(drm_object_type_t type, void *ptr, u32 index) {
         g_obj_table[idx].entity = entity_create(ENTITY_ARCH_DRM, 0,
             0, 0, 0, 0, 0, 1);
         if (g_obj_table[idx].entity != 0) {
+          char name[64];
+
           entity_set_i32(g_obj_table[idx].entity, 0, (s32)type);
           entity_set_i32(g_obj_table[idx].entity, 1, (s32)index);
+          snprintf(name, sizeof(name), "/Entity/Drm/%u",
+              (unsigned int)id);
+          entity_ns_bind(name, g_obj_table[idx].entity);
         }
       }
       g_obj_next = (idx + 1) % OBJ_TABLE_SIZE;

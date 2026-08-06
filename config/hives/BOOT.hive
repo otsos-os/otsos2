@@ -69,6 +69,14 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 		string Dest = "/bin/profile"
 	}
 
+	key Modules.lse {
+		string Dest = "/bin/lse"
+	}
+
+	key Modules.ecat {
+		string Dest = "/bin/ecat"
+	}
+
 	key Modules.oven {
 		string Dest = "/bin/oven"
 	}

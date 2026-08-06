@@ -64,6 +64,7 @@ $define %func entity_dump as procedure with args void
 $define %func entity_event_set_notify as procedure with args callback
 
 $define %func entity_handle_init_process as procedure with args process *
+$define %func entity_handle_init as procedure with args void
 $define %func entity_handle_alloc as function with args process *, entity id, u32
 $define %func entity_handle_lookup as function with args process *, int, u64 *, u32 *
 $define %func entity_handle_free as function with args process *, int
@@ -97,6 +98,7 @@ $space %export entity_get_i32, entity_set_i32
 $space %export entity_name, entity_access, entity_foreach, entity_dump
 $space %export entity_event_set_notify
 $space %export entity_handle_init_process, entity_handle_alloc
+$space %export entity_handle_init
 $space %export entity_handle_lookup, entity_handle_free, entity_handle_dup
 $space %export entity_handle_copy_all, entity_handle_release_all
 $space %export entity_handle_drop
@@ -230,6 +232,7 @@ void	entity_dump(void);
 void	entity_event_set_notify(void (*fn)(entity_id_t id, u32 fflags));
 
 void	entity_handle_init_process(struct process *proc);
+void	entity_handle_init(void);
 int	entity_handle_alloc(struct process *proc, entity_id_t id, u32 access);
 int	entity_handle_lookup(const struct process *proc, int handle,
 	    entity_id_t *id, u32 *access);

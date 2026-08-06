@@ -255,9 +255,20 @@ newbus_interface_open(device_t dev, const char *name)
 					    ENTITY_ARCH_NB_INTERFACE, 0,
 					    0, 0, 0, 0, 0, 1);
 					if (id != 0) {
+						char	name[128];
+						const char *dev_name;
+
 						entity_io_set_ptr(id,
 						    ENTITY_IO_PTR_BACKING,
 						    &newbus_interface_slots[i]);
+						dev_name =
+						    device_get_nameunit(dev);
+						snprintf(name, sizeof(name),
+						    "/Entity/Interface/%s/%s",
+						    dev_name ? dev_name : "?",
+						    newbus_interface_slots[i].
+						    iface->name);
+						entity_ns_bind(name, id);
 						handle = entity_handle_alloc(
 						    NULL, id,
 						    ENTITY_ACCESS_READ |

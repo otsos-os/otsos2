@@ -768,8 +768,13 @@ api_kofo_load(const char *path, u32 flags)
 			handle = entity_handle_alloc(NULL, eid,
 			    ENTITY_ACCESS_READ | ENTITY_ACCESS_WRITE);
 			if (handle >= 0) {
+				char	name[128];
+
 				entity_release(eid);
 				mod->entity = eid;
+				snprintf(name, sizeof(name),
+				    "/Entity/Kofo/%s", mod->name);
+				entity_ns_bind(name, eid);
 				drivers_log("[KOFO] loaded %s id=%u "
 				    "image=%p size=%u\n",
 				    mod->name, mod->id, mod->image,

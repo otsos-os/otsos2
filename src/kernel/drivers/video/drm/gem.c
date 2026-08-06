@@ -80,9 +80,14 @@ drm_handle_t drm_gem_create(u64 size) {
       handle = entity_handle_alloc(NULL, id, ENTITY_ACCESS_READ |
           ENTITY_ACCESS_WRITE);
       if (handle >= 0) {
+        char name[64];
+
         entity_release(id);
         buf->entity = id;
         buf->handle = (drm_handle_t)handle;
+        snprintf(name, sizeof(name), "/Entity/Gem/%u",
+            (unsigned int)handle);
+        entity_ns_bind(name, id);
         return buf->handle;
       }
       entity_destroy(id);

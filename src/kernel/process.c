@@ -267,10 +267,6 @@ process_exit(int code)
 		    "with code %d)", code);
 	}
 
-	if (proc->entity != 0) {
-		entity_destroy(proc->entity);
-		proc->entity = 0;
-	}
 	proc->exit_code = code;
 
 	thread_kill_all(proc);
@@ -308,6 +304,10 @@ process_exit(int code)
 	}
 
 	terminal_drop_pgrp(proc->pgid);
+	if (proc->entity != 0) {
+		entity_destroy(proc->entity);
+		proc->entity = 0;
+	}
 	while (1) {
 		process_yield();
 	}
@@ -400,11 +400,6 @@ process_kill(u32 pid)
 		return (0);
 	}
 
-	if (proc->entity != 0) {
-		entity_destroy(proc->entity);
-		proc->entity = 0;
-	}
-
 	if (proc == process_current()) {
 		process_exit(proc->exit_code);
 		return (0);
@@ -436,6 +431,10 @@ process_kill(u32 pid)
 			}
 		}
 		terminal_drop_pgrp(proc->pgid);
+		if (proc->entity != 0) {
+			entity_destroy(proc->entity);
+			proc->entity = 0;
+		}
 		return (0);
 	}
 
@@ -468,6 +467,10 @@ process_kill(u32 pid)
 	}
 
 	terminal_drop_pgrp(proc->pgid);
+	if (proc->entity != 0) {
+		entity_destroy(proc->entity);
+		proc->entity = 0;
+	}
 
 	return (0);
 }

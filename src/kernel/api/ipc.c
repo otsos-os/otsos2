@@ -63,6 +63,7 @@ $space %export api_ipc_recv, api_ipc_call, api_ipc_ctl
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
+#include <mlibc/stdio.h>
 
 static int
 ipc_copy_name(const char *user, char *name)
@@ -104,6 +105,13 @@ ipc_handle_alloc(ipc_endpoint_t *endpoint, u32 flags)
 	if (handle < 0) {
 		entity_destroy(id);
 		return (handle);
+	}
+	if (endpoint->role == IPC_ENDPOINT_SERVER && endpoint->service) {
+		char	name[64];
+
+		snprintf(name, sizeof(name), "/Entity/IPC/%s",
+		    endpoint->service->name);
+		entity_ns_bind(name, id);
 	}
 	(void)flags;
 	return (handle);

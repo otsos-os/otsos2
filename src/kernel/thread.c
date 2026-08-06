@@ -234,9 +234,16 @@ thread_create(process_t *proc, u64 rip, u64 rsp, u64 cs, u64 ss)
 	td->fpu_valid = 0;
 	thread_fpu_init_context(&td->fpu_context);
 	if (entity_is_initialized()) {
+		char	name[64];
+
 		td->entity = entity_create(ENTITY_ARCH_THREAD, 0,
 		    proc->pid, proc->uid, proc->gid, proc->euid,
 		    proc->egid, proc->kusr_auth);
+		if (td->entity != 0) {
+			snprintf(name, sizeof(name), "/Entity/Thread/%u",
+			    td->tid);
+			entity_ns_bind(name, td->entity);
+		}
 	}
 
 	td->state = PROC_STATE_RUNNABLE;

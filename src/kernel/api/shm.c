@@ -62,6 +62,7 @@ $space %export api_shm_get, api_shm_map, api_shm_ctl
 #include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
+#include <mlibc/stdio.h>
 #include <mm/vm/vm_map.h>
 #include <mm/vm/vm_object.h>
 
@@ -84,7 +85,10 @@ shm_free_if_dead(shm_segment_t *seg)
 		return;
 	}
 
-	if (seg->entity != 0) {
+	if (seg->entity_handle != 0) {
+		entity_handle_free(NULL, seg->entity_handle);
+		seg->entity_handle = 0;
+	} else if (seg->entity != 0) {
 		entity_destroy(seg->entity);
 		seg->entity = 0;
 	}
@@ -117,6 +121,22 @@ shm_get(int id)
 		    !shm_segments[i].removed) {
 			shm_segments[i].refs++;
 			return (&shm_segments[i]);
+		}
+	}
+	{
+		entity_id_t	eid;
+		u32		access;
+
+		if (entity_handle_lookup(NULL, (int)id, &eid, &access) == 0 &&
+		    entity_arch(eid) == ENTITY_ARCH_SHM) {
+			shm_segment_t	*seg;
+
+			seg = (shm_segment_t *)entity_io_ptr(eid,
+			    ENTITY_IO_PTR_BACKING);
+			if (seg && seg->used && !seg->removed) {
+				seg->refs++;
+				return (seg);
+			}
 		}
 	}
 	return (NULL);
@@ -204,6 +224,17 @@ shm_get_or_create(u64 key, u64 size, int flags, int *error)
 		}
 		return (NULL);
 	}
+	entity_io_set_ptr(free_seg->entity, ENTITY_IO_PTR_BACKING,
+	    free_seg);
+	free_seg->entity_handle = entity_handle_alloc(NULL,
+	    free_seg->entity, ENTITY_ACCESS_READ | ENTITY_ACCESS_WRITE);
+	if (free_seg->entity_handle < 0) {
+		entity_destroy(free_seg->entity);
+		free_seg->entity = 0;
+		free_seg->entity_handle = 0;
+	} else {
+		entity_release(free_seg->entity);
+	}
 
 	free_seg->used = 1;
 	free_seg->id = shm_next_id++;
@@ -213,6 +244,13 @@ shm_get_or_create(u64 key, u64 size, int flags, int *error)
 	free_seg->refs = 1;
 	if (shm_next_id <= 0) {
 		shm_next_id = 1;
+	}
+	if (free_seg->entity != 0) {
+		char	name[64];
+
+		snprintf(name, sizeof(name), "/Entity/Shm/%u",
+		    free_seg->id);
+		entity_ns_bind(name, free_seg->entity);
 	}
 
 	return (free_seg);
@@ -362,7 +400,8 @@ api_shm_get(struct api_shmget_args *uargs)
 		return (error);
 	}
 
-	args.id = (u32)seg->id;
+	args.id = seg->entity_handle != 0 ?
+	    (u32)seg->entity_handle : (u32)seg->id;
 	memcpy(uargs, &args, sizeof(args));
 	shm_put(seg);
 	return (0);

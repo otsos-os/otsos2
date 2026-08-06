@@ -63,7 +63,7 @@ NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
 NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 DLD_BIN = ../libc/LibExec/dld/drld
 YABOX_DIR = $(PROGS_DIR)/yabox
-YABOX_TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv mmod unzip profile
+YABOX_TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv mmod unzip profile lse ecat
 CMSEED_BIN = ../bin/cmseed
 BOOT_HIVE = ../config/hives/BOOT.hive
 KOFO_PACK = ../tools/kofo_pack.py
@@ -706,7 +706,7 @@ $(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $
 			yes) src=$(YES_BIN);; \
 			fetch) src=$(FETCH_BIN);; \
 			sh) src=$(SHELL_BIN);; \
-			ls|cat|touch|pwd|whoami|rm|mkdir|rmdir|cp|mv|mmod|unzip|profile) src=$(YABOX_DIR)/$$m;; \
+			ls|cat|touch|pwd|whoami|rm|mkdir|rmdir|cp|mv|mmod|unzip|profile|lse|ecat) src=$(YABOX_DIR)/$$m;; \
 			oven) src=$(OVEN_BIN);; \
 			cursord) src=$(CURSORD_BIN);; \
 			srapi_demo) src=$(SRAPI_DEMO_BIN);; \

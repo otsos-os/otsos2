@@ -111,8 +111,15 @@ pty_alloc(void)
 			memset(p, 0, sizeof(*p));
 			p->id = i + 1;
 			if (entity_is_initialized()) {
+				char	name[64];
+
 				p->entity = entity_create(ENTITY_ARCH_PTY, 0,
 				    0, 0, 0, 0, 0, 1);
+				if (p->entity != 0) {
+					snprintf(name, sizeof(name),
+					    "/Entity/Pty/%d", p->id);
+					entity_ns_bind(name, p->entity);
+				}
 			}
 			pty_default_termios(&p->term);
 			p->ws.ws_row = 24;

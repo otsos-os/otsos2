@@ -81,6 +81,25 @@ static u32	entity_handle_prev[ENTITY_MAX_HANDLES];
 static u32	entity_handle_free_head;
 static u32	entity_handle_count;
 
+void
+entity_handle_init(void)
+{
+	u32	i;
+
+	memset(entity_handle_used, 0, sizeof(entity_handle_used));
+	memset(entity_handle_pid, 0, sizeof(entity_handle_pid));
+	memset(entity_handle_id, 0, sizeof(entity_handle_id));
+	memset(entity_handle_flags, 0, sizeof(entity_handle_flags));
+	memset(entity_handle_gen, 0, sizeof(entity_handle_gen));
+	memset(entity_handle_prev, 0, sizeof(entity_handle_prev));
+	entity_handle_free_head = 0;
+	for (i = 0; i < ENTITY_MAX_HANDLES - 1; i++) {
+		entity_handle_next[i] = i + 1;
+	}
+	entity_handle_next[ENTITY_MAX_HANDLES - 1] = ENTITY_HANDLE_NONE;
+	entity_handle_count = 0;
+}
+
 static void
 entity_handle_unlink(u32 slot)
 {
@@ -327,7 +346,12 @@ entity_handle_release_all(struct process *proc)
 		return;
 	}
 	while (proc->entity_handle_head != -1) {
-		entity_handle_drop(proc, proc->entity_handle_head, 1);
+		u32	slot;
+		int	handle;
+
+		slot = (u32)proc->entity_handle_head;
+		handle = (int)((entity_handle_gen[slot] << 16) | slot);
+		entity_handle_drop(proc, handle, 1);
 	}
 }
 

@@ -36,15 +36,12 @@ $define %type api_entity_entry as struct with entity list entry
 
 $define %func entity_str_put as function with args const char *, u32 *
 $define %func entity_str_get as function with args u32
+$define %func entity_ns_component_valid as function with args const char *, int
+$define %func entity_ns_canonical as function with args const char *, char *, u32
+$define %func entity_ns_find_name as function with args const char *
+$define %func entity_ns_find_entity as function with args entity_id
+$define %func entity_ns_free_slot as procedure with args u32
 $define %func entity_ns_init as procedure with args void
-$define %func entity_ns_node_alloc as function with args u32, const char *
-$define %func entity_ns_node_free as procedure with args u32
-$define %func entity_ns_find_child as function with args u32, const char *
-$define %func entity_ns_component as function with args const char **, char *
-$define %func entity_ns_skip_prefix as function with args const char *
-$define %func entity_ns_resolve_node as function with args const char *, u32 *
-$define %func entity_ns_find_by_entity as function with args entity_id
-$define %func entity_ns_prune as procedure with args u32
 $define %func entity_ns_is_path as function with args const char *
 $define %func entity_ns_name_of as function with args entity_id
 $define %func entity_ns_bind as function with args const char *, entity_id
@@ -58,11 +55,10 @@ $define %func entity_ns_list as function with args path, entries, count
 /* !SPACE!
 
 $space %internal entity_str_put, entity_str_get
+$space %internal entity_ns_component_valid, entity_ns_canonical
+$space %internal entity_ns_find_name, entity_ns_find_entity
+$space %internal entity_ns_free_slot
 $space %export entity_ns_init
-$space %internal entity_ns_node_alloc, entity_ns_node_free
-$space %internal entity_ns_find_child, entity_ns_component
-$space %internal entity_ns_skip_prefix, entity_ns_resolve_node
-$space %internal entity_ns_find_by_entity, entity_ns_prune
 $space %export entity_ns_is_path, entity_ns_name_of
 $space %export entity_ns_bind, entity_ns_unbind, entity_ns_unbind_id
 $space %export entity_ns_lookup, entity_ns_list
@@ -76,48 +72,16 @@ $space %export entity_ns_lookup, entity_ns_list
 #include <mlibc/mlibc.h>
 
 #define	ENTITY_NS_NONE		0xFFFFFFFFU
-#define	ENTITY_NS_ROOT		0
 #define	ENTITY_NS_COMPONENT_MAX	(ENTITY_NAME_MAX - 1)
 
 static u32	entity_ns_used[ENTITY_MAX_NS_NODES];
-static u32	entity_ns_parent[ENTITY_MAX_NS_NODES];
-static u32	entity_ns_first_child[ENTITY_MAX_NS_NODES];
-static u32	entity_ns_next_sibling[ENTITY_MAX_NS_NODES];
-static u32	entity_ns_name_off[ENTITY_MAX_NS_NODES];
 static u64	entity_ns_entity[ENTITY_MAX_NS_NODES];
+static u32	entity_ns_name_off[ENTITY_MAX_NS_NODES];
+static u32	entity_ns_free_next[ENTITY_MAX_NS_NODES];
 static u32	entity_ns_free_head;
 
 static char	entity_str_arena[ENTITY_STRING_ARENA_SIZE];
 static u32	entity_str_next;
-
-void
-entity_ns_init(void)
-{
-	u32	i;
-
-	memset(entity_ns_used, 0, sizeof(entity_ns_used));
-	memset(entity_ns_parent, 0, sizeof(entity_ns_parent));
-	memset(entity_ns_first_child, 0,
-	    sizeof(entity_ns_first_child));
-	memset(entity_ns_next_sibling, 0,
-	    sizeof(entity_ns_next_sibling));
-	memset(entity_ns_name_off, 0, sizeof(entity_ns_name_off));
-	memset(entity_ns_entity, 0, sizeof(entity_ns_entity));
-	memset(entity_str_arena, 0, sizeof(entity_str_arena));
-	entity_ns_used[ENTITY_NS_ROOT] = 1;
-	entity_ns_parent[ENTITY_NS_ROOT] = ENTITY_NS_NONE;
-	entity_ns_first_child[ENTITY_NS_ROOT] = ENTITY_NS_NONE;
-	entity_ns_next_sibling[ENTITY_NS_ROOT] = ENTITY_NS_NONE;
-	entity_ns_name_off[ENTITY_NS_ROOT] = 0;
-	entity_ns_entity[ENTITY_NS_ROOT] = 0;
-	entity_ns_free_head = 1;
-	for (i = 1; i < ENTITY_MAX_NS_NODES; i++) {
-		entity_ns_next_sibling[i] = i + 1;
-	}
-	entity_ns_next_sibling[ENTITY_MAX_NS_NODES - 1] =
-	    ENTITY_NS_NONE;
-	entity_str_next = 0;
-}
 
 static int
 entity_str_put(const char *src, u32 *off)
@@ -128,16 +92,12 @@ entity_str_put(const char *src, u32 *off)
 		return (-API_ERR_BAD_VALUE);
 	}
 	len = (u32)strlen(src);
-	if (len >= ENTITY_NAME_MAX) {
-		return (-API_ERR_TOO_BIG);
-	}
-	if (entity_str_next + len + 1 > ENTITY_STRING_ARENA_SIZE) {
+	if (len + 1 > ENTITY_STRING_ARENA_SIZE - entity_str_next) {
 		return (-API_ERR_NO_SPACE);
 	}
 	*off = entity_str_next;
-	memcpy(entity_str_arena + entity_str_next, src, len);
-	entity_str_next += len;
-	entity_str_arena[entity_str_next++] = '\0';
+	memcpy(entity_str_arena + entity_str_next, src, len + 1);
+	entity_str_next += len + 1;
 	return (0);
 }
 
@@ -150,256 +110,192 @@ entity_str_get(u32 off)
 	return (entity_str_arena + off);
 }
 
-static u32
-entity_ns_node_alloc(u32 parent, const char *name)
+static int
+entity_ns_component_valid(const char *comp, int len)
 {
-	u32	node;
-	u32	name_off;
-
-	if (entity_ns_free_head == ENTITY_NS_NONE) {
-		return (ENTITY_NS_NONE);
+	if (len <= 0 || len >= ENTITY_NS_COMPONENT_MAX) {
+		return (0);
 	}
-	if (entity_str_put(name, &name_off) != 0) {
-		return (ENTITY_NS_NONE);
+	if ((len == 1 && comp[0] == '.') ||
+	    (len == 2 && comp[0] == '.' && comp[1] == '.')) {
+		return (0);
 	}
-	node = entity_ns_free_head;
-	entity_ns_free_head = entity_ns_next_sibling[node];
-	entity_ns_used[node] = 1;
-	entity_ns_parent[node] = parent;
-	entity_ns_name_off[node] = name_off;
-	entity_ns_entity[node] = 0;
-	entity_ns_next_sibling[node] = entity_ns_first_child[parent];
-	entity_ns_first_child[parent] = node;
-	return (node);
-}
-
-static void
-entity_ns_node_free(u32 node)
-{
-	entity_ns_used[node] = 0;
-	entity_ns_parent[node] = ENTITY_NS_NONE;
-	entity_ns_first_child[node] = ENTITY_NS_NONE;
-	entity_ns_name_off[node] = 0;
-	entity_ns_entity[node] = 0;
-	entity_ns_next_sibling[node] = entity_ns_free_head;
-	entity_ns_free_head = node;
-}
-
-static u32
-entity_ns_find_child(u32 parent, const char *name)
-{
-	u32	child;
-
-	for (child = entity_ns_first_child[parent];
-	    child != ENTITY_NS_NONE;
-	    child = entity_ns_next_sibling[child]) {
-		const char	*child_name;
-
-		child_name = entity_str_get(entity_ns_name_off[child]);
-		if (child_name && strcmp(child_name, name) == 0) {
-			return (child);
-		}
-	}
-	return (ENTITY_NS_NONE);
+	return (1);
 }
 
 static int
-entity_ns_component(const char **path, char *buf, u32 bufsize)
+entity_ns_canonical(const char *path, char *out, u32 out_size)
 {
 	const char	*p;
-	u32		len;
+	u32		pos;
+	int		len;
 
-	p = *path;
-	while (*p == '/') {
-		p++;
-	}
-	if (*p == '\0') {
-		*path = p;
-		return (0);
-	}
-	len = 0;
-	while (p[len] != '\0' && p[len] != '/') {
-		len++;
-	}
-	if (len == 0 || len >= bufsize || len >= ENTITY_NS_COMPONENT_MAX) {
+	if (!path || !out || out_size == 0) {
 		return (-API_ERR_BAD_VALUE);
-	}
-	if ((len == 1 && p[0] == '.') ||
-	    (len == 2 && p[0] == '.' && p[1] == '.')) {
-		return (-API_ERR_BAD_VALUE);
-	}
-	memcpy(buf, p, len);
-	buf[len] = '\0';
-	*path = p + len;
-	return ((int)len);
-}
-
-static const char *
-entity_ns_skip_prefix(const char *path)
-{
-	if (!path) {
-		return (NULL);
 	}
 	if (strncmp(path, ENTITY_NS_PREFIX, ENTITY_NS_PREFIX_LEN) != 0) {
-		return (NULL);
+		return (-API_ERR_BAD_VALUE);
 	}
 	if (path[ENTITY_NS_PREFIX_LEN] != '\0' &&
 	    path[ENTITY_NS_PREFIX_LEN] != '/') {
-		return (NULL);
-	}
-	return (path + ENTITY_NS_PREFIX_LEN);
-}
-
-static int
-entity_ns_resolve_node(const char *path, u32 *out_node)
-{
-	const char	*p;
-	char		comp[ENTITY_NS_COMPONENT_MAX];
-	u32		node;
-	int		len;
-
-	if (!out_node) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	p = entity_ns_skip_prefix(path);
-	if (!p) {
-		return (-API_ERR_BAD_VALUE);
-	}
-	node = ENTITY_NS_ROOT;
-	for (;;) {
-		len = entity_ns_component(&p, comp, sizeof(comp));
-		if (len < 0) {
-			return (len);
+	p = path + ENTITY_NS_PREFIX_LEN;
+	if (*p == '\0') {
+		if (ENTITY_NS_PREFIX_LEN + 1 > out_size) {
+			return (-API_ERR_TOO_BIG);
 		}
-		if (len == 0) {
+		memcpy(out, ENTITY_NS_PREFIX, ENTITY_NS_PREFIX_LEN + 1);
+		return (0);
+	}
+	pos = ENTITY_NS_PREFIX_LEN;
+	memcpy(out, ENTITY_NS_PREFIX, ENTITY_NS_PREFIX_LEN);
+	out[pos] = '\0';
+	while (*p != '\0') {
+		const char	*start;
+
+		while (*p == '/') {
+			p++;
+		}
+		if (*p == '\0') {
 			break;
 		}
-		node = entity_ns_find_child(node, comp);
-		if (node == ENTITY_NS_NONE) {
-			return (-API_ERR_NOT_FOUND);
+		start = p;
+		while (*p != '\0' && *p != '/') {
+			p++;
 		}
+		len = (int)(p - start);
+		if (!entity_ns_component_valid(start, len)) {
+			return (-API_ERR_BAD_VALUE);
+		}
+		if (pos + 1 + (u32)len + 1 > out_size) {
+			return (-API_ERR_TOO_BIG);
+		}
+		out[pos++] = '/';
+		memcpy(out + pos, start, (u32)len);
+		pos += (u32)len;
+		out[pos] = '\0';
 	}
-	*out_node = node;
 	return (0);
 }
 
-static u32
-entity_ns_find_by_entity(entity_id_t id)
+static int
+entity_ns_find_name(const char *name)
 {
-	u32	node;
+	u32	i;
 
-	for (node = 1; node < ENTITY_MAX_NS_NODES; node++) {
-		if (entity_ns_used[node] &&
-		    entity_ns_entity[node] == id) {
-			return (node);
+	for (i = 0; i < ENTITY_MAX_NS_NODES; i++) {
+		const char	*stored;
+
+		if (!entity_ns_used[i]) {
+			continue;
+		}
+		stored = entity_str_get(entity_ns_name_off[i]);
+		if (stored && strcmp(stored, name) == 0) {
+			return ((int)i);
 		}
 	}
-	return (ENTITY_NS_NONE);
+	return (-1);
+}
+
+static int
+entity_ns_find_entity(entity_id_t id)
+{
+	u32	i;
+
+	for (i = 0; i < ENTITY_MAX_NS_NODES; i++) {
+		if (entity_ns_used[i] && entity_ns_entity[i] == id) {
+			return ((int)i);
+		}
+	}
+	return (-1);
 }
 
 static void
-entity_ns_prune(u32 node)
+entity_ns_free_slot(u32 slot)
 {
-	u32	parent;
+	entity_ns_used[slot] = 0;
+	entity_ns_entity[slot] = 0;
+	entity_ns_name_off[slot] = 0;
+	entity_ns_free_next[slot] = entity_ns_free_head;
+	entity_ns_free_head = slot;
+}
 
-	while (node != ENTITY_NS_ROOT && entity_ns_used[node] &&
-	    entity_ns_entity[node] == 0 &&
-	    entity_ns_first_child[node] == ENTITY_NS_NONE) {
-		parent = entity_ns_parent[node];
-		if (parent == ENTITY_NS_NONE ||
-		    !entity_ns_used[parent]) {
-			break;
-		}
-		if (entity_ns_first_child[parent] == node) {
-			entity_ns_first_child[parent] =
-			    entity_ns_next_sibling[node];
-		} else {
-			u32	prev, cur;
+void
+entity_ns_init(void)
+{
+	u32	i;
 
-			prev = entity_ns_first_child[parent];
-			cur = prev != ENTITY_NS_NONE ?
-			    entity_ns_next_sibling[prev] : ENTITY_NS_NONE;
-			while (cur != ENTITY_NS_NONE && cur != node) {
-				prev = cur;
-				cur = entity_ns_next_sibling[cur];
-			}
-			if (cur == node) {
-				entity_ns_next_sibling[prev] =
-				    entity_ns_next_sibling[node];
-			}
-		}
-		entity_ns_node_free(node);
-		node = parent;
+	memset(entity_ns_used, 0, sizeof(entity_ns_used));
+	memset(entity_ns_entity, 0, sizeof(entity_ns_entity));
+	memset(entity_ns_name_off, 0, sizeof(entity_ns_name_off));
+	memset(entity_ns_free_next, 0, sizeof(entity_ns_free_next));
+	memset(entity_str_arena, 0, sizeof(entity_str_arena));
+	entity_ns_free_head = 0;
+	for (i = 0; i < ENTITY_MAX_NS_NODES - 1; i++) {
+		entity_ns_free_next[i] = i + 1;
 	}
+	entity_ns_free_next[ENTITY_MAX_NS_NODES - 1] = ENTITY_NS_NONE;
+	entity_str_next = 0;
 }
 
 int
 entity_ns_is_path(const char *name)
 {
+	char	canon[ENTITY_PATH_MAX];
+
 	if (!name) {
 		return (0);
 	}
-	return (entity_ns_skip_prefix(name) != NULL);
+	return (entity_ns_canonical(name, canon, sizeof(canon)) == 0);
 }
 
 const char *
 entity_ns_name_of(entity_id_t id)
 {
-	u32	node;
+	int	slot;
 
-	node = entity_ns_find_by_entity(id);
-	if (node == ENTITY_NS_NONE) {
+	slot = entity_ns_find_entity(id);
+	if (slot < 0) {
 		return (NULL);
 	}
-	return (entity_str_get(entity_ns_name_off[node]));
+	return (entity_str_get(entity_ns_name_off[(u32)slot]));
 }
 
 int
 entity_ns_bind(const char *path, entity_id_t id)
 {
-	const char	*p;
-	char		comp[ENTITY_NS_COMPONENT_MAX];
-	u32		node;
-	u32		child;
-	int		len;
-	int		components;
+	char	canon[ENTITY_PATH_MAX];
+	u32	name_off;
+	u32	slot;
+	int	ret;
 
-	if (id == 0 || !entity_ns_is_path(path)) {
+	if (id == 0) {
 		return (-API_ERR_BAD_VALUE);
+	}
+	ret = entity_ns_canonical(path, canon, sizeof(canon));
+	if (ret != 0) {
+		return (ret);
 	}
 	smp_lock();
-	p = entity_ns_skip_prefix(path);
-	node = ENTITY_NS_ROOT;
-	components = 0;
-	for (;;) {
-		len = entity_ns_component(&p, comp, sizeof(comp));
-		if (len < 0) {
-			smp_unlock();
-			return (len);
-		}
-		if (len == 0) {
-			break;
-		}
-		components++;
-		child = entity_ns_find_child(node, comp);
-		if (child == ENTITY_NS_NONE) {
-			child = entity_ns_node_alloc(node, comp);
-			if (child == ENTITY_NS_NONE) {
-				smp_unlock();
-				return (-API_ERR_NO_SPACE);
-			}
-		}
-		node = child;
-	}
-	if (components == 0) {
-		smp_unlock();
-		return (-API_ERR_BAD_VALUE);
-	}
-	if (entity_ns_entity[node] != 0) {
+	if (entity_ns_find_name(canon) >= 0) {
 		smp_unlock();
 		return (-API_ERR_EXISTS);
 	}
-	entity_ns_entity[node] = id;
+	if (entity_ns_free_head == ENTITY_NS_NONE) {
+		smp_unlock();
+		return (-API_ERR_NO_SPACE);
+	}
+	if (entity_str_put(canon, &name_off) != 0) {
+		smp_unlock();
+		return (-API_ERR_NO_SPACE);
+	}
+	slot = entity_ns_free_head;
+	entity_ns_free_head = entity_ns_free_next[slot];
+	entity_ns_free_next[slot] = ENTITY_NS_NONE;
+	entity_ns_used[slot] = 1;
+	entity_ns_entity[slot] = id;
+	entity_ns_name_off[slot] = name_off;
 	smp_unlock();
 	return (0);
 }
@@ -407,21 +303,21 @@ entity_ns_bind(const char *path, entity_id_t id)
 int
 entity_ns_unbind(const char *path)
 {
-	u32	node;
+	char	canon[ENTITY_PATH_MAX];
+	int	slot;
 	int	ret;
 
-	smp_lock();
-	ret = entity_ns_resolve_node(path, &node);
+	ret = entity_ns_canonical(path, canon, sizeof(canon));
 	if (ret != 0) {
-		smp_unlock();
 		return (ret);
 	}
-	if (entity_ns_entity[node] == 0) {
+	smp_lock();
+	slot = entity_ns_find_name(canon);
+	if (slot < 0) {
 		smp_unlock();
 		return (-API_ERR_NOT_FOUND);
 	}
-	entity_ns_entity[node] = 0;
-	entity_ns_prune(node);
+	entity_ns_free_slot((u32)slot);
 	smp_unlock();
 	return (0);
 }
@@ -429,13 +325,12 @@ entity_ns_unbind(const char *path)
 int
 entity_ns_unbind_id(entity_id_t id)
 {
-	u32	node;
+	int	slot;
 
 	smp_lock();
-	node = entity_ns_find_by_entity(id);
-	if (node != ENTITY_NS_NONE) {
-		entity_ns_entity[node] = 0;
-		entity_ns_prune(node);
+	slot = entity_ns_find_entity(id);
+	if (slot >= 0) {
+		entity_ns_free_slot((u32)slot);
 	}
 	smp_unlock();
 	return (0);
@@ -444,20 +339,25 @@ entity_ns_unbind_id(entity_id_t id)
 int
 entity_ns_lookup(const char *path, entity_id_t *id)
 {
-	u32	node;
+	char	canon[ENTITY_PATH_MAX];
+	int	slot;
 	int	ret;
 
 	if (!id) {
 		return (-API_ERR_BAD_VALUE);
 	}
 	*id = 0;
-	smp_lock();
-	ret = entity_ns_resolve_node(path, &node);
+	ret = entity_ns_canonical(path, canon, sizeof(canon));
 	if (ret != 0) {
-		smp_unlock();
 		return (ret);
 	}
-	*id = entity_ns_entity[node];
+	smp_lock();
+	slot = entity_ns_find_name(canon);
+	if (slot < 0) {
+		smp_unlock();
+		return (-API_ERR_NOT_FOUND);
+	}
+	*id = entity_ns_entity[(u32)slot];
 	smp_unlock();
 	if (*id == 0) {
 		return (-API_ERR_NOT_FOUND);
@@ -469,12 +369,11 @@ int
 entity_ns_list(const char *path, struct api_entity_entry *entries,
     u32 max_entries, u32 *count)
 {
-	const char	*p;
-	char		comp[ENTITY_NS_COMPONENT_MAX];
-	u32		node;
-	u32		child;
+	char		prefix[ENTITY_PATH_MAX + 1];
+	u32		prefix_len;
 	u32		out;
-	int		len;
+	u32		i;
+	int		ret;
 
 	if (!entries || !count) {
 		return (-API_ERR_BAD_VALUE);
@@ -483,51 +382,72 @@ entity_ns_list(const char *path, struct api_entity_entry *entries,
 	if (max_entries == 0) {
 		return (0);
 	}
-	smp_lock();
-	p = entity_ns_skip_prefix(path);
-	if (!p) {
-		smp_unlock();
-		return (-API_ERR_BAD_VALUE);
+	ret = entity_ns_canonical(path, prefix, ENTITY_PATH_MAX);
+	if (ret != 0) {
+		return (ret);
 	}
-	node = ENTITY_NS_ROOT;
-	for (;;) {
-		len = entity_ns_component(&p, comp, sizeof(comp));
-		if (len < 0) {
-			smp_unlock();
-			return (len);
-		}
-		if (len == 0) {
-			break;
-		}
-		node = entity_ns_find_child(node, comp);
-		if (node == ENTITY_NS_NONE) {
-			smp_unlock();
-			return (-API_ERR_NOT_FOUND);
-		}
+	prefix_len = (u32)strlen(prefix);
+	if (prefix_len + 1 > sizeof(prefix)) {
+		return (-API_ERR_TOO_BIG);
 	}
-	out = 0;
-	for (child = entity_ns_first_child[node];
-	    child != ENTITY_NS_NONE && out < max_entries;
-	    child = entity_ns_next_sibling[child]) {
-		const char	*name;
-		u32		name_len;
+	prefix[prefix_len] = '/';
+	prefix[prefix_len + 1] = '\0';
+	prefix_len++;
 
-		name = entity_str_get(entity_ns_name_off[child]);
-		if (!name) {
+	smp_lock();
+	out = 0;
+	for (i = 0; i < ENTITY_MAX_NS_NODES && out < max_entries; i++) {
+		const char	*name;
+		const char	*rest;
+		const char	*comp_end;
+		u32		comp_len;
+		u32		j;
+		int		seen;
+
+		if (!entity_ns_used[i]) {
+			continue;
+		}
+		name = entity_str_get(entity_ns_name_off[i]);
+		if (!name || strncmp(name, prefix, prefix_len) != 0) {
+			continue;
+		}
+		rest = name + prefix_len;
+		if (*rest == '\0') {
+			continue;
+		}
+		comp_end = rest;
+		while (*comp_end != '\0' && *comp_end != '/') {
+			comp_end++;
+		}
+		comp_len = (u32)(comp_end - rest);
+		if (comp_len == 0) {
+			continue;
+		}
+		seen = 0;
+		for (j = 0; j < out; j++) {
+			if (strncmp(entries[j].name, rest, comp_len) == 0 &&
+			    entries[j].name[comp_len] == '\0') {
+				seen = 1;
+				break;
+			}
+		}
+		if (seen) {
 			continue;
 		}
 		memset(&entries[out], 0, sizeof(entries[out]));
-		entries[out].id = entity_ns_entity[child];
-		if (entries[out].id != 0) {
-			entries[out].archetype = entity_arch(entries[out].id);
-			entries[out].state = entity_state(entries[out].id);
-			entries[out].owner_pid = entity_owner(entries[out].id);
+		if (*comp_end == '\0') {
+			entries[out].id = entity_ns_entity[i];
+			if (entries[out].id != 0) {
+				entries[out].archetype =
+				    entity_arch(entries[out].id);
+				entries[out].state =
+				    entity_state(entries[out].id);
+				entries[out].owner_pid =
+				    entity_owner(entries[out].id);
+			}
 		}
-		name_len = (u32)strlen(name);
-		if (name_len >= sizeof(entries[out].name)) {
-			name_len = (u32)sizeof(entries[out].name) - 1;
-		}
-		memcpy(entries[out].name, name, name_len);
+		memcpy(entries[out].name, rest, comp_len);
+		entries[out].name[comp_len] = '\0';
 		out++;
 	}
 	smp_unlock();

@@ -204,9 +204,16 @@ scheduler_assign_process(process_t *proc)
 	}
 	proc->last_cpu = -1;
 	if (entity_is_initialized() && proc->entity == 0) {
+		char	name[64];
+
 		proc->entity = entity_create(ENTITY_ARCH_PROCESS, 0,
 		    proc->pid, proc->uid, proc->gid, proc->euid,
 		    proc->egid, proc->kusr_auth);
+		if (proc->entity != 0) {
+			snprintf(name, sizeof(name), "/Entity/Process/%u",
+			    proc->pid);
+			entity_ns_bind(name, proc->entity);
+		}
 	}
 	printk("[SCHED] PID %d preferred_cpu=%d\n", proc->pid,
 	    proc->preferred_cpu);

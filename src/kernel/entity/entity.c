@@ -89,7 +89,6 @@ $space %export entity_event_set_notify
 */
 
 #include <kernel/api/errno.h>
-#include <kernel/cm/cm.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/drivers/newbus/newbus.h>
 #include <kernel/entity/entity.h>
@@ -244,6 +243,7 @@ entity_init(void)
 	memset(entity_name_off_col, 0, sizeof(entity_name_off_col));
 	memset(entity_arch_names, 0, sizeof(entity_arch_names));
 	memset(entity_arch_release, 0, sizeof(entity_arch_release));
+	entity_handle_init();
 
 	entity_free_head = 0;
 	for (i = 0; i < ENTITY_MAX_ENTITIES; i++) {
@@ -275,9 +275,6 @@ entity_init(void)
 	drivers_log("[ENTITY] initialized: %d slots, %d handles, "
 	    "%d namespace nodes\n", ENTITY_MAX_ENTITIES,
 	    ENTITY_MAX_HANDLES, ENTITY_MAX_NS_NODES);
-	if (cm_get_bool_default("SYSTEM", "Entity", "Debug", 0)) {
-		printk("[ENTITY] debug mode enabled\n");
-	}
 }
 
 int
@@ -707,10 +704,6 @@ entity_access(const struct process *proc, entity_id_t id, u32 want)
 
 	(void)want;
 	if (!proc) {
-		return (0);
-	}
-	if (!cm_get_bool_default("SYSTEM", "Entity",
-	    "EnforceOwnership", 1)) {
 		return (0);
 	}
 	smp_lock();

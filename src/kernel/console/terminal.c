@@ -1165,7 +1165,11 @@ terminal_entity_register_all(void)
 
 		id = entity_create(ENTITY_ARCH_TTY, 0, 0, 0, 0, 0, 0, 1);
 		if (id != 0) {
+			char	name[64];
+
 			entity_set_i32(id, 0, (s32)i);
+			snprintf(name, sizeof(name), "/Entity/Tty/%d", i);
+			entity_ns_bind(name, id);
 		}
 	}
 }
