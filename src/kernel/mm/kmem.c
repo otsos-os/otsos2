@@ -281,7 +281,7 @@ kmem_alloc_internal(size_t size)
 			if (new_area) {
 				vm_page_reserve_range(
 				    (u64)new_area -
-				    KERNEL_VMA, grow_needed);
+				    DMAP_BASE, grow_needed);
 			}
 		}
 		if (!new_area) {
@@ -292,7 +292,7 @@ kmem_alloc_internal(size_t size)
 
 		printk("[KMEM] grow: new_area=%p grow_needed=%d "
 		    "phys=%p\n", new_area, (int)grow_needed,
-		    (void *)((u64)new_area - KERNEL_VMA));
+		    (void *)((u64)new_area - DMAP_BASE));
 
 		hdr = (header_t *)new_area;
 		hdr->magic = KMEM_MAGIC;
@@ -575,7 +575,7 @@ rescan:
 			new_area = bootmem_alloc(grow_needed, 4096);
 			if (new_area) {
 				vm_page_reserve_range(
-				    (u64)new_area - KERNEL_VMA,
+				    (u64)new_area - DMAP_BASE,
 				    grow_needed);
 			}
 		}
@@ -587,7 +587,7 @@ rescan:
 		printk("[KMEM] grow aligned: new_area=%p "
 		    "grow_needed=%d phys=%p\n", new_area,
 		    (int)grow_needed,
-		    (void *)((u64)new_area - KERNEL_VMA));
+		    (void *)((u64)new_area - DMAP_BASE));
 
 		hdr = (header_t *)new_area;
 		hdr->magic = KMEM_MAGIC;

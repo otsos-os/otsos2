@@ -206,7 +206,7 @@ void *bootmem_alloc(u64 size, u64 align) {
     }
     if (reserve_cb)
       reserve_cb(addr, size);
-    return (void *)(addr + KERNEL_VMA);
+    return (void *)(addr + DMAP_BASE);
   }
 
   return NULL;

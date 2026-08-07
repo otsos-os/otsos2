@@ -144,6 +144,10 @@ p2_table_high:
     .skip 4096
 p2_table_high_1:
     .skip 4096
+p3_table_dmap:
+    .skip 4096
+p2_table_dmap:
+    .skip 4096 * 64
 
 stack_guard:
     .skip 16384
@@ -1577,6 +1581,41 @@ setup_page_tables:
     inc ecx
     cmp ecx, 512
     jne .Lmap_p2_high_1
+
+    /* Direct map: PML4[256] -> p3_table_dmap.
+     * TODO: maybe we need to map bigger than 64GB. */
+    mov eax, offset p3_table_dmap
+    or eax, 0b11
+    mov [p4_table + 256 * 8], eax
+
+    xor esi, esi
+.Ldmap_p3:
+    mov eax, esi
+    shl eax, 12
+    add eax, offset p2_table_dmap
+    or eax, 0b11
+    mov [p3_table_dmap + esi * 8], eax
+    mov eax, esi
+    mov ecx, 0x40000000
+    mul ecx
+    mov edi, esi
+    shl edi, 12
+    add edi, offset p2_table_dmap
+    xor ebx, ebx
+.Ldmap_entries:
+    mov ecx, eax
+    or ecx, 0b10000011
+    mov [edi + ebx * 8], ecx
+    mov ecx, edx
+    mov [edi + ebx * 8 + 4], ecx
+    add eax, 0x200000
+    adc edx, 0
+    inc ebx
+    cmp ebx, 512
+    jne .Ldmap_entries
+    inc esi
+    cmp esi, 64
+    jne .Ldmap_p3
     
     ret
 

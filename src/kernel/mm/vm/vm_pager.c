@@ -74,7 +74,7 @@ default_getpage(vm_pager_t *pager, u64 offset, u64 *out_phys)
 	if (phys == 0) {
 		return (-1);
 	}
-	memset((void *)(phys + KERNEL_VMA), 0, PAGE_SIZE);
+	memset((void *)(phys + DMAP_BASE), 0, PAGE_SIZE);
 	*out_phys = phys;
 	return (0);
 }
@@ -119,11 +119,11 @@ vnode_getpage(vm_pager_t *pager, u64 offset, u64 *out_phys)
 	if (phys == 0) {
 		return (-1);
 	}
-	memset((void *)(phys + KERNEL_VMA), 0, PAGE_SIZE);
+	memset((void *)(phys + DMAP_BASE), 0, PAGE_SIZE);
 	if (pager->path[0] != '\0') {
 		vn = NULL;
 		if (vfs_resolve(pager->path, &vn) == 0 && vn != NULL) {
-			n = vnode_read(vn, (void *)(phys + KERNEL_VMA), PAGE_SIZE,
+			n = vnode_read(vn, (void *)(phys + DMAP_BASE), PAGE_SIZE,
 			    offset);
 			vnode_release(vn);
 			(void)n;

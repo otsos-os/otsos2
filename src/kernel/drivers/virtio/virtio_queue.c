@@ -78,7 +78,13 @@ virtio_virt_to_phys(void *vaddr)
 	page_virt = (u64)vaddr & ~((u64)PAGE_SIZE - 1);
 	page_phys = pmap_extract(page_virt);
 	if (page_phys == 0) {
-		return ((u64)vaddr - KERNEL_VMA);
+		if ((u64)vaddr >= KERNEL_VMA) {
+			return ((u64)vaddr - KERNEL_VMA);
+		}
+		if ((u64)vaddr >= DMAP_BASE) {
+			return ((u64)vaddr - DMAP_BASE);
+		}
+		return (0);
 	}
 	return (page_phys | ((u64)vaddr & (PAGE_SIZE - 1)));
 }

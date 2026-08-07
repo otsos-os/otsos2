@@ -557,7 +557,7 @@ trace_capture_stack(trace_record_t *rec, const registers_t *regs)
 	}
 	bp = regs->rbp;
 	while (count < limit) {
-		if (bp < KERNEL_VMA) {
+		if (bp < DMAP_BASE) {
 			break;
 		}
 		if (bp < regs->rsp || bp - regs->rsp > KERNEL_STACK_SIZE) {

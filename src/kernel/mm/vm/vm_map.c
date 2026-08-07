@@ -365,7 +365,7 @@ vm_map_create_user_stack(process_t *proc)
 			    USER_STACK_END);
 			return (-1);
 		}
-		memset((void *)(page + KERNEL_VMA), 0, PAGE_SIZE);
+		memset((void *)(page + DMAP_BASE), 0, PAGE_SIZE);
 		pmap_enter(va, page, PTE_PRESENT | PTE_RW | PTE_USER |
 		    PTE_NX);
 
@@ -615,8 +615,8 @@ vm_map_fault(process_t *proc, u64 addr, u64 err_code)
 			if (new_phys == 0) {
 				return (-1);
 			}
-			memcpy((void *)(new_phys + KERNEL_VMA),
-			    (void *)((old_phys & ~0xFFF) + KERNEL_VMA),
+			memcpy((void *)(new_phys + DMAP_BASE),
+			    (void *)((old_phys & ~0xFFF) + DMAP_BASE),
 			    PAGE_SIZE);
 			vm_page_free_phys(old_phys);
 			vm_object_set_page(v->object, index,
@@ -673,8 +673,8 @@ vm_cow_fault(u64 addr, u64 err_code)
 		if (new_phys == 0) {
 			return (-1);
 		}
-		memcpy((void *)(new_phys + KERNEL_VMA),
-		    (void *)((phys & ~0xFFF) + KERNEL_VMA), PAGE_SIZE);
+		memcpy((void *)(new_phys + DMAP_BASE),
+		    (void *)((phys & ~0xFFF) + DMAP_BASE), PAGE_SIZE);
 		vm_page_free_phys(phys);
 		pmap_enter(page_va, new_phys, new_flags);
 	} else {

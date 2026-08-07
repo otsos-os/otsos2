@@ -44,6 +44,9 @@ static u64 kernel_virt_to_phys(void *ptr) {
   if (phys == 0 && vaddr >= KERNEL_VMA) {
     phys = page - KERNEL_VMA;
   }
+  if (phys == 0 && vaddr >= DMAP_BASE && vaddr < KERNEL_VMA) {
+    phys = page - DMAP_BASE;
+  }
   if (phys == 0) {
     return 0;
   }

@@ -819,7 +819,7 @@ posix_brk(u64 addr_u, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 					}
 					return (-POSIX_ENOMEM);
 				}
-				memset((void *)(phys + KERNEL_VMA), 0, PAGE_SIZE);
+				memset((void *)(phys + DMAP_BASE), 0, PAGE_SIZE);
 				pmap_enter(va, phys,
 				    PTE_PRESENT | PTE_RW | PTE_USER);
 			}

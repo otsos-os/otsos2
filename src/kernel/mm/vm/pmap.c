@@ -83,7 +83,7 @@ static int	pmap_initialized = 0;
 static u64 *
 pmap_table_ptr(u64 phys)
 {
-	return ((u64 *)((phys & PTE_ADDR_MASK) + KERNEL_VMA));
+	return ((u64 *)((phys & PTE_ADDR_MASK) + DMAP_BASE));
 }
 
 static u64 *
@@ -108,7 +108,7 @@ pmap_alloc_zeroed_page(void)
 	if (phys == 0) {
 		return (0);
 	}
-	memset((void *)(phys + KERNEL_VMA), 0, PAGE_SIZE);
+	memset((void *)(phys + DMAP_BASE), 0, PAGE_SIZE);
 	return (phys);
 }
 

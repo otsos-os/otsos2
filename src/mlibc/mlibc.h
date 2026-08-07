@@ -32,6 +32,7 @@
 #endif
 
 #define KERNEL_VMA    0xFFFFFFFF80000000ULL
+#define DMAP_BASE     0xFFFF800000000000ULL
 
 typedef unsigned char u8;
 typedef unsigned short u16;
