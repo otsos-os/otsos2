@@ -29,6 +29,7 @@ pub const panic = panic_mod.panic;
 
 const PAGE_SIZE: u64 = 4096;
 const KERNEL_VMA: u64 = 0xFFFFFFFF80000000;
+const DMAP_BASE: u64 = 0xFFFF800000000000;
 
 const PTE_PRESENT: u64 = 0x1;
 const PTE_RW: u64 = 0x2;
@@ -139,7 +140,7 @@ inline fn u64_to_ptr(value: u64) *anyopaque {
     return @ptrFromInt(u64_to_usize(value));
 }
 inline fn phys_to_ptr(value: u64) *anyopaque {
-    return u64_to_ptr(value + KERNEL_VMA);
+    return u64_to_ptr(value + DMAP_BASE);
 }
 
 inline fn u64_to_ptr_dbg(value: u64) ?*anyopaque {

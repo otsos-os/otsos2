@@ -53,10 +53,13 @@ $space %export print_panic_logo, kernel_panic, panic
 #include <kernel/console/console.h>
 #include <kernel/console/terminal.h>
 #include <kernel/drivers/console/kms_console.h>
+#include <kernel/drivers/uart/uart.h>
 #include <kernel/drivers/video/drm/rapi/rapi.h>
 #include <kernel/interrupts/idt.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdio.h>
+
+static void	panic_emit(const char *fmt, ...);
 
 static const char *exception_messages[] = {
 	"Division By Zero",
@@ -104,21 +107,17 @@ dump_memory(u64 addr, int count)
 	ptr = (u8 *)addr;
 	for (i = 0; i < count; i++) {
 		if (i > 0 && i % 16 == 0) {
-			klog("\n\r");
-			klog("\n");
+			panic_emit("\n");
 		}
 
 		itoa(ptr[i], buf, 16);
 
 		if (ptr[i] < 16) {
-			klog("0");
-			klog("0");
+			panic_emit("0");
 		}
-		klog("%s ", buf);
-		klog("%s ", buf);
+		panic_emit("%s ", buf);
 	}
-	klog("\n\r");
-	klog("\n");
+	panic_emit("\n");
 }
 
 void
@@ -127,8 +126,7 @@ print_stack_trace(u64 rbp)
 	u64	*frame;
 	int	i;
 
-	klog("\n\rStack Trace:\n\r");
-	klog("\nStack Trace:\n");
+	panic_emit("\nStack Trace:\n");
 
 	frame = (u64 *)rbp;
 	for (i = 0; i < 8 && frame; i++) {
@@ -139,8 +137,7 @@ print_stack_trace(u64 rbp)
 			break;
 		}
 		rip = frame[1];
-		klog("  [%d] %p\n\r", i, (void *)rip);
-		klog("  [%d] %p\n", i, (void *)rip);
+		panic_emit("  [%d] %p\n", i, (void *)rip);
 		frame = (u64 *)frame[0];
 	}
 }
@@ -260,12 +257,12 @@ print_panic_logo(void)
 	width = console_get_width();
 	height = console_get_height();
 	x = width - 81;
-	if (x < 0) {
-		x = 0;
+	if (x < 16) {
+		return;
 	}
 	y = height - 36;
-	if (y < 0) {
-		y = 0;
+	if (y < 6) {
+		return;
 	}
 
 	cur_x = x;
@@ -293,6 +290,72 @@ print_panic_logo(void)
 	}
 }
 
+static int	panic_screen_x;
+static int	panic_screen_y;
+
+static void
+panic_screen_puts(const char *s)
+{
+	kms_console_t	*con;
+	const char	*p;
+	int		cols, rows;
+
+	con = kms_kernel_console();
+	if (!con) {
+		return;
+	}
+	cols = (int)con->cols;
+	rows = (int)con->rows;
+	if (cols <= 0) {
+		cols = 80;
+	}
+	if (rows <= 0) {
+		rows = 25;
+	}
+	for (p = s; *p; p++) {
+		if (*p == '\r') {
+			panic_screen_x = 0;
+			continue;
+		}
+		if (*p == '\n') {
+			panic_screen_x = 0;
+			panic_screen_y++;
+			continue;
+		}
+		if (panic_screen_y < rows) {
+			rapi_console_glyph(con,
+			    (u32)(panic_screen_x * 8),
+			    (u32)(panic_screen_y * 16), *p,
+			    console_color_rgb(0x1F), 0x000000);
+		}
+		panic_screen_x++;
+		if (panic_screen_x >= cols) {
+			panic_screen_x = 0;
+			panic_screen_y++;
+		}
+	}
+	kms_console_flush(con);
+}
+
+static void
+panic_emit_raw(const char *s)
+{
+	uart_write_string(s);
+	panic_screen_puts(s);
+}
+
+static void
+panic_emit(const char *fmt, ...)
+{
+	char			buffer[512];
+	__builtin_va_list	args;
+
+	__builtin_va_start(args, fmt);
+	vsnprintf(buffer, sizeof(buffer), fmt, args);
+	__builtin_va_end(args);
+	panic_emit_raw(buffer);
+}
+
 static int	panic_in_progress;
 
 void
@@ -316,37 +379,27 @@ kernel_panic(registers_t *regs)
 
 	console_set_color(0x1F);
 	clear_scr();
+	panic_screen_x = 0;
+	panic_screen_y = 0;
 
 	msg = (regs->int_no < 32) ?
 	    exception_messages[regs->int_no] :
 	    "Unexpected Interrupt";
 
-	klog("\n\r:::::::::::::::::::::::: KERNEL "
-	    "PANIC ::::::::::::::::::::::::\n\r");
-	klog(":::::::::::::::::::::::: KERNEL PANIC "
-	    "::::::::::::::::::::::::\n");
+	panic_emit("\n:::::::::::::::::::::::: KERNEL "
+	    "PANIC ::::::::::::::::::::::::\n");
 
-	klog("Exception: %s\n\r", msg);
-	klog("Exception: %s\n", msg);
+	panic_emit("Exception: %s\n", msg);
 
-	klog("RIP: %p  CS: %x  RFLAGS: %p  ERR: %x\n\r",
-	    (void *)regs->rip, (int)regs->cs,
-	    (void *)regs->rflags, (int)regs->err_code);
-	klog("RIP: %p  CS: %x  RFLAGS: %p  ERR: %x\n",
+	panic_emit("RIP: %p  CS: %x  RFLAGS: %p  ERR: %x\n",
 	    (void *)regs->rip, (int)regs->cs,
 	    (void *)regs->rflags, (int)regs->err_code);
 
-	klog("RAX: %p RBX: %p RCX: %p RDX: %p\n\r",
-	    (void *)regs->rax, (void *)regs->rbx,
-	    (void *)regs->rcx, (void *)regs->rdx);
-	klog("RAX: %p RBX: %p RCX: %p RDX: %p\n",
+	panic_emit("RAX: %p RBX: %p RCX: %p RDX: %p\n",
 	    (void *)regs->rax, (void *)regs->rbx,
 	    (void *)regs->rcx, (void *)regs->rdx);
 
-	klog("RSI: %p RDI: %p RBP: %p RSP: %p\n\r",
-	    (void *)regs->rsi, (void *)regs->rdi,
-	    (void *)regs->rbp, (void *)regs->rsp);
-	klog("RSI: %p RDI: %p RBP: %p RSP: %p\n",
+	panic_emit("RSI: %p RDI: %p RBP: %p RSP: %p\n",
 	    (void *)regs->rsi, (void *)regs->rdi,
 	    (void *)regs->rbp, (void *)regs->rsp);
 
@@ -355,65 +408,42 @@ kernel_panic(registers_t *regs)
 	__asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
 	__asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
 
-	klog("CR0: %p  CR2: %p  CR3: %p  CR4: %p\n\r",
-	    (void *)cr0, (void *)cr2, (void *)cr3,
-	    (void *)cr4);
-	klog("CR0: %p  CR2: %p  CR3: %p  CR4: %p\n",
+	panic_emit("CR0: %p  CR2: %p  CR3: %p  CR4: %p\n",
 	    (void *)cr0, (void *)cr2, (void *)cr3,
 	    (void *)cr4);
 
 	if (regs->int_no == 14) {
-		klog("PF Details: ");
+		panic_emit("PF Details: ");
 		if (!(regs->err_code & 1)) {
-			klog("Not-Present ");
+			panic_emit("Not-Present ");
 		} else {
-			klog("Protection-Violation ");
+			panic_emit("Protection-Violation ");
 		}
 		if (regs->err_code & 2) {
-			klog("Write ");
+			panic_emit("Write ");
 		}
 		if (regs->err_code & 16) {
-			klog("Instruction-Fetch ");
+			panic_emit("Instruction-Fetch ");
 		}
-		klog("\n\r");
-
-		klog("PF Details: ");
-		if (!(regs->err_code & 1)) {
-			klog("Not-Present ");
-		} else {
-			klog("Protection-Violation ");
-		}
-		if (regs->err_code & 2) {
-			klog("Write ");
-		}
-		if (regs->err_code & 16) {
-			klog("Instruction-Fetch ");
-		}
-		klog("\n");
+		panic_emit("\n");
 	}
 
 	__asm__ volatile("sgdt %0" : "=m"(gdtr));
 	__asm__ volatile("sidt %0" : "=m"(idtr));
-	klog("GDTR: %p (Limit: %x)  IDTR: %p "
-	    "(Limit: %x)\n\r",
-	    (void *)gdtr.base, gdtr.limit,
-	    (void *)idtr.base, idtr.limit);
-	klog("GDTR: %p (Limit: %x)  IDTR: %p (Limit: %x)\n",
+	panic_emit("GDTR: %p (Limit: %x)  IDTR: %p "
+	    "(Limit: %x)\n",
 	    (void *)gdtr.base, gdtr.limit,
 	    (void *)idtr.base, idtr.limit);
 
-	klog("\n\rCode dump at RIP:\n\r");
-	klog("\nCode dump at RIP:\n");
+	panic_emit("\nCode dump at RIP:\n");
 	dump_memory(regs->rip, 16);
 
-	klog("\n\rStack dump at RSP:\n\r");
-	klog("\nStack dump at RSP:\n");
+	panic_emit("\nStack dump at RSP:\n");
 	dump_memory(regs->rsp, 32);
 
 	print_stack_trace(regs->rbp);
 
-	klog("\n\rSystem Halted.\n\r");
-	klog("\nSystem Halted.\n");
+	panic_emit("\nSystem Halted.\n");
 
 	terminal_flush_kernel();
 	print_panic_logo();
@@ -442,14 +472,13 @@ panic(const char *format, ...)
 
 	console_set_color(0x1F);
 	clear_scr();
+	panic_screen_x = 0;
+	panic_screen_y = 0;
 
-	klog("\n\r:::::::::::::::::::::::: KERNEL "
-	    "PANIC ::::::::::::::::::::::::\n\r");
-	klog(":::::::::::::::::::::::: KERNEL PANIC "
-	    "::::::::::::::::::::::::\n");
+	panic_emit("\n:::::::::::::::::::::::: KERNEL "
+	    "PANIC ::::::::::::::::::::::::\n");
 
-	klog("Message: ");
-	klog("Message: ");
+	panic_emit("Message: ");
 
 	__builtin_va_start(args, format);
 
@@ -527,11 +556,9 @@ panic(const char *format, ...)
 
 	__builtin_va_end(args);
 
-	klog("%s\n\r", buffer);
-	klog("%s\n", buffer);
+	panic_emit("%s\n", buffer);
 
-	klog("\n\rSystem Halted.\n\r");
-	klog("\nSystem Halted.\n");
+	panic_emit("\nSystem Halted.\n");
 
 	terminal_flush_kernel();
 	print_panic_logo();

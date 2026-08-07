@@ -2,7 +2,7 @@
 # Runtime configuration lives in ../config/hives/*.hive and cmseed.
 
 [os]
-release = "2.3.3"
+release = "2.3.4"
 
 [libc]
 enabled = true

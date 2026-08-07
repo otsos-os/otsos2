@@ -460,6 +460,18 @@ User need to test, dont run test manually, ask user.
 
 ## Things Every Agent Should Know
 
+- Kernel data allocations (bootmem, kmem heap, vm_page metadata, GEM
+  buffers) are accessed through the direct map at `DMAP_BASE`
+  (`0xFFFF800000000000`), which maps physical memory 0-64GB with 2MB huge
+  pages; it is built statically in `src/boot/boot.s` (PML4[256]) before long
+  mode. `KERNEL_VMA` (`0xFFFFFFFF80000000`) is only the kernel image mapping
+  (phys 0-2GB). Phys->VA for kernel data: `phys + DMAP_BASE`; VA->phys:
+  `va - DMAP_BASE`. Kernel image addresses (e.g. `&kernel_end`) still use
+  `KERNEL_VMA`. `pmap_table_ptr()`, `bootmem_alloc()`, kmem growth, physical
+  page zero/copy helpers and the Zig ELF loader's `phys_to_ptr()`
+  (`src/userland/elf.zig`) must all use `DMAP_BASE`; the old
+  `KERNEL_VMA`-based data mapping wraps for phys >= 2GB and silently
+  aliases the identity map on machines with more than 2GB RAM.
 - otsos2 is a single-address-space kernel during boot; userspace processes get
   their own page tables via `pmap_create()`.
 - The kernel is loaded at `0xFFFFFFFF80000000` (higher half) after the bootloader

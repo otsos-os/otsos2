@@ -4,7 +4,7 @@ hive SYSTEM @access(read=user, add=kusr, edit=kusr) {
 	key Os {
 		string SysName = "otsos2"
 		string NodeName = "localhost"
-		string Release = "2.3.3"
+		string Release = "2.3.4"
 		string Version = "otsos2-kernel-rev2"
 		string Machine = "x86_64"
 		string DomainName = "localdomain"
