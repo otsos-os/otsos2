@@ -91,6 +91,12 @@ static void reserve_range(u64 start, u64 end) {
   }
 }
 
+void bootmem_reserve_phys(u64 phys_start, u64 size) {
+  if (size == 0)
+    return;
+  reserve_range(phys_start, phys_start + size);
+}
+
 static void load_mb1_mmap(multiboot_info_t *mb) {
   if (mb->flags & MULTIBOOT_FLAG_MMAP) {
     multiboot_mmap_entry_t *entry =

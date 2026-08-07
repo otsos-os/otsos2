@@ -472,6 +472,8 @@ User need to test, dont run test manually, ask user.
   (`src/userland/elf.zig`) must all use `DMAP_BASE`; the old
   `KERNEL_VMA`-based data mapping wraps for phys >= 2GB and silently
   aliases the identity map on machines with more than 2GB RAM.
+- The entity store uses an AoSoA layout: metadata is SoA columns inside
+  blocks of `ENTITY_BLOCK_ENTRIES`
 - otsos2 is a single-address-space kernel during boot; userspace processes get
   their own page tables via `pmap_create()`.
 - The kernel is loaded at `0xFFFFFFFF80000000` (higher half) after the bootloader

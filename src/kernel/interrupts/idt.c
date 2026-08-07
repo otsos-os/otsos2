@@ -124,6 +124,7 @@ void init_idt() {
   idt_set_gate(6, (unsigned long long)isr_stub_6, 0x8E);
   idt_set_gate(7, (unsigned long long)isr_stub_7, 0x8E);
   idt_set_gate(8, (unsigned long long)isr_stub_8, 0x8E);
+  idt[8].ist = 1; /* Double Fault uses its own stack (IST1) */
   idt_set_gate(9, (unsigned long long)isr_stub_9, 0x8E);
   idt_set_gate(10, (unsigned long long)isr_stub_10, 0x8E);
   idt_set_gate(11, (unsigned long long)isr_stub_11, 0x8E);

@@ -41,6 +41,9 @@ static int gdt_initialized = 0;
 /* Kernel stack for TSS (16KB aligned) */
 static u8 kernel_stack[16384] __attribute__((aligned(16)));
 
+/* Dedicated stacks for the double-fault handler (one per CPU) */
+static u8 df_stack[SMP_MAX_CPUS][8192] __attribute__((aligned(16)));
+
 /*
  * Set a GDT entry
  * access byte format:
@@ -92,6 +95,7 @@ void gdt_init(void) {
   /* Initialize TSS */
   memset(&tss, 0, sizeof(tss_t));
   tss.rsp0 = (u64)&kernel_stack[sizeof(kernel_stack)]; /* Top of kernel stack */
+  tss.ist1 = (u64)&df_stack[0][sizeof(df_stack[0])];
   tss.iomap_base = sizeof(tss_t); /* No I/O permission bitmap */
 
   /* Null descriptor */
@@ -141,6 +145,9 @@ void gdt_init_cpu(u8 cpu_index, tss_t *tss, gdt_entry_t *gdt) {
 
   memset(tss, 0, sizeof(tss_t));
   tss->iomap_base = sizeof(tss_t);
+  if (cpu_index < SMP_MAX_CPUS) {
+    tss->ist1 = (u64)&df_stack[cpu_index][sizeof(df_stack[0])];
+  }
 
   gdt_set_entry(gdt, 0, 0, 0, 0, 0);
   gdt_set_entry(gdt, 1, 0, 0xFFFFF, 0x9A, 0x20);

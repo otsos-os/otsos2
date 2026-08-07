@@ -22,5 +22,6 @@ u32 bootmem_range_count(void);
 const bootmem_range_t *bootmem_ranges(void);
 void bootmem_dump(void);
 void bootmem_set_reserve_cb(void (*cb)(u64 phys_start, u64 size));
+void bootmem_reserve_phys(u64 phys_start, u64 size);
 
 #endif

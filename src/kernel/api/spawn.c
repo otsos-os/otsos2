@@ -174,11 +174,15 @@ static int read_file_into_buffer(const char *path, u8 **out_buf,
     return -API_ERR_BAD_IMAGE;
   }
 
+  printk("[SPAWN] exec file '%s' size=%u\n", path, size);
+
   buf = (u8 *)kmem_calloc(size, 1);
   if (!buf) {
     vnode_release(vn);
     return -API_ERR_NO_MEMORY;
   }
+
+  printk("[SPAWN] buffer at %p\n", (void *)buf);
 
   bytes_read = 0;
   {
@@ -190,6 +194,8 @@ static int read_file_into_buffer(const char *path, u8 **out_buf,
     }
     bytes_read = (u32)n;
   }
+
+  printk("[SPAWN] read %u bytes of '%s'\n", bytes_read, path);
 
   vnode_release(vn);
 
@@ -428,6 +434,8 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
     return err;
   }
 
+  printk("[SPAWN] '%s' in memory (%u bytes)\n", kpath, elf_size);
+
   process_t *child = alloc_process();
   if (!child) {
     printk("[SPAWN] Error: no free process slots\n");
@@ -450,8 +458,13 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
     return -API_ERR_NO_MEMORY;
   }
 
+  printk("[SPAWN] new address space: %p\n", (void *)new_cr3);
+
   u64 old_cr3 = pmap_get_cr3();
   pmap_load(new_cr3);
+
+  printk("[SPAWN] switched to cr3=%p, loading ELF...\n",
+      (void *)pmap_get_cr3());
 
   elf_loadinfo_t li;
   u64 entry = elf_load_full(elf_buf, elf_size, &li);

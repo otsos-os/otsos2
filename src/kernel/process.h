@@ -30,6 +30,7 @@
 #include <kernel/api/api.h>
 #include <kernel/api/posix/posix.h>
 #include <kernel/thread.h>
+#include <kernel/entity/entity.h>
 #include <mlibc/mlibc.h>
 
 struct vm_object;
@@ -162,7 +163,17 @@ static inline int proc_has_privilege(const process_t *proc)
 }
 
 /* Global process data */
-extern process_t process_table[MAX_PROCESSES];
+/*
+ * AoSoA: processes and their entity metadata live in one block so the
+ * objects and metadata share the same allocation and cache lines.
+ */
+typedef struct process_block {
+	entity_meta_block_t	meta;
+	process_t		processes[MAX_PROCESSES];
+} process_block_t;
+
+extern process_block_t process_block;
+#define process_table (process_block.processes)
 extern u32 next_pid;
 
 #endif

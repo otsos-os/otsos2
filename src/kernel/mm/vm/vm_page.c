@@ -281,6 +281,7 @@ vm_page_alloc(u32 flags)
 	}
 
 	vm_page_queue_remove(page);
+	bootmem_reserve_phys(page->phys_addr, PAGE_SIZE);
 
 	if (flags & VM_PAGE_WIRED) {
 		page->state = VM_PAGE_USED | VM_PAGE_WIRED;

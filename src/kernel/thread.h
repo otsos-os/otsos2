@@ -73,6 +73,7 @@ $space %export thread_count_alive, thread_kill_all
 #define THREAD_H
 
 #include <kernel/interrupts/idt.h>
+#include <kernel/entity/entity.h>
 #include <mlibc/mlibc.h>
 
 #define MAX_THREADS 128
@@ -149,7 +150,17 @@ int		thread_join(u32 tid, int *status);
 int		thread_count_alive(struct process *proc);
 void		thread_kill_all(struct process *proc);
 
-extern thread_t	thread_table[MAX_THREADS];
+/*
+ * AoSoA: threads and their entity metadata live in one block so the
+ * objects and metadata share the same allocation and cache lines.
+ */
+typedef struct thread_block {
+	entity_meta_block_t	meta;
+	thread_t		threads[MAX_THREADS];
+} thread_block_t;
+
+extern thread_block_t thread_block;
+#define thread_table (thread_block.threads)
 extern u32	next_tid;
 
 #endif

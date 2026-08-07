@@ -206,9 +206,10 @@ scheduler_assign_process(process_t *proc)
 	if (entity_is_initialized() && proc->entity == 0) {
 		char	name[64];
 
-		proc->entity = entity_create(ENTITY_ARCH_PROCESS, 0,
-		    proc->pid, proc->uid, proc->gid, proc->euid,
-		    proc->egid, proc->kusr_auth);
+		proc->entity = entity_attach(ENTITY_ARCH_PROCESS,
+		    (u32)(proc - process_table), 0, proc->pid,
+		    proc->uid, proc->gid, proc->euid, proc->egid,
+		    proc->kusr_auth);
 		if (proc->entity != 0) {
 			snprintf(name, sizeof(name), "/Entity/Process/%u",
 			    proc->pid);

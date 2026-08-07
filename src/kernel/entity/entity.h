@@ -132,6 +132,37 @@ $space %export entity_arch_io_get
 #define	ENTITY_I32_COUNT		8
 #define	ENTITY_LIST_MAX_ENTRIES		256
 
+/*
+ * AoSoA layout: the entity metadata store is an array of blocks; each
+ * block holds SoA columns for ENTITY_BLOCK_ENTRIES entities. Archetypes
+ * with inline objects (e.g. process/thread tables) register their own
+ * block so the objects and their metadata live in the same allocation.
+ */
+#define	ENTITY_BLOCK_SHIFT		7
+#define	ENTITY_BLOCK_ENTRIES		(1U << ENTITY_BLOCK_SHIFT)
+#define	ENTITY_BLOCK_COUNT		(ENTITY_MAX_ENTITIES / \
+					    ENTITY_BLOCK_ENTRIES)
+
+typedef struct entity_meta_block {
+	u16	arch[ENTITY_BLOCK_ENTRIES];
+	u16	gen[ENTITY_BLOCK_ENTRIES];
+	u32	used[ENTITY_BLOCK_ENTRIES];
+	u32	state[ENTITY_BLOCK_ENTRIES];
+	u32	flags[ENTITY_BLOCK_ENTRIES];
+	s32	refs[ENTITY_BLOCK_ENTRIES];
+	u32	owner[ENTITY_BLOCK_ENTRIES];
+	u32	uid[ENTITY_BLOCK_ENTRIES];
+	u32	gid[ENTITY_BLOCK_ENTRIES];
+	u32	euid[ENTITY_BLOCK_ENTRIES];
+	u32	egid[ENTITY_BLOCK_ENTRIES];
+	u32	kusr[ENTITY_BLOCK_ENTRIES];
+	u64	size[ENTITY_BLOCK_ENTRIES];
+	u64	born[ENTITY_BLOCK_ENTRIES];
+	u64	data[ENTITY_DATA_COUNT][ENTITY_BLOCK_ENTRIES];
+	s32	i32[ENTITY_I32_COUNT][ENTITY_BLOCK_ENTRIES];
+	u32	name_off[ENTITY_BLOCK_ENTRIES];
+} entity_meta_block_t;
+
 #define	ENTITY_ARCH_GENERIC		1
 #define	ENTITY_ARCH_FILE		2
 #define	ENTITY_ARCH_PIPE		3
@@ -222,6 +253,10 @@ int	entity_arch_release_register(u16 arch, entity_release_fn fn);
 
 entity_id_t entity_create(u16 arch, u32 flags, u32 owner_pid, u32 uid,
 	    u32 gid, u32 euid, u32 egid, int kusr);
+entity_id_t entity_attach(u16 arch, u32 index, u32 flags, u32 owner_pid,
+	    u32 uid, u32 gid, u32 euid, u32 egid, int kusr);
+int	entity_meta_register(u16 arch, entity_meta_block_t *meta, u32 base,
+	    u32 count);
 int	entity_destroy(entity_id_t id);
 void	entity_retain(entity_id_t id);
 void	entity_release(entity_id_t id);

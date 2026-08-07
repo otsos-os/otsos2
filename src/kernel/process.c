@@ -78,7 +78,7 @@ $space %export process_get, process_create, process_create_kernel
 #include <kernel/api/posix/posix.h>
 #include <kernel/api/signal.h>
 
-process_t	process_table[MAX_PROCESSES];
+process_block_t	process_block;
 u32		next_pid = 1;
 static int	process_initialized = 0;
 
@@ -87,6 +87,8 @@ process_init(void)
 {
 	printk("[PROC] Initializing process subsystem...\n");
 	memset(process_table, 0, sizeof(process_table));
+	entity_meta_register(ENTITY_ARCH_PROCESS, &process_block.meta,
+	    0, MAX_PROCESSES);
 	next_pid = 1;
 	thread_init();
 	scheduler_init();

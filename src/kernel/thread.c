@@ -111,7 +111,7 @@ thread_wrmsr(u32 msr, u64 value)
 	__asm__ volatile("wrmsr" : : "c"(msr), "a"(low), "d"(high));
 }
 
-thread_t	thread_table[MAX_THREADS];
+thread_block_t	thread_block;
 u32		next_tid = 1;
 static int	thread_initialized = 0;
 
@@ -152,6 +152,8 @@ thread_init(void)
 {
 	printk("[THREAD] Initializing thread subsystem...\n");
 	memset(thread_table, 0, sizeof(thread_table));
+	entity_meta_register(ENTITY_ARCH_THREAD, &thread_block.meta,
+	    0, MAX_THREADS);
 	next_tid = 1;
 	smp_set_current_thread(NULL);
 	thread_initialized = 1;
@@ -236,9 +238,10 @@ thread_create(process_t *proc, u64 rip, u64 rsp, u64 cs, u64 ss)
 	if (entity_is_initialized()) {
 		char	name[64];
 
-		td->entity = entity_create(ENTITY_ARCH_THREAD, 0,
-		    proc->pid, proc->uid, proc->gid, proc->euid,
-		    proc->egid, proc->kusr_auth);
+		td->entity = entity_attach(ENTITY_ARCH_THREAD,
+		    (u32)(td - thread_table), 0, proc->pid, proc->uid,
+		    proc->gid, proc->euid, proc->egid,
+		    proc->kusr_auth);
 		if (td->entity != 0) {
 			snprintf(name, sizeof(name), "/Entity/Thread/%u",
 			    td->tid);
