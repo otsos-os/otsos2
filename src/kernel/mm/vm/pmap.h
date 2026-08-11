@@ -38,6 +38,7 @@ $define %func pmap_enter as procedure with args u64, u64, u64
 $define %func pmap_remove as procedure with args u64
 $define %func pmap_extract as function with args u64
 $define %func pmap_extract_flags as function with args u64
+$define %func pmap_map_mmio as function with args u64, u64
 $define %func pmap_create as function with args void
 $define %func pmap_clone as function with args u64
 $define %func pmap_destroy as procedure with args u64
@@ -58,6 +59,7 @@ $space %export pmap_extract, pmap_extract_flags, pmap_create, pmap_clone
 $space %export pmap_destroy, pmap_destroy_page_tables_only, pmap_enter_in
 $space %export pmap_kernel_cr3, pmap_clear_user_range
 $space %export pmap_invlpg, pmap_load, pmap_get_cr3
+$space %export pmap_map_mmio
 
 */
 
@@ -89,6 +91,7 @@ void	pmap_enter(u64 vaddr, u64 paddr, u64 flags);
 void	pmap_remove(u64 vaddr);
 u64	pmap_extract(u64 vaddr);
 u64	pmap_extract_flags(u64 vaddr);
+void	*pmap_map_mmio(u64 paddr, u64 size);
 u64	pmap_create(void);
 u64	pmap_clone(u64 src_cr3);
 void	pmap_destroy(u64 cr3);

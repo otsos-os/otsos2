@@ -61,6 +61,7 @@ $define %func kbd_event_reset as procedure with args void
 
 $space %export keyboard_manager_init, keyboard_getchar
 $space %export keyboard_register_driver
+$space %export keyboard_switch_driver
 $space %export keyboard_getchar_blocking, keyboard_common_handler
 $space %export keyboard_poll, keyboard_reset_state
 $space %export keyboard_flush_chars, keyboard_flush_input
@@ -147,6 +148,36 @@ keyboard_register_driver(keyboard_driver_t *driver)
 			    "driver disabled.\n");
 			return (-1);
 		}
+	}
+	current_driver = driver;
+	drivers_log("[KEYBOARD] switch to driver: %s\n",
+	    (char *)current_driver->name);
+	return (0);
+}
+
+int
+keyboard_switch_driver(keyboard_driver_t *driver)
+{
+	int	i;
+
+	if (driver == NULL || driver->name == NULL) {
+		return (-1);
+	}
+	for (i = 0; i < keyboard_driver_count; i++) {
+		if (keyboard_drivers[i] == driver) {
+			break;
+		}
+	}
+	if (i == keyboard_driver_count) {
+		return (-1);
+	}
+	if (driver->init != NULL && driver->init() != 0) {
+		drivers_log("[KEYBOARD] switch init failed, "
+		    "driver disabled.\n");
+		return (-1);
+	}
+	if (current_driver != NULL && current_driver->flush != NULL) {
+		current_driver->flush();
 	}
 	current_driver = driver;
 	drivers_log("[KEYBOARD] switch to driver: %s\n",

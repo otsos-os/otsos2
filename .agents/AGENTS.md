@@ -98,6 +98,10 @@ Monolithic kernel with the following rough layers:
   discovery source.
   Linker-set registration depends on the `.newbus.drivers` section in
   `src/linker.ld`.
+- `drivers/USB/` — USB transport-neutral core.  It owns standard descriptor
+  parsing, endpoint contracts and USB-interface newbus children; host
+  controllers and class drivers remain separate modules.  USB interfaces are
+  dynamically enumerated, so their newbus drivers must support reprobe/hot-plug.
 - `drivers/pmu/` — CPU performance monitoring driver. Owns CPUID/MSR PMU
   detection, counter programming, per-CPU counter state, and `drivers_log`
   status lines. Trace code should consume it through the PMU API instead of

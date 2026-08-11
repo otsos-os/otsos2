@@ -109,6 +109,7 @@ struct kbd_event {
 
 void		keyboard_manager_init(void);
 int		keyboard_register_driver(keyboard_driver_t *driver);
+int		keyboard_switch_driver(keyboard_driver_t *driver);
 char		keyboard_getchar(void);
 char		keyboard_getchar_blocking(void);
 void		keyboard_common_handler(void);

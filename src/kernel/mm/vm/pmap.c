@@ -53,6 +53,7 @@ $define %func pmap_clear_user_range as procedure with args u64, u64
 $define %func pmap_clone as function with args u64
 $define %func pmap_destroy as procedure with args u64
 $define %func pmap_destroy_page_tables_only as procedure with args u64
+$define %func pmap_map_mmio as function with args u64, u64
 
 */
 
@@ -67,6 +68,7 @@ $space %export pmap_remove, pmap_extract, pmap_enter_in
 $space %export pmap_create, pmap_kernel_cr3, pmap_extract_flags
 $space %export pmap_clear_user_range, pmap_clone, pmap_destroy
 $space %export pmap_destroy_page_tables_only
+$space %export pmap_map_mmio
 
 */
 
@@ -372,6 +374,27 @@ pmap_remove(u64 vaddr)
 	ptv = pmap_table_ptr((u64)pt);
 	ptv[pt_index] = 0;
 	pmap_invlpg(vaddr);
+}
+
+void *
+pmap_map_mmio(u64 paddr, u64 size)
+{
+	u64	end, last, page;
+
+	if (size == 0 || paddr > ~0ULL - size) {
+		return (NULL);
+	}
+	last = paddr + size - 1;
+	if (last > ~0ULL - (PAGE_SIZE - 1)) {
+		return (NULL);
+	}
+	end = (last + PAGE_SIZE) & ~((u64)PAGE_SIZE - 1);
+	for (page = paddr & ~((u64)PAGE_SIZE - 1); page < end;
+	    page += PAGE_SIZE) {
+		pmap_enter(DMAP_BASE + page, page,
+		    PTE_RW | PTE_PCD | PTE_PWT);
+	}
+	return ((void *)(DMAP_BASE + paddr));
 }
 
 u64

@@ -74,6 +74,8 @@ static int		newbus_driver_count;
 static device_t		newbus_root_device;
 static int		newbus_generation;
 static int		newbus_configured_pass = -1;
+static int		newbus_configure_busy;
+static int		newbus_reprobe_pending;
 
 static device_t
 newbus_alloc_device(const char *name, int unit)
@@ -497,7 +499,8 @@ newbus_module_matches_device(device_t dev, const newbus_module_t *module)
 	if (dev == NULL || module == NULL || module->driver == NULL) {
 		return (0);
 	}
-	if (strcmp(module->bus_name, "pci") == 0) {
+	if (strcmp(module->bus_name, "pci") == 0 ||
+	    strcmp(module->bus_name, "usb") == 0) {
 		return (1);
 	}
 	if (module->name != NULL && strcmp(module->name, dev->name) == 0) {
@@ -577,7 +580,9 @@ newbus_probe_device(device_t dev, int pass)
 	for (i = 0; i < newbus_driver_count; i++) {
 		module = newbus_drivers[i].module;
 		if (module->pass > pass ||
-		    strcmp(module->bus_name, parent->name) != 0) {
+		    (strcmp(module->bus_name, parent->name) != 0 &&
+		    (parent->driver == NULL ||
+		    strcmp(module->bus_name, parent->driver->name) != 0))) {
 			continue;
 		}
 		if (newbus_module_failed_on_device(dev, module)) {
@@ -689,6 +694,11 @@ newbus_configure_one_pass(int pass)
 {
 	int	i, old_generation;
 
+	if (newbus_configure_busy) {
+		newbus_reprobe_pending = 1;
+		return;
+	}
+	newbus_configure_busy = 1;
 	do {
 		old_generation = newbus_generation;
 		newbus_run_identify(pass);
@@ -697,6 +707,11 @@ newbus_configure_one_pass(int pass)
 		}
 		newbus_attach_devices(pass);
 	} while (old_generation != newbus_generation);
+	newbus_configure_busy = 0;
+	if (newbus_reprobe_pending) {
+		newbus_reprobe_pending = 0;
+		newbus_configure_one_pass(pass);
+	}
 }
 
 void

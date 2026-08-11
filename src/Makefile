@@ -355,6 +355,12 @@ TERM_INFO_O = ../bin/term_info.o
 TERM_MOUSE_O = ../bin/term_mouse.o
 TERM_MODE_O = ../bin/term_mode.o
 INPUT_O = ../bin/input.o
+USB_CORE_O = ../bin/usb_core.o
+XHCI_O = ../bin/xhci.o
+HID_CORE_O = ../bin/hid_core.o
+USB_MOUSE_O = ../bin/usb_mouse.o
+USB_KEYBOARD_O = ../bin/usb_keyboard.o
+USB_RNDIS_O = ../bin/usb_rndis.o
 
 TIME_O = ../bin/time.o
 CLOCKSOURCE_O = ../bin/clocksource.o
@@ -387,6 +393,7 @@ OBJ_NO_KSYMTAB = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UAR
       $(API_TIME_O) $(TERM_POWER_O) $(TERM_INFO_O) $(TERM_MOUSE_O) \
       $(TERM_MODE_O) \
       $(INPUT_O) \
+      $(USB_CORE_O) $(XHCI_O) $(HID_CORE_O) $(USB_MOUSE_O) $(USB_KEYBOARD_O) $(USB_RNDIS_O) \
       $(TIME_O) $(CLOCKSOURCE_O) $(ET_CLOCKSOURCE_O) $(CMOS_RTC_O)
 
 OBJ = $(OBJ_NO_KSYMTAB) $(KOFO_KSYMTAB_O)
@@ -884,6 +891,30 @@ $(I8042_O): kernel/drivers/input/i8042.c kernel/drivers/input/i8042.h
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(INPUT_CORE_O): kernel/drivers/input/input.c kernel/drivers/input/input.h kernel/api/input_abi.h kernel/event/event.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(USB_CORE_O): kernel/drivers/USB/usb.c kernel/drivers/USB/usb.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(XHCI_O): kernel/drivers/USB/xhci.c kernel/drivers/USB/xhci.h kernel/drivers/USB/usb.h kernel/pci/pci.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(HID_CORE_O): kernel/drivers/HID/hid.c kernel/drivers/HID/hid.h kernel/drivers/USB/usb.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(USB_MOUSE_O): kernel/drivers/mouse/usb.c kernel/drivers/HID/hid.h kernel/drivers/USB/usb.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(USB_KEYBOARD_O): kernel/drivers/keyboard/usb.c kernel/drivers/HID/hid.h kernel/drivers/USB/usb.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(USB_RNDIS_O): kernel/drivers/net/rndis.c kernel/drivers/USB/usb.h kernel/net/net.h kernel/net/netdev/netdev.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1629,6 +1660,10 @@ run_bios: check_bios_run_tools $(ISO_IMAGE) $(DISK_IMG)
 virtio: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (virtio-gpu, virtio-net)"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device virtio-gpu-pci -netdev user,id=net0 -device virtio-net-pci,netdev=net0,disable-legacy=on -device i6300esb -watchdog-action reset $(QEMU_MEM_OPTS)
+
+run_usb: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
+	@echo "  RUN     QEMU (xHCI USB controller)"
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device qemu-xhci -device usb-kbd -device usb-mouse -netdev user,id=net0 -device usb-net,netdev=net0 -device i6300esb -watchdog-action reset $(QEMU_MEM_OPTS)
 
 virtio_nodis: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (virtio-gpu, virtio-net, terminal)"

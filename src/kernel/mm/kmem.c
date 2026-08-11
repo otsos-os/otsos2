@@ -562,6 +562,7 @@ rescan:
 
 	{
 		size_t		grow_needed;
+		size_t		pad;
 		void		*new_area;
 		header_t	*hdr;
 
@@ -589,10 +590,14 @@ rescan:
 		    (int)grow_needed,
 		    (void *)((u64)new_area - DMAP_BASE));
 
-		hdr = (header_t *)new_area;
+		pad = (sizeof(header_t) + KMEM_REDZONE_SZ) % align;
+		if (pad != 0) {
+			pad = align - pad;
+		}
+		hdr = (header_t *)((u8 *)new_area + pad);
 		hdr->magic = KMEM_MAGIC;
 		hdr->is_free = 1;
-		hdr->size = grow_needed - sizeof(header_t);
+		hdr->size = grow_needed - pad - sizeof(header_t);
 		hdr->payload_size = 0;
 		hdr->next = kmem_heap_head;
 		hdr->prev = NULL;
