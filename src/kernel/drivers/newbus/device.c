@@ -90,6 +90,7 @@ newbus_alloc_device(const char *name, int unit)
 	if (dev == NULL) {
 		return (NULL);
 	}
+	memset(dev, 0, sizeof(*dev));
 	strncpy(dev->name, name, NEWBUS_NAME_MAX - 1);
 	dev->unit = unit;
 	dev->state = DS_ALIVE;

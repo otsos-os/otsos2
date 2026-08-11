@@ -415,10 +415,7 @@ kmem_calloc_internal(size_t nmemb, size_t size)
 
 	ptr = kmem_alloc_internal(total);
 	if (ptr != NULL) {
-		if ((char *)ptr < growth_pool_start ||
-		    (char *)ptr >= growth_pool_end) {
-			memset(ptr, 0, total);
-		}
+		memset(ptr, 0, total);
 	}
 	return (ptr);
 }
