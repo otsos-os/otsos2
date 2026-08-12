@@ -628,8 +628,9 @@ rndis_attach(device_t dev)
 	    state->ndev.mac[4], state->ndev.mac[5]);
 	usb_log_flush();
 	if (rndis_poll(&state->ndev) != 0) {
-		rndis_detach(dev);
-		return (-1);
+		usb_log_printf("rndis: attach %s: initial rx submit "
+		    "failed, will retry\n", device_get_nameunit(dev));
+		usb_log_flush();
 	}
 	return (0);
 }
