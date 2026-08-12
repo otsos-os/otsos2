@@ -44,6 +44,7 @@ $define %func newbus_driver_add_module as function with args module
 $define %func newbus_driver_remove_module as function with args module
 $define %func newbus_driver_range_busy as function with args memory range
 $define %func device_add_child as function with args device_t, const char *, int
+$define %func device_delete_child as function with args device_t, device_t
 $define %func device_find_child as function with args device_t, const char *, int
 $define %func device_get_name as function with args device_t
 $define %func device_get_nameunit as function with args device_t
@@ -88,6 +89,7 @@ $space %export newbus_configure_pass, newbus_configure, newbus_reprobe
 $space %export newbus_driver_add_module, newbus_driver_remove_module
 $space %export newbus_driver_range_busy
 $space %export device_add_child, device_find_child
+$space %export device_delete_child
 $space %export device_get_name, device_get_nameunit
 $space %export newbus_device_count_get, newbus_device_get
 $space %export newbus_driver_count_get, newbus_driver_module_get
@@ -327,6 +329,7 @@ void		newbus_device_set_state(device_t dev,
 		    newbus_device_state_t state);
 
 device_t	device_add_child(device_t parent, const char *name, int unit);
+int		device_delete_child(device_t parent, device_t child);
 device_t	device_find_child(device_t parent, const char *name, int unit);
 device_t	device_get_parent(device_t dev);
 device_t	device_get_child(device_t dev);

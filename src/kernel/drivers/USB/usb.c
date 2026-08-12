@@ -38,7 +38,10 @@ $define %func usb_control_transfer as function with args usb_device_t *, setup, 
 $define %func usb_bulk_transfer as function with args usb_device_t *, endpoint, void *, u32 *, u32
 $define %func usb_bulk_submit as function with args usb_device_t *, endpoint, void *, u32, callback, void *
 $define %func usb_interrupt_submit as function with args usb_device_t *, endpoint, void *, u32, callback, void *
+$define %func usb_set_interface as function with args usb_device_t *, u8, u8
 $define %func usb_interface_get as function with args device_t
+$define %func usb_log_printf as function with args const char *, ...
+$define %func usb_log_flush as procedure with args void
 
 */
 
@@ -48,14 +51,52 @@ $space %internal usb_parse_configuration, usb_enumerate_port
 $space %export usb_controller_init, usb_controller_scan
 $space %export usb_control_transfer, usb_bulk_transfer, usb_interrupt_submit
 $space %export usb_bulk_submit
+$space %export usb_set_interface
 $space %export usb_interface_get
+$space %export usb_log_printf, usb_log_flush
 
 */
 
 #include <kernel/drivers/USB/usb.h>
+#include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/mm/kmem.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
+
+#define	USB_LOG_PATH		"/log.txt"
+#define	USB_LOG_SIZE		32768
+
+static char		usb_log_buf[USB_LOG_SIZE];
+static u32		usb_log_len;
+
+int
+usb_log_printf(const char *fmt, ...)
+{
+	__builtin_va_list	args;
+	char			line[256];
+	int			n;
+
+	__builtin_va_start(args, fmt);
+	vsnprintf(line, sizeof(line), fmt, args);
+	__builtin_va_end(args);
+	printk("%s", line);
+	n = (int)strlen(line);
+	if (n > 0 && usb_log_len + (u32)n < USB_LOG_SIZE) {
+		memcpy(usb_log_buf + usb_log_len, line, (u32)n);
+		usb_log_len += (u32)n;
+	}
+	return (0);
+}
+
+void
+usb_log_flush(void)
+{
+	if (usb_log_len == 0) {
+		return;
+	}
+	(void)vfs_write_file(USB_LOG_PATH, (const u8 *)usb_log_buf,
+	    usb_log_len);
+}
 
 typedef struct {
 	u8	length;
@@ -159,7 +200,7 @@ usb_parse_configuration(usb_device_t *dev, const u8 *buffer, u16 length)
 		}
 		offset += header->length;
 	}
-	return (0);
+	return (dev->interface_count == 0 ? -1 : 0);
 }
 
 static int
@@ -183,6 +224,25 @@ static driver_t usb_bus_driver = {
 
 DRIVER_MODULE(usb_bus, xhci, usb_bus_driver, usb_bus_devclass,
     NEWBUS_PASS_STORAGE, NEWBUS_ORDER_MIDDLE);
+
+static int
+usb_ivars_belongs(device_t child, usb_device_t *dev)
+{
+	void	*ivars;
+	u64	p, start, end;
+
+	if (child == NULL || dev == NULL) {
+		return (0);
+	}
+	ivars = device_get_ivars(child);
+	if (ivars == NULL) {
+		return (0);
+	}
+	p = (u64)ivars;
+	start = (u64)dev->interfaces;
+	end = start + sizeof(dev->interfaces);
+	return (p >= start && p < end);
+}
 
 static int
 usb_enumerate_port(usb_controller_t *controller, u8 port, u8 speed)
@@ -213,18 +273,32 @@ usb_enumerate_port(usb_controller_t *controller, u8 port, u8 speed)
 	    USB_RECIP_DEVICE;
 	setup.bRequest = USB_REQ_GET_DESCRIPTOR;
 	setup.wValue = USB_DESC_DEVICE << 8;
-	setup.wLength = sizeof(device_desc);
+	setup.wLength = 8;
 	if (usb_control_transfer(dev, &setup, &device_desc,
-	    sizeof(device_desc), 1000) != 0) {
-		printk("usb: port %u: get device descriptor failed\n", port);
+	    8, 1000) != 0) {
+		usb_log_printf("usb: port %u: get device descriptor failed\n",
+		    port);
 		(void)controller->ops->remove_device(controller->priv, dev);
 		kmem_free(dev);
 		return (-1);
 	}
+	if (device_desc.length < 8 || device_desc.type != USB_DESC_DEVICE) {
+		usb_log_printf("usb: port %u: bad short device descriptor "
+		    "len=%u type=%u\n", port, device_desc.length,
+		    device_desc.type);
+		(void)controller->ops->remove_device(controller->priv, dev);
+		kmem_free(dev);
+		return (-1);
+	}
+	usb_log_printf("usb: port %u: dev8=%02x %02x %04x %02x %02x %02x "
+	    "%02x\n", port, device_desc.length, device_desc.type,
+	    device_desc.bcd_usb, device_desc.device_class,
+	    device_desc.device_subclass, device_desc.device_protocol,
+	    device_desc.max_packet_size0);
 	if (dev->speed >= USB_SPEED_SUPER) {
 		if (device_desc.max_packet_size0 > 11) {
-			printk("usb: port %u: bad super-speed ep0 size %u\n",
-			    port, device_desc.max_packet_size0);
+			usb_log_printf("usb: port %u: bad super-speed ep0 "
+			    "size %u\n", port, device_desc.max_packet_size0);
 			(void)controller->ops->remove_device(controller->priv, dev);
 			kmem_free(dev);
 			return (-1);
@@ -233,35 +307,74 @@ usb_enumerate_port(usb_controller_t *controller, u8 port, u8 speed)
 	} else {
 		dev->max_packet_size0 = device_desc.max_packet_size0;
 	}
-	if (dev->max_packet_size0 == 0) {
-		printk("usb: port %u: zero ep0 max packet size\n", port);
+	if (dev->max_packet_size0 != 8 && dev->max_packet_size0 != 16 &&
+	    dev->max_packet_size0 != 32 && dev->max_packet_size0 != 64) {
+		usb_log_printf("usb: port %u: bad ep0 max packet size %u\n",
+		    port, dev->max_packet_size0);
 		(void)controller->ops->remove_device(controller->priv, dev);
 		kmem_free(dev);
 		return (-1);
 	}
+	if (controller->ops->update_ep0(controller->priv, dev) != 0) {
+		usb_log_printf("usb: port %u: update ep0 failed\n", port);
+		(void)controller->ops->remove_device(controller->priv, dev);
+		kmem_free(dev);
+		return (-1);
+	}
+	usb_log_printf("usb: port %u: ep0 max=%u\n", port,
+	    dev->max_packet_size0);
+	memset(&setup, 0, sizeof(setup));
+	setup.bmRequestType = USB_DIR_IN | USB_REQ_TYPE_STANDARD |
+	    USB_RECIP_DEVICE;
+	setup.bRequest = USB_REQ_GET_DESCRIPTOR;
+	setup.wValue = USB_DESC_DEVICE << 8;
+	setup.wLength = sizeof(device_desc);
+	if (usb_control_transfer(dev, &setup, &device_desc,
+	    sizeof(device_desc), 1000) != 0) {
+		usb_log_printf("usb: port %u: get full device descriptor "
+		    "failed\n", port);
+		(void)controller->ops->remove_device(controller->priv, dev);
+		kmem_free(dev);
+		return (-1);
+	}
+	if (device_desc.length != sizeof(usb_device_desc_t) ||
+	    device_desc.type != USB_DESC_DEVICE) {
+		usb_log_printf("usb: port %u: bad device descriptor "
+		    "len=%u type=%u\n", port, device_desc.length,
+		    device_desc.type);
+		(void)controller->ops->remove_device(controller->priv, dev);
+		kmem_free(dev);
+		return (-1);
+	}
+	usb_log_printf("usb: port %u: dev=%02x %02x %04x %02x %02x %02x "
+	    "%02x %04x:%04x %04x\n", port, device_desc.length,
+	    device_desc.type, device_desc.bcd_usb, device_desc.device_class,
+	    device_desc.device_subclass, device_desc.device_protocol,
+	    device_desc.max_packet_size0, device_desc.vendor_id,
+	    device_desc.product_id, device_desc.bcd_device);
 	dev->vendor_id = device_desc.vendor_id;
 	dev->product_id = device_desc.product_id;
 	dev->device_class = device_desc.device_class;
 	dev->device_subclass = device_desc.device_subclass;
 	dev->device_protocol = device_desc.device_protocol;
-	if (controller->ops->update_ep0(controller->priv, dev) != 0) {
-		printk("usb: port %u: update ep0 failed\n", port);
-		(void)controller->ops->remove_device(controller->priv, dev);
-		kmem_free(dev);
-		return (-1);
-	}
 	memset(&config, 0, sizeof(config));
 	setup.wValue = USB_DESC_CONFIGURATION << 8;
 	setup.wLength = sizeof(config);
 	if (usb_control_transfer(dev, &setup, &config, sizeof(config),
-	    1000) != 0 || config.total_length < sizeof(config) ||
+	    1000) != 0 || config.length != sizeof(usb_config_desc_t) ||
+	    config.type != USB_DESC_CONFIGURATION ||
+	    config.total_length < sizeof(config) ||
 	    config.total_length > USB_MAX_CONFIG_SIZE) {
-		printk("usb: port %u: get config header failed (total=%u)\n",
-		    port, config.total_length);
+		usb_log_printf("usb: port %u: get config header failed "
+		    "(total=%u)\n", port, config.total_length);
 		(void)controller->ops->remove_device(controller->priv, dev);
 		kmem_free(dev);
 		return (-1);
 	}
+	usb_log_printf("usb: port %u: cfg=%02x %02x %04x %02x %02x %02x "
+	    "%02x\n", port, config.length, config.type, config.total_length,
+	    config.interface_count, config.configuration_value,
+	    config.configuration, config.attributes);
 	total_length = config.total_length;
 	config_data = kmem_alloc(total_length);
 	if (config_data == NULL) {
@@ -273,11 +386,24 @@ usb_enumerate_port(usb_controller_t *controller, u8 port, u8 speed)
 	if (usb_control_transfer(dev, &setup, config_data, total_length,
 	    1000) != 0 || usb_parse_configuration(dev, config_data,
 	    total_length) != 0) {
-		printk("usb: port %u: get/parse configuration failed\n", port);
+		usb_log_printf("usb: port %u: get/parse configuration "
+		    "failed\n", port);
 		kmem_free(config_data);
 		(void)controller->ops->remove_device(controller->priv, dev);
 		kmem_free(dev);
 		return (-1);
+	}
+	usb_log_printf("usb: port %u: dev %04x:%04x speed=%u\n", port,
+	    dev->vendor_id, dev->product_id, dev->speed);
+	for (index = 0; index < dev->interface_count; index++) {
+		usb_log_printf("usb:   iface %u alt %u class %02x/%02x/%02x "
+		    "eps %u\n",
+		    dev->interfaces[index].number,
+		    dev->interfaces[index].alternate,
+		    dev->interfaces[index].class_code,
+		    dev->interfaces[index].subclass,
+		    dev->interfaces[index].protocol,
+		    dev->interfaces[index].endpoint_count);
 	}
 	dev->configuration = config.configuration_value;
 	setup.bmRequestType = USB_DIR_OUT | USB_REQ_TYPE_STANDARD |
@@ -286,19 +412,24 @@ usb_enumerate_port(usb_controller_t *controller, u8 port, u8 speed)
 	setup.wValue = dev->configuration;
 	setup.wLength = 0;
 	if (usb_control_transfer(dev, &setup, NULL, 0, 1000) != 0) {
-		printk("usb: port %u: set configuration failed\n", port);
+		usb_log_printf("usb: port %u: set configuration failed\n",
+		    port);
 		kmem_free(config_data);
 		(void)controller->ops->remove_device(controller->priv, dev);
 		kmem_free(dev);
 		return (-1);
 	}
+	usb_log_printf("usb: port %u: set config %u ok\n", port,
+	    dev->configuration);
 	if (controller->ops->configure_device(controller->priv, dev) != 0) {
-		printk("usb: port %u: configure endpoints failed\n", port);
+		usb_log_printf("usb: port %u: configure endpoints failed\n",
+		    port);
 		kmem_free(config_data);
 		(void)controller->ops->remove_device(controller->priv, dev);
 		kmem_free(dev);
 		return (-1);
 	}
+	usb_log_printf("usb: port %u: configure ok\n", port);
 	for (index = 0; index < dev->interface_count; index++) {
 		child = device_add_child(controller->bus_device, "usbif", -1);
 		if (child != NULL) {
@@ -338,23 +469,71 @@ usb_controller_init(usb_controller_t *controller,
 void
 usb_controller_scan(usb_controller_t *controller)
 {
-	u8	port, speed;
+	usb_device_t	*old;
+	device_t	child, next;
+	u8		port, speed;
 
 	if (controller == NULL) {
 		return;
 	}
 	for (port = 1; port <= controller->port_count; port++) {
 		speed = 0;
-		if (controller->ports[port - 1] != NULL ||
-		    (controller->port_done & (1U << (port - 1))) != 0 ||
+		if (controller->retry_ticks[port - 1] != 0) {
+			controller->retry_ticks[port - 1]--;
+			if (controller->retry_ticks[port - 1] == 0) {
+				controller->port_done &=
+				    ~(1U << (port - 1));
+			}
+			continue;
+		}
+		if (controller->ports[port - 1] != NULL) {
+			if ((controller->rescan_mask & (1U << (port - 1))) == 0 &&
+			    controller->ops->port_connected(controller->priv,
+			    port, &speed) != 0) {
+				continue;
+			}
+			old = controller->ports[port - 1];
+			controller->rescan_mask &= ~(1U << (port - 1));
+			usb_log_printf("usb: port %u: device "
+			    "re-enumerating\n", port);
+			for (child = device_get_child(controller->bus_device);
+			    child != NULL; child = next) {
+				next = device_get_next(child);
+				if (usb_ivars_belongs(child, old)) {
+					(void)device_delete_child(
+					    controller->bus_device,
+					    child);
+				}
+			}
+			(void)controller->ops->remove_device(
+			    controller->priv,
+			    old);
+			kmem_free(old);
+			controller->ports[port - 1] = NULL;
+		}
+		if ((controller->port_done & (1U << (port - 1))) != 0 ||
 		    controller->ops->port_connected(controller->priv, port,
 		    &speed) == 0) {
 			continue;
 		}
 		if (controller->ops->port_reset(controller->priv, port) == 0) {
-			(void)usb_enumerate_port(controller, port, speed);
+			speed = 0;
+			if (controller->ops->port_connected(controller->priv,
+			    port, &speed) != 0 &&
+			    usb_enumerate_port(controller, port, speed) == 0) {
+				controller->port_done |= 1U << (port - 1);
+				controller->fail_count[port - 1] = 0;
+			} else {
+				controller->port_done |= 1U << (port - 1);
+				controller->fail_count[port - 1]++;
+				if (controller->fail_count[port - 1] < 5) {
+					controller->retry_ticks[port - 1] = 100;
+				}
+			}
+		} else {
+			controller->port_done |= 1U << (port - 1);
 		}
-		controller->port_done |= 1U << (port - 1);
+		usb_log_flush();
 	}
 }
 
@@ -365,6 +544,8 @@ usb_controller_port_retry(usb_controller_t *controller, u8 port)
 		return;
 	}
 	controller->port_done &= ~(1U << (port - 1));
+	controller->rescan_mask |= 1U << (port - 1);
+	controller->fail_count[port - 1] = 0;
 }
 
 int
@@ -377,6 +558,45 @@ usb_control_transfer(usb_device_t *dev, const usb_setup_t *setup,
 	}
 	return (dev->controller->ops->control(dev->controller->priv, dev,
 	    setup, data, length, timeout));
+}
+
+int
+usb_set_interface(usb_device_t *dev, u8 interface_number, u8 alternate)
+{
+	usb_setup_t	setup;
+	u8		index;
+
+	if (dev == NULL || dev->controller == NULL) {
+		return (-1);
+	}
+	for (index = 0; index < dev->interface_count; index++) {
+		if (dev->interfaces[index].number == interface_number &&
+		    dev->interfaces[index].alternate == alternate) {
+			break;
+		}
+	}
+	if (index == dev->interface_count) {
+		return (-1);
+	}
+	memset(&setup, 0, sizeof(setup));
+	setup.bmRequestType = USB_DIR_OUT | USB_REQ_TYPE_STANDARD |
+	    USB_RECIP_INTERFACE;
+	setup.bRequest = USB_REQ_SET_INTERFACE;
+	setup.wValue = alternate;
+	setup.wIndex = interface_number;
+	if (usb_control_transfer(dev, &setup, NULL, 0, 1000) != 0) {
+		return (-1);
+	}
+	if (dev->controller->ops->configure_interface != NULL) {
+		if (dev->controller->ops->configure_interface(
+		    dev->controller->priv, dev, interface_number,
+		    alternate) != 0) {
+			return (-1);
+		}
+	}
+	usb_log_printf("usb: set interface %u alt %u ok\n", interface_number,
+	    alternate);
+	return (0);
 }
 
 int

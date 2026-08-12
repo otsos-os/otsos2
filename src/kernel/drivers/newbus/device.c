@@ -38,6 +38,7 @@ $define %func newbus_device_set_driver as procedure with args device_t, driver_t
 $define %func newbus_device_find_name as function with args const char *
 $define %func newbus_device_find_nameunit as function with args const char *
 $define %func device_add_child as function with args device_t, const char *, int
+$define %func device_delete_child as function with args device_t, device_t
 $define %func newbus_configure_pass as procedure with args int
 $define %func newbus_reprobe as procedure with args void
 $define %func newbus_shutdown as procedure with args void
@@ -52,6 +53,7 @@ $space %internal newbus_attach_device, newbus_configure_one_pass
 $space %export newbus_driver_add_module, newbus_driver_remove_module
 $space %export newbus_driver_range_busy, newbus_device_create_root
 $space %export newbus_device_set_driver, device_add_child
+$space %export device_delete_child
 $space %export newbus_device_find_name, newbus_device_find_nameunit
 $space %export newbus_configure_pass, newbus_configure
 $space %export newbus_reprobe, newbus_shutdown
@@ -325,6 +327,45 @@ device_add_child(device_t parent, const char *name, int unit)
 	drivers_log("[NEWBUS] add %s under %s\n",
 	    dev->nameunit, parent->nameunit);
 	return (dev);
+}
+
+int
+device_delete_child(device_t parent, device_t child)
+{
+	device_t	*link;
+	int		ret;
+
+	if (parent == NULL || child == NULL || child->parent != parent) {
+		return (-1);
+	}
+	if (child->state == DS_ATTACHED && child->driver != NULL &&
+	    child->driver->detach != NULL) {
+		ret = child->driver->detach(child);
+		if (ret != 0) {
+			drivers_log("[NEWBUS] detach failed: %s by %s (%d)\n",
+			    child->nameunit, child->driver->name, ret);
+		}
+	}
+	link = &parent->child;
+	while (*link != NULL && *link != child) {
+		link = &(*link)->next;
+	}
+	if (*link == child) {
+		*link = child->next;
+	}
+	child->parent = NULL;
+	child->next = NULL;
+	device_set_ivars(child, NULL);
+	device_set_softc(child, NULL);
+	child->driver = NULL;
+	child->devclass = NULL;
+	child->module = NULL;
+	memset(child->failed_modules, 0, sizeof(child->failed_modules));
+	child->failed_module_count = 0;
+	child->state = DS_DETACHED;
+	newbus_generation++;
+	newbus_entity_device_sync(child);
+	return (0);
 }
 
 device_t

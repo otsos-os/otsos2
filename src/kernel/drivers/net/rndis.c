@@ -158,6 +158,7 @@ typedef struct {
 static int	rndis_probe(device_t dev);
 static int	rndis_attach(device_t dev);
 static int	rndis_detach(device_t dev);
+static usb_interface_t	*rndis_find_data_interface(usb_device_t *usb);
 static int	rndis_control(rndis_state_t *state, void *command, u16 command_len,
 		    void *response, u16 response_len);
 static int	rndis_query(rndis_state_t *state, u32 oid, void *out, u32 out_len);
@@ -191,14 +192,23 @@ rndis_control(rndis_state_t *state, void *command, u16 command_len,
 	setup.wLength = command_len;
 	if (usb_control_transfer(state->control->device, &setup, command,
 	    command_len, 1000) != 0) {
+		usb_log_printf("rndis: control send bRequest=%u failed\n",
+		    setup.bRequest);
+		usb_log_flush();
 		return (-1);
 	}
 	setup.bmRequestType = USB_DIR_IN | USB_REQ_TYPE_CLASS |
 	    USB_RECIP_INTERFACE;
 	setup.bRequest = RNDIS_REQ_GET_RESPONSE;
 	setup.wLength = response_len;
-	return (usb_control_transfer(state->control->device, &setup, response,
-	    response_len, 1000));
+	if (usb_control_transfer(state->control->device, &setup, response,
+	    response_len, 1000) != 0) {
+		usb_log_printf("rndis: control get bRequest=%u failed\n",
+		    setup.bRequest);
+		usb_log_flush();
+		return (-1);
+	}
+	return (0);
 }
 
 static int
@@ -220,6 +230,11 @@ rndis_initialize(rndis_state_t *state)
 	    response.length < sizeof(response) ||
 	    response.request_id != command.request_id ||
 	    response.status != RNDIS_STATUS_SUCCESS || response.medium != 0) {
+		usb_log_printf("rndis: initialize failed type=%x len=%u "
+		    "rid=%u status=%x medium=%u\n", response.type,
+		    response.length, response.request_id, response.status,
+		    response.medium);
+		usb_log_flush();
 		return (-1);
 	}
 	return (0);
@@ -244,6 +259,8 @@ rndis_query(rndis_state_t *state, u32 oid, void *out, u32 out_len)
 	command.oid = oid;
 	if (rndis_control(state, &command, sizeof(command), buffer,
 	    sizeof(buffer)) != 0) {
+		usb_log_printf("rndis: query oid=%x transport failed\n", oid);
+		usb_log_flush();
 		return (-1);
 	}
 	memcpy(&response, buffer, sizeof(response));
@@ -252,6 +269,11 @@ rndis_query(rndis_state_t *state, u32 oid, void *out, u32 out_len)
 	    response.request_id != command.request_id ||
 	    response.status != RNDIS_STATUS_SUCCESS ||
 	    response.info_length < out_len) {
+		usb_log_printf("rndis: query oid=%x failed type=%x len=%u "
+		    "rid=%u status=%x info_len=%u\n", oid, response.type,
+		    response.length, response.request_id, response.status,
+		    response.info_length);
+		usb_log_flush();
 		return (-1);
 	}
 	offset = 8 + response.info_offset;
@@ -289,6 +311,10 @@ rndis_set(rndis_state_t *state, u32 oid, const void *data, u32 data_len)
 	    response.length < sizeof(response) ||
 	    response.request_id != command.request_id ||
 	    response.status != RNDIS_STATUS_SUCCESS) {
+		usb_log_printf("rndis: set oid=%x failed type=%x len=%u "
+		    "rid=%u status=%x\n", oid, response.type,
+		    response.length, response.request_id, response.status);
+		usb_log_flush();
 		return (-1);
 	}
 	return (0);
@@ -362,7 +388,8 @@ rndis_transmit(netdev_t *ndev, const u8 *frame, u16 length)
 	packet->data_length = length;
 	memcpy(state->tx_buffer + sizeof(*packet), frame, length);
 	transfer_length = packet->length;
-	if (transfer_length % state->bulk_out->max_packet_size == 0) {
+	if (state->bulk_out->max_packet_size != 0 &&
+	    transfer_length % state->bulk_out->max_packet_size == 0) {
 		state->tx_buffer[transfer_length++] = 0;
 	}
 	if (usb_bulk_transfer(state->control->device, state->bulk_out,
@@ -400,18 +427,88 @@ rndis_link(netdev_t *ndev)
 	return (state != NULL && state->running);
 }
 
+static usb_interface_t *
+rndis_find_data_interface(usb_device_t *usb)
+{
+	usb_interface_t	*interface;
+	u8		index;
+
+	if (usb == NULL) {
+		return (NULL);
+	}
+	for (index = 0; index < usb->interface_count; index++) {
+		interface = &usb->interfaces[index];
+		if (interface->class_code == USB_CLASS_DATA &&
+		    interface->endpoint_count != 0) {
+			return (interface);
+		}
+	}
+	return (NULL);
+}
+
+static int
+rndis_is_standard_interface(usb_interface_t *interface)
+{
+	if (interface == NULL) {
+		return (0);
+	}
+	return ((interface->class_code == 0xE0 &&
+	    interface->subclass == 1 && interface->protocol == 3) ||
+	    (interface->class_code == USB_CLASS_COMM &&
+	    interface->subclass == 2 && interface->protocol == 0xFF));
+}
+
+static int
+rndis_has_standard_interface(usb_device_t *usb)
+{
+	usb_interface_t	*interface;
+	u8		index;
+
+	if (usb == NULL) {
+		return (0);
+	}
+	for (index = 0; index < usb->interface_count; index++) {
+		interface = &usb->interfaces[index];
+		if (rndis_is_standard_interface(interface)) {
+			return (1);
+		}
+	}
+	return (0);
+}
+
 static int
 rndis_probe(device_t dev)
 {
 	usb_interface_t	*interface;
+	usb_device_t	*usb;
+	int		standard;
 
 	interface = usb_interface_get(dev);
-	if (interface == NULL ||
-	    !((interface->class_code == 0xE0 && interface->subclass == 1 &&
-	    interface->protocol == 3) || (interface->class_code == USB_CLASS_COMM &&
-	    interface->subclass == 2 && interface->protocol == 0xFF))) {
+	if (interface == NULL) {
 		return (-1);
 	}
+	usb = interface->device;
+	standard = rndis_is_standard_interface(interface);
+	if (!standard && !(interface->class_code == 0xFF &&
+	    !rndis_has_standard_interface(usb) &&
+	    rndis_find_data_interface(usb) != NULL)) {
+		usb_log_printf("rndis: probe %s: no match class="
+		    "%02x/%02x/%02x dev=%04x:%04x\n",
+		    device_get_nameunit(dev),
+		    interface->class_code, interface->subclass,
+		    interface->protocol,
+		    usb != NULL ? usb->vendor_id : 0,
+		    usb != NULL ? usb->product_id : 0);
+		usb_log_flush();
+		return (-1);
+	}
+	usb_log_printf("rndis: probe %s: match class=%02x/%02x/%02x "
+	    "dev=%04x:%04x\n",
+	    device_get_nameunit(dev), interface->class_code,
+	    interface->subclass, interface->protocol,
+	    usb != NULL ? usb->vendor_id : 0,
+	    usb != NULL ? usb->product_id : 0);
+	usb_log_flush();
 	return (100);
 }
 
@@ -421,12 +518,17 @@ rndis_attach(device_t dev)
 	rndis_state_t	*state;
 	usb_interface_t	*interface;
 	usb_endpoint_t	*endpoint;
-	usb_setup_t	setup;
 	u32		filter;
 	u8		index;
 
 	interface = usb_interface_get(dev);
-	if (interface == NULL || !net_is_initialized()) {
+	if (interface == NULL) {
+		return (-1);
+	}
+	if (!net_is_initialized()) {
+		usb_log_printf("rndis: attach %s: net not initialized\n",
+		    device_get_nameunit(dev));
+		usb_log_flush();
 		return (-1);
 	}
 	state = kmem_calloc(1, sizeof(*state));
@@ -435,26 +537,24 @@ rndis_attach(device_t dev)
 	}
 	state->dev = dev;
 	state->control = interface;
-	for (index = 0; index < interface->device->interface_count; index++) {
-		if (interface->device->interfaces[index].class_code == USB_CLASS_DATA &&
-		    interface->device->interfaces[index].endpoint_count != 0) {
-			state->data = &interface->device->interfaces[index];
-			break;
-		}
-	}
+	state->data = rndis_find_data_interface(interface->device);
 	if (state->data == NULL) {
+		usb_log_printf("rndis: attach %s: no data interface found\n",
+		    device_get_nameunit(dev));
+		usb_log_flush();
 		kmem_free(state);
 		return (-1);
 	}
-	memset(&setup, 0, sizeof(setup));
-	setup.bmRequestType = USB_DIR_OUT | USB_REQ_TYPE_STANDARD |
-	    USB_RECIP_INTERFACE;
-	setup.bRequest = USB_REQ_SET_INTERFACE;
-	setup.wValue = state->data->alternate;
-	setup.wIndex = state->data->number;
-	if (usb_control_transfer(interface->device, &setup, NULL, 0, 1000) != 0) {
-		kmem_free(state);
-		return (-1);
+	if (state->data->alternate != 0) {
+		if (usb_set_interface(interface->device, state->data->number,
+		    state->data->alternate) != 0) {
+			usb_log_printf("rndis: attach %s: set interface %u "
+			    "alt %u failed\n", device_get_nameunit(dev),
+			    state->data->number, state->data->alternate);
+			usb_log_flush();
+			kmem_free(state);
+			return (-1);
+		}
 	}
 	for (index = 0; index < state->data->endpoint_count; index++) {
 		endpoint = &state->data->endpoints[index];
@@ -474,6 +574,10 @@ rndis_attach(device_t dev)
 	    rndis_initialize(state) != 0 || rndis_query(state,
 	    RNDIS_OID_CURRENT_ADDRESS, state->ndev.mac,
 	    sizeof(state->ndev.mac)) != 0) {
+		usb_log_printf("rndis: attach %s: init/query failed "
+		    "(in=%p out=%p)\n", device_get_nameunit(dev),
+		    (void *)state->bulk_in, (void *)state->bulk_out);
+		usb_log_flush();
 		if (state->rx_buffer != NULL) {
 			kmem_free(state->rx_buffer);
 		}
@@ -486,6 +590,9 @@ rndis_attach(device_t dev)
 	filter = RNDIS_PACKET_FILTER;
 	if (rndis_set(state, RNDIS_OID_PACKET_FILTER, &filter,
 	    sizeof(filter)) != 0) {
+		usb_log_printf("rndis: attach %s: set packet filter failed\n",
+		    device_get_nameunit(dev));
+		usb_log_flush();
 		kmem_free(state->rx_buffer);
 		kmem_free(state->tx_buffer);
 		kmem_free(state);
@@ -504,6 +611,9 @@ rndis_attach(device_t dev)
 	state->iface.index = -1;
 	if (netdev_register(&state->ndev) != 0 ||
 	    net_iface_register(&state->iface, &state->ndev) != 0) {
+		usb_log_printf("rndis: attach %s: netdev register failed\n",
+		    device_get_nameunit(dev));
+		usb_log_flush();
 		netdev_unregister(&state->ndev);
 		kmem_free(state->rx_buffer);
 		kmem_free(state->tx_buffer);
@@ -512,6 +622,11 @@ rndis_attach(device_t dev)
 	}
 	state->running = 1;
 	device_set_softc(dev, state);
+	usb_log_printf("rndis: attach %s: up mac=%02x:%02x:%02x:%02x:"
+	    "%02x:%02x\n", device_get_nameunit(dev), state->ndev.mac[0],
+	    state->ndev.mac[1], state->ndev.mac[2], state->ndev.mac[3],
+	    state->ndev.mac[4], state->ndev.mac[5]);
+	usb_log_flush();
 	if (rndis_poll(&state->ndev) != 0) {
 		rndis_detach(dev);
 		return (-1);
@@ -531,7 +646,14 @@ rndis_detach(device_t dev)
 	state->running = 0;
 	net_iface_unregister(&state->iface);
 	netdev_unregister(&state->ndev);
+	if (state->rx_buffer != NULL) {
+		kmem_free(state->rx_buffer);
+	}
+	if (state->tx_buffer != NULL) {
+		kmem_free(state->tx_buffer);
+	}
 	device_set_softc(dev, NULL);
+	kmem_free(state);
 	return (0);
 }
 

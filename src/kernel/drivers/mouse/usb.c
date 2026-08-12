@@ -44,7 +44,8 @@ static int
 usb_mouse_attach(device_t dev)
 {
 	usb_mouse_t *mouse; hid_interface_t *hid;
-	hid = hid_interface_get(dev); if (hid == NULL || hid_set_boot_protocol(hid)) return (-1);
+	hid = hid_interface_get(dev); if (hid == NULL) return (-1);
+	(void)hid_set_boot_protocol(hid);
 	mouse = kmem_calloc(1, sizeof(*mouse)); if (mouse == NULL) return (-1);
 	mouse->hid = hid; device_set_softc(dev, mouse);
 	return (hid_interrupt_submit(hid, mouse->buffer, sizeof(mouse->buffer),

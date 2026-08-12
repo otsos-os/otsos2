@@ -38,7 +38,10 @@ $define %func usb_control_transfer as function with args usb_device_t *, setup, 
 $define %func usb_bulk_transfer as function with args usb_device_t *, endpoint, void *, u32 *, u32
 $define %func usb_bulk_submit as function with args usb_device_t *, endpoint, void *, u32, callback, void *
 $define %func usb_interrupt_submit as function with args usb_device_t *, endpoint, void *, u32, callback, void *
+$define %func usb_set_interface as function with args usb_device_t *, u8, u8
 $define %func usb_interface_get as function with args device_t
+$define %func usb_log_printf as function with args const char *, ...
+$define %func usb_log_flush as procedure with args void
 
 */
 
@@ -47,7 +50,9 @@ $define %func usb_interface_get as function with args device_t
 $space %export usb_controller_init, usb_controller_scan
 $space %export usb_control_transfer, usb_bulk_transfer, usb_interrupt_submit
 $space %export usb_bulk_submit
+$space %export usb_set_interface
 $space %export usb_interface_get
+$space %export usb_log_printf, usb_log_flush
 
 */
 
@@ -129,6 +134,8 @@ typedef struct usb_controller_ops {
 	int	(*address_device)(void *priv, struct usb_device *dev);
 	int	(*update_ep0)(void *priv, struct usb_device *dev);
 	int	(*configure_device)(void *priv, struct usb_device *dev);
+	int	(*configure_interface)(void *priv, struct usb_device *dev,
+		    u8 interface_number, u8 alternate);
 	int	(*remove_device)(void *priv, struct usb_device *dev);
 	int	(*control)(void *priv, struct usb_device *dev,
 		    const usb_setup_t *setup, void *data, u16 length, u32 timeout);
@@ -166,6 +173,9 @@ typedef struct usb_controller {
 	device_t				bus_device;
 	usb_device_t			*ports[USB_MAX_PORTS];
 	u32					port_done;
+	u32					rescan_mask;
+	u8				retry_ticks[USB_MAX_PORTS];
+	u8				fail_count[USB_MAX_PORTS];
 	u8				port_count;
 } usb_controller_t;
 
@@ -182,6 +192,10 @@ int	usb_bulk_submit(usb_device_t *dev, usb_endpoint_t *ep, void *data,
 	    u32 length, usb_complete_t complete, void *arg);
 int	usb_interrupt_submit(usb_device_t *dev, usb_endpoint_t *ep,
 	    void *data, u32 length, usb_complete_t complete, void *arg);
+int	usb_set_interface(usb_device_t *dev, u8 interface_number,
+	    u8 alternate);
 usb_interface_t	*usb_interface_get(device_t dev);
+int		usb_log_printf(const char *fmt, ...);
+void		usb_log_flush(void);
 
 #endif
