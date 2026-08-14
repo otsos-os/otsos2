@@ -34,6 +34,9 @@ $define %func usb_parse_configuration as function with args usb_device_t *, cons
 $define %func usb_enumerate_port as function with args usb_controller_t *, u8, u8
 $define %func usb_controller_init as function with args usb_controller_t *, ops, void *, device_t, u8
 $define %func usb_controller_scan as procedure with args usb_controller_t *
+$define %func usb_controller_fini as procedure with args usb_controller_t *
+$define %func usb_dma_alloc as function with args usb_dma_t *, u32, u32, u64
+$define %func usb_dma_free as procedure with args usb_dma_t *
 $define %func usb_control_transfer as function with args usb_device_t *, setup, void *, u16, u32
 $define %func usb_bulk_transfer as function with args usb_device_t *, endpoint, void *, u32 *, u32
 $define %func usb_bulk_submit as function with args usb_device_t *, endpoint, void *, u32, callback, void *
@@ -48,7 +51,8 @@ $define %func usb_log_flush as procedure with args void
 /* !SPACE!
 
 $space %internal usb_parse_configuration, usb_enumerate_port
-$space %export usb_controller_init, usb_controller_scan
+$space %export usb_controller_init, usb_controller_scan, usb_controller_fini
+$space %export usb_dma_alloc, usb_dma_free
 $space %export usb_control_transfer, usb_bulk_transfer, usb_interrupt_submit
 $space %export usb_bulk_submit
 $space %export usb_set_interface
@@ -60,6 +64,8 @@ $space %export usb_log_printf, usb_log_flush
 #include <kernel/drivers/USB/usb.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/mm/kmem.h>
+#include <kernel/mm/vm/pmap.h>
+#include <kernel/mm/vm/vm_page.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -68,6 +74,38 @@ $space %export usb_log_printf, usb_log_flush
 
 static char		usb_log_buf[USB_LOG_SIZE];
 static u32		usb_log_len;
+
+int
+usb_dma_alloc(usb_dma_t *dma, u32 size, u32 alignment, u64 max_address)
+{
+	u64	phys;
+	u32	pages;
+
+	if (dma == NULL || size == 0 || alignment == 0) {
+		return (-1);
+	}
+	pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+	phys = vm_page_alloc_contig(pages, alignment, max_address);
+	if (phys == 0) {
+		return (-1);
+	}
+	dma->virt = (void *)(phys + DMAP_BASE);
+	dma->phys = phys;
+	dma->size = pages * PAGE_SIZE;
+	dma->page_count = pages;
+	memset(dma->virt, 0, dma->size);
+	return (0);
+}
+
+void
+usb_dma_free(usb_dma_t *dma)
+{
+	if (dma == NULL || dma->virt == NULL) {
+		return;
+	}
+	vm_page_free_contig(dma->phys, dma->page_count);
+	memset(dma, 0, sizeof(*dma));
+}
 
 int
 usb_log_printf(const char *fmt, ...)
@@ -222,7 +260,27 @@ static driver_t usb_bus_driver = {
 	.attach		= usb_bus_attach,
 };
 
+static driver_t usb_bus_ehci_driver = {
+	.name		= "usb",
+	.identify	= NULL,
+	.probe		= NULL,
+	.attach		= usb_bus_attach,
+};
+
+static driver_t usb_bus_ohci_driver = {
+	.name		= "usb",
+	.identify	= NULL,
+	.probe		= NULL,
+	.attach		= usb_bus_attach,
+};
+
 DRIVER_MODULE(usb_bus, xhci, usb_bus_driver, usb_bus_devclass,
+    NEWBUS_PASS_STORAGE, NEWBUS_ORDER_MIDDLE);
+
+DRIVER_MODULE(usb_bus_ehci, ehci, usb_bus_ehci_driver, usb_bus_devclass,
+    NEWBUS_PASS_STORAGE, NEWBUS_ORDER_MIDDLE);
+
+DRIVER_MODULE(usb_bus_ohci, ohci, usb_bus_ohci_driver, usb_bus_devclass,
     NEWBUS_PASS_STORAGE, NEWBUS_ORDER_MIDDLE);
 
 static int
@@ -534,6 +592,32 @@ usb_controller_scan(usb_controller_t *controller)
 			controller->port_done |= 1U << (port - 1);
 		}
 		usb_log_flush();
+	}
+}
+
+void
+usb_controller_fini(usb_controller_t *controller)
+{
+	usb_device_t	*dev;
+	device_t	child, next;
+	u8		port;
+
+	if (controller == NULL) {
+		return;
+	}
+	for (child = device_get_child(controller->bus_device); child != NULL;
+	    child = next) {
+		next = device_get_next(child);
+		(void)device_delete_child(controller->bus_device, child);
+	}
+	for (port = 0; port < controller->port_count; port++) {
+		dev = controller->ports[port];
+		if (dev == NULL) {
+			continue;
+		}
+		(void)controller->ops->remove_device(controller->priv, dev);
+		kmem_free(dev);
+		controller->ports[port] = NULL;
 	}
 }
 

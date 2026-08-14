@@ -44,7 +44,9 @@ $define %func vm_page_init_from_bootmem as procedure with args void
 $define %func vm_page_alloc as function with args u32
 $define %func vm_page_free as procedure with args vm_page_t *
 $define %func vm_page_alloc_phys as function with args u32
+$define %func vm_page_alloc_contig as function with args u32, u64, u64
 $define %func vm_page_free_phys as function with args u64
+$define %func vm_page_free_contig as procedure with args u64, u32
 $define %func vm_page_ref as procedure with args vm_page_t *
 $define %func vm_page_unref as procedure with args vm_page_t *
 $define %func vm_page_ref_phys as procedure with args u64
@@ -67,7 +69,8 @@ $space %internal round_page, trunc_page, atop
 $space %internal vm_page_queue_insert, vm_page_queue_remove
 $space %export vm_page_init, vm_page_init_from_bootmem
 $space %export vm_page_alloc, vm_page_free, vm_page_alloc_phys
-$space %export vm_page_free_phys, vm_page_ref, vm_page_unref
+$space %export vm_page_alloc_contig, vm_page_free_phys
+$space %export vm_page_free_contig, vm_page_ref, vm_page_unref
 $space %export vm_page_ref_phys, vm_page_ref_count
 $space %export vm_page_activate, vm_page_deactivate, vm_page_cache_insert
 $space %export vm_page_count_free, vm_page_count_total
@@ -318,6 +321,59 @@ vm_page_alloc_phys(u32 flags)
 	if (page == NULL)
 		return (0);
 	return (page->phys_addr);
+}
+
+u64
+vm_page_alloc_contig(u32 page_total, u64 alignment, u64 max_address)
+{
+	vm_page_t	*page;
+	u64		base;
+	u64		i, j;
+
+	if (page_total == 0 || alignment == 0 ||
+	    (alignment & (alignment - 1)) != 0) {
+		return (0);
+	}
+	for (i = 0; i + page_total <= page_count; i++) {
+		base = pages[i].phys_addr;
+		if ((base & (alignment - 1)) != 0 ||
+		    base + (u64)page_total * PAGE_SIZE - 1 > max_address) {
+			continue;
+		}
+		for (j = 0; j < page_total; j++) {
+			page = &pages[i + j];
+			if (page->phys_addr != base + j * PAGE_SIZE ||
+			    page->state != VM_PAGE_FREE) {
+				break;
+			}
+		}
+		if (j != page_total) {
+			continue;
+		}
+		for (j = 0; j < page_total; j++) {
+			page = &pages[i + j];
+			vm_page_queue_remove(page);
+			bootmem_reserve_phys(page->phys_addr, PAGE_SIZE);
+			page->state = VM_PAGE_USED | VM_PAGE_WIRED;
+			page->ref_count = 1;
+		}
+		return (base);
+	}
+	return (0);
+}
+
+void
+vm_page_free_contig(u64 phys_addr, u32 page_total)
+{
+	vm_page_t	*page;
+	u32		i;
+
+	for (i = 0; i < page_total; i++) {
+		page = vm_page_lookup(phys_addr + (u64)i * PAGE_SIZE);
+		if (page != NULL) {
+			vm_page_free(page);
+		}
+	}
 }
 
 int

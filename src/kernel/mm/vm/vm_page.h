@@ -37,7 +37,9 @@ $define %func vm_page_init_from_bootmem as procedure with args void
 $define %func vm_page_alloc as function with args u32
 $define %func vm_page_free as procedure with args vm_page_t *
 $define %func vm_page_alloc_phys as function with args u32
+$define %func vm_page_alloc_contig as function with args u32, u64, u64
 $define %func vm_page_free_phys as function with args u64
+$define %func vm_page_free_contig as procedure with args u64, u32
 $define %func vm_page_ref as procedure with args vm_page_t *
 $define %func vm_page_unref as procedure with args vm_page_t *
 $define %func vm_page_ref_phys as procedure with args u64
@@ -58,7 +60,8 @@ $define %func vm_page_dump as procedure with args void
 
 $space %export vm_page_init, vm_page_init_from_bootmem
 $space %export vm_page_alloc, vm_page_free, vm_page_alloc_phys
-$space %export vm_page_free_phys, vm_page_ref, vm_page_unref
+$space %export vm_page_alloc_contig, vm_page_free_phys
+$space %export vm_page_free_contig, vm_page_ref, vm_page_unref
 $space %export vm_page_ref_phys, vm_page_ref_count
 $space %export vm_page_activate, vm_page_deactivate, vm_page_cache_insert
 $space %export vm_page_count_free, vm_page_count_total
@@ -99,7 +102,10 @@ void		vm_page_init_from_bootmem(void);
 vm_page_t	*vm_page_alloc(u32 flags);
 void		vm_page_free(vm_page_t *page);
 u64		vm_page_alloc_phys(u32 flags);
+u64		vm_page_alloc_contig(u32 page_total, u64 alignment,
+		    u64 max_address);
 int		vm_page_free_phys(u64 phys_addr);
+void		vm_page_free_contig(u64 phys_addr, u32 page_total);
 void		vm_page_reserve_range(u64 phys_start, u64 size);
 void		vm_page_ref(vm_page_t *page);
 void		vm_page_unref(vm_page_t *page);

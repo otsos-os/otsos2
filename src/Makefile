@@ -357,6 +357,8 @@ TERM_MODE_O = ../bin/term_mode.o
 INPUT_O = ../bin/input.o
 USB_CORE_O = ../bin/usb_core.o
 XHCI_O = ../bin/xhci.o
+EHCI_O = ../bin/ehci.o
+OHCI_O = ../bin/ohci.o
 HID_CORE_O = ../bin/hid_core.o
 USB_MOUSE_O = ../bin/usb_mouse.o
 USB_KEYBOARD_O = ../bin/usb_keyboard.o
@@ -393,7 +395,7 @@ OBJ_NO_KSYMTAB = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UAR
       $(API_TIME_O) $(TERM_POWER_O) $(TERM_INFO_O) $(TERM_MOUSE_O) \
       $(TERM_MODE_O) \
       $(INPUT_O) \
-      $(USB_CORE_O) $(XHCI_O) $(HID_CORE_O) $(USB_MOUSE_O) $(USB_KEYBOARD_O) $(USB_RNDIS_O) \
+       $(USB_CORE_O) $(XHCI_O) $(EHCI_O) $(OHCI_O) $(HID_CORE_O) $(USB_MOUSE_O) $(USB_KEYBOARD_O) $(USB_RNDIS_O) \
       $(TIME_O) $(CLOCKSOURCE_O) $(ET_CLOCKSOURCE_O) $(CMOS_RTC_O)
 
 OBJ = $(OBJ_NO_KSYMTAB) $(KOFO_KSYMTAB_O)
@@ -899,6 +901,14 @@ $(USB_CORE_O): kernel/drivers/USB/usb.c kernel/drivers/USB/usb.h
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(XHCI_O): kernel/drivers/USB/xhci.c kernel/drivers/USB/xhci.h kernel/drivers/USB/usb.h kernel/pci/pci.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(EHCI_O): kernel/drivers/USB/ehci.c kernel/drivers/USB/ehci.h kernel/drivers/USB/usb.h kernel/pci/pci.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(OHCI_O): kernel/drivers/USB/ohci.c kernel/drivers/USB/ohci.h kernel/drivers/USB/usb.h kernel/pci/pci.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1664,6 +1674,10 @@ virtio: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 run_usb: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (xHCI USB controller)"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device qemu-xhci -device usb-kbd -device usb-mouse -netdev user,id=net0 -device usb-net,netdev=net0 -device i6300esb -watchdog-action reset $(QEMU_MEM_OPTS)
+
+run_usb_ohci: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
+	@echo "  RUN     QEMU (OHCI USB controller)"
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device pci-ohci -device usb-kbd -device usb-mouse -netdev user,id=net0 -device usb-net,netdev=net0 -device i6300esb -watchdog-action reset $(QEMU_MEM_OPTS)
 
 virtio_nodis: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (virtio-gpu, virtio-net, terminal)"
