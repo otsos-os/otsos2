@@ -25,12 +25,62 @@
 
 #include <kernel/cm/cm.h>
 #include <kernel/drivers/uart/uart.h>
+#include <evr/evr.h>
 #include <mlibc/stdio.h>
+
+#define	STDIO_EARLY_LOG_SIZE	16384
 
 static int	log_enabled = 1;
 static int	log_drivers = 1;
 static int	log_initialized = 0;
 static void	(*terminal_mirror)(char) = NULL;
+static char	stdio_early_log[STDIO_EARLY_LOG_SIZE];
+static u32	stdio_early_log_start;
+static u32	stdio_early_log_count;
+static int	stdio_evr_replayed;
+
+static void
+stdio_early_log_append(const char *s)
+{
+	u32	index;
+
+	if (s == NULL || stdio_evr_replayed) {
+		return;
+	}
+	while (*s != '\0') {
+		if (stdio_early_log_count < STDIO_EARLY_LOG_SIZE) {
+			index = (stdio_early_log_start +
+			    stdio_early_log_count) % STDIO_EARLY_LOG_SIZE;
+			stdio_early_log_count++;
+		} else {
+			index = stdio_early_log_start;
+			stdio_early_log_start = (stdio_early_log_start + 1) %
+			    STDIO_EARLY_LOG_SIZE;
+		}
+		stdio_early_log[index] = *s++;
+	}
+}
+
+static void
+stdio_evr_emit(const char *s)
+{
+	u32	i, index;
+
+	stdio_early_log_append(s);
+	if (!evr_is_active()) {
+		return;
+	}
+	if (!stdio_evr_replayed) {
+		for (i = 0; i < stdio_early_log_count; i++) {
+			index = (stdio_early_log_start + i) %
+			    STDIO_EARLY_LOG_SIZE;
+			evr_putc(stdio_early_log[index]);
+		}
+		stdio_evr_replayed = 1;
+		return;
+	}
+	evr_write(s);
+}
 
 void
 stdio_init(void)
@@ -61,6 +111,7 @@ log_emit_format(const char *fmt, __builtin_va_list args)
 
 	vsnprintf(buffer, sizeof(buffer), fmt, args);
 	uart_write_string(buffer);
+	stdio_evr_emit(buffer);
 	if (terminal_mirror) {
 		for (i = 0; buffer[i] != '\0'; i++) {
 			terminal_mirror(buffer[i]);

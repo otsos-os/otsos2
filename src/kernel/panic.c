@@ -55,6 +55,7 @@ $space %export print_panic_logo, kernel_panic, panic
 #include <kernel/drivers/console/kms_console.h>
 #include <kernel/drivers/uart/uart.h>
 #include <kernel/drivers/video/drm/rapi/rapi.h>
+#include <evr/evr.h>
 #include <kernel/interrupts/idt.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdio.h>
@@ -302,6 +303,7 @@ panic_screen_puts(const char *s)
 
 	con = kms_kernel_console();
 	if (!con) {
+		evr_write(s);
 		return;
 	}
 	cols = (int)con->cols;

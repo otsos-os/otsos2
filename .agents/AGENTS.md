@@ -118,6 +118,9 @@ Monolithic kernel with the following rough layers:
 - `drivers/video/drm/` — minimal DRM: GEM buffers, KMS objects, primary/cursor
   planes, atomic commit, fbdev, render helpers (`rapi`), and a virtio-gpu
   backend.
+- `drivers/video/evr/` — early video renderer for the Multiboot linear
+  framebuffer. It works before DRM/KMS is ready, then stops through
+  `evr_handoff()` only after a successful DRM initialization.
 - `net/` — polling Ethernet/ARP/IPv4/ICMP/UDP stack with a native TCP stream
   MVP; virtio-net supports modern PCI and legacy/transitional PCI I/O
   transports. RX is polled from timer IRQs after the network subsystem has

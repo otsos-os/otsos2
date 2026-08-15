@@ -23,6 +23,12 @@ OTSOS targets modern (UEFI) systems and ships no legacy VGA text-mode
 driver. All display output goes through the DRM subsystem, which manages a
 stack of GPU backend drivers plus a frame/monitor pipeline.
 
+Before DRM attaches, `kernel/drivers/video/evr/` owns the boot linear
+framebuffer. EVR renders the early `printk` stream and panic text directly,
+without GEM, heap-backed surfaces, or KMS. A bounded static log ring replays
+messages emitted before EVR could map the framebuffer. A successful DRM init
+performs a synchronized handoff and permanently stops EVR writes.
+
 Layering (top to bottom):
 
     userspace (drmCall syscall) / tty / panic / kshell / console

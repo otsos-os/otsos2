@@ -33,6 +33,7 @@
 #include <drm/kms/crtc.h>
 #include <drm/kms/framebuffer.h>
 #include <drm/kms/plane.h>
+#include <evr/evr.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -263,6 +264,7 @@ int drm_init(const drm_driver_t *driver, const void *boot_info) {
   drm_kms_init();
 
   g_ready = 1;
+  evr_handoff();
   drivers_log("[DRM] ready, driver '%s'\n", driver->name ? driver->name : "?");
   return DRM_OK;
 }
@@ -318,6 +320,7 @@ int drm_reinit(const drm_driver_t *new_driver, const void *boot_info) {
   drm_kms_init();
 
   g_ready = 1;
+  evr_handoff();
   drivers_log("[DRM] reinit complete, driver '%s'\n",
               new_driver->name ? new_driver->name : "?");
   return DRM_OK;

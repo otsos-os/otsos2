@@ -69,7 +69,7 @@ int strlen(const char *str) {
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <mlibc/mlibc.h>
 
-static void debug_chainfs_write(const void *dest, unsigned long n,
+/*static void debug_chainfs_write(const void *dest, unsigned long n,
                                 const char *op) {
   static int hits = 0;
   if (hits >= 8) {
@@ -86,7 +86,7 @@ static void debug_chainfs_write(const void *dest, unsigned long n,
     printk("[CHAINFS] magic overwritten by %s at %p len=%u ra=%p\n", op,
                 dest, (unsigned int)n, __builtin_return_address(0));
   }
-}
+}*/
 
 char* strcpy(char* dest, const char* src) {
   char* original_dest = dest;
@@ -123,7 +123,7 @@ char* strchr(const char* str, int c) {
   return 0;
 }
 void *memset(void *s, int c, unsigned long n) {
-  debug_chainfs_write(s, n, "memset");
+  //debug_chainfs_write(s, n, "memset");
   unsigned char *p = (unsigned char *)s;
   unsigned char val = (unsigned char)c;
   unsigned long v = val;
@@ -147,7 +147,7 @@ void *memset(void *s, int c, unsigned long n) {
   return s;
 }
 void *memcpy(void *dest, const void *src, unsigned long n) {
-  debug_chainfs_write(dest, n, "memcpy");
+  //debug_chainfs_write(dest, n, "memcpy");
   unsigned char *d = (unsigned char *)dest;
   const unsigned char *s = (const unsigned char *)src;
 

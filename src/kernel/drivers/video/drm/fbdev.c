@@ -322,24 +322,20 @@ static int fbdev_probe(const void *boot_info) {
   return 0;
 }
 
-static void fbdev_map_hw(u64 addr, u64 size) {
-  u64 pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
-  for (u64 i = 0; i < pages; i++) {
-    pmap_enter(addr + i * PAGE_SIZE, addr + i * PAGE_SIZE,
-               PTE_PRESENT | PTE_RW);
-  }
-}
-
 static int fbdev_init(const void *boot_info) {
   const drm_fbdev_boot_t *boot = (const drm_fbdev_boot_t *)boot_info;
+  void *mapped;
   if (fbdev_probe(boot) != 0) {
     return -1;
   }
 
   u64 size = (u64)boot->pitch * boot->height;
-  fbdev_map_hw(boot->hw_address, size);
+  mapped = pmap_map_mmio(boot->hw_address, size);
+  if (!mapped) {
+    return -1;
+  }
 
-  g_hw_base = (u8 *)boot->hw_address;
+  g_hw_base = (u8 *)mapped;
   g_hw_phys = boot->hw_address;
   g_hw_size = size;
   g_hw_pitch = boot->pitch;

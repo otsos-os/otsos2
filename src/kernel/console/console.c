@@ -47,6 +47,7 @@ $space %internal early_scroll, early_putc
 #include <kernel/drivers/video/drm/drm.h>
 #include <kernel/drivers/video/drm/kms/crtc.h>
 #include <kernel/drivers/video/drm/rapi/rapi.h>
+#include <evr/evr.h>
 #include <mlibc/mlibc.h>
 #include <stdarg.h>
 
@@ -71,6 +72,9 @@ console_get_width(void)
 	if (drm_is_ready()) {
 		return ((int)(drm_crtc_get_width() / 8));
 	}
+	if (evr_is_active()) {
+		return (evr_get_width());
+	}
 	return (80);
 }
 
@@ -85,6 +89,9 @@ console_get_height(void)
 	}
 	if (drm_is_ready()) {
 		return ((int)(drm_crtc_get_height() / 16));
+	}
+	if (evr_is_active()) {
+		return (evr_get_height());
 	}
 	return (25);
 }
@@ -116,6 +123,8 @@ console_reinit(void)
 void
 console_set_color(u8 color)
 {
+	evr_set_colors(console_palette[color & 0x0F],
+	    console_palette[(color >> 4) & 0x0F]);
 	if (terminal_is_initialized()) {
 		terminal_set_color(color);
 	}
@@ -132,6 +141,8 @@ console_put_entry_at(char c, u8 color, int x, int y)
 
 	con = kms_kernel_console();
 	if (!con) {
+		evr_set_colors(console_palette[color & 0x0F], 0x000000);
+		evr_put_entry_at(c, (u32)x, (u32)y);
 		return;
 	}
 
@@ -163,6 +174,7 @@ early_putc(char c)
 
 	con = kms_kernel_console();
 	if (!con) {
+		evr_putc(c);
 		return;
 	}
 
@@ -209,6 +221,9 @@ console_putchar(char c)
 {
 	if (terminal_is_initialized()) {
 		terminal_putc_from_kernel(c);
+		if (evr_is_active()) {
+			evr_putc(c);
+		}
 		return;
 	}
 	early_putc(c);
@@ -235,6 +250,9 @@ clear_scr(void)
 	if (terminal_is_initialized()) {
 		terminal_clear_active();
 		terminal_flush_kernel();
+		if (evr_is_active()) {
+			evr_clear();
+		}
 		return;
 	}
 
@@ -242,6 +260,8 @@ clear_scr(void)
 	if (con) {
 		rapi_console_clear(con, 0x000000);
 		kms_console_flush(con);
+	} else {
+		evr_clear();
 	}
 	early_x = 0;
 	early_y = 0;
