@@ -113,6 +113,10 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 		string Dest = "/bin/dhcpd"
 	}
 
+	key Modules.powerd {
+		string Dest = "/bin/powerd"
+	}
+
 	key Modules.posix_hello {
 		string Dest = "/bin/posix_hello"
 	}

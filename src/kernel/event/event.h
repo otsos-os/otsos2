@@ -95,8 +95,9 @@ $space %export event_notify_net_change, event_notify_ipc_change
 #define	EVFILT_IPC	(-9)
 #define	EVFILT_INPUT	(-10)
 #define	EVFILT_ENTITY	(-11)
+#define	EVFILT_POWER	(-12)
 
-#define	EVFILT_SYSCOUNT	11
+#define	EVFILT_SYSCOUNT	12
 
 #define	EV_ADD		0x0001
 #define	EV_DELETE	0x0002
@@ -137,6 +138,9 @@ $space %export event_notify_net_change, event_notify_ipc_change
 #define	NOTE_IPC_HUP	0x00000004
 #define	NOTE_IPC_PEER	0x00000008
 #define	NOTE_IPC_ALL	0x0000000F
+
+#define	POWER_EVENT_IDENT_SYSTEM	0
+#define	NOTE_POWER_BUTTON	0x00000001
 
 #define	MAX_KQUEUES	32
 #define	MAX_KNOTES	64

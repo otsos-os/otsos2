@@ -48,6 +48,7 @@ SEND_BIN = $(PROGS_DIR)/send
 SSH_BIN = $(PROGS_DIR)/ssh/ssh
 DHCPC_BIN = $(PROGS_DIR)/dhcpc
 DHCPD_BIN = $(PROGS_DIR)/demons/dhcpd
+POWERD_BIN = $(PROGS_DIR)/demons/powerd
 POSIX_HELLO_BIN = $(PROGS_DIR)/posix_hello
 MUSL_TEST_BIN = $(PROGS_DIR)/musl_test
 TOOLCHAIN_AS_BIN = $(PROGS_DIR)/toolchain/as/as
@@ -332,6 +333,7 @@ EVENT_KBD_O = ../bin/event_kbd.o
 EVENT_IPC_O = ../bin/event_ipc.o
 EVENT_INPUT_O = ../bin/event_input.o
 EVENT_ENTITY_O = ../bin/event_entity.o
+EVENT_POWER_O = ../bin/event_power.o
 
 VFS_O = ../bin/vfs.o
 VFS_BACK_O = ../bin/vfs_back.o
@@ -352,6 +354,7 @@ THREAD_API_O = ../bin/thread_api.o
 FUTEX_O = ../bin/futex.o
 SYS_O = ../bin/sys.o
 API_TIME_O = ../bin/api_time.o
+POWER_STATE_O = ../bin/power_state.o
 TERM_POWER_O = ../bin/term_power.o
 TERM_INFO_O = ../bin/term_info.o
 TERM_MOUSE_O = ../bin/term_mouse.o
@@ -389,12 +392,13 @@ OBJ_NO_KSYMTAB = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UAR
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
       $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
       $(EVENT_KBD_O) $(EVENT_IPC_O) $(EVENT_INPUT_O) \
-      $(EVENT_ENTITY_O) \
+      $(EVENT_ENTITY_O) $(EVENT_POWER_O) \
       $(VFS_O) $(VFS_BACK_O) $(DEVFS_O) $(HIVEFS_O) $(LINK_O) \
       $(POSIX_O) $(POSIX_IO_O) $(POSIX_PROC_O) $(POSIX_FS_O) \
       $(POSIX_MEM_O) $(POSIX_SOCKET_O) $(POSIX_SIGNAL_O) $(SIGNAL_O) \
       $(PROC_PID_O) $(PROC_PERM_O) $(THREAD_API_O) $(FUTEX_O) $(SYS_O) \
-      $(API_TIME_O) $(TERM_POWER_O) $(TERM_INFO_O) $(TERM_MOUSE_O) \
+      $(API_TIME_O) $(POWER_STATE_O) $(TERM_POWER_O) $(TERM_INFO_O) \
+      $(TERM_MOUSE_O) \
       $(TERM_MODE_O) \
       $(INPUT_O) \
        $(USB_CORE_O) $(XHCI_O) $(EHCI_O) $(OHCI_O) $(HID_CORE_O) $(USB_MOUSE_O) $(USB_KEYBOARD_O) $(USB_RNDIS_O) \
@@ -554,6 +558,11 @@ $(DHCPD_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
 	@echo "  MAKE    progs/demons/dhcpd"
 	@$(MAKE) -C $(PROGS_DIR) demons/dhcpd LIBC_ENABLED=$(LIBC_ENABLED)
 
+.PHONY: $(POWERD_BIN)
+$(POWERD_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
+	@echo "  MAKE    progs/demons/powerd"
+	@$(MAKE) -C $(PROGS_DIR) demons/powerd LIBC_ENABLED=$(LIBC_ENABLED)
+
 .PHONY: $(YABOX_BINS)
 $(YABOX_BINS): $(NATIVE_CRT0) $(NATIVE_SO)
 	@echo "  MAKE    progs/yabox"
@@ -704,7 +713,7 @@ $(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BU
 		exit 1; \
 	fi
 
-$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(SRAPI_DEMO_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(HELLO_DRIVER_KOFO) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
+$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(HELLO_DRIVER_KOFO) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
 	@rm -rf $(BIOS_PAYLOAD_DIR)
 	@mkdir -p $(BIOS_PAYLOAD_DIR)
 	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
@@ -727,6 +736,7 @@ $(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $
 			ssh) src=$(SSH_BIN);; \
 			dhcpc) src=$(DHCPC_BIN);; \
 			dhcpd) src=$(DHCPD_BIN);; \
+			powerd) src=$(POWERD_BIN);; \
 			posix_hello) src=$(POSIX_HELLO_BIN);; \
 			as) src=$(TOOLCHAIN_AS_BIN);; \
 			ld) src=$(TOOLCHAIN_LD_BIN);; \
@@ -1505,6 +1515,11 @@ $(EVENT_ENTITY_O): kernel/event/filter_entity.c kernel/event/event.h \
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+$(EVENT_POWER_O): kernel/event/filter_power.c kernel/event/event.h \
+    kernel/drivers/power/pbutton.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
 $(TERM_POWER_O): kernel/api/term_power.c kernel/api/api.h kernel/console/terminal.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
@@ -1648,6 +1663,11 @@ $(CMOS_RTC_O): kernel/drivers/rtc/cmos_rtc.c kernel/drivers/rtc/rtc.h kernel/tim
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(API_TIME_O): kernel/api/time.c kernel/api/api.h kernel/time.h kernel/time/clocksource.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(POWER_STATE_O): kernel/api/power_state.c kernel/api/api.h \
+    kernel/drivers/power/power.h kernel/process.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

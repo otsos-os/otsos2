@@ -7,9 +7,9 @@
  * 1. Redistributions of source code must retain the above copyright notice,
  * this list of conditions and the following disclaimer.
  *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the documentation
- *    and/or other materials provided with the distribution.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ * notice, this list of conditions and the following disclaimer in the
+ * documentation and/or other materials provided with the distribution.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -26,32 +26,40 @@
 
 /* !DEFINES!
 
+$define %type u32 as 32 bit unsigned
 $define %type int as 32 bit signed
-$define %type u64 as 64 bit unsigned
 
-$define %func power_button_init as function with args void
-$define %func power_button_poll as procedure with args void
-$define %func power_button_is_initialized as function with args void
-$define %func power_button_event_sequence as function with args void
+$define %func api_power_state as function with args u32
 
 */
 
 /* !SPACE!
 
-$space %export power_button_init, power_button_poll
-$space %export power_button_is_initialized
-$space %export power_button_event_sequence
+$space %export api_power_state
 
 */
 
-#ifndef POWER_PBUTTON_H
-#define POWER_PBUTTON_H
+#include <kernel/api/api.h>
+#include <kernel/drivers/power/power.h>
+#include <kernel/process.h>
 
-#include <mlibc/mlibc.h>
+int
+api_power_state(u32 state)
+{
+	if (!proc_has_privilege(process_current())) {
+		return (-API_ERR_PERM);
+	}
 
-int	power_button_init(void);
-void	power_button_poll(void);
-int	power_button_is_initialized(void);
-u64	power_button_event_sequence(void);
+	switch (state) {
+	case API_POWER_STATE_SHUTDOWN:
+		power_controller_shutdown();
+		break;
+	case API_POWER_STATE_REBOOT:
+		power_controller_reboot();
+		break;
+	default:
+		return (-API_ERR_INVAL);
+	}
 
-#endif
+	return (-API_ERR_IO);
+}

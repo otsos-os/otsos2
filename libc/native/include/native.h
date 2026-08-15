@@ -14,6 +14,7 @@ $define %type api_trace_program as native trace program descriptor
 $define %type api_trace_record as native trace record
 $define %type api_term_mouse as struct with console mouse state args
 $define %type kevent as struct with native event data
+$define %func powerState as function with args uint32_t
 $define %func termWrite as function with args const void *, size_t
 $define %func termMouse as function with args api_term_mouse *
 $define %func dataOpen as function with args const char *, int
@@ -68,6 +69,7 @@ $space %export fsMnt, fsUmnt
 $space %export procSpawn, procSpawnAbi, procSpawnNative, procWait
 $space %export procRun, procExit, procKill
 $space %export memMap, memUnmap, eventKqueue, eventWait, eventClose
+$space %export powerState
 $space %export netOpen, netBind, netConnect, netListen, netAccept
 $space %export netSend, netRecv, netCtl
 $space %export ipcCreate, ipcConnect, ipcSend, ipcRecv, ipcCall, ipcCtl
@@ -241,6 +243,7 @@ $space %export entityRead, entityWrite, entitySeek, entityIoctl
 #define CALL_SYS_TIMEINFO	0x504
 #define CALL_SYS_TIME		0x505
 #define CALL_SYS_CPUINFO	0x506
+#define CALL_POWER_STATE	0x507
 #define CALL_DRM_CALL		0x600
 #define CALL_EVENT_KQUEUE	0x700
 #define CALL_EVENT_KEVENT	0x701
@@ -564,6 +567,8 @@ struct api_entity_ioctl {
 #define EVFILT_IPC		(-9)
 #define EVFILT_INPUT		(-10)
 #define EVFILT_ENTITY		(-11)
+#define EVFILT_POWER		(-12)
+#define POWER_EVENT_IDENT_SYSTEM	0
 
 #define EV_ADD			0x0001
 #define EV_DELETE		0x0002
@@ -574,6 +579,10 @@ struct api_entity_ioctl {
 #define EV_EOF			0x8000
 
 #define NOTE_EXIT		0x80000000U
+#define NOTE_POWER_BUTTON	0x00000001U
+
+#define API_POWER_STATE_SHUTDOWN	1
+#define API_POWER_STATE_REBOOT	2
 
 #define DRM_OP_INFO		1
 #define DRM_OP_GEM_CREATE	2
@@ -1301,6 +1310,7 @@ int	sysCpuInfo(struct api_cpuinfo *buf);
 int	sysRandom(void *buf, size_t len);
 int	sysTimeInfo(struct api_timeinfo *buf);
 int	sysTime(void);
+int	powerState(uint32_t state);
 
 int	traceOpen(uint32_t flags);
 int	traceClose(int trace);

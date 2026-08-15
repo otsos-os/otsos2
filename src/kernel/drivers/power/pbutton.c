@@ -27,12 +27,14 @@
 /* !DEFINES!
 
 $define %type u16 as 16 bit unsigned
+$define %type u64 as 64 bit unsigned
 $define %type int as 32 bit signed
 
 $define %func pbutton_handle_event as function with args u16
 $define %func power_button_init as function with args void
 $define %func power_button_poll as procedure with args void
 $define %func power_button_is_initialized as function with args void
+$define %func power_button_event_sequence as function with args void
 
 */
 
@@ -41,20 +43,21 @@ $define %func power_button_is_initialized as function with args void
 $space %internal pbutton_handle_event
 $space %export power_button_init, power_button_poll
 $space %export power_button_is_initialized
+$space %export power_button_event_sequence
 
 */
 
 #include <kernel/drivers/acpi/acpi.h>
 #include <kernel/drivers/newbus/newbus.h>
 #include <kernel/drivers/power/pbutton.h>
-#include <kernel/drivers/power/power.h>
+#include <kernel/event/event.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define	PM1_STS_PWRBTN	(1 << 8)
 
 static int	g_pbutton_initialized;
-static int	g_pbutton_shutdown_in_progress;
+static u64	g_pbutton_event_sequence;
 static u16	g_pm1a_event;
 static u16	g_pm1b_event;
 
@@ -73,14 +76,6 @@ pbutton_handle_event(u16 pm1_event_port)
 	}
 
 	outw(pm1_event_port, PM1_STS_PWRBTN);
-
-	if (!g_pbutton_shutdown_in_progress) {
-		g_pbutton_shutdown_in_progress = 1;
-		drivers_log("[PWRBTN] Power button pressed, "
-		    "shutting down...\n");
-		power_controller_shutdown();
-	}
-
 	return (1);
 }
 
@@ -90,7 +85,7 @@ power_button_init(void)
 	acpi_fadt_t	*fadt;
 
 	g_pbutton_initialized = 0;
-	g_pbutton_shutdown_in_progress = 0;
+	__atomic_store_n(&g_pbutton_event_sequence, 0, __ATOMIC_RELAXED);
 	g_pm1a_event = 0;
 	g_pm1b_event = 0;
 
@@ -119,20 +114,35 @@ power_button_init(void)
 void
 power_button_poll(void)
 {
-	if (!g_pbutton_initialized || g_pbutton_shutdown_in_progress) {
+	int	pressed;
+
+	if (!g_pbutton_initialized) {
 		return;
 	}
 
-	if (pbutton_handle_event(g_pm1a_event)) {
+	pressed = pbutton_handle_event(g_pm1a_event);
+	pressed |= pbutton_handle_event(g_pm1b_event);
+	if (!pressed) {
 		return;
 	}
-	(void)pbutton_handle_event(g_pm1b_event);
+
+	__atomic_add_fetch(&g_pbutton_event_sequence, 1,
+	    __ATOMIC_RELEASE);
+	drivers_log("[PWRBTN] Power button pressed\n");
+	knote_notify_all(EVFILT_POWER, POWER_EVENT_IDENT_SYSTEM,
+	    NOTE_POWER_BUTTON, 0);
 }
 
 int
 power_button_is_initialized(void)
 {
 	return (g_pbutton_initialized);
+}
+
+u64
+power_button_event_sequence(void)
+{
+	return (__atomic_load_n(&g_pbutton_event_sequence, __ATOMIC_ACQUIRE));
 }
 
 static void

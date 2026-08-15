@@ -524,6 +524,9 @@ void syscall_handler(registers_t *regs) {
   case CALL_SYS_CPUINFO:
     regs->rax = (u64)api_cpuinfo((struct api_cpuinfo *)arg1);
     break;
+  case CALL_POWER_STATE:
+    regs->rax = (u64)api_power_state((u32)arg1);
+    break;
   default:
     printk("Unknown syscall: %d\n", syscall_number);
     regs->rax = -API_ERR_NO_CALL;

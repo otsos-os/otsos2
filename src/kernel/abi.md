@@ -34,3 +34,15 @@ data in `key`, `raw`, `mods`, and `ch`.
 
 If the shared input ring overflows for a subscriber, `flags` contains
 `API_INPUT_FLAG_DROPPED` and `lost` reports how many events were skipped.
+
+## Power Events
+
+Native userspace receives ACPI power-button notifications through kqueue
+`EVFILT_POWER` with `ident == POWER_EVENT_IDENT_SYSTEM`. A button event has
+`fflags & NOTE_POWER_BUTTON` and `data` contains the number of button presses
+since that knote last reported an event. Register with `EV_ADD | EV_CLEAR`.
+
+The privileged `CALL_POWER_STATE` syscall takes one argument: use
+`API_POWER_STATE_SHUTDOWN` or `API_POWER_STATE_REBOOT`. The syscall returns
+`-API_ERR_PERM` unless the calling process has kusr privilege; successful
+shutdown and reboot requests do not return.

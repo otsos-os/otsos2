@@ -233,6 +233,7 @@ event_init(void)
 		extern const filter_ops_t filter_ipc_ops;
 		extern const filter_ops_t filter_input_ops;
 		extern const filter_ops_t filter_entity_ops;
+		extern const filter_ops_t filter_power_ops;
 
 		filter_register(&filter_read_ops);
 		filter_register(&filter_write_ops);
@@ -244,6 +245,7 @@ event_init(void)
 		filter_register(&filter_ipc_ops);
 		filter_register(&filter_input_ops);
 		filter_register(&filter_entity_ops);
+		filter_register(&filter_power_ops);
 	}
 
 	entity_event_set_notify(event_notify_entity);

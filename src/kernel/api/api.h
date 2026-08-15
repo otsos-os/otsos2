@@ -75,6 +75,8 @@ struct api_ipc_call;
 #define API_TERM_POWER_GET	0
 #define API_TERM_POWER_CHANGE	1
 #define API_TERM_POWER_RESET	2
+#define API_POWER_STATE_SHUTDOWN	1
+#define API_POWER_STATE_REBOOT	2
 #define API_TERM_MOUSE_UPDATE	0
 #define API_TERM_MOUSE_VISIBLE	0x00000001
 
@@ -957,6 +959,7 @@ int api_kofo_info(u32 id, struct api_kofo_info *info);
 int api_kofo_unload(u32 id, u32 flags);
 int api_timeinfo(struct api_timeinfo *buf);
 int api_time(void);
+int api_power_state(u32 state);
 int api_term_power(struct api_term_power *args);
 int api_term_info(struct api_term_info *info);
 int api_term_mouse(struct api_term_mouse *args);
