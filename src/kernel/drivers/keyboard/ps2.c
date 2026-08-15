@@ -696,6 +696,9 @@ atkbd_attach(device_t dev)
 		softc->irq = irq;
 	}
 	if (!irq_ok) {
+		if (irq != NULL) {
+			bus_release_resource(dev, SYS_RES_IRQ, irq->rid, irq);
+		}
 		kmem_free(softc);
 		device_set_softc(dev, NULL);
 		return (-1);

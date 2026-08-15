@@ -149,6 +149,7 @@ typedef struct {
 	u8 next_address;
 	u8 busy;
 	u8 error_logs;
+	u8 usb_initialized;
 } ohci_state_t;
 
 static ohci_state_t *ohci_states[OHCI_MAX];
@@ -510,11 +511,32 @@ static int ohci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	st->next_address=1; st->usb.bus_device=device_add_child(st->nb_dev,"usb",-1);
 	if (st->usb.bus_device==NULL || usb_controller_init(&st->usb,&ohci_ops,st,
 	    st->usb.bus_device,st->ports)!=0) goto fail;
+	st->usb_initialized = 1;
 	rid=0; st->irq_res=bus_alloc_resource_any(st->nb_dev,SYS_RES_IRQ,&rid,RF_ACTIVE);
 	if (st->irq_res==NULL || bus_setup_intr(st->nb_dev,st->irq_res,ohci_intr,st,
 	    &st->irq_cookie)!=0) goto fail;
 	pdev->driver_data=st; ohci_states[slot]=st; return (0);
-fail: usb_dma_free(&st->list_dma); usb_dma_free(&st->hcca_dma); kmem_free(st); return (-1);
+fail:
+	if (st->regs != NULL) {
+		*(volatile u32 *)(st->regs + OHCI_INT_DISABLE) = 0xFFFFFFFF;
+		*(volatile u32 *)(st->regs + OHCI_CONTROL) = 0;
+	}
+	if (st->irq_cookie != NULL) {
+		bus_teardown_intr(st->nb_dev, st->irq_res, st->irq_cookie);
+	}
+	if (st->irq_res != NULL) {
+		bus_release_resource(st->nb_dev, SYS_RES_IRQ,
+		    st->irq_res->rid, st->irq_res);
+	}
+	if (st->usb_initialized) {
+		usb_controller_fini(&st->usb);
+	} else if (st->usb.bus_device != NULL) {
+		(void)device_delete_child(st->nb_dev, st->usb.bus_device);
+	}
+	usb_dma_free(&st->list_dma);
+	usb_dma_free(&st->hcca_dma);
+	kmem_free(st);
+	return (-1);
 }
 static void ohci_pci_remove(pci_device_t *pdev)
 {

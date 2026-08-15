@@ -67,6 +67,8 @@ static irq_desc_t	irq_descs[IRQ_MAX_DESCS];
 static irq_desc_t	*irq_vectors[256];
 static irq_action_t	irq_actions[IRQ_MAX_ACTIONS];
 static u8		irq_vector_used[256];
+static irq_source_t	irq_vector_sources[256];
+static u8		irq_vector_source_valid[256];
 static int		irq_ioapic_ready;
 
 static int
@@ -134,6 +136,8 @@ irq_desc_alloc(irq_source_t source)
 			desc->source = source;
 			desc->source.vector = (u8)vector;
 			desc->used = 1;
+			irq_vector_sources[vector] = desc->source;
+			irq_vector_source_valid[vector] = 1;
 			irq_vectors[vector] = desc;
 			return (desc);
 		}
@@ -194,6 +198,8 @@ irq_init(void)
 	memset(irq_vectors, 0, sizeof(irq_vectors));
 	memset(irq_actions, 0, sizeof(irq_actions));
 	memset(irq_vector_used, 0, sizeof(irq_vector_used));
+	memset(irq_vector_sources, 0, sizeof(irq_vector_sources));
+	memset(irq_vector_source_valid, 0, sizeof(irq_vector_source_valid));
 	irq_vector_used[IRQ_VECTOR_SYSCALL] = 1;
 	irq_vector_used[IRQ_VECTOR_LAPIC_TIMER] = 1;
 	irq_vector_used[IRQ_VECTOR_SPURIOUS] = 1;
@@ -285,6 +291,7 @@ irq_request(irq_source_t source, irq_handler_t *handler, void *arg,
 		}
 		if (irq_route(desc) != 0) {
 			irq_vectors[desc->source.vector] = NULL;
+			irq_vector_source_valid[desc->source.vector] = 0;
 			irq_vector_free(desc->source.vector);
 			memset(desc, 0, sizeof(*desc));
 			return (-1);
@@ -301,6 +308,7 @@ irq_request(irq_source_t source, irq_handler_t *handler, void *arg,
 		if (desc->action_count == 0) {
 			irq_mask(desc);
 			irq_vectors[desc->source.vector] = NULL;
+			irq_vector_source_valid[desc->source.vector] = 0;
 			irq_vector_free(desc->source.vector);
 			memset(desc, 0, sizeof(*desc));
 		}
@@ -367,8 +375,22 @@ irq_dispatch(u32 vector, registers_t *regs)
 	int		handled;
 
 	(void)regs;
-	if (vector > IRQ_VECTOR_SPURIOUS ||
-	    (desc = irq_vectors[vector]) == NULL) {
+	if (vector > IRQ_VECTOR_SPURIOUS) {
+		return (0);
+	}
+	desc = irq_vectors[vector];
+	if (desc == NULL) {
+		if (vector == IRQ_VECTOR_SPURIOUS ||
+		    !irq_vector_source_valid[vector]) {
+			return (0);
+		}
+		if (irq_vector_sources[vector].domain == IRQ_DOMAIN_IOAPIC ||
+		    irq_vector_sources[vector].domain == IRQ_DOMAIN_LOCAL) {
+			lapic_eoi();
+		} else if (irq_vector_sources[vector].domain == IRQ_DOMAIN_PIC) {
+			pic_send_eoi((unsigned char)
+			    irq_vector_sources[vector].hwirq);
+		}
 		return (0);
 	}
 	desc->count++;

@@ -214,6 +214,7 @@ static int	xhci_interrupt(void *priv, usb_device_t *dev,
 static void	xhci_handle_transfer_event(xhci_state_t *state,
 		    const xhci_trb_t *event);
 static void	xhci_device_free(xhci_state_t *state, xhci_device_t *device);
+static void	xhci_state_destroy(xhci_state_t *state);
 static void	xhci_slot_release(xhci_state_t *state, u8 slot_id,
 		    xhci_device_t *device);
 static void	xhci_poll(void *arg);
@@ -1405,7 +1406,8 @@ xhci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	state->usb.bus_device = device_add_child(state->nb_dev, "usb", -1);
 	if (state->usb.bus_device == NULL || usb_controller_init(&state->usb,
 	    &xhci_usb_ops, state, state->usb.bus_device, state->max_ports) != 0) {
-		kmem_free(state);
+		(void)xhci_halt(state);
+		xhci_state_destroy(state);
 		return (-1);
 	}
 	rid = 0;
@@ -1413,14 +1415,43 @@ xhci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	    &rid, RF_ACTIVE);
 	if (state->irq_res == NULL || bus_setup_intr(state->nb_dev,
 	    state->irq_res, xhci_intr, state, &state->irq_cookie) != 0) {
+		if (state->irq_res != NULL) {
+			bus_release_resource(state->nb_dev, SYS_RES_IRQ,
+			    state->irq_res->rid, state->irq_res);
+			state->irq_res = NULL;
+		}
 		usb_controller_fini(&state->usb);
 		(void)xhci_halt(state);
-		kmem_free(state);
+		xhci_state_destroy(state);
 		return (-1);
 	}
 	pdev->driver_data = state;
 	xhci_states[index] = state;
 	return (0);
+}
+
+static void
+xhci_state_destroy(xhci_state_t *state)
+{
+	int	index;
+
+	if (state == NULL) {
+		return;
+	}
+	if (state->scratch_bufs != NULL) {
+		for (index = 0; index < (int)state->scratch_count; index++) {
+			kmem_free(state->scratch_bufs[index]);
+		}
+		kmem_free(state->scratch_bufs);
+	}
+	if (state->scratch != NULL) {
+		kmem_free(state->scratch);
+	}
+	kmem_free(state->erst);
+	kmem_free(state->events);
+	kmem_free(state->command_ring.trbs);
+	kmem_free(state->dcbaa);
+	kmem_free(state);
 }
 
 static void
@@ -1449,20 +1480,7 @@ xhci_pci_remove(pci_device_t *pdev)
 			xhci_states[index] = NULL;
 		}
 	}
-	if (state->scratch_bufs != NULL) {
-		for (index = 0; index < (int)state->scratch_count; index++) {
-			kmem_free(state->scratch_bufs[index]);
-		}
-		kmem_free(state->scratch_bufs);
-	}
-	if (state->scratch != NULL) {
-		kmem_free(state->scratch);
-	}
-	kmem_free(state->erst);
-	kmem_free(state->events);
-	kmem_free(state->command_ring.trbs);
-	kmem_free(state->dcbaa);
-	kmem_free(state);
+	xhci_state_destroy(state);
 }
 
 static const pci_match_t xhci_matches[] = {
