@@ -210,11 +210,14 @@ ipv4_output_src(net_iface_t *iface, u32 src_ip, u32 dst_ip, u8 protocol,
 	if (!iface || !iface->ndev || !data || dst_ip == 0) {
 		return (-1);
 	}
+	if (!net_stack_enabled() || !(iface->flags & NET_IFF_UP)) {
+		return (-1);
+	}
 	if (src_ip == 0 && dst_ip != 0xFFFFFFFF) {
 		return (-1);
 	}
 	total_len = (u16)(sizeof(ipv4_header_t) + len);
-	if (total_len > ETHERNET_MTU) {
+	if (total_len > ETHERNET_MTU || total_len > iface->ndev->mtu) {
 		return (-1);
 	}
 
@@ -223,7 +226,7 @@ ipv4_output_src(net_iface_t *iface, u32 src_ip, u32 dst_ip, u8 protocol,
 	ip->ver_ihl = (IPV4_VERSION << 4) | IPV4_IHL_MIN;
 	ip->total_len = __builtin_bswap16(total_len);
 	ip->id = __builtin_bswap16(packet_id++);
-	ip->ttl = IPV4_TTL_DEFAULT;
+	ip->ttl = net_default_ttl();
 	ip->protocol = protocol;
 	ip->src = __builtin_bswap32(src_ip);
 	ip->dst = __builtin_bswap32(dst_ip);

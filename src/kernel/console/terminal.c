@@ -89,6 +89,9 @@ $define %func terminal_power_get as function with args int
 $define %func terminal_power_set as function with args int, int
 $define %func terminal_power_reset as function with args int
 $define %func terminal_power_suspend_all as function with args void
+$define %func terminal_load_config as function with args void
+$define %func terminal_cm_update as function with args u32
+$define %func terminal_get_default_tty as function with args void
 
 */
 
@@ -120,11 +123,14 @@ $space %export terminal_drain_output
 $space %export terminal_mouse_update
 $space %export terminal_power_get, terminal_power_set, terminal_power_reset
 $space %export terminal_power_suspend_all
+$space %internal terminal_load_config
+$space %export terminal_cm_update, terminal_get_default_tty
 
 */
 
 #include <kernel/api/errno.h>
 #include <kernel/api/posix/posix.h>
+#include <kernel/cm/cm.h>
 #include <kernel/console/palette.h>
 #include <kernel/console/terminal.h>
 #include <kernel/entity/entity.h>
@@ -142,11 +148,14 @@ $space %export terminal_power_suspend_all
 
 #define	TERM_COUNT		10
 #define	TERM_LINE_BUF_SIZE	256
-#define	TERM_MOUSE_BLINK_DIV	2
+#define	TERM_MOUSE_BLINK_DEFAULT_MS	500
+#define	TERM_MOUSE_BLINK_MIN_MS	50
+#define	TERM_MOUSE_BLINK_MAX_MS	5000
 #define	TERM_CELL_W		8
 #define	TERM_CELL_H		16
 
 static void	terminal_lazy_init(void);
+static void	terminal_switch_to(int index);
 void		terminal_update(void);
 static void	*terminal_input_channel = &terminal_input_channel;
 typedef struct {
@@ -193,6 +202,11 @@ static int			terminal_initialized = 0;
 static volatile int		terminal_switch_pending = -1;
 static int			terminal_ctrl_down = 0;
 static int			terminal_suppress_com1_mirror = 0;
+static int			terminal_default_tty = 1;
+static u8			terminal_default_color = 0x07;
+static int			terminal_kernel_log_tty = 0;
+static u32			terminal_mouse_blink_ms =
+	    TERM_MOUSE_BLINK_DEFAULT_MS;
 
 static u64	terminal_indicator_end_time = 0;
 static int	terminal_indicator_active = 0;
@@ -235,7 +249,7 @@ terminal_draw_cell(int x, int y, char c, u8 color)
 	} else {
 		fg = console_palette[color & 0x0F];
 	}
-	bg = 0x000000;
+	bg = console_palette[(color >> 4) & 0x0F];
 	if (tty->mouse_enabled && tty->mouse_blink_visible &&
 	    tty->mouse_cell_x == x && tty->mouse_cell_y == y) {
 		bg = fg == 0x000000 ? 0xFFFFFF : fg;
@@ -273,11 +287,77 @@ terminal_mouse_blink_interval(void)
 	u64	interval;
 
 	freq = timer_get_frequency();
-	interval = freq / TERM_MOUSE_BLINK_DIV;
+	interval = (freq * terminal_mouse_blink_ms + 999) / 1000;
 	if (interval == 0) {
 		interval = 1;
 	}
 	return (interval);
+}
+
+static int
+terminal_load_config(void)
+{
+	u32	default_tty;
+	u32	default_color;
+	u32	log_tty;
+	u32	blink_ms;
+
+	default_tty = cm_get_u32_default("SYSTEM", "Console",
+	    "DefaultTty", 1);
+	default_color = cm_get_u32_default("SYSTEM", "Console",
+	    "DefaultColor", 0x07);
+	log_tty = cm_get_u32_default("SYSTEM", "Console",
+	    "KernelLogTty", 0);
+	blink_ms = cm_get_u32_default("SYSTEM", "Console",
+	    "MouseBlinkMs", TERM_MOUSE_BLINK_DEFAULT_MS);
+	if (default_tty >= TERM_COUNT || log_tty >= TERM_COUNT ||
+	    default_color > 0xFF || blink_ms < TERM_MOUSE_BLINK_MIN_MS ||
+	    blink_ms > TERM_MOUSE_BLINK_MAX_MS) {
+		return (-API_ERR_BAD_VALUE);
+	}
+
+	terminal_default_tty = (int)default_tty;
+	terminal_default_color = (u8)default_color;
+	terminal_kernel_log_tty = (int)log_tty;
+	terminal_mouse_blink_ms = blink_ms;
+	return (0);
+}
+
+int
+terminal_cm_update(u32 flags)
+{
+	u64	now;
+	int	i;
+
+	(void)flags;
+	if (!cm_is_initialized()) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	if (terminal_load_config() != 0) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (!terminal_initialized) {
+		return (0);
+	}
+
+	for (i = 0; i < TERM_COUNT; i++) {
+		terminals[i].color = terminal_default_color;
+	}
+	now = timer_get_ticks();
+	for (i = 0; i < TERM_COUNT; i++) {
+		if (terminals[i].mouse_enabled) {
+			terminals[i].mouse_next_tick = now +
+			    terminal_mouse_blink_interval();
+		}
+	}
+	terminal_switch_to(terminal_default_tty);
+	return (0);
+}
+
+int
+terminal_get_default_tty(void)
+{
+	return (terminal_default_tty);
 }
 
 static int
@@ -331,15 +411,15 @@ terminal_ansi_sgr(terminal_state_t *tty, int params[], int count)
 
 		if (code == 39) {
 			self->fg_rgb = 0xFFFFFFFF;
-			self->color = 0x07;
+			self->color = terminal_default_color;
 			i++;
 			continue;
 		}
 
-		color_idx = 0x07;
+		color_idx = terminal_default_color;
 		switch (code) {
 		case 0:
-			color_idx = 0x07;
+			color_idx = terminal_default_color;
 			break;
 		case 30:
 			color_idx = 0x00;
@@ -1077,6 +1157,9 @@ terminal_init(void)
 	if (terminal_initialized) {
 		return;
 	}
+	cm_register_consumer(CM_CONSUMER_CONSOLE, "console",
+	    terminal_cm_update);
+	(void)terminal_load_config();
 
 	width = 0;
 	height = 0;
@@ -1103,7 +1186,7 @@ terminal_init(void)
 		term->mouse_cell_y = 0;
 		term->mouse_buttons = 0;
 		term->mouse_next_tick = 0;
-		term->color = 0x07;
+		term->color = terminal_default_color;
 		term->ansi_state = 0;
 		term->fg_rgb = 0xFFFFFFFF;
 		term->ansi_params[0] = 0;
@@ -1143,6 +1226,9 @@ terminal_init(void)
 
 	keyboard_set_scancode_callback(terminal_scancode_callback);
 	terminal_initialized = 1;
+	if (cm_is_initialized()) {
+		terminal_active = terminal_default_tty;
+	}
 	terminal_redraw(&terminals[terminal_active]);
 }
 
@@ -1311,7 +1397,8 @@ terminal_log_mirror(char c)
 	if (!terminal_initialized) {
 		return;
 	}
-	terminal_putc_internal(&terminals[0], c, terminal_active == 0);
+	terminal_putc_internal(&terminals[terminal_kernel_log_tty], c,
+	    terminal_active == terminal_kernel_log_tty);
 }
 
 void
@@ -1744,7 +1831,7 @@ terminal_reset_one(int index)
 	term = &terminals[index];
 
 	if (term->cells) {
-		blank = ((u16)0x07 << 8) | ' ';
+		blank = ((u16)terminal_default_color << 8) | ' ';
 		for (i = 0; i < term->width * term->height; i++) {
 			term->cells[i] = blank;
 		}
@@ -1758,7 +1845,7 @@ terminal_reset_one(int index)
 	term->mouse_cell_y = 0;
 	term->mouse_buttons = 0;
 	term->mouse_next_tick = 0;
-	term->color = 0x07;
+	term->color = terminal_default_color;
 	term->fg_rgb = 0xFFFFFFFF;
 	term->ansi_state = 0;
 	term->ansi_param_count = 0;

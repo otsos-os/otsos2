@@ -15,37 +15,67 @@ $space %internal usb_keyboard_handler
 #include <kernel/mm/kmem.h>
 typedef struct { hid_interface_t *hid; u8 previous[8]; u8 buffer[64]; char cbuffer[64]; u8 chead; u8 ctail; } usb_keyboard_t;
 static usb_keyboard_t	*usb_keyboard_state;
+static keyboard_driver_t usb_keyboard_kbd_driver;
 static int
 usb_keyboard_has(const u8 *report, u8 usage)
 { u8 i; for (i = 2; i < 8; i++) if (report[i] == usage) return (1); return (0); }
 static void
 usb_keyboard_complete(usb_device_t *usb, void *buffer, u32 length, int status, void *arg)
 {
-	usb_keyboard_t *keyboard; u8 usage, next; u32 mods, ch;
-	(void)usb; (void)buffer; keyboard = arg; mods = 0;
+	usb_keyboard_t	*keyboard;
+	u8		 usage;
+	u8		 next;
+	u32		 mods;
+	u32		 ch;
+	int		 active;
+
+	(void)usb;
+	(void)buffer;
+	keyboard = arg;
+	mods = 0;
+	active = keyboard_driver_is_active(&usb_keyboard_kbd_driver);
 	if (status == 0 && length >= 8) {
-		if (keyboard->buffer[0] & 0x11) mods |= MOD_CTRL;
-		if (keyboard->buffer[0] & 0x22) mods |= MOD_SHIFT;
-		if (keyboard->buffer[0] & 0x44) mods |= MOD_ALT;
-		for (usage = 4; usage < 0xE0; usage++) {
-			if (usb_keyboard_has(keyboard->buffer, usage) && !usb_keyboard_has(keyboard->previous, usage)) {
-				ch = keymap_ascii(usage, mods);
-				if (ch != 0) {
-					next = (keyboard->chead + 1) % sizeof(keyboard->cbuffer);
-					if (next != keyboard->ctail) {
-						keyboard->cbuffer[keyboard->chead] = (char)ch;
-						keyboard->chead = next;
-					}
-				}
-				kbd_event_put(usage, usage, KEY_EVENT_PRESS, mods, ch);
+		if (active) {
+			if (keyboard->buffer[0] & 0x11) {
+				mods |= MOD_CTRL;
 			}
-			if (!usb_keyboard_has(keyboard->buffer, usage) && usb_keyboard_has(keyboard->previous, usage))
-				kbd_event_put(usage, usage, KEY_EVENT_RELEASE, mods, 0);
+			if (keyboard->buffer[0] & 0x22) {
+				mods |= MOD_SHIFT;
+			}
+			if (keyboard->buffer[0] & 0x44) {
+				mods |= MOD_ALT;
+			}
+			for (usage = 4; usage < 0xE0; usage++) {
+				if (usb_keyboard_has(keyboard->buffer, usage) &&
+				    !usb_keyboard_has(keyboard->previous, usage)) {
+					ch = keymap_ascii(usage, mods);
+					if (ch != 0) {
+						next = (keyboard->chead + 1) %
+						    sizeof(keyboard->cbuffer);
+						if (next != keyboard->ctail) {
+							keyboard->cbuffer[
+							    keyboard->chead] = (char)ch;
+							keyboard->chead = next;
+						}
+					}
+					kbd_event_put(usage, usage, KEY_EVENT_PRESS,
+					    mods, ch);
+				}
+				if (!usb_keyboard_has(keyboard->buffer, usage) &&
+				    usb_keyboard_has(keyboard->previous, usage)) {
+					kbd_event_put(usage, usage, KEY_EVENT_RELEASE,
+					    mods, 0);
+				}
+			}
 		}
-		memcpy(keyboard->previous, keyboard->buffer, sizeof(keyboard->previous));
+		memcpy(keyboard->previous, keyboard->buffer,
+		    sizeof(keyboard->previous));
 	}
-	(void)hid_interrupt_submit(keyboard->hid, keyboard->buffer, 8, usb_keyboard_complete, keyboard);
-	keyboard_common_handler();
+	(void)hid_interrupt_submit(keyboard->hid, keyboard->buffer, 8,
+	    usb_keyboard_complete, keyboard);
+	if (active) {
+		keyboard_common_handler();
+	}
 }
 static int
 usb_keyboard_probe(device_t dev)
@@ -64,7 +94,28 @@ static keyboard_driver_t usb_keyboard_kbd_driver = {
 };
 static int
 usb_keyboard_attach(device_t dev)
-{ usb_keyboard_t *keyboard; hid_interface_t *hid; hid = hid_interface_get(dev); if (hid == NULL || hid_set_boot_protocol(hid)) return (-1); keyboard = kmem_calloc(1, sizeof(*keyboard)); if (keyboard == NULL) return (-1); keyboard->hid = hid; usb_keyboard_state = keyboard; device_set_softc(dev, keyboard); if (keyboard_register_driver(&usb_keyboard_kbd_driver) != 0 || keyboard_switch_driver(&usb_keyboard_kbd_driver) != 0) { kmem_free(keyboard); return (-1); } return (hid_interrupt_submit(hid, keyboard->buffer, 8, usb_keyboard_complete, keyboard)); }
+{
+	usb_keyboard_t	*keyboard;
+	hid_interface_t	*hid;
+
+	hid = hid_interface_get(dev);
+	if (hid == NULL || hid_set_boot_protocol(hid)) {
+		return (-1);
+	}
+	keyboard = kmem_calloc(1, sizeof(*keyboard));
+	if (keyboard == NULL) {
+		return (-1);
+	}
+	keyboard->hid = hid;
+	if (keyboard_register_driver(&usb_keyboard_kbd_driver) != 0) {
+		kmem_free(keyboard);
+		return (-1);
+	}
+	usb_keyboard_state = keyboard;
+	device_set_softc(dev, keyboard);
+	return (hid_interrupt_submit(hid, keyboard->buffer, 8,
+	    usb_keyboard_complete, keyboard));
+}
 static devclass_t usb_keyboard_devclass = { .name = "usb_keyboard", .maxunit = USB_MAX_DEVICES };
 static driver_t usb_keyboard_driver = { .name = "usb_keyboard", .probe = usb_keyboard_probe, .attach = usb_keyboard_attach };
 DRIVER_MODULE(usb_keyboard, usb, usb_keyboard_driver, usb_keyboard_devclass, NEWBUS_PASS_LATE, NEWBUS_ORDER_MIDDLE);

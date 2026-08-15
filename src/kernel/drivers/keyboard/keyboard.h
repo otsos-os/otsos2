@@ -49,6 +49,9 @@ $define %func scanf as function with args const char *, ...
 $define %func keyboard_set_scancode_callback as procedure with args keyboard_scancode_callback_t
 $define %func keyboard_handle_scancode as procedure with args u8, int, int
 $define %func keyboard_get_driver_name as function with args void
+$define %func keyboard_driver_is_active as function with args keyboard_driver_t *
+$define %func keyboard_driver_handler as procedure with args keyboard_driver_t *
+$define %func keyboard_cm_update as function with args u32
 $define %func kbd_event_put as procedure with args u16, u16, u32, u32, u32
 $define %func kbd_event_get as function with args struct kbd_event *
 $define %func kbd_event_count as function with args void
@@ -66,6 +69,8 @@ $space %export keyboard_flush_chars, keyboard_flush_input
 $space %export keyboard_start_direct_input, keyboard_stop_direct_input, scanf
 $space %export keyboard_set_scancode_callback, keyboard_handle_scancode
 $space %export keyboard_get_driver_name
+$space %export keyboard_driver_is_active, keyboard_driver_handler
+$space %export keyboard_cm_update
 $space %export kbd_event_put, kbd_event_get, kbd_event_count, kbd_event_reset
 
 */
@@ -110,6 +115,9 @@ struct kbd_event {
 void		keyboard_manager_init(void);
 int		keyboard_register_driver(keyboard_driver_t *driver);
 int		keyboard_switch_driver(keyboard_driver_t *driver);
+int		keyboard_driver_is_active(keyboard_driver_t *driver);
+void		keyboard_driver_handler(keyboard_driver_t *driver);
+int		keyboard_cm_update(u32 flags);
 char		keyboard_getchar(void);
 char		keyboard_getchar_blocking(void);
 void		keyboard_common_handler(void);

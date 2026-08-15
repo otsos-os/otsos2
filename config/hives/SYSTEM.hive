@@ -80,6 +80,17 @@ hive SYSTEM @access(read=user, add=kusr, edit=kusr) {
 		string Prompt = "kshell> "
 	}
 
+	key Console {
+		u32 DefaultTty = 1
+		u32 DefaultColor = 7
+		u32 KernelLogTty = 0
+		u32 MouseBlinkMs = 500
+	}
+
+	key Input.Keyboard {
+		string PreferredDriver = "auto"
+	}
+
 	key Kshell.Commands.help {
 		bool Enabled = true
 		string Description = "show command list or detailed help"

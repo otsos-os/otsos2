@@ -48,6 +48,8 @@ $define %func net_cm_update as function with args u32
 $define %func net_iface_set_ip as procedure with args net_iface_t *, u32
 $define %func net_iface_set_netmask as procedure with args net_iface_t *, u32
 $define %func net_iface_set_gw as procedure with args net_iface_t *, u32
+$define %func net_stack_enabled as function with args void
+$define %func net_default_ttl as function with args void
 
 */
 
@@ -60,6 +62,7 @@ $space %export net_iface_find_by_ndev
 $space %export net_poll_all, net_tick, net_request_poll, net_dump_ifaces
 $space %export net_cm_update
 $space %export net_iface_set_ip, net_iface_set_netmask, net_iface_set_gw
+$space %export net_stack_enabled, net_default_ttl
 
 */
 
@@ -71,7 +74,7 @@ $space %export net_iface_set_ip, net_iface_set_netmask, net_iface_set_gw
 
 #define	NET_MAX_IFACES		8
 #define	NET_IFACE_NAME_LEN	16
-#define	NET_POLL_HZ		100
+#define	NET_POLL_HZ_DEFAULT	100
 #define	NET_TX_PENDING		(-2)
 
 #define	NET_IFF_UP		(1 << 0)
@@ -104,5 +107,7 @@ int	net_cm_update(u32 flags);
 void	net_iface_set_ip(net_iface_t *iface, u32 ip);
 void	net_iface_set_netmask(net_iface_t *iface, u32 mask);
 void	net_iface_set_gw(net_iface_t *iface, u32 gw);
+int	net_stack_enabled(void);
+u8	net_default_ttl(void);
 
 #endif

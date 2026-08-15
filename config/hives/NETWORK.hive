@@ -1,12 +1,19 @@
 # Initial network registry hive.
 
 hive NETWORK @access(read=user, add=kusr, edit=kusr) {
+	key Stack {
+		bool Enabled = true
+		u32 PollHz = 100
+		u32 DefaultTtl = 64
+	}
+
 	key Interfaces.eth0 {
 		bool Enabled = true
 		bool Dhcp = false
 		ipv4 Address = 10.0.2.15
 		ipv4 Netmask = 255.255.255.0
 		ipv4 Gateway = 10.0.2.2
+		u32 Mtu = 1500
 	}
 
 	key DNS {

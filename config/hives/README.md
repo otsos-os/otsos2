@@ -65,6 +65,15 @@ If a hive does not specify access explicitly, the default is
 `read=user, add=kusr, edit=kusr`.  `regUpd()` is not a hive permission; CM
 checks it separately.
 
+Runtime consumers currently use these policy keys:
+
+- `SYSTEM.Console`: `DefaultTty`, `DefaultColor`, `KernelLogTty`, and
+  `MouseBlinkMs`.
+- `SYSTEM.Input.Keyboard.PreferredDriver`: `auto`, `ps2`, or `usb`.
+- `NETWORK.Stack`: `Enabled`, `PollHz`, and `DefaultTtl`.
+- `NETWORK.Interfaces.<name>.Mtu`: validated against the interface and the
+  Ethernet stack limits.
+
 ## Binary Format
 
 `cmseed` is an HPK pack:

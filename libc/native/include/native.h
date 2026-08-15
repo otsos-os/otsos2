@@ -355,6 +355,8 @@ $space %export entityRead, entityWrite, entitySeek, entityIoctl
 #define API_REG_CONSUMER_NET		1
 #define API_REG_CONSUMER_SCHEDULER	2
 #define API_REG_CONSUMER_KUSR		3
+#define API_REG_CONSUMER_CONSOLE	4
+#define API_REG_CONSUMER_INPUT	5
 
 #define API_KOFO_NAME_MAX	32
 #define API_KOFO_VERSION_MAX	32

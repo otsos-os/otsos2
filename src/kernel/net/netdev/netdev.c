@@ -64,6 +64,12 @@ netdev_register(netdev_t *ndev)
 	    !ndev->ops->poll) {
 		return (-1);
 	}
+	if (ndev->mtu == 0) {
+		return (-1);
+	}
+	if (ndev->mtu_max == 0) {
+		ndev->mtu_max = ndev->mtu;
+	}
 	if (g_device_count >= NETDEV_MAX_DEVICES) {
 		drivers_log("[NETDEV] too many devices\n");
 		return (-1);

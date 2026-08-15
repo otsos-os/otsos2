@@ -442,6 +442,22 @@ User need to test, dont run test manually, ask user.
   modeled yet.
 - `src/config.toml` is build-time only. Runtime kernel settings must go through
   `kernel/cm/` and the registry hives.
+- Console policy lives under `SYSTEM.Console`: `DefaultTty` and
+  `KernelLogTty` are terminal indices 0-9, `DefaultColor` is a VGA attribute,
+  and `MouseBlinkMs` is validated to 50-5000 milliseconds. The console
+  consumer is applied after CM is mounted and can be refreshed with
+  `API_REG_CONSUMER_CONSOLE`.
+- Keyboard policy lives under `SYSTEM.Input.Keyboard.PreferredDriver` and
+  accepts `auto`, `ps2`, or `usb`. The input consumer switches only registered
+  drivers; hardware sources continue to be drained while inactive without
+  publishing their events. Refresh it with `API_REG_CONSUMER_INPUT`.
+- Network stack policy lives under `NETWORK.Stack`: `Enabled`, `PollHz`
+  (1-1000),
+  and `DefaultTtl` (1-255). Interface keys may set `Mtu`; Ethernet interfaces
+  are limited to IPv4 minimum MTU 68 and the lower of 1500 or the driver's
+  advertised maximum.
+  Network settings are cached by `CM_CONSUMER_NET` and never read from poll or
+  packet hot paths.
 - **Privilege model:** native `kusr_auth` and POSIX `euid == 0` are treated as
   the same root privilege inside the kernel (`proc_has_privilege()`).  Init and
   kernel processes start as root; children inherit credentials on fork/clone/

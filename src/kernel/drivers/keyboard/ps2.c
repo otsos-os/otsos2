@@ -95,6 +95,7 @@ static int	ps2_ready;
 static int	scancode_extended;
 static int	ps2_debug;
 static int	kshell_hotkey_latch;
+static keyboard_driver_t atkbd_keyboard_driver;
 
 static void
 ps2_debug_status(const char *tag, u8 status, u8 data)
@@ -414,8 +415,11 @@ ps2_process_scancode(u8 scancode)
 		return;
 	}
 
-	keyboard_handle_scancode(code, released, extended);
 	ps2_update_modifier(key, released);
+	if (!keyboard_driver_is_active(&atkbd_keyboard_driver)) {
+		return;
+	}
+	keyboard_handle_scancode(code, released, extended);
 
 	mods = ps2_mods();
 	flags = released ? KEY_EVENT_RELEASE : KEY_EVENT_PRESS;
@@ -645,7 +649,7 @@ static int
 atkbd_intr(void *arg)
 {
 	(void)arg;
-	keyboard_common_handler();
+	keyboard_driver_handler(&atkbd_keyboard_driver);
 	return (0);
 }
 
@@ -658,7 +662,7 @@ static void
 atkbd_poll(void *arg)
 {
 	(void)arg;
-	keyboard_poll();
+	keyboard_driver_handler(&atkbd_keyboard_driver);
 }
 
 static int

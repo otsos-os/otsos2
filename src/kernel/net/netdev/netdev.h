@@ -84,6 +84,7 @@ typedef struct netdev {
 	char			name[NETDEV_NAME_LEN];
 	u8			mac[NETDEV_MAC_SIZE];
 	u16			mtu;
+	u16			mtu_max;
 	int			flags;
 	int			index;
 	void			*priv;

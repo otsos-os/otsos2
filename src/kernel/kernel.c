@@ -774,6 +774,10 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	if (fs_ok) {
 		cm_ok = (cm_init() == 0);
 	}
+	if (cm_ok) {
+		(void)cm_update_consumer(CM_CONSUMER_INPUT, 0);
+		(void)cm_update_consumer(CM_CONSUMER_NET, 0);
+	}
 
 	status_line("kmem heap", heap_ok);
 	status_line("idt", idt_ok);
@@ -798,7 +802,10 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 
 	kshell_set_boot_info(is_multiboot2);
 
-	terminal_set_active(1);
+	if (cm_ok) {
+		(void)cm_update_consumer(CM_CONSUMER_CONSOLE, 0);
+	}
+	terminal_set_active(terminal_get_default_tty());
 
 	if (!fs_ok) {
 		printk("[VFS] root filesystem unavailable, "

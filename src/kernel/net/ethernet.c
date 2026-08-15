@@ -59,12 +59,16 @@ ethernet_input(netdev_t *ndev, const u8 *frame, u16 len)
 	u16			ethertype;
 	int			is_bcast, is_ours;
 
-	if (!ndev || !frame || len < ETHERNET_HEADER_LEN) {
+	if (!ndev || !frame || len < ETHERNET_HEADER_LEN ||
+	    len > ndev->mtu + ETHERNET_HEADER_LEN) {
+		return;
+	}
+	if (!net_stack_enabled()) {
 		return;
 	}
 
 	iface = net_iface_find_by_ndev(ndev);
-	if (!iface) {
+	if (!iface || !(iface->flags & NET_IFF_UP)) {
 		return;
 	}
 
@@ -116,6 +120,10 @@ ethernet_output(net_iface_t *iface, const u8 *dst_mac,
 
 	ndev = iface->ndev;
 	if (!ndev || !ndev->ops || !ndev->ops->transmit) {
+		return (-1);
+	}
+	if (!net_stack_enabled() || !(iface->flags & NET_IFF_UP) ||
+	    payload_len > ndev->mtu) {
 		return (-1);
 	}
 

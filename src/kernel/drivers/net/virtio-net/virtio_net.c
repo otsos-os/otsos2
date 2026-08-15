@@ -512,7 +512,7 @@ virtio_net_pci_probe(pci_device_t *dev, const pci_match_t *match)
 	st->ndev_registered = 1;
 
 	memset(&st->iface, 0, sizeof(st->iface));
-	strcpy(st->iface.name, "virtio0");
+	strcpy(st->iface.name, st->ndev.name);
 	st->iface.flags = NET_IFF_UP;
 
 	if (net_iface_register(&st->iface, &st->ndev) != 0) {

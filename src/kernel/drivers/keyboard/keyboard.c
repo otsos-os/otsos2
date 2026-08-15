@@ -50,6 +50,12 @@ $define %func scanf as function with args const char *, ...
 $define %func keyboard_set_scancode_callback as procedure with args keyboard_scancode_callback_t
 $define %func keyboard_handle_scancode as procedure with args u8, int, int
 $define %func keyboard_get_driver_name as function with args void
+$define %func keyboard_driver_is_active as function with args keyboard_driver_t *
+$define %func keyboard_driver_handler as procedure with args keyboard_driver_t *
+$define %func keyboard_cm_update as function with args u32
+$define %func keyboard_driver_priority as function with args keyboard_driver_t *
+$define %func keyboard_driver_matches as function with args keyboard_driver_t *, const char *
+$define %func keyboard_find_preferred as function with args const char *
 $define %func kbd_event_put as procedure with args u16, u16, u32, u32, u32
 $define %func kbd_event_get as function with args struct kbd_event *
 $define %func kbd_event_count as function with args void
@@ -68,11 +74,17 @@ $space %export keyboard_flush_chars, keyboard_flush_input
 $space %export keyboard_start_direct_input, keyboard_stop_direct_input, scanf
 $space %export keyboard_set_scancode_callback, keyboard_handle_scancode
 $space %export keyboard_get_driver_name
+$space %export keyboard_driver_is_active, keyboard_driver_handler
+$space %export keyboard_cm_update
+$space %internal keyboard_driver_priority, keyboard_driver_matches
+$space %internal keyboard_find_preferred
 $space %export kbd_event_put, kbd_event_get, kbd_event_count, kbd_event_reset
 
 */
 
+#include <kernel/api/errno.h>
 #include <kernel/api/posix/posix.h>
+#include <kernel/cm/cm.h>
 #include <kernel/console/terminal.h>
 #include <kernel/drivers/input/input.h>
 #include <kernel/drivers/keyboard/keyboard.h>
@@ -86,6 +98,7 @@ $space %export kbd_event_put, kbd_event_get, kbd_event_count, kbd_event_reset
 
 #define	KBD_STATUS_PORT	0x64
 #define	KEYBOARD_MAX_DRIVERS	8
+#define	KEYBOARD_PREFERENCE_LEN	16
 
 static keyboard_driver_t			*current_driver;
 static keyboard_driver_t			*keyboard_drivers[
@@ -94,10 +107,68 @@ static int					keyboard_driver_count;
 static int					keyboard_initialized;
 static keyboard_scancode_callback_t		scancode_callback;
 static volatile int				direct_input_depth;
+static char				keyboard_preferred_driver[
+    KEYBOARD_PREFERENCE_LEN] = "auto";
 
 static struct kbd_event	kbd_event_ring[KBD_EVENT_RING_SIZE];
 static int			kbd_event_head;
 static int			kbd_event_tail;
+
+static int
+keyboard_driver_priority(keyboard_driver_t *driver)
+{
+	if (!driver || !driver->name) {
+		return (-1);
+	}
+	if (strcmp(driver->name, "USB Keyboard") == 0) {
+		return (2);
+	}
+	if (strcmp(driver->name, "PS/2 Keyboard") == 0) {
+		return (1);
+	}
+	return (0);
+}
+
+static int
+keyboard_driver_matches(keyboard_driver_t *driver, const char *preference)
+{
+	if (!driver || !driver->name || !preference) {
+		return (0);
+	}
+	if (strcmp(preference, "usb") == 0) {
+		return (strcmp(driver->name, "USB Keyboard") == 0);
+	}
+	if (strcmp(preference, "ps2") == 0) {
+		return (strcmp(driver->name, "PS/2 Keyboard") == 0);
+	}
+	return (0);
+}
+
+static keyboard_driver_t *
+keyboard_find_preferred(const char *preference)
+{
+	keyboard_driver_t	*best;
+	int			 best_priority;
+	int			 i;
+	int			 priority;
+
+	best = NULL;
+	best_priority = -1;
+	for (i = 0; i < keyboard_driver_count; i++) {
+		if (strcmp(preference, "auto") != 0) {
+			if (keyboard_driver_matches(keyboard_drivers[i], preference)) {
+				return (keyboard_drivers[i]);
+			}
+			continue;
+		}
+		priority = keyboard_driver_priority(keyboard_drivers[i]);
+		if (priority > best_priority) {
+			best = keyboard_drivers[i];
+			best_priority = priority;
+		}
+	}
+	return (best);
+}
 
 void
 keyboard_manager_init(void)
@@ -108,6 +179,7 @@ keyboard_manager_init(void)
 	keyboard_driver_count = 0;
 	current_driver = NULL;
 	kbd_event_reset();
+	cm_register_consumer(CM_CONSUMER_INPUT, "input", keyboard_cm_update);
 	keyboard_initialized = 1;
 	drivers_log("[KEYBOARD] manager initialized\n");
 }
@@ -138,20 +210,13 @@ keyboard_register_driver(keyboard_driver_t *driver)
 	drivers_log("[KEYBOARD] detected: %s\n",
 	    (char *)driver->name);
 
-	if (current_driver != NULL) {
-		return (0);
+	if (current_driver == NULL ||
+	    keyboard_driver_matches(driver, keyboard_preferred_driver) ||
+	    (strcmp(keyboard_preferred_driver, "auto") == 0 &&
+	    keyboard_driver_priority(driver) >
+	    keyboard_driver_priority(current_driver))) {
+		return (keyboard_switch_driver(driver));
 	}
-
-	if (driver->init) {
-		if (driver->init() != 0) {
-			drivers_log("[KEYBOARD] init failed, "
-			    "driver disabled.\n");
-			return (-1);
-		}
-	}
-	current_driver = driver;
-	drivers_log("[KEYBOARD] switch to driver: %s\n",
-	    (char *)current_driver->name);
 	return (0);
 }
 
@@ -162,6 +227,9 @@ keyboard_switch_driver(keyboard_driver_t *driver)
 
 	if (driver == NULL || driver->name == NULL) {
 		return (-1);
+	}
+	if (current_driver == driver) {
+		return (0);
 	}
 	for (i = 0; i < keyboard_driver_count; i++) {
 		if (keyboard_drivers[i] == driver) {
@@ -182,6 +250,37 @@ keyboard_switch_driver(keyboard_driver_t *driver)
 	current_driver = driver;
 	drivers_log("[KEYBOARD] switch to driver: %s\n",
 	    (char *)current_driver->name);
+	return (0);
+}
+
+int
+keyboard_cm_update(u32 flags)
+{
+	keyboard_driver_t	*driver;
+	char			 preference[KEYBOARD_PREFERENCE_LEN];
+
+	(void)flags;
+	if (!cm_is_initialized()) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	(void)cm_get_string_default("SYSTEM", "Input.Keyboard",
+	    "PreferredDriver", preference, sizeof(preference), "auto");
+	if (strcmp(preference, "auto") != 0 &&
+	    strcmp(preference, "ps2") != 0 &&
+	    strcmp(preference, "usb") != 0) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	driver = keyboard_find_preferred(preference);
+	if (!driver) {
+		strcpy(keyboard_preferred_driver, preference);
+		drivers_log("[KEYBOARD] preferred driver %s is not present\n",
+		    preference);
+		return (0);
+	}
+	if (keyboard_switch_driver(driver) != 0) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	strcpy(keyboard_preferred_driver, preference);
 	return (0);
 }
 
@@ -228,15 +327,18 @@ keyboard_getchar_blocking(void)
 }
 
 void
-keyboard_common_handler(void)
+keyboard_driver_handler(keyboard_driver_t *driver)
 {
 	void	*ch;
 
-	if (!current_driver || !current_driver->handler) {
+	if (!driver || !driver->handler) {
 		return;
 	}
 
-	current_driver->handler();
+	driver->handler();
+	if (driver != current_driver) {
+		return;
+	}
 	if (direct_input_depth == 0) {
 		terminal_input_poll();
 	}
@@ -246,6 +348,12 @@ keyboard_common_handler(void)
 		proc_wakeup(ch);
 	}
 	posix_poll_notify();
+}
+
+void
+keyboard_common_handler(void)
+{
+	keyboard_driver_handler(current_driver);
 }
 
 void
@@ -334,6 +442,12 @@ keyboard_get_driver_name(void)
 		return (NULL);
 	}
 	return (current_driver->name);
+}
+
+int
+keyboard_driver_is_active(keyboard_driver_t *driver)
+{
+	return (driver != NULL && driver == current_driver);
 }
 
 void

@@ -157,6 +157,8 @@ void	terminal_putc_to(int index, char c);
 void	terminal_puts_to(int index, const char *s);
 void	terminal_set_active(int index);
 int	terminal_get_active(void);
+int	terminal_get_default_tty(void);
+int	terminal_cm_update(u32 flags);
 void	terminal_restore_active_display(void);
 void	terminal_update(void);
 void	terminal_flush_input_active(void);

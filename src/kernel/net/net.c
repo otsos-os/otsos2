@@ -31,8 +31,12 @@ $define %type u32 as 32 bit unsigned
 $define %type int as 32 bit signed
 $define %type net_iface_t as struct with logical network interface state
 $define %type netdev_t as struct with physical network device state
+$define %type net_stack_config_t as struct with global network policy
+$define %type net_iface_config_t as struct with interface network policy
 
-$define %func net_apply_config as function with args net_iface_t *
+$define %func net_read_stack_config as function with args net_stack_config_t *
+$define %func net_read_iface_config as function with args net_iface_t *, net_iface_config_t *
+$define %func net_apply_iface_config as procedure with args net_iface_t *, const net_iface_config_t *, int
 $define %func net_init as function with args void
 $define %func net_is_initialized as function with args void
 $define %func net_iface_register as function with args net_iface_t *, netdev_t *
@@ -54,7 +58,8 @@ $define %func net_iface_set_gw as procedure with args net_iface_t *, u32
 
 /* !SPACE!
 
-$space %internal net_apply_config
+$space %internal net_read_stack_config, net_read_iface_config
+$space %internal net_apply_iface_config
 $space %export net_init, net_is_initialized
 $space %export net_iface_register, net_iface_unregister, net_iface_count
 $space %export net_iface_get, net_iface_by_name
@@ -68,6 +73,7 @@ $space %export net_iface_set_ip, net_iface_set_netmask, net_iface_set_gw
 #include <kernel/net/net.h>
 #include <kernel/net/ethernet.h>
 #include <kernel/net/arp.h>
+#include <kernel/net/ipv4.h>
 #include <kernel/net/udp.h>
 #include <kernel/net/endpoint.h>
 #include <kernel/drivers/newbus/newbus.h>
@@ -83,15 +89,63 @@ static int		g_initialized;
 static int		g_polling;
 static u64		g_last_poll_tick;
 static int		g_poll_requested;
+static int		g_stack_enabled = 1;
+static u32		g_poll_hz = NET_POLL_HZ_DEFAULT;
+static u8		g_default_ttl = IPV4_TTL_DEFAULT;
+
+#define	NET_POLL_HZ_MIN	1
+#define	NET_POLL_HZ_MAX	1000
+#define	NET_IPV4_TTL_MIN	1
+#define	NET_IPV4_TTL_MAX	255
+#define	NET_IPV4_MTU_MIN	68
+
+typedef struct net_stack_config {
+	int	enabled;
+	u32	poll_hz;
+	u8	default_ttl;
+} net_stack_config_t;
+
+typedef struct net_iface_config {
+	int	enabled;
+	u32	ip;
+	u32	mask;
+	u32	gw;
+	u16	mtu;
+} net_iface_config_t;
 
 static int
-net_apply_config(net_iface_t *iface)
+net_read_stack_config(net_stack_config_t *config)
+{
+	u32	poll_hz;
+	u32	default_ttl;
+
+	if (!config) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	poll_hz = cm_get_u32_default("NETWORK", "Stack", "PollHz",
+	    NET_POLL_HZ_DEFAULT);
+	default_ttl = cm_get_u32_default("NETWORK", "Stack", "DefaultTtl",
+	    IPV4_TTL_DEFAULT);
+	if (poll_hz < NET_POLL_HZ_MIN || poll_hz > NET_POLL_HZ_MAX ||
+	    default_ttl < NET_IPV4_TTL_MIN ||
+	    default_ttl > NET_IPV4_TTL_MAX) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	config->enabled = cm_get_bool_default("NETWORK", "Stack",
+	    "Enabled", 1);
+	config->poll_hz = poll_hz;
+	config->default_ttl = (u8)default_ttl;
+	return (0);
+}
+
+static int
+net_read_iface_config(net_iface_t *iface, net_iface_config_t *config)
 {
 	char	key[128];
-	u32	ip, mask, gw;
-	int	enabled;
+	u32	mtu;
+	u32	mtu_max;
 
-	if (!iface) {
+	if (!iface || !iface->ndev || !config) {
 		return (-API_ERR_BAD_VALUE);
 	}
 	if (strlen("Interfaces.") + strlen(iface->name) >= sizeof(key)) {
@@ -101,32 +155,51 @@ net_apply_config(net_iface_t *iface)
 	strcpy(key, "Interfaces.");
 	strcat(key, iface->name);
 
-	enabled = cm_get_bool_default("NETWORK", key, "Enabled", 1);
-	if (!enabled) {
-		iface->ip_addr = 0;
-		iface->netmask = 0;
-		iface->gw_addr = 0;
-		return (0);
+	config->enabled = cm_get_bool_default("NETWORK", key, "Enabled", 1);
+	config->ip = cm_get_ipv4_default("NETWORK", key, "Address",
+	    iface->ip_addr);
+	config->mask = cm_get_ipv4_default("NETWORK", key, "Netmask",
+	    iface->netmask);
+	config->gw = cm_get_ipv4_default("NETWORK", key, "Gateway",
+	    iface->gw_addr);
+	mtu_max = iface->ndev->mtu_max;
+	if (!(iface->flags & NET_IFF_LOOPBACK) && mtu_max > ETHERNET_MTU) {
+		mtu_max = ETHERNET_MTU;
 	}
-	if (cm_get_ipv4("NETWORK", key, "Address", &ip) != 0) {
-		return (0);
+	mtu = cm_get_u32_default("NETWORK", key, "Mtu", mtu_max);
+	if (mtu < NET_IPV4_MTU_MIN || mtu > mtu_max || mtu > 0xFFFF) {
+		return (-API_ERR_BAD_VALUE);
 	}
-	mask = cm_get_ipv4_default("NETWORK", key, "Netmask",
-	    0xFFFFFF00u);
-	gw = cm_get_ipv4_default("NETWORK", key, "Gateway", 0);
-
-	iface->ip_addr = ip;
-	iface->netmask = mask;
-	iface->gw_addr = gw;
-	drivers_log("[NET] %s configured %d.%d.%d.%d/%d.%d.%d.%d gw "
-	    "%d.%d.%d.%d\n", iface->name,
-	    (ip >> 24) & 0xFF, (ip >> 16) & 0xFF,
-	    (ip >> 8) & 0xFF, ip & 0xFF,
-	    (mask >> 24) & 0xFF, (mask >> 16) & 0xFF,
-	    (mask >> 8) & 0xFF, mask & 0xFF,
-	    (gw >> 24) & 0xFF, (gw >> 16) & 0xFF,
-	    (gw >> 8) & 0xFF, gw & 0xFF);
+	config->mtu = (u16)mtu;
 	return (0);
+}
+
+static void
+net_apply_iface_config(net_iface_t *iface, const net_iface_config_t *config,
+    int stack_enabled)
+{
+	if (!iface || !iface->ndev || !config) {
+		return;
+	}
+	iface->ndev->mtu = config->mtu;
+	if (!stack_enabled || !config->enabled) {
+		iface->flags &= ~NET_IFF_UP;
+		return;
+	}
+
+	iface->flags |= NET_IFF_UP;
+	iface->ip_addr = config->ip;
+	iface->netmask = config->mask;
+	iface->gw_addr = config->gw;
+	drivers_log("[NET] %s configured %d.%d.%d.%d/%d.%d.%d.%d gw "
+	    "%d.%d.%d.%d mtu %d\n", iface->name,
+	    (config->ip >> 24) & 0xFF, (config->ip >> 16) & 0xFF,
+	    (config->ip >> 8) & 0xFF, config->ip & 0xFF,
+	    (config->mask >> 24) & 0xFF, (config->mask >> 16) & 0xFF,
+	    (config->mask >> 8) & 0xFF, config->mask & 0xFF,
+	    (config->gw >> 24) & 0xFF, (config->gw >> 16) & 0xFF,
+	    (config->gw >> 8) & 0xFF, config->gw & 0xFF,
+	    config->mtu);
 }
 
 int
@@ -145,6 +218,9 @@ net_init(void)
 	g_polling = 0;
 	g_last_poll_tick = 0;
 	g_poll_requested = 1;
+	g_stack_enabled = 1;
+	g_poll_hz = NET_POLL_HZ_DEFAULT;
+	g_default_ttl = IPV4_TTL_DEFAULT;
 
 	arp_cache_init();
 	udp_init();
@@ -191,6 +267,9 @@ net_iface_register(net_iface_t *iface, netdev_t *ndev)
 	g_ifaces[g_iface_count] = iface;
 	iface->index = g_iface_count;
 	g_iface_count++;
+	if (cm_is_initialized()) {
+		(void)net_cm_update(0);
+	}
 
 	drivers_log("[NET] iface %s on %s "
 	    "(%02x:%02x:%02x:%02x:%02x:%02x)\n",
@@ -320,7 +399,7 @@ net_poll_all(void)
 {
 	int	i;
 
-	if (!g_initialized || g_polling) {
+	if (!g_initialized || !g_stack_enabled || g_polling) {
 		return;
 	}
 	g_polling = 1;
@@ -330,7 +409,8 @@ net_poll_all(void)
 		netdev_t	*ndev;
 
 		ndev = g_ifaces[i]->ndev;
-		if (ndev && (ndev->flags & NETDEV_F_UP) &&
+		if (ndev && (g_ifaces[i]->flags & NET_IFF_UP) &&
+		    (ndev->flags & NETDEV_F_UP) &&
 		    ndev->ops && ndev->ops->poll) {
 			ndev->ops->poll(ndev);
 		}
@@ -344,7 +424,7 @@ net_tick(void)
 	u32	freq;
 	u64	now, interval;
 
-	if (!g_initialized) {
+	if (!g_initialized || !g_stack_enabled) {
 		return;
 	}
 	if (!timer_is_initialized()) {
@@ -353,7 +433,7 @@ net_tick(void)
 	}
 
 	freq = timer_get_frequency();
-	interval = freq / NET_POLL_HZ;
+	interval = freq / g_poll_hz;
 	if (interval == 0) {
 		interval = 1;
 	}
@@ -412,21 +492,49 @@ net_dump_ifaces(void)
 int
 net_cm_update(u32 flags)
 {
-	int	i, ret, last_ret;
+	net_iface_config_t	iface_config[NET_MAX_IFACES];
+	net_stack_config_t	stack_config;
+	int			i;
+	int			ret;
 
 	(void)flags;
 	if (!g_initialized) {
 		return (-API_ERR_NOT_FOUND);
 	}
 
-	last_ret = 0;
+	ret = net_read_stack_config(&stack_config);
+	if (ret != 0) {
+		return (ret);
+	}
 	for (i = 0; i < g_iface_count; i++) {
-		ret = net_apply_config(g_ifaces[i]);
+		ret = net_read_iface_config(g_ifaces[i], &iface_config[i]);
 		if (ret != 0) {
-			last_ret = ret;
+			return (ret);
 		}
 	}
-	return (last_ret);
+
+	g_stack_enabled = stack_config.enabled;
+	g_poll_hz = stack_config.poll_hz;
+	g_default_ttl = stack_config.default_ttl;
+	g_last_poll_tick = 0;
+	g_poll_requested = 1;
+	for (i = 0; i < g_iface_count; i++) {
+		net_apply_iface_config(g_ifaces[i], &iface_config[i],
+		    g_stack_enabled);
+	}
+	return (0);
+}
+
+int
+net_stack_enabled(void)
+{
+	return (g_stack_enabled);
+}
+
+u8
+net_default_ttl(void)
+{
+	return (g_default_ttl);
 }
 
 void

@@ -119,6 +119,8 @@ $space %export cm_get_string_default
 #define	CM_CONSUMER_NET		1
 #define	CM_CONSUMER_SCHEDULER	2
 #define	CM_CONSUMER_KUSR	3
+#define	CM_CONSUMER_CONSOLE	4
+#define	CM_CONSUMER_INPUT	5
 
 typedef int (*cm_key_cb)(const char *name, void *ctx);
 typedef int (*cm_consumer_update_t)(u32 flags);
