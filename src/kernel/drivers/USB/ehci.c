@@ -36,6 +36,7 @@ $space %export ehci_pci_register
 #define EHCI_MAX_CONTROLLERS	8
 #define EHCI_MAX_REQUESTS	32
 #define EHCI_DMA_MAX		0xffffffffULL
+
 #define EHCI_CAPLENGTH		0x00
 #define EHCI_HCSPARAMS		0x04
 #define EHCI_HCCPARAMS		0x08
@@ -112,7 +113,8 @@ typedef struct {
 	u32		*frame_list;
 	ehci_request_t	requests[EHCI_MAX_REQUESTS];
 	usb_controller_t usb;
-	void		*poll_cookie;
+	void		*irq_cookie;
+	resource_t	*irq_res;
 	u8		ports;
 	u8		next_address;
 	u8		busy;
@@ -387,6 +389,22 @@ ehci_poll(void *arg)
 	__atomic_store_n(&st->busy, 0, __ATOMIC_RELEASE);
 }
 
+static int
+ehci_intr(void *arg)
+{
+	ehci_state_t	*st;
+	u32		status;
+
+	st = arg;
+	status = *(volatile u32 *)(st->op + EHCI_USBSTS);
+	if ((status & (EHCI_STS_INT | EHCI_STS_ERR | EHCI_STS_PCD |
+	    EHCI_STS_HSE)) == 0) {
+		return (-1);
+	}
+	ehci_poll(st);
+	return (0);
+}
+
 static const usb_controller_ops_t ehci_ops = {
 	.port_connected = ehci_port_connected, .port_reset = ehci_port_reset,
 	.address_device = ehci_address, .update_ep0 = ehci_noop,
@@ -401,7 +419,7 @@ ehci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	ehci_state_t *st;
 	pci_bar_t bar;
 	u32 caplen, hcc, eecp, value, i;
-	int index;
+	int index, rid;
 
 	(void)match;
 	if (pci_read_bar(pdev, 0, &bar) != 0 || bar.is_io || bar.size < 0x100)
@@ -451,8 +469,12 @@ ehci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	st->next_address = 1;
 	st->usb.bus_device = device_add_child(st->nb_dev, "usb", -1);
 	if (st->usb.bus_device == NULL || usb_controller_init(&st->usb, &ehci_ops,
-	    st, st->usb.bus_device, st->ports) != 0 || bus_setup_poll(st->nb_dev,
-	    NB_POLL_TIMER, ehci_poll, st, &st->poll_cookie) != 0) goto fail;
+	    st, st->usb.bus_device, st->ports) != 0) goto fail;
+	rid = 0;
+	st->irq_res = bus_alloc_resource_any(st->nb_dev, SYS_RES_IRQ, &rid,
+	    RF_ACTIVE);
+	if (st->irq_res == NULL || bus_setup_intr(st->nb_dev, st->irq_res,
+	    ehci_intr, st, &st->irq_cookie) != 0) goto fail;
 	pdev->driver_data = st; ehci_states[index] = st;
 	return (0);
 fail:
@@ -467,7 +489,11 @@ ehci_pci_remove(pci_device_t *pdev)
 	int i;
 
 	st = pdev->driver_data; if (st == NULL) return;
-	if (st->poll_cookie) bus_teardown_poll(st->nb_dev, st->poll_cookie);
+	*(volatile u32 *)(st->op + EHCI_USBINTR) = 0;
+	if (st->irq_cookie) bus_teardown_intr(st->nb_dev, st->irq_res,
+	    st->irq_cookie);
+	if (st->irq_res) bus_release_resource(st->nb_dev, SYS_RES_IRQ,
+	    st->irq_res->rid, st->irq_res);
 	usb_controller_fini(&st->usb);
 	*(volatile u32 *)(st->op + EHCI_USBCMD) = 0;
 	for (i = 0; i < EHCI_MAX_CONTROLLERS; i++)

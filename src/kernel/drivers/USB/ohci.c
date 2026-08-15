@@ -36,11 +36,13 @@ $space %export ohci_pci_register
 #define OHCI_MAX	8
 #define OHCI_MAX_REQ	32
 #define OHCI_DMA_MAX	0xffffffffULL
+
 #define OHCI_REV	0x00
 #define OHCI_CONTROL	0x04
 #define OHCI_CMD	0x08
 #define OHCI_INT_STATUS	0x0c
 #define OHCI_INT_ENABLE	0x10
+#define OHCI_INT_DISABLE	0x14
 #define OHCI_HCCA	0x18
 #define OHCI_PERIODIC	0x14
 #define OHCI_CTRL_HEAD	0x20
@@ -141,7 +143,8 @@ typedef struct {
 	ohci_ed_t *bulk_ed;
 	ohci_request_t requests[OHCI_MAX_REQ];
 	usb_controller_t usb;
-	void *poll_cookie;
+	void *irq_cookie;
+	resource_t *irq_res;
 	u8 ports;
 	u8 next_address;
 	u8 busy;
@@ -455,6 +458,16 @@ static void ohci_poll(void *arg)
 	}
 	__atomic_store_n(&st->busy, 0, __ATOMIC_RELEASE);
 }
+static int ohci_intr(void *arg)
+{
+	ohci_state_t *st = arg;
+	u32 status;
+	status = *(volatile u32 *)(st->regs + OHCI_INT_STATUS);
+	if ((status & (OHCI_INT_WDH | OHCI_INT_UE | OHCI_INT_RHSC)) == 0)
+		return (-1);
+	ohci_poll(st);
+	return (0);
+}
 static const usb_controller_ops_t ohci_ops = {
 	.port_connected=ohci_port_connected, .port_reset=ohci_port_reset,
 	.address_device=ohci_address, .update_ep0=ohci_noop, .configure_device=ohci_noop,
@@ -464,7 +477,7 @@ static const usb_controller_ops_t ohci_ops = {
 
 static int ohci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 {
-	ohci_state_t *st; pci_bar_t bar; u32 desc, i; int slot;
+	ohci_state_t *st; pci_bar_t bar; u32 desc, i; int slot, rid;
 	(void)match; if (pci_read_bar(pdev, 0, &bar) != 0 || bar.is_io || bar.size < 0x100)
 		return (-1);
 	for (slot=0; slot<OHCI_MAX && ohci_states[slot]!=NULL; slot++);
@@ -496,15 +509,20 @@ static int ohci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	    OHCI_INT_RHSC|OHCI_INT_MIE;
 	st->next_address=1; st->usb.bus_device=device_add_child(st->nb_dev,"usb",-1);
 	if (st->usb.bus_device==NULL || usb_controller_init(&st->usb,&ohci_ops,st,
-	    st->usb.bus_device,st->ports)!=0 || bus_setup_poll(st->nb_dev,NB_POLL_TIMER,
-	    ohci_poll,st,&st->poll_cookie)!=0) goto fail;
+	    st->usb.bus_device,st->ports)!=0) goto fail;
+	rid=0; st->irq_res=bus_alloc_resource_any(st->nb_dev,SYS_RES_IRQ,&rid,RF_ACTIVE);
+	if (st->irq_res==NULL || bus_setup_intr(st->nb_dev,st->irq_res,ohci_intr,st,
+	    &st->irq_cookie)!=0) goto fail;
 	pdev->driver_data=st; ohci_states[slot]=st; return (0);
 fail: usb_dma_free(&st->list_dma); usb_dma_free(&st->hcca_dma); kmem_free(st); return (-1);
 }
 static void ohci_pci_remove(pci_device_t *pdev)
 {
 	ohci_state_t *st=pdev->driver_data; int i;
-	if (st==NULL) return; if (st->poll_cookie) bus_teardown_poll(st->nb_dev,st->poll_cookie);
+	if (st==NULL) return; *(volatile u32 *)(st->regs+OHCI_INT_DISABLE)=0xFFFFFFFF;
+	if (st->irq_cookie) bus_teardown_intr(st->nb_dev,st->irq_res,st->irq_cookie);
+	if (st->irq_res) bus_release_resource(st->nb_dev,SYS_RES_IRQ,
+	    st->irq_res->rid,st->irq_res);
 	usb_controller_fini(&st->usb); *(volatile u32 *)(st->regs+OHCI_CONTROL)=0;
 	for(i=0;i<OHCI_MAX;i++) if(ohci_states[i]==st) ohci_states[i]=NULL;
 	usb_dma_free(&st->list_dma); usb_dma_free(&st->hcca_dma); pdev->driver_data=NULL; kmem_free(st);

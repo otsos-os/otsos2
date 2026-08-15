@@ -402,6 +402,11 @@ psm_intr(void *arg)
 	return (0);
 }
 
+typedef struct psm_softc {
+	resource_t	*irq;
+	void		*irq_cookie;
+} psm_softc_t;
+
 static void
 psm_poll(void *arg)
 {
@@ -423,23 +428,49 @@ static int
 psm_attach(device_t dev)
 {
 	resource_t	*irq;
+	psm_softc_t	*softc;
 	int		irq_ok, rid;
 
 	if (ps2_mouse_init() != 0) {
 		return (-1);
 	}
+	softc = kmem_calloc(1, sizeof(*softc));
+	if (softc == NULL) {
+		return (-1);
+	}
+	device_set_softc(dev, softc);
 	irq_ok = 0;
 	rid = 0;
 	irq = bus_alloc_resource_any(dev, SYS_RES_IRQ, &rid, RF_ACTIVE);
 	if (irq != NULL &&
-	    bus_setup_intr(dev, irq, psm_intr, NULL, NULL) == 0) {
+	    bus_setup_intr(dev, irq, psm_intr, NULL,
+	    &softc->irq_cookie) == 0) {
 		irq_ok = 1;
+		softc->irq = irq;
 	}
 	if (!irq_ok) {
-		drivers_log("[MOUSE] IRQ unavailable so using timer "
-		    "poll\n");
+		kmem_free(softc);
+		device_set_softc(dev, NULL);
+		return (-1);
 	}
-	(void)bus_setup_poll(dev, NB_POLL_TIMER, psm_poll, NULL, NULL);
+	return (0);
+}
+
+static int
+psm_detach(device_t dev)
+{
+	psm_softc_t	*softc;
+
+	softc = device_get_softc(dev);
+	if (softc != NULL && softc->irq_cookie != NULL) {
+		bus_teardown_intr(dev, softc->irq, softc->irq_cookie);
+	}
+	if (softc != NULL && softc->irq != NULL) {
+		bus_release_resource(dev, SYS_RES_IRQ, softc->irq->rid,
+		    softc->irq);
+	}
+	kmem_free(softc);
+	device_set_softc(dev, NULL);
 	return (0);
 }
 
@@ -453,6 +484,7 @@ static driver_t psm_driver = {
 	.identify	= NULL,
 	.probe		= psm_probe,
 	.attach		= psm_attach,
+	.detach		= psm_detach,
 };
 
 DRIVER_MODULE(psm, i8042, psm_driver, psm_devclass,

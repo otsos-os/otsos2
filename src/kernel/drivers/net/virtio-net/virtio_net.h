@@ -29,13 +29,12 @@ $define %type int as 32 bit signed
 $define %type u8 as 8 bit unsigned
 
 $define %func virtio_net_pci_register as function with args void
-$define %func virtio_net_irq as function with args u8
 
 */
 
 /* !SPACE!
 
-$space %export virtio_net_pci_register, virtio_net_irq
+$space %export virtio_net_pci_register
 
 */
 
@@ -45,6 +44,5 @@ $space %export virtio_net_pci_register, virtio_net_irq
 #include <mlibc/mlibc.h>
 
 int	virtio_net_pci_register(void);
-int	virtio_net_irq(u8 irq);
 
 #endif

@@ -45,6 +45,7 @@ $space %export apic_timer_init
 */
 
 #include <kernel/interrupts/apic/lapic.h>
+#include <kernel/interrupts/irq.h>
 #include <kernel/drivers/eventtimer.h>
 #include <kernel/drivers/newbus/newbus.h>
 #include <kernel/drivers/timer.h>
@@ -54,6 +55,10 @@ $space %export apic_timer_init
 
 static struct eventtimer	apic_et;
 static u64			apic_freq;
+static void			*apic_irq_cookie;
+
+extern irq_result_t irq_system_tick(registers_t *regs, void *arg);
+extern void pit_irq_disable(void);
 
 static int
 apic_timer_start(struct eventtimer *et, u64 first, u64 period)
@@ -167,8 +172,15 @@ apic_timer_probe(device_t dev)
 static int
 apic_timer_attach(device_t dev)
 {
-	(void)dev;
+	irq_source_t	source;
+
 	apic_timer_init();
+	source = irq_source_local(APIC_TIMER_VECTOR);
+	if (irq_request(source, irq_system_tick, NULL, "lapic-timer",
+	    &apic_irq_cookie) != 0) {
+		return (-1);
+	}
+	pit_irq_disable();
 	return (0);
 }
 

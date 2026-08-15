@@ -32,6 +32,7 @@
 #include <kernel/console/terminal.h>
 #include <kernel/event/event.h>
 #include <kernel/interrupts/idt.h>
+#include <kernel/interrupts/irq.h>
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_map.h>
 #include <kernel/scheduler.h>
@@ -41,8 +42,6 @@
 #include <mlibc/mlibc.h>
 
 extern void kernel_panic(registers_t *regs);
-extern void pic_send_eoi(unsigned char irq);
-
 #include <kernel/syscall.h>
 
 #include <kernel/process.h>
@@ -94,44 +93,23 @@ void isr_handler(registers_t *regs) {
   }
 }
 
+irq_result_t
+irq_system_tick(registers_t *regs, void *arg)
+{
+  (void)arg;
+  eventtimer_dispatch();
+  trace_sample_tick(regs);
+  event_timer_tick();
+  crypto_rng_tick();
+  newbus_poll_dispatch(NB_POLL_TIMER);
+  scheduler_tick(regs);
+  terminal_update();
+  return (IRQ_HANDLED);
+}
+
 void irq_handler(registers_t *regs) {
-  u8 irq;
-
   trace_irq_enter(regs);
-  if (regs->int_no >= 32 && regs->int_no < 48) {
-    irq = (u8)(regs->int_no - 32);
-    (void)newbus_irq_dispatch(irq);
-  }
-
-  if (regs->int_no == 32) {
-    eventtimer_dispatch();
-    trace_sample_tick(regs);
-    event_timer_tick();
-    crypto_rng_tick();
-    newbus_poll_dispatch(NB_POLL_TIMER);
-    scheduler_tick(regs);
-    terminal_update();
-  } else if (regs->int_no == 33) {
-    scheduler_tick(regs);
-  } else if (regs->int_no == 44) {
-    scheduler_tick(regs);
-  } else if (regs->int_no == 48) {
-    eventtimer_dispatch();
-    trace_sample_tick(regs);
-    event_timer_tick();
-    crypto_rng_tick();
-    newbus_poll_dispatch(NB_POLL_TIMER);
-    scheduler_tick(regs);
-    terminal_update();
-    trace_irq_exit(regs);
-    lapic_eoi();
-    return;
-  } else if (regs->int_no == 255) {
-    trace_irq_exit(regs);
-    return;
-  }
-
-  if (regs->int_no >= 32 && regs->int_no < 48)
-    pic_send_eoi(regs->int_no - 32);
+  if (regs->int_no != IRQ_VECTOR_SPURIOUS)
+    (void)irq_dispatch((u32)regs->int_no, regs);
   trace_irq_exit(regs);
 }

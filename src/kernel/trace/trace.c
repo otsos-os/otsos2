@@ -138,6 +138,7 @@ $space %export trace_provider_info, trace_probe_info, trace_get_stats
 #include <mm/kmem.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdio.h>
+#include <kernel/interrupts/irq.h>
 
 #define	TRACE_IRQ_VECTORS	256
 #define	TRACE_STACK_SCAN_LIMIT	0x100000ULL
@@ -1137,6 +1138,7 @@ trace_irq_enter(registers_t *regs)
 {
 	u64	args[TRACE_MAX_ARGS];
 	u64	now;
+	u32	domain, hwirq;
 	int	cpu;
 
 	if (regs == NULL) {
@@ -1154,6 +1156,10 @@ trace_irq_enter(registers_t *regs)
 	args[0] = regs->int_no;
 	args[1] = regs->err_code;
 	args[2] = regs->cs;
+	if (irq_vector_info((u32)regs->int_no, &domain, &hwirq) == 0) {
+		args[1] = hwirq;
+		args[2] = domain;
+	}
 	trace_probe_fire(TRACE_PROBE_IRQ_ENTRY, 0, regs, args);
 }
 
@@ -1162,6 +1168,7 @@ trace_irq_exit(registers_t *regs)
 {
 	u64	args[TRACE_MAX_ARGS];
 	u64	now, start, cycles;
+	u32	domain, hwirq;
 	int	cpu;
 
 	if (regs == NULL) {
@@ -1184,6 +1191,10 @@ trace_irq_exit(registers_t *regs)
 	args[0] = regs->int_no;
 	args[1] = regs->err_code;
 	args[2] = regs->cs;
+	if (irq_vector_info((u32)regs->int_no, &domain, &hwirq) == 0) {
+		args[1] = hwirq;
+		args[2] = domain;
+	}
 	args[3] = cycles;
 	trace_probe_fire(TRACE_PROBE_IRQ_RETURN, 0, regs, args);
 }

@@ -32,6 +32,14 @@ irq_stub_%1:
     jmp irq_common
 %endmacro
 
+%macro irq_vector_stub 1
+global irq_vector_stub_%1
+irq_vector_stub_%1:
+    push qword 0
+    push qword %1
+    jmp irq_common
+%endmacro
+
 global irq_stub_spurious
 irq_stub_spurious:
     push qword 0
@@ -183,6 +191,29 @@ irq_stub 13
 irq_stub 14
 irq_stub 15
 irq_stub 16
+
+%assign vector 32
+%rep 223
+%if vector != 128 && vector != 255
+irq_vector_stub vector
+%endif
+%assign vector vector + 1
+%endrep
+
+section .rodata
+global irq_vector_stubs
+irq_vector_stubs:
+%assign vector 32
+%rep 223
+%if vector == 128
+    dq 0
+%else
+    dq irq_vector_stub_%+vector
+%endif
+%assign vector vector + 1
+%endrep
+
+section .text
 
 global load_idt
 load_idt:

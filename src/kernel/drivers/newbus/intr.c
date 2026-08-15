@@ -31,21 +31,19 @@ $define %type int as 32 bit signed
 
 $define %func bus_setup_intr as function with args device_t, resource_t *, newbus_intr_handler_t *, void *, void **
 $define %func bus_teardown_intr as function with args device_t, resource_t *, void *
-$define %func newbus_irq_dispatch as function with args u8
+$define %func newbus_intr_invoke as function with args void *
 
 */
 
 /* !SPACE!
 
+$space %internal newbus_intr_invoke
 $space %export bus_setup_intr, bus_teardown_intr
-$space %export newbus_irq_dispatch
 
 */
 
 #include <kernel/drivers/newbus/newbus.h>
-
-extern void	pic_unmask_irq(unsigned char irq);
-extern void	ioapic_unmask_irq(u8 irq);
+#include <kernel/interrupts/irq.h>
 
 typedef struct newbus_intr_entry {
 	device_t			dev;
@@ -53,8 +51,23 @@ typedef struct newbus_intr_entry {
 	newbus_intr_handler_t	*handler;
 	void			*arg;
 	u8			irq;
+	void			*irq_cookie;
+	irq_source_t		source;
 	int			used;
 } newbus_intr_entry_t;
+
+static irq_result_t
+newbus_intr_invoke(registers_t *regs, void *arg)
+{
+	newbus_intr_entry_t	*entry;
+
+	(void)regs;
+	entry = arg;
+	if (entry == NULL || !entry->used || entry->handler == NULL) {
+		return (IRQ_NONE);
+	}
+	return (entry->handler(entry->arg) == 0 ? IRQ_HANDLED : IRQ_NONE);
+}
 
 static newbus_intr_entry_t	newbus_intrs[NEWBUS_MAX_INTR_HANDLERS];
 
@@ -62,10 +75,13 @@ int
 bus_setup_intr(device_t dev, resource_t *res,
     newbus_intr_handler_t *handler, void *arg, void **cookiep)
 {
+	u32	irq_flags;
 	int	i;
 
 	if (dev == NULL || res == NULL || handler == NULL ||
-	    res->type != SYS_RES_IRQ) {
+	    res->type != SYS_RES_IRQ || res->owner != dev ||
+	    (res->flags & RF_ACTIVE) == 0 ||
+	    (res->flags & RF_BUSY) == 0) {
 		return (-1);
 	}
 	for (i = 0; i < NEWBUS_MAX_INTR_HANDLERS; i++) {
@@ -78,13 +94,30 @@ bus_setup_intr(device_t dev, resource_t *res,
 		newbus_intrs[i].arg = arg;
 		newbus_intrs[i].irq = (u8)res->start;
 		newbus_intrs[i].used = 1;
+		irq_flags = 0;
+		if (res->flags & RF_SHAREABLE)
+			irq_flags |= IRQF_SHARED;
+		if (res->flags & RF_IRQ_LEVEL)
+			irq_flags |= IRQF_LEVEL;
+		if (res->flags & RF_IRQ_ACTIVE_LOW)
+			irq_flags |= IRQF_ACTIVE_LOW;
+		if (res->flags & RF_IRQ_GSI) {
+			newbus_intrs[i].source = irq_source_gsi(
+			    (u32)res->start, irq_flags);
+		} else {
+			newbus_intrs[i].source = irq_source_isa(
+			    (u32)res->start);
+			newbus_intrs[i].source.flags |= irq_flags;
+		}
+		if (irq_request(newbus_intrs[i].source,
+		    newbus_intr_invoke, &newbus_intrs[i],
+		    device_get_nameunit(dev), &newbus_intrs[i].irq_cookie) != 0) {
+			memset(&newbus_intrs[i], 0, sizeof(newbus_intrs[i]));
+			return (-1);
+		}
 		if (cookiep != NULL) {
 			*cookiep = &newbus_intrs[i];
 		}
-		if (newbus_intrs[i].irq < 16) {
-			pic_unmask_irq(newbus_intrs[i].irq);
-		}
-		ioapic_unmask_irq(newbus_intrs[i].irq);
 		return (0);
 	}
 	return (-1);
@@ -102,27 +135,14 @@ bus_teardown_intr(device_t dev, resource_t *res, void *cookie)
 	if (!entry->used || entry->dev != dev || entry->res != res) {
 		return (-1);
 	}
+	if (irq_release(entry->irq_cookie) != 0) {
+		return (-1);
+	}
 	entry->used = 0;
 	entry->dev = NULL;
 	entry->res = NULL;
 	entry->handler = NULL;
 	entry->arg = NULL;
+	entry->irq_cookie = NULL;
 	return (0);
-}
-
-int
-newbus_irq_dispatch(u8 irq)
-{
-	int	handled, i;
-
-	handled = 0;
-	for (i = 0; i < NEWBUS_MAX_INTR_HANDLERS; i++) {
-		if (!newbus_intrs[i].used || newbus_intrs[i].irq != irq) {
-			continue;
-		}
-		if (newbus_intrs[i].handler(newbus_intrs[i].arg) == 0) {
-			handled = 1;
-		}
-	}
-	return (handled);
 }

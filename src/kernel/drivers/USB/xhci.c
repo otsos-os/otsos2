@@ -79,8 +79,11 @@ $space %export xhci_pci_register
 #define	XHCI_ERDP			0x38
 #define	XHCI_USBCMD_RUN		0x01
 #define	XHCI_USBCMD_HCRST	0x02
+#define	XHCI_USBCMD_INTE	0x04
 #define	XHCI_USBSTS_HCH		0x01
 #define	XHCI_USBSTS_CNR		0x800
+#define	XHCI_IMAN_IP		0x01
+#define	XHCI_IMAN_IE		0x02
 #define	XHCI_TRB_CYCLE		1
 #define	XHCI_TRB_TC			2
 #define	XHCI_TRB_TYPE_SHIFT	10
@@ -183,7 +186,8 @@ typedef struct {
 	u8		busy;
 	xhci_ring_t	command_ring;
 	xhci_device_t	*slots[256];
-	void			*poll_cookie;
+	resource_t		*irq_res;
+	void			*irq_cookie;
 	usb_controller_t	usb;
 } xhci_state_t;
 
@@ -213,6 +217,7 @@ static void	xhci_device_free(xhci_state_t *state, xhci_device_t *device);
 static void	xhci_slot_release(xhci_state_t *state, u8 slot_id,
 		    xhci_device_t *device);
 static void	xhci_poll(void *arg);
+static int	xhci_intr(void *arg);
 static int	xhci_wait32(volatile u32 *reg, u32 mask, u32 value, u32 limit);
 static u64	xhci_phys(void *ptr);
 static int	xhci_trylock(xhci_state_t *state);
@@ -1143,6 +1148,27 @@ xhci_poll(void *arg)
 }
 
 static int
+xhci_intr(void *arg)
+{
+	xhci_state_t	*state;
+	volatile u32	*iman;
+	u32		value;
+
+	state = arg;
+	if (state == NULL) {
+		return (-1);
+	}
+	iman = (volatile u32 *)(state->runtime + XHCI_IMAN);
+	value = *iman;
+	if ((value & XHCI_IMAN_IP) == 0) {
+		return (-1);
+	}
+	*iman = value | XHCI_IMAN_IP | XHCI_IMAN_IE;
+	xhci_poll(state);
+	return (0);
+}
+
+static int
 xhci_trylock(xhci_state_t *state)
 {
 	u8	old;
@@ -1302,7 +1328,7 @@ xhci_setup_rings(xhci_state_t *state)
 	    state->command_ring.phys >> 32;
 	*(volatile u32 *)(state->op + XHCI_CONFIG) = state->max_slots;
 	iman = (volatile u32 *)(state->runtime + XHCI_IMAN);
-	*iman = 2;
+	*iman = XHCI_IMAN_IE;
 	*(volatile u32 *)(state->runtime + XHCI_ERSTSZ) = 1;
 	*(volatile u32 *)(state->runtime + XHCI_ERSTBA) =
 	    (u32)state->erst_phys;
@@ -1313,7 +1339,8 @@ xhci_setup_rings(xhci_state_t *state)
 	*(volatile u32 *)(state->runtime + XHCI_ERDP + 4) =
 	    state->events_phys >> 32;
 	value = *(volatile u32 *)(state->op + XHCI_USBCMD);
-	*(volatile u32 *)(state->op + XHCI_USBCMD) = value | XHCI_USBCMD_RUN;
+	*(volatile u32 *)(state->op + XHCI_USBCMD) = value |
+	    XHCI_USBCMD_RUN | XHCI_USBCMD_INTE;
 	return (xhci_wait32((volatile u32 *)(state->op + XHCI_USBSTS),
 	    XHCI_USBSTS_HCH, 0, 1000000));
 }
@@ -1327,7 +1354,7 @@ xhci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	u32		caplength;
 	u32		dboff;
 	u32		rtsoff;
-	int		index;
+	int		index, rid;
 
 	(void)match;
 	if (pci_read_bar(pdev, 0, &bar) != 0 || bar.is_io ||
@@ -1377,9 +1404,17 @@ xhci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	}
 	state->usb.bus_device = device_add_child(state->nb_dev, "usb", -1);
 	if (state->usb.bus_device == NULL || usb_controller_init(&state->usb,
-	    &xhci_usb_ops, state, state->usb.bus_device, state->max_ports) != 0 ||
-	    bus_setup_poll(state->nb_dev, NB_POLL_TIMER, xhci_poll, state,
-	    &state->poll_cookie) != 0) {
+	    &xhci_usb_ops, state, state->usb.bus_device, state->max_ports) != 0) {
+		kmem_free(state);
+		return (-1);
+	}
+	rid = 0;
+	state->irq_res = bus_alloc_resource_any(state->nb_dev, SYS_RES_IRQ,
+	    &rid, RF_ACTIVE);
+	if (state->irq_res == NULL || bus_setup_intr(state->nb_dev,
+	    state->irq_res, xhci_intr, state, &state->irq_cookie) != 0) {
+		usb_controller_fini(&state->usb);
+		(void)xhci_halt(state);
 		kmem_free(state);
 		return (-1);
 	}
@@ -1397,6 +1432,16 @@ xhci_pci_remove(pci_device_t *pdev)
 	state = (xhci_state_t *)pdev->driver_data;
 	if (state == NULL) {
 		return;
+	}
+	if (state->irq_cookie != NULL) {
+		bus_teardown_intr(state->nb_dev, state->irq_res,
+		    state->irq_cookie);
+		state->irq_cookie = NULL;
+	}
+	if (state->irq_res != NULL) {
+		bus_release_resource(state->nb_dev, SYS_RES_IRQ,
+		    state->irq_res->rid, state->irq_res);
+		state->irq_res = NULL;
 	}
 	(void)xhci_halt(state);
 	for (index = 0; index < XHCI_MAX_CONTROLLERS; index++) {

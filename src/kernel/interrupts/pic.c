@@ -32,6 +32,7 @@
 #define PIC1_DATA (PIC1 + 1)
 #define PIC2_COMMAND PIC2
 #define PIC2_DATA (PIC2 + 1)
+#define PIC_READ_ISR 0x0B
 
 #define ICW1_ICW4 0x01      /* ICW4 (not) needed */
 #define ICW1_SINGLE 0x02    /* Single (cascade) mode */
@@ -96,4 +97,36 @@ void pic_unmask_irq(unsigned char irq) {
   }
   value = inb(port) & ~(1 << irq);
   outb(port, value);
+}
+
+void pic_mask_irq(unsigned char irq) {
+  unsigned short port;
+  unsigned char value;
+
+  if (irq < 8) {
+    port = PIC1_DATA;
+  } else {
+    port = PIC2_DATA;
+    irq -= 8;
+  }
+  value = inb(port) | (1 << irq);
+  outb(port, value);
+}
+
+int pic_is_spurious(unsigned char irq) {
+  unsigned char isr;
+
+  if (irq != 7 && irq != 15)
+    return (0);
+  if (irq == 7) {
+    outb(PIC1_COMMAND, PIC_READ_ISR);
+    isr = inb(PIC1_COMMAND);
+    return ((isr & 0x80) == 0);
+  }
+  outb(PIC2_COMMAND, PIC_READ_ISR);
+  isr = inb(PIC2_COMMAND);
+  if ((isr & 0x80) != 0)
+    return (0);
+  outb(PIC1_COMMAND, 0x20);
+  return (1);
 }

@@ -32,6 +32,7 @@ $define %type u8 as 8 bit unsigned
 $define %type int as 32 bit signed
 
 $define %func pit_init as procedure with args void
+$define %func pit_irq_disable as procedure with args void
 
 $define %const PIT_FREQUENCY as 1193182
 $define %const PIT_COMMAND as 0x43
@@ -42,12 +43,13 @@ $define %const PIT_MAX_DIVISOR as 65535
 
 /* !SPACE!
 
-$space %export pit_init
+$space %export pit_init, pit_irq_disable
 
 */
 
 #include <kernel/drivers/eventtimer.h>
 #include <kernel/drivers/newbus/newbus.h>
+#include <kernel/interrupts/irq.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -57,6 +59,18 @@ $space %export pit_init
 #define PIT_MAX_DIVISOR	65535
 
 static struct eventtimer	pit_et;
+static void			*pit_irq_cookie;
+
+extern irq_result_t irq_system_tick(registers_t *regs, void *arg);
+
+void
+pit_irq_disable(void)
+{
+	if (pit_irq_cookie != NULL) {
+		irq_release(pit_irq_cookie);
+		pit_irq_cookie = NULL;
+	}
+}
 
 static u64
 pit_ns_to_divisor(u64 period_ns)
@@ -138,8 +152,14 @@ pit_identify(driver_t *driver, device_t parent)
 static int
 pit_attach(device_t dev)
 {
-	(void)dev;
+	irq_source_t	source;
+
 	pit_init();
+	source = irq_source_isa(0);
+	if (irq_request(source, irq_system_tick, NULL, "pit",
+	    &pit_irq_cookie) != 0) {
+		return (-1);
+	}
 	return (0);
 }
 

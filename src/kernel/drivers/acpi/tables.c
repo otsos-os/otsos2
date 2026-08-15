@@ -58,6 +58,7 @@ $space %export acpi_has_dual_pic, acpi_dump_tables
 */
 
 #include <kernel/drivers/acpi/acpi.h>
+#include <kernel/interrupts/irq.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -161,6 +162,56 @@ acpi_get_local_apic_address(void)
 		return (0);
 	}
 	return (madt->local_apic_address);
+}
+
+typedef struct acpi_irq_resolve_ctx {
+	u32	isa_irq;
+	u32	gsi;
+	u32	flags;
+	int	found;
+} acpi_irq_resolve_ctx_t;
+
+static void
+acpi_resolve_irq_cb(acpi_madt_entry_header_t *entry, void *arg)
+{
+	acpi_irq_resolve_ctx_t	*ctx;
+	acpi_madt_int_override_t *override;
+	u16			polarity, trigger;
+
+	ctx = arg;
+	override = (acpi_madt_int_override_t *)entry;
+	if (override->bus_source != 0 ||
+	    override->irq_source != ctx->isa_irq) {
+		return;
+	}
+	ctx->gsi = override->global_system_interrupt;
+	polarity = override->flags & 3;
+	trigger = (override->flags >> 2) & 3;
+	if (polarity == 3) {
+		ctx->flags |= IRQF_ACTIVE_LOW;
+	}
+	if (trigger == 3) {
+		ctx->flags |= IRQF_LEVEL;
+	}
+	ctx->found = 1;
+}
+
+int
+acpi_resolve_isa_irq(u32 isa_irq, u32 *gsi, u32 *irq_flags)
+{
+	acpi_irq_resolve_ctx_t	ctx;
+
+	if (gsi == NULL || irq_flags == NULL) {
+		return (-1);
+	}
+	memset(&ctx, 0, sizeof(ctx));
+	ctx.isa_irq = isa_irq;
+	ctx.gsi = isa_irq;
+	(void)acpi_madt_foreach(ACPI_MADT_INT_SRC_OVERRIDE,
+	    acpi_resolve_irq_cb, &ctx);
+	*gsi = ctx.gsi;
+	*irq_flags = ctx.flags;
+	return (ctx.found ? 0 : 1);
 }
 
 int

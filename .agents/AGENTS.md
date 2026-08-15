@@ -160,6 +160,11 @@ Monolithic kernel with the following rough layers:
   authentication.
 - `interrupts/`, `gdt.c`, `time.c`, `futex.c`, `syscall.c`, `process.c`,
   `thread.c`, `scheduler.c`, `panic.c`, `useraddr.c`.
+  The interrupt subsystem has a logical IRQ core in `interrupts/irq.c` with
+  dynamic vector allocation and PIC, IOAPIC/GSI, and LAPIC-local domains.
+  Hardware drivers register through newbus `bus_setup_intr()`; the core owns
+  shared-line dispatch, ACPI ISO routing, masking, EOI, statistics, and storm
+  handling. Device interrupt delivery must not be added to timer poll hooks.
 
 ### Bootloader (`src/boot/`)
 
@@ -413,6 +418,9 @@ User need to test, dont run test manually, ask user.
   handlers, PCI core, DRM core, VFS core, or DevFS init. Add or update a module
   in the driver implementation and let it probe through the generic bus/resource
   APIs.
+- Do not derive interrupt vectors from IRQ or GSI numbers. Obtain vectors from
+  the IRQ core; vector 48 is reserved for the LAPIC timer, 128 for `int 0x80`,
+  and 255 for LAPIC spurious interrupts.
 - ChainFS is a flat, single-chain filesystem; it is not POSIX-safe for hard
   links or large files. POSIX personality uses the VFS and devfs on top of it.
 - POSIX personality is opt-in per process via `CALL_PERSONALITY` (`0xFFFF`);

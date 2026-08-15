@@ -70,7 +70,6 @@ $define %func newbus_config_driver_get_u32 as function with args const char *, c
 $define %func newbus_config_driver_get_string as function with args const char *, const char *, char *, u32, const char *
 $define %func bus_alloc_resource as function with args device_t, int, int *, u64, u64, u32
 $define %func bus_setup_intr as function with args device_t, resource_t *, newbus_intr_handler_t, void *, void **
-$define %func newbus_irq_dispatch as function with args u8
 $define %func bus_setup_poll as function with args device_t, u32, newbus_poll_handler_t, void *, void **
 $define %func newbus_poll_dispatch as procedure with args u32
 $define %func newbus_entity_init as procedure with args void
@@ -104,7 +103,7 @@ $space %export newbus_config_probe_allowed
 $space %export newbus_config_driver_get_bool
 $space %export newbus_config_driver_get_u32
 $space %export newbus_config_driver_get_string
-$space %export bus_alloc_resource, bus_setup_intr, newbus_irq_dispatch
+$space %export bus_alloc_resource, bus_setup_intr
 $space %export bus_setup_poll, newbus_poll_dispatch
 $space %export newbus_entity_init, newbus_entity_device_sync
 $space %export newbus_interface_read_entity, newbus_interface_write_entity
@@ -162,6 +161,10 @@ $space %export newbus_interface_ioctl_entity, newbus_interface_stat_entity
 #define	RF_ACTIVE		0x0002
 #define	RF_SHAREABLE		0x0004
 #define	RF_BUSY			0x0008
+#define	RF_IRQ_LEVEL		0x0010
+#define	RF_IRQ_ACTIVE_LOW	0x0020
+#define	RF_IRQ_ISA		0x0040
+#define	RF_IRQ_GSI		0x0080
 
 #define	NB_POLL_TIMER		0x0001
 #define	NB_POLL_IDLE		0x0002
@@ -375,7 +378,6 @@ int		bus_setup_intr(device_t dev, resource_t *res,
 		    void **cookiep);
 int		bus_teardown_intr(device_t dev, resource_t *res,
 		    void *cookie);
-int		newbus_irq_dispatch(u8 irq);
 
 int		bus_setup_poll(device_t dev, u32 event,
 		    newbus_poll_handler_t *handler, void *arg,

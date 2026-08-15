@@ -44,8 +44,6 @@ $define %type pci_driver_t as struct with PCI driver
 $define %func virtio_net_setup_queue as function with args virtio_vq_t *, virtio_hw_t *, u16
 $define %func virtio_net_read_mac as function with args virtio_net_state_t *
 $define %func virtio_net_read_link as procedure with args virtio_net_state_t *
-$define %func virtio_net_irq_register as procedure with args virtio_net_state_t *
-$define %func virtio_net_irq_unregister as procedure with args virtio_net_state_t *
 $define %func virtio_net_post_rx as function with args virtio_net_state_t *, u16
 $define %func virtio_net_reclaim_tx as procedure with args virtio_net_state_t *
 $define %func virtio_net_destroy as procedure with args virtio_net_state_t *
@@ -55,20 +53,18 @@ $define %func virtio_net_ndev_is_link_up as function with args netdev_t *
 $define %func virtio_net_pci_probe as function with args pci_device_t *, const pci_match_t *
 $define %func virtio_net_pci_remove as procedure with args pci_device_t *
 $define %func virtio_net_pci_register as function with args void
-$define %func virtio_net_irq as function with args u8
 
 */
 
 /* !SPACE!
 
 $space %internal virtio_net_setup_queue, virtio_net_read_mac, virtio_net_read_link
-$space %internal virtio_net_irq_register, virtio_net_irq_unregister
 $space %internal virtio_net_post_rx, virtio_net_reclaim_tx
 $space %internal virtio_net_destroy
 $space %internal virtio_net_ndev_transmit, virtio_net_ndev_poll
 $space %internal virtio_net_ndev_is_link_up
 $space %internal virtio_net_pci_probe, virtio_net_pci_remove
-$space %export virtio_net_pci_register, virtio_net_irq
+$space %export virtio_net_pci_register
 
 */
 
@@ -136,7 +132,6 @@ typedef struct {
 } virtio_net_state_t;
 
 static netdev_ops_t	virtio_net_ndev_ops;
-static virtio_net_state_t *g_virtio_net_states[VIRTIO_NET_MAX_STATES];
 
 static int	virtio_net_ndev_transmit(netdev_t *ndev,
 		    const u8 *frame, u16 len);
@@ -204,39 +199,6 @@ virtio_net_read_link(virtio_net_state_t *st)
 		return;
 	}
 	st->link_up = (status & VIRTIO_NET_S_LINK_UP) != 0;
-}
-
-static void
-virtio_net_irq_register(virtio_net_state_t *st)
-{
-	int	i;
-
-	if (!st) {
-		return;
-	}
-	for (i = 0; i < VIRTIO_NET_MAX_STATES; i++) {
-		if (g_virtio_net_states[i] == st) {
-			return;
-		}
-	}
-	for (i = 0; i < VIRTIO_NET_MAX_STATES; i++) {
-		if (!g_virtio_net_states[i]) {
-			g_virtio_net_states[i] = st;
-			return;
-		}
-	}
-}
-
-static void
-virtio_net_irq_unregister(virtio_net_state_t *st)
-{
-	int	i;
-
-	for (i = 0; i < VIRTIO_NET_MAX_STATES; i++) {
-		if (g_virtio_net_states[i] == st) {
-			g_virtio_net_states[i] = NULL;
-		}
-	}
 }
 
 static int
@@ -316,7 +278,11 @@ virtio_net_destroy(virtio_net_state_t *st)
 		    st->irq_cookie);
 		st->irq_cookie = NULL;
 	}
-	virtio_net_irq_unregister(st);
+	if (st->irq_res != NULL && st->nb_dev != NULL) {
+		bus_release_resource(st->nb_dev, SYS_RES_IRQ,
+		    st->irq_res->rid, st->irq_res);
+		st->irq_res = NULL;
+	}
 	if (st->iface_registered) {
 		net_iface_unregister(&st->iface);
 	}
@@ -462,35 +428,6 @@ virtio_net_ndev_is_link_up(netdev_t *ndev)
 	return (st->ready && st->link_up);
 }
 
-int
-virtio_net_irq(u8 irq)
-{
-	virtio_net_state_t	*st;
-	u8			isr;
-	int			i, handled;
-
-	handled = 0;
-	for (i = 0; i < VIRTIO_NET_MAX_STATES; i++) {
-		st = g_virtio_net_states[i];
-		if (!st || !st->ready || !st->irq_enabled ||
-		    st->irq_line != irq) {
-			continue;
-		}
-		isr = virtio_hw_read_isr(&st->hw);
-		if ((isr & (VIRTIO_ISR_QUEUE | VIRTIO_ISR_CONFIG)) == 0) {
-			continue;
-		}
-		if (isr & VIRTIO_ISR_CONFIG) {
-			virtio_net_read_link(st);
-		}
-		if (isr & VIRTIO_ISR_QUEUE) {
-			virtio_net_ndev_poll(&st->ndev);
-		}
-		handled = 1;
-	}
-	return (handled);
-}
-
 static int
 virtio_net_pci_probe(pci_device_t *dev, const pci_match_t *match)
 {
@@ -595,7 +532,6 @@ virtio_net_pci_probe(pci_device_t *dev, const pci_match_t *match)
 		st->irq_res = bus_alloc_resource_any(st->nb_dev,
 		    SYS_RES_IRQ, &rid, RF_ACTIVE);
 		st->irq_enabled = 1;
-		virtio_net_irq_register(st);
 		if (st->irq_res != NULL &&
 		    bus_setup_intr(st->nb_dev, st->irq_res,
 		    virtio_net_irq_state, st, &st->irq_cookie) == 0) {

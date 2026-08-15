@@ -217,7 +217,7 @@ i8042_attach(device_t dev)
 		child = device_add_child(dev, "atkbd", 0);
 	}
 	if (child != NULL) {
-		bus_set_resource(child, SYS_RES_IRQ, 0, 1, 1, 0);
+		bus_set_resource(child, SYS_RES_IRQ, 0, 1, 1, RF_IRQ_ISA);
 	}
 
 	child = device_find_child(dev, "psm", 0);
@@ -225,7 +225,7 @@ i8042_attach(device_t dev)
 		child = device_add_child(dev, "psm", 0);
 	}
 	if (child != NULL) {
-		bus_set_resource(child, SYS_RES_IRQ, 0, 12, 1, 0);
+		bus_set_resource(child, SYS_RES_IRQ, 0, 12, 1, RF_IRQ_ISA);
 	}
 	return (0);
 }

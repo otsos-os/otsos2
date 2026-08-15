@@ -105,7 +105,8 @@ pci_bus_add_resources(device_t child, pci_device_t *pdev)
     }
   }
   if (pdev->irq_pin != 0 && pdev->irq_line != 0xFF) {
-    bus_set_resource(child, SYS_RES_IRQ, 0, pdev->irq_line, 1, 0);
+    bus_set_resource(child, SYS_RES_IRQ, 0, pdev->irq_line, 1,
+        RF_SHAREABLE | RF_IRQ_LEVEL | RF_IRQ_ACTIVE_LOW | RF_IRQ_ISA);
   }
 }
 

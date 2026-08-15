@@ -59,6 +59,7 @@ $define %func acpi_madt_foreach as function with args u8, void (*)(acpi_madt_ent
 $define %func acpi_get_cpu_count as function with args void
 $define %func acpi_get_ioapic_address as function with args void
 $define %func acpi_get_local_apic_address as function with args void
+$define %func acpi_resolve_isa_irq as function with args u32, u32 *, u32 *
 $define %func acpi_has_dual_pic as function with args void
 $define %func acpi_dump_tables as procedure with args void
 
@@ -72,6 +73,7 @@ $space %export acpi_is_initialized, acpi_get_revision
 $space %export acpi_validate_checksum
 $space %export acpi_madt_foreach, acpi_get_cpu_count
 $space %export acpi_get_ioapic_address, acpi_get_local_apic_address
+$space %export acpi_resolve_isa_irq
 $space %export acpi_has_dual_pic, acpi_dump_tables
 
 */
@@ -284,6 +286,7 @@ int	acpi_madt_foreach(u8 entry_type,
 int	acpi_get_cpu_count(void);
 u32	acpi_get_ioapic_address(void);
 u32	acpi_get_local_apic_address(void);
+int	acpi_resolve_isa_irq(u32 isa_irq, u32 *gsi, u32 *irq_flags);
 int	acpi_has_dual_pic(void);
 void	acpi_dump_tables(void);
 

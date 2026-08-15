@@ -96,6 +96,7 @@ extern void irq_stub_15();
 extern void irq_stub_16();
 extern void irq_stub_spurious();
 extern void isr_stub_128();
+extern void *irq_vector_stubs[];
 
 void idt_set_gate(int n, unsigned long long handler, u8 type_attr) {
   idt[n].low_offset = handler & 0xFFFF;
@@ -109,11 +110,15 @@ void idt_set_gate(int n, unsigned long long handler, u8 type_attr) {
 
 extern void pic_remap(int offset1, int offset2);
 
+extern void irq_init(void);
+
 void init_idt() {
+  int vector;
   idt_ptr.limit = sizeof(idt_entry_t) * 256 - 1;
   idt_ptr.base = (unsigned long long)&idt;
 
   pic_remap(0x20, 0x28);
+  irq_init();
 
   idt_set_gate(0, (unsigned long long)isr_stub_0, 0x8E);
   idt_set_gate(1, (unsigned long long)isr_stub_1, 0x8E);
@@ -149,27 +154,15 @@ void init_idt() {
   idt_set_gate(30, (unsigned long long)isr_stub_30, 0x8E);
   idt_set_gate(31, (unsigned long long)isr_stub_31, 0x8E);
 
-  idt_set_gate(32, (unsigned long long)irq_stub_0, 0x8E);
-  idt_set_gate(33, (unsigned long long)irq_stub_1, 0x8E);
-  idt_set_gate(34, (unsigned long long)irq_stub_2, 0x8E);
-  idt_set_gate(35, (unsigned long long)irq_stub_3, 0x8E);
-  idt_set_gate(36, (unsigned long long)irq_stub_4, 0x8E);
-  idt_set_gate(37, (unsigned long long)irq_stub_5, 0x8E);
-  idt_set_gate(38, (unsigned long long)irq_stub_6, 0x8E);
-  idt_set_gate(39, (unsigned long long)irq_stub_7, 0x8E);
-  idt_set_gate(40, (unsigned long long)irq_stub_8, 0x8E);
-  idt_set_gate(41, (unsigned long long)irq_stub_9, 0x8E);
-  idt_set_gate(42, (unsigned long long)irq_stub_10, 0x8E);
-  idt_set_gate(43, (unsigned long long)irq_stub_11, 0x8E);
-  idt_set_gate(44, (unsigned long long)irq_stub_12, 0x8E);
-  idt_set_gate(45, (unsigned long long)irq_stub_13, 0x8E);
-  idt_set_gate(46, (unsigned long long)irq_stub_14, 0x8E);
-  idt_set_gate(47, (unsigned long long)irq_stub_15, 0x8E);
+  for (vector = 32; vector <= 254; vector++) {
+    if (vector != 128)
+      idt_set_gate(vector,
+          (unsigned long long)irq_vector_stubs[vector - 32], 0x8E);
+  }
 
   // Syscall 0x80 (128), DPL=3 (User Mode), Type=0xE (Interrupt Gate)
   // 0xE | DPL<<5 | Present<<7 = 0xE | 0x60 | 0x80 = 0xEE
   idt_set_gate(128, (unsigned long long)isr_stub_128, 0xEE);
-  idt_set_gate(48, (unsigned long long)irq_stub_16, 0x8E);
   idt_set_gate(255, (unsigned long long)irq_stub_spurious, 0x8E);
 
   load_idt(&idt_ptr);

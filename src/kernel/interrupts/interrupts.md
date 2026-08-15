@@ -1,46 +1,69 @@
 # Interrupt Management
 
-OTSOS handles hardware and software interrupts using the x86_64 Interrupt Descriptor Table (IDT).
+OTSOS uses a unified IRQ core between x86 interrupt entry, interrupt
+controllers, newbus resources, and device drivers.
 
-## 1. IDT (Interrupt Descriptor Table)
-The IDT contains 256 entries (gates). Each entry points to a kernel function (stub) that handles a specific interrupt.
+## Entry And Vectors
 
-### Gate Structure
-- **Offset**: Address of the handler.
-- **Selector**: Kernel code segment selector (0x08).
-- **Type**: 0x8E (Interrupt Gate, Present, Ring 0).
+`idt.asm` generates hardware stubs for vectors 32 through 254. `idt.c` installs
+them from `irq_vector_stubs`; exceptions and the user `int 0x80` gate remain
+separate.
 
-## 2. Interrupt Stubs
-Interrupt handlers are divided into two parts:
-1. **Low-level Stubs (`idt.asm`)**: ASM wrappers that save registers (`pushaq`), call the C handler, and restore registers.
-2. **High-level Handlers (`handlers.c` / `idt.c`)**: C functions that implement the logic.
+The IRQ core allocates vectors dynamically. It permanently reserves vector 128
+for the syscall gate, vector 48 for the LAPIC timer, and vector 255 for LAPIC
+spurious interrupts. Dispatch uses a vector-to-descriptor table and never
+assumes `vector == irq + 32`.
 
-## 3. Categories of Interrupts
+## Sources And Domains
 
-### Exceptions (0-31)
-Handled by `isr_handler`. Includes:
-- `0`: Division by Zero
-- `13`: General Protection Fault
-- `14`: Page Fault
+An `irq_source_t` identifies an interrupt by domain, hardware IRQ, electrical
+attributes, and allocated vector. Supported domains are:
 
-### IRQs (Hardware Interrupts) (32-47)
-The PIC is remapped to offsets `0x20` (Master) and `0x28` (Slave).
-- `32`: System Timer
-- `33`: Keyboard
+- PIC legacy IRQs;
+- IOAPIC GSIs;
+- LAPIC local interrupts.
 
-## 4. API
+ISA sources pass through ACPI MADT Interrupt Source Override resolution before
+registration. Overrides supply the GSI, polarity, and trigger mode. All MADT
+IOAPIC entries are discovered and mapped, so routing is selected by GSI range
+rather than by a fixed 24-entry controller.
 
-### `void init_idt()`
-Initializes the IDT, sets up entry points for all 256 interrupts, remaps the PIC, and enables interrupts via `sti`.
+PIC is used when IOAPIC is unavailable. IRQ7 and IRQ15 use PIC ISR checks for
+correct spurious interrupt handling.
 
-### `registers_t`
-A structure containing the CPU state at the time of the interrupt, passed to C handlers.
-```c
-typedef struct {
-  unsigned long long r15, r14, r13, r12, r11, r10, r9, r8;
-  unsigned long long rbp, rdi, rsi, rdx, rcx, rbx, rax;
-  unsigned long long int_no, err_code;
-  unsigned long long rip, cs, rflags, rsp, ss;
-} registers_t;
-```
+## Actions And Lifecycle
 
+`irq_request()` creates or joins a descriptor and `irq_release()` removes an
+action. Shared registration requires every action to opt in and requires
+compatible trigger, polarity, and per-CPU attributes.
+
+The first action routes and unmasks the source. Removing the last action masks
+the source, removes the vector mapping, and releases dynamically allocated
+vectors. IOAPIC and LAPIC interrupts receive LAPIC EOI; PIC sources receive PIC
+EOI.
+
+Each descriptor tracks total, handled, and unhandled interrupts. Repeated
+unhandled interrupts are rate-limited in logs and a sustained unhandled storm
+masks non-per-CPU sources. `irq_stats_dump()` prints descriptor state and
+counters.
+
+## Newbus
+
+Drivers obtain active `SYS_RES_IRQ` resources and register through
+`bus_setup_intr()`. Resource flags describe ISA/GSI namespace, sharing,
+trigger mode, and polarity. Newbus converts the resource to `irq_source_t` and
+adapts the existing driver callback result to `IRQ_HANDLED` or `IRQ_NONE`.
+
+Drivers must disable device interrupt generation, call `bus_teardown_intr()`,
+then release the IRQ resource before destroying device state.
+
+## Consumers
+
+PIT and LAPIC timer register the same system tick action. Selecting LAPIC timer
+releases and masks the PIT IRQ source, preventing duplicate ticks.
+
+PS/2 keyboard and mouse, UART RX, virtio-net INTx, EHCI, OHCI, and xHCI use
+newbus IRQ resources. Their former timer polling paths and private IRQ
+registries are not part of interrupt delivery. Protocol timers, watchdog
+servicing, and software recovery work remain timer events because they are not
+hardware interrupt sources.
