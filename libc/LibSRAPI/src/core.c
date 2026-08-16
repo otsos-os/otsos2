@@ -212,6 +212,54 @@ srapiDeviceBackbuffer(srapi_device_t *device)
 	return (&device->backbuffer);
 }
 
+uint32_t
+srapiImageWidth(const srapi_image_t *image)
+{
+	return (image != NULL ? image->width : 0);
+}
+
+uint32_t
+srapiImageHeight(const srapi_image_t *image)
+{
+	return (image != NULL ? image->height : 0);
+}
+
+uint32_t
+srapiImagePitch(const srapi_image_t *image)
+{
+	return (image != NULL ? image->pitch : 0);
+}
+
+uint32_t
+srapiImageBpp(const srapi_image_t *image)
+{
+	return (image != NULL ? image->bpp : 0);
+}
+
+void *
+srapiImagePixels(srapi_image_t *image)
+{
+	return (image != NULL ? image->pixels : NULL);
+}
+
+int
+srapiImageDamage(srapi_image_t *image, const struct srapi_region *region)
+{
+	if (image == NULL) {
+		return (SRAPI_ERR_INVALID);
+	}
+	if (region == NULL) {
+		srapi_image_mark_dirty(image, 0, 0, image->width, image->height);
+		return (SRAPI_OK);
+	}
+	if (region->width == 0 || region->height == 0) {
+		return (SRAPI_ERR_INVALID);
+	}
+	srapi_image_mark_dirty(image, region->x, region->y, region->width,
+	    region->height);
+	return (SRAPI_OK);
+}
+
 int
 srapiCreateBuffer(srapi_device_t *device,
     const struct srapi_buffer_desc *desc, srapi_buffer_t **out)

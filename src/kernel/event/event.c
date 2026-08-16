@@ -740,8 +740,11 @@ kevent_process(int kq_idx, struct kevent *changelist,
 {
 	kqueue_t	*kq;
 	process_t	*owner;
+	thread_t	*td;
 	int		i, count, ret;
-	u64		start_ticks, timeout_ticks, elapsed;
+	u64		start_ticks, timeout_ticks, elapsed, now_ticks;
+	u64		remaining_ticks;
+	u32		frequency;
 
 	if (!event_initialized) {
 		return (-API_ERR_NOT_SUPPORTED);
@@ -755,6 +758,7 @@ kevent_process(int kq_idx, struct kevent *changelist,
 	if (owner && kq->owner != owner) {
 		return (-API_ERR_PERM);
 	}
+	td = thread_current();
 	trace_kevent_wait(kq_idx, nchanges, nevents, timeout_ms);
 
 	for (i = 0; i < nchanges; i++) {
@@ -803,8 +807,15 @@ kevent_process(int kq_idx, struct kevent *changelist,
 	start_ticks = timer_get_ticks();
 	timeout_ticks = 0;
 	if (timeout_ms > 0) {
-		timeout_ticks = (u64)timeout_ms *
-		    timer_get_frequency() / 1000;
+		frequency = timer_get_frequency();
+		if (frequency == 0) {
+			frequency = 1000;
+		}
+		timeout_ticks = ((u64)timeout_ms * frequency + 999) /
+		    1000;
+		if (timeout_ticks == 0) {
+			timeout_ticks = 1;
+		}
 	}
 
 	while (1) {
@@ -824,7 +835,20 @@ kevent_process(int kq_idx, struct kevent *changelist,
 			}
 		}
 
+		if (timeout_ms > 0 && td != NULL) {
+			now_ticks = timer_get_ticks();
+			elapsed = now_ticks - start_ticks;
+			if (elapsed >= timeout_ticks) {
+				trace_kevent_return(kq_idx, 0, timeout_ms);
+				return (0);
+			}
+			remaining_ticks = timeout_ticks - elapsed;
+			td->sleep_target_ticks = now_ticks + remaining_ticks;
+		}
 		proc_sleep(kq->wait_channel);
+		if (td != NULL) {
+			td->sleep_target_ticks = 0;
+		}
 	}
 
 	return (0);

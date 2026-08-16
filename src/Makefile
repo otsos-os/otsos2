@@ -41,6 +41,8 @@ SHELL_BIN = $(PROGS_DIR)/sh
 OVEN_BIN = $(PROGS_DIR)/oven
 CURSORD_BIN = $(PROGS_DIR)/demons/cursord
 SRAPI_DEMO_BIN = $(PROGS_DIR)/srapi_demo
+SWM_BIN = $(PROGS_DIR)/GUI/swm/swm
+DE_BIN = $(PROGS_DIR)/GUI/swm/de
 SHMTEST_BIN = $(PROGS_DIR)/shmtest
 UDP_ECHO_BIN = $(PROGS_DIR)/udp_echo
 TCP_ECHO_BIN = $(PROGS_DIR)/tcp_echo
@@ -523,6 +525,16 @@ $(SRAPI_DEMO_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
 	@echo "  MAKE    progs/srapi_demo"
 	@$(MAKE) -C $(PROGS_DIR) srapi_demo LIBC_ENABLED=$(LIBC_ENABLED)
 
+.PHONY: $(SWM_BIN)
+$(SWM_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
+	@echo "  MAKE    progs/GUI/swm"
+	@$(MAKE) -C $(PROGS_DIR) GUI/swm/swm LIBC_ENABLED=$(LIBC_ENABLED)
+
+.PHONY: $(DE_BIN)
+$(DE_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
+	@echo "  MAKE    progs/GUI/de"
+	@$(MAKE) -C $(PROGS_DIR) GUI/swm/de LIBC_ENABLED=$(LIBC_ENABLED)
+
 .PHONY: $(SHMTEST_BIN)
 $(SHMTEST_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    progs/shmtest"
@@ -713,7 +725,7 @@ $(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BU
 		exit 1; \
 	fi
 
-$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(HELLO_DRIVER_KOFO) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
+$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SWM_BIN) $(DE_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(HELLO_DRIVER_KOFO) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
 	@rm -rf $(BIOS_PAYLOAD_DIR)
 	@mkdir -p $(BIOS_PAYLOAD_DIR)
 	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
@@ -729,6 +741,8 @@ $(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $
 			oven) src=$(OVEN_BIN);; \
 			cursord) src=$(CURSORD_BIN);; \
 			srapi_demo) src=$(SRAPI_DEMO_BIN);; \
+			swm) src=$(SWM_BIN);; \
+			de) src=$(DE_BIN);; \
 			shmtest) src=$(SHMTEST_BIN);; \
 			udp_echo) src=$(UDP_ECHO_BIN);; \
 			tcp_echo) src=$(TCP_ECHO_BIN);; \

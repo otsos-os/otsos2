@@ -65,6 +65,8 @@ LIBELF_DIR = ../libc/LibELF
 LIBEMIT_DIR = ../libc/LibEmit
 LIBSSH_DIR = ../libc/LibSSH
 LIBCRYPTO_DIR = ../libc/LibCrypto
+SPROT_DIR = GUI/sprot
+SWM_DIR = GUI/swm
 NATIVE_LIBC = $(NATIVE_DIR)/lib/libc.a
 NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
@@ -76,6 +78,9 @@ LIBELF = $(LIBELF_DIR)/lib/libelf.a
 LIBEMIT = $(LIBEMIT_DIR)/lib/libemit.a
 LIBSSH = $(LIBSSH_DIR)/lib/libssh.a
 LIBCRYPTO = $(LIBCRYPTO_DIR)/lib/libcrypto.a
+LIBSPROT = $(SPROT_DIR)/lib/libsprot.a
+SWM_BIN = $(SWM_DIR)/swm
+DE_BIN = $(SWM_DIR)/de
 NATIVE_DYN_LDFLAGS = -m elf_x86_64 -pie --oformat=elf64-x86-64 \
                      -nostdlib -dynamic-linker /lib/drld \
                      --export-dynamic
@@ -84,9 +89,9 @@ MUSL_TEST_OBJS = musl_test.o
 LIBC_ENABLED ?= true
 
 ifeq ($(LIBC_ENABLED),true)
-ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) yabox $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(MUSL_TEST_BIN)
+ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SWM_BIN) $(DE_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) yabox $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(MUSL_TEST_BIN)
 else
-ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) yabox $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN)
+ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SWM_BIN) $(DE_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) yabox $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN)
 endif
 
 all: $(ALL_TARGETS)
@@ -114,6 +119,10 @@ $(LIBSRAPI): FORCE
 $(LIBG): $(LIBSRAPI) FORCE
 	@echo "  MAKE    LibG"
 	@$(MAKE) -C $(LIBG_DIR)
+
+$(LIBSPROT): FORCE
+	@echo "  MAKE    Sprot"
+	@$(MAKE) -C $(SPROT_DIR)
 
 $(LIBAS): FORCE
 	@echo "  MAKE    progs/toolchain/as"
@@ -170,6 +179,12 @@ $(SRAPI_DEMO_BIN): $(NATIVE_CRT0) $(SRAPI_DEMO_OBJS) $(LIBG) $(LIBSRAPI) \
 	    $(NATIVE_SO) -o $@
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
+
+.PHONY: $(SWM_BIN) $(DE_BIN)
+$(SWM_BIN) $(DE_BIN): $(NATIVE_CRT0) $(NATIVE_SO) $(LIBSPROT) \
+    $(LIBSRAPI) $(LIBG)
+	@echo "  MAKE    progs/GUI/swm"
+	@$(MAKE) -C $(SWM_DIR) $(notdir $@)
 
 $(SHMTEST_BIN): $(SHMTEST_OBJS)
 	@echo "  LLD      $@"
@@ -316,5 +331,6 @@ clean:
 	$(MAKE) -C $(TOOLCHAIN_LD_DIR) clean
 	$(MAKE) -C $(LIBSRAPI_DIR) clean
 	$(MAKE) -C $(LIBG_DIR) clean
+	$(MAKE) -C $(SWM_DIR) clean
 
 .PHONY: all clean yabox FORCE

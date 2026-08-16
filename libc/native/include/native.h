@@ -13,6 +13,7 @@ $define %type api_trace_probe as native trace probe metadata
 $define %type api_trace_program as native trace program descriptor
 $define %type api_trace_record as native trace record
 $define %type api_term_mouse as struct with console mouse state args
+$define %type api_shminfo_args as native shared memory metadata
 $define %type kevent as struct with native event data
 $define %func powerState as function with args uint32_t
 $define %func termWrite as function with args const void *, size_t
@@ -27,6 +28,10 @@ $define %func netListen as function with args int, int
 $define %func netAccept as function with args int, api_net_addr *, uint32_t
 $define %func ipcCreate as function with args const char *, uint32_t, uint32_t
 $define %func ipcCall as function with args int, api_ipc_call *
+$define %func shmGet as function with args uint64_t, size_t, uint32_t, int *
+$define %func shmMap as function with args int, void *, size_t, uint32_t, uint32_t
+$define %func shmCtl as function with args int, int, void *
+$define %func shmClose as function with args int
 $define %func regOpen as function with args const char *, const char *, uint32_t
 $define %func regGet as function with args int, api_reg_value *
 $define %func regUpd as function with args uint32_t
@@ -73,6 +78,7 @@ $space %export powerState
 $space %export netOpen, netBind, netConnect, netListen, netAccept
 $space %export netSend, netRecv, netCtl
 $space %export ipcCreate, ipcConnect, ipcSend, ipcRecv, ipcCall, ipcCtl
+$space %export shmGet, shmMap, shmCtl, shmClose
 $space %export regOpen, regClose, regGet, regSet, regCreateKey
 $space %export regDeleteKey, regDeleteValue, regEnum, regUpd
 $space %export regGetBool, regSetBool, regGetU32, regSetU32
@@ -216,6 +222,9 @@ $space %export entityRead, entityWrite, entitySeek, entityIoctl
 #define CALL_FS_UMNT		0x20F
 #define CALL_MEM_MAP		0x300
 #define CALL_MEM_UNMAP		0x301
+#define CALL_SHM_GET		0x302
+#define CALL_SHM_MAP		0x303
+#define CALL_SHM_CTL		0x304
 #define CALL_PROC_CLONE		0x400
 #define CALL_PROC_COPY		0x401
 #define CALL_PROC_SPAWN		0x402
@@ -315,6 +324,13 @@ $space %export entityRead, entityWrite, entitySeek, entityIoctl
 #define API_MAP_FIXED		0x10
 #define API_MAP_ANON		0x20
 #define API_MAP_GEM		0x40
+
+#define SHM_PRIVATE		0
+#define SHM_CREAT		01000
+#define SHM_EXCL		02000
+#define SHM_RDONLY		010000
+#define SHM_CTL_RMID		0
+#define SHM_CTL_STAT		2
 
 #define API_CLONE_VM		0x00000100
 #define API_CLONE_THREAD	0x00010000
@@ -576,6 +592,8 @@ struct api_entity_ioctl {
 #define EV_DISABLE		0x0008
 #define EV_ONESHOT		0x0010
 #define EV_CLEAR		0x0020
+#define EV_RECEIPT		0x0040
+#define EV_ERROR		0x4000
 #define EV_EOF			0x8000
 
 #define NOTE_EXIT		0x80000000U
@@ -1040,6 +1058,30 @@ struct mem_map_args {
 	uint64_t	offset;
 } __attribute__((packed));
 
+struct api_shmget_args {
+	uint64_t	key;
+	uint64_t	size;
+	uint32_t	flags;
+	uint32_t	id;
+};
+
+struct api_shmmap_args {
+	uint32_t	id;
+	uint32_t	prot;
+	uint32_t	flags;
+	uint64_t	addr;
+	uint64_t	size;
+};
+
+struct api_shminfo_args {
+	uint32_t	id;
+	uint32_t	mode;
+	uint32_t	refs;
+	uint32_t	removed;
+	uint64_t	key;
+	uint64_t	size;
+};
+
 #define NOTE_IPC_READ	0x00000001
 #define NOTE_IPC_WRITE	0x00000002
 #define NOTE_IPC_HUP	0x00000004
@@ -1167,6 +1209,7 @@ struct api_drm_driver_entry {
 
 #define IPC_NAME_MAX		48
 #define IPC_MAX_PAYLOAD	1024
+#define IPC_MAX_HANDLES		8
 
 #define IPC_MSG_REQUEST	0x00000001
 #define IPC_MSG_REPLY		0x00000002
@@ -1204,6 +1247,9 @@ struct api_ipc_message {
 	uint32_t	capacity;
 	void		*data;
 	struct api_ipc_cred cred;
+	uint32_t	handle_count;
+	uint32_t	handle_capacity;
+	int		handles[IPC_MAX_HANDLES];
 };
 
 struct api_ipc_call {
@@ -1275,6 +1321,11 @@ int	fsUmnt(const char *target, uint64_t flags);
 
 void	*memMap(const struct mem_map_args *args);
 int	memUnmap(void *addr, size_t length);
+int	shmGet(uint64_t key, size_t size, uint32_t flags, int *handle);
+void	*shmMap(int handle, void *addr, size_t size, uint32_t prot,
+	    uint32_t flags);
+int	shmCtl(int handle, int cmd, void *arg);
+int	shmClose(int handle);
 
 long	procClone(uint64_t flags, void *child_stack, uint64_t ptid);
 int	procCopy(void);

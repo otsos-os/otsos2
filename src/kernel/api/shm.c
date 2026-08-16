@@ -31,8 +31,12 @@ $define %type process_t as struct with mmap state
 $define %type vma_t as struct with start, end, next
 
 $define %func align_up as function with args u64, u64
+$define %func shm_entity_release as procedure with args entity_id_t
 $define %func shm_free_if_dead as procedure with args shm_segment_t *
 $define %func shm_range_busy as function with args process_t *, u64, u64
+$define %func shm_access_allowed as function with args shm_segment_t *, process_t *, u32
+$define %func shm_handle_get as function with args int, u32, int
+$define %func shm_init as procedure with args void
 $define %func shm_get as function with args int
 $define %func shm_put as procedure with args shm_segment_t *
 $define %func shm_get_or_create as function with args u64, u64, int, int *
@@ -49,8 +53,9 @@ $define %func api_shm_ctl as function with args int, int, void *
 
 /* !SPACE!
 
-$space %internal align_up, shm_free_if_dead, shm_range_busy
-$space %export shm_get, shm_put, shm_get_or_create, shm_remove
+$space %internal align_up, shm_entity_release, shm_free_if_dead
+$space %internal shm_range_busy, shm_access_allowed, shm_handle_get
+$space %export shm_init, shm_get, shm_put, shm_get_or_create, shm_remove
 $space %export shm_attach, shm_detach
 $space %export shm_map, shm_info
 $space %export api_shm_get, api_shm_map, api_shm_ctl
@@ -78,6 +83,23 @@ align_up(u64 val, u64 align)
 }
 
 static void
+shm_entity_release(entity_id_t id)
+{
+	shm_segment_t	*seg;
+
+	seg = (shm_segment_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+	if (seg == NULL) {
+		return;
+	}
+	seg->entity = 0;
+	seg->entity_owner_ref = 0;
+	if (seg->object != NULL) {
+		vm_object_unref(seg->object);
+	}
+	memset(seg, 0, sizeof(*seg));
+}
+
+static void
 shm_free_if_dead(shm_segment_t *seg)
 {
 	if (seg == NULL || !seg->used || !seg->removed || seg->refs != 0 ||
@@ -85,17 +107,17 @@ shm_free_if_dead(shm_segment_t *seg)
 		return;
 	}
 
-	if (seg->entity_handle != 0) {
-		entity_handle_free(NULL, seg->entity_handle);
-		seg->entity_handle = 0;
-	} else if (seg->entity != 0) {
-		entity_destroy(seg->entity);
-		seg->entity = 0;
+	if (seg->entity != 0 && seg->entity_owner_ref) {
+		seg->entity_owner_ref = 0;
+		entity_release(seg->entity);
+		return;
 	}
-	if (seg->object != NULL) {
-		vm_object_unref(seg->object);
+	if (seg->entity == 0) {
+		if (seg->object != NULL) {
+			vm_object_unref(seg->object);
+		}
+		memset(seg, 0, sizeof(*seg));
 	}
-	memset(seg, 0, sizeof(*seg));
 }
 
 static int
@@ -111,6 +133,65 @@ shm_range_busy(process_t *proc, u64 start, u64 end)
 	return (0);
 }
 
+static int
+shm_access_allowed(shm_segment_t *seg, process_t *proc, u32 required)
+{
+	u32	mode;
+
+	if (seg == NULL || proc == NULL) {
+		return (proc == NULL);
+	}
+	if (proc_has_privilege(proc) || proc->euid == 0) {
+		return (1);
+	}
+	if (proc->euid == entity_uid(seg->entity)) {
+		mode = (seg->mode >> 6) & 7;
+	} else if (proc->egid == entity_gid(seg->entity)) {
+		mode = (seg->mode >> 3) & 7;
+	} else {
+		mode = seg->mode & 7;
+	}
+	if ((required & ENTITY_ACCESS_READ) != 0 && (mode & 4) == 0) {
+		return (0);
+	}
+	if ((required & ENTITY_ACCESS_WRITE) != 0 && (mode & 2) == 0) {
+		return (0);
+	}
+	return (1);
+}
+
+static shm_segment_t *
+shm_handle_get(int handle, u32 required_access, int allow_removed)
+{
+	shm_segment_t	*seg;
+	process_t	*proc;
+	entity_id_t	id;
+	u32		access;
+	int		ret;
+
+	proc = process_current();
+	ret = entity_handle_lookup(proc, handle, &id, &access);
+	if (ret != 0 || entity_arch(id) != ENTITY_ARCH_SHM ||
+	    (access & required_access) != required_access) {
+		return (NULL);
+	}
+	seg = (shm_segment_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+	if (seg == NULL || !seg->used || (!allow_removed && seg->removed)) {
+		return (NULL);
+	}
+	seg->refs++;
+	return (seg);
+}
+
+void
+shm_init(void)
+{
+	memset(shm_segments, 0, sizeof(shm_segments));
+	shm_next_id = 1;
+	(void)entity_arch_release_register(ENTITY_ARCH_SHM,
+	    shm_entity_release);
+}
+
 shm_segment_t *
 shm_get(int id)
 {
@@ -121,22 +202,6 @@ shm_get(int id)
 		    !shm_segments[i].removed) {
 			shm_segments[i].refs++;
 			return (&shm_segments[i]);
-		}
-	}
-	{
-		entity_id_t	eid;
-		u32		access;
-
-		if (entity_handle_lookup(NULL, (int)id, &eid, &access) == 0 &&
-		    entity_arch(eid) == ENTITY_ARCH_SHM) {
-			shm_segment_t	*seg;
-
-			seg = (shm_segment_t *)entity_io_ptr(eid,
-			    ENTITY_IO_PTR_BACKING);
-			if (seg && seg->used && !seg->removed) {
-				seg->refs++;
-				return (seg);
-			}
 		}
 	}
 	return (NULL);
@@ -176,6 +241,15 @@ shm_get_or_create(u64 key, u64 size, int flags, int *error)
 				if (size > shm_segments[i].size) {
 					if (error != NULL)
 						*error = -API_ERR_BAD_VALUE;
+						return (NULL);
+					}
+				if (!shm_access_allowed(&shm_segments[i],
+				    process_current(),
+				    (flags & SHM_RDONLY) != 0 ?
+				    ENTITY_ACCESS_READ : ENTITY_ACCESS_READ |
+				    ENTITY_ACCESS_WRITE)) {
+					if (error != NULL)
+						*error = -API_ERR_ACCESS;
 					return (NULL);
 				}
 				shm_segments[i].refs++;
@@ -226,15 +300,7 @@ shm_get_or_create(u64 key, u64 size, int flags, int *error)
 	}
 	entity_io_set_ptr(free_seg->entity, ENTITY_IO_PTR_BACKING,
 	    free_seg);
-	free_seg->entity_handle = entity_handle_alloc(NULL,
-	    free_seg->entity, ENTITY_ACCESS_READ | ENTITY_ACCESS_WRITE);
-	if (free_seg->entity_handle < 0) {
-		entity_destroy(free_seg->entity);
-		free_seg->entity = 0;
-		free_seg->entity_handle = 0;
-	} else {
-		entity_release(free_seg->entity);
-	}
+	free_seg->entity_owner_ref = 1;
 
 	free_seg->used = 1;
 	free_seg->id = shm_next_id++;
@@ -274,6 +340,9 @@ shm_remove(int id)
 	}
 
 	seg->removed = 1;
+	if (seg->entity != 0) {
+		entity_ns_unbind_all_id(seg->entity);
+	}
 	shm_free_if_dead(seg);
 	return (0);
 }
@@ -387,7 +456,9 @@ api_shm_get(struct api_shmget_args *uargs)
 {
 	struct api_shmget_args	args;
 	shm_segment_t		*seg;
-	int			error;
+	process_t		*proc;
+	u32			access;
+	int			error, handle;
 
 	if (!is_user_address(uargs, sizeof(args))) {
 		return (-API_ERR_BAD_ADDR);
@@ -400,8 +471,17 @@ api_shm_get(struct api_shmget_args *uargs)
 		return (error);
 	}
 
-	args.id = seg->entity_handle != 0 ?
-	    (u32)seg->entity_handle : (u32)seg->id;
+	proc = process_current();
+	access = ENTITY_ACCESS_READ;
+	if ((args.flags & SHM_RDONLY) == 0) {
+		access |= ENTITY_ACCESS_WRITE;
+	}
+	handle = entity_handle_alloc(proc, seg->entity, access);
+	if (handle < 0) {
+		shm_put(seg);
+		return (handle);
+	}
+	args.id = (u32)handle;
 	memcpy(uargs, &args, sizeof(args));
 	shm_put(seg);
 	return (0);
@@ -413,15 +493,26 @@ api_shm_map(struct api_shmmap_args *uargs)
 	struct api_shmmap_args	args;
 	shm_segment_t		*seg;
 	u64			addr;
+	u32			access;
 
 	if (!is_user_address(uargs, sizeof(args))) {
 		return ((u64)-API_ERR_BAD_ADDR);
 	}
 
 	memcpy(&args, uargs, sizeof(args));
-	seg = shm_get((int)args.id);
+	access = 0;
+	if (args.prot & API_MAP_READ) {
+		access |= ENTITY_ACCESS_READ;
+	}
+	if (args.prot & API_MAP_WRITE) {
+		access |= ENTITY_ACCESS_WRITE;
+	}
+	if (access == 0) {
+		return ((u64)-API_ERR_BAD_VALUE);
+	}
+	seg = shm_handle_get((int)args.id, access, 0);
 	if (seg == NULL) {
-		return ((u64)-API_ERR_NOT_FOUND);
+		return ((u64)-API_ERR_BAD_HANDLE);
 	}
 
 	addr = shm_map(seg, args.addr, args.size, args.prot, args.flags);
@@ -433,19 +524,32 @@ int
 api_shm_ctl(int id, int cmd, void *uarg)
 {
 	struct api_shminfo_args	info;
+	shm_segment_t		*seg;
+	u32			access;
 	int			ret;
 
+	access = cmd == SHM_CTL_RMID ? ENTITY_ACCESS_WRITE :
+	    ENTITY_ACCESS_READ;
+	seg = shm_handle_get(id, access, 1);
+	if (seg == NULL) {
+		return (-API_ERR_BAD_HANDLE);
+	}
 	if (cmd == SHM_CTL_RMID) {
-		return (shm_remove(id));
+		ret = shm_remove(seg->id);
+		shm_put(seg);
+		return (ret);
 	}
 	if (cmd != SHM_CTL_STAT) {
+		shm_put(seg);
 		return (-API_ERR_BAD_VALUE);
 	}
 	if (!is_user_address(uarg, sizeof(info))) {
+		shm_put(seg);
 		return (-API_ERR_BAD_ADDR);
 	}
 
-	ret = shm_info(id, &info);
+	ret = shm_info(seg->id, &info);
+	shm_put(seg);
 	if (ret != 0) {
 		return (ret);
 	}

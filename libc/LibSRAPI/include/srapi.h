@@ -22,6 +22,8 @@ $define %func srapiMapSurface as function with args surface, out, out pitch
 $define %func srapiUnmapSurface as procedure with args surface
 $define %func srapiSurfaceWrite as function with args surface, region, pixels, pitch
 $define %func srapiSurfaceSetPalette as function with args surface, first, colors, count
+$define %func srapiImagePixels as function with args image
+$define %func srapiImageDamage as function with args image, region
 $define %func srapiCreateShader as function with args device, desc, out shader
 $define %func srapiComputeShader as function with args shader
 $define %func srapiCreatePipeline as function with args device, desc, out pipeline
@@ -44,6 +46,8 @@ $space %export srapi_region, srapi_surface_desc, srapi_vm_inst
 $space %export srapiCreateInstance, srapiDestroyInstance
 $space %export srapiCreateDevice, srapiDestroyDevice, srapiDeviceInfo
 $space %export srapiDeviceBackbuffer, srapiCreateBuffer, srapiDestroyBuffer
+$space %export srapiImageWidth, srapiImageHeight, srapiImagePitch
+$space %export srapiImageBpp, srapiImagePixels, srapiImageDamage
 $space %export srapiMapBuffer, srapiUnmapBuffer, srapiBufferWrite
 $space %export srapiCreateSurface, srapiDestroySurface, srapiMapSurface
 $space %export srapiUnmapSurface, srapiSurfaceWrite
@@ -162,11 +166,31 @@ enum srapi_key_event_flags {
 	SRAPI_KEY_EXTENDED = 0x00000008
 };
 
+#define SRAPI_KEY_ENTER		0x0028
+#define SRAPI_KEY_ESCAPE	0x0029
+#define SRAPI_KEY_BACKSPACE	0x002A
+#define SRAPI_KEY_LALT		0x00E2
+#define SRAPI_KEY_LSUPER	0x00E3
+#define SRAPI_KEY_RSUPER	0x00E7
+
+#define SRAPI_MOD_LSHIFT	0x00000001
+#define SRAPI_MOD_RSHIFT	0x00000002
+#define SRAPI_MOD_LCTRL	0x00000004
+#define SRAPI_MOD_RCTRL	0x00000008
+#define SRAPI_MOD_LALT		0x00000010
+#define SRAPI_MOD_RALT		0x00000020
+#define SRAPI_MOD_LSUPER	0x00000040
+#define SRAPI_MOD_RSUPER	0x00000080
+#define SRAPI_MOD_CTRL	(SRAPI_MOD_LCTRL | SRAPI_MOD_RCTRL)
+#define SRAPI_MOD_ALT		(SRAPI_MOD_LALT | SRAPI_MOD_RALT)
+#define SRAPI_MOD_SUPER	(SRAPI_MOD_LSUPER | SRAPI_MOD_RSUPER)
+
 enum srapi_mouse_event_flags {
 	SRAPI_MOUSE_MOVE = 0x00000001,
 	SRAPI_MOUSE_BUTTON = 0x00000002,
 	SRAPI_MOUSE_WHEEL = 0x00000004,
-	SRAPI_MOUSE_OVERFLOW = 0x00000008
+	SRAPI_MOUSE_OVERFLOW = 0x00000008,
+	SRAPI_MOUSE_ABSOLUTE = 0x00000010
 };
 
 enum srapi_input_flags {
@@ -350,6 +374,13 @@ int	srapiCreateDevice(srapi_instance_t *instance,
 void	srapiDestroyDevice(srapi_device_t *device);
 int	srapiDeviceInfo(srapi_device_t *device, struct srapi_device_info *out);
 srapi_image_t	*srapiDeviceBackbuffer(srapi_device_t *device);
+uint32_t	srapiImageWidth(const srapi_image_t *image);
+uint32_t	srapiImageHeight(const srapi_image_t *image);
+uint32_t	srapiImagePitch(const srapi_image_t *image);
+uint32_t	srapiImageBpp(const srapi_image_t *image);
+void	*srapiImagePixels(srapi_image_t *image);
+int	srapiImageDamage(srapi_image_t *image,
+	    const struct srapi_region *region);
 
 int	srapiCreateBuffer(srapi_device_t *device,
 	    const struct srapi_buffer_desc *desc, srapi_buffer_t **out);

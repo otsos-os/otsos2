@@ -96,6 +96,7 @@ $space %export entity_io_ioctl
 
 #include <kernel/api/api.h>
 #include <kernel/api/errno.h>
+#include <kernel/api/shm.h>
 #include <kernel/console/terminal.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/newbus/newbus.h>
@@ -423,6 +424,7 @@ entity_io_init(void)
 	    kqueue_entity_release);
 	entity_arch_release_register(ENTITY_ARCH_TRACE,
 	    api_trace_entity_release);
+	shm_init();
 	terminal_entity_register_all();
 	entity_arch_io_register(ENTITY_ARCH_FILE, &entity_io_file_ops);
 	entity_arch_io_register(ENTITY_ARCH_VNODE, &entity_io_vnode_ops);

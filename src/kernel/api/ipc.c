@@ -241,6 +241,9 @@ api_ipc_recv(int handle, struct api_ipc_message *umessage, u32 flags)
 	if (message.capacity > IPC_MAX_PAYLOAD) {
 		message.capacity = IPC_MAX_PAYLOAD;
 	}
+	if (message.handle_capacity > IPC_MAX_HANDLES) {
+		message.handle_capacity = IPC_MAX_HANDLES;
+	}
 	if (message.capacity > 0 &&
 	    (!is_user_address(message.data, message.capacity) ||
 	    !user_range_fault_in(message.data, message.capacity, 1))) {
@@ -273,9 +276,13 @@ api_ipc_call(int handle, struct api_ipc_call *ucall)
 	}
 	memcpy(&call, ucall, sizeof(call));
 	if (call.request.length > IPC_MAX_PAYLOAD ||
-	    call.reply.capacity > IPC_MAX_PAYLOAD) {
+	    call.reply.capacity > IPC_MAX_PAYLOAD ||
+	    call.request.handle_count > IPC_MAX_HANDLES) {
 		ret = -API_ERR_TOO_BIG;
 		goto out;
+	}
+	if (call.reply.handle_capacity > IPC_MAX_HANDLES) {
+		call.reply.handle_capacity = IPC_MAX_HANDLES;
 	}
 	if (call.request.length > 0 &&
 	    (!is_user_address(call.request.data, call.request.length) ||

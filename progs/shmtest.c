@@ -44,6 +44,7 @@ $define %func pass as procedure with args const char *
 $define %func shm_get as function with args u64, u64, u32, u32 *
 $define %func shm_map as function with args u32, u64, u32, u64 *
 $define %func shm_ctl as function with args u32, u32, void *
+$define %func shm_close as function with args u32
 $define %func mem_unmap as function with args void *, u64
 $define %func fill_pattern as procedure with args unsigned char *, u64
 $define %func check_pattern as function with args unsigned char *, u64
@@ -55,7 +56,7 @@ $define %func run_tests as function with args void
 
 $space %export _start
 $space %internal syscall1, syscall3, strlen, print, print_num
-$space %internal fail, pass, shm_get, shm_map, shm_ctl, mem_unmap
+$space %internal fail, pass, shm_get, shm_map, shm_ctl, shm_close, mem_unmap
 $space %internal fill_pattern, check_pattern, run_tests
 
 */
@@ -66,6 +67,7 @@ $space %internal fill_pattern, check_pattern, run_tests
 #define	CALL_SHM_MAP		0x303
 #define	CALL_SHM_CTL		0x304
 #define	CALL_PROC_EXIT		0x403
+#define	CALL_ENTITY_CLOSE	0xD02
 #define	CALL_PERSONALITY	0xFFFF
 #define	API_MAP_READ		0x1
 #define	API_MAP_WRITE		0x2
@@ -239,6 +241,12 @@ shm_ctl(u32 id, u32 cmd, void *arg)
 }
 
 static long
+shm_close(u32 id)
+{
+	return (syscall1(CALL_ENTITY_CLOSE, (long)id));
+}
+
+static long
 mem_unmap(void *addr, u64 size)
 {
 	return (syscall3(CALL_MEM_UNMAP, (long)addr, (long)size, 0));
@@ -389,8 +397,20 @@ run_tests(void)
 	pass("unmap second");
 
 	ret = shm_ctl(id, SHM_CTL_STAT, &info);
+	if (ret != 0 || info.removed != 1 || info.refs != 0) {
+		fail("stat after final detach", ret);
+		return (1);
+	}
+	pass("stat after final detach");
+
+	ret = shm_close(id);
+	if (ret != 0) {
+		fail("close handle", ret);
+		return (1);
+	}
+	ret = shm_ctl(id, SHM_CTL_STAT, &info);
 	if (ret >= 0) {
-		fail("stat after final detach should fail", ret);
+		fail("stat after close should fail", ret);
 		return (1);
 	}
 	pass("final cleanup");

@@ -40,6 +40,7 @@ $define %func ipc_service_client as function with args ipc_service_t *, u64
 $define %func ipc_queue_push as function with args ipc_endpoint_t *, const ipc_message_t *, u32
 $define %func ipc_queue_pop as function with args endpoint, message, reply, flags
 $define %func ipc_queue_unpop as procedure with args endpoint, message
+$define %func ipc_message_release_handles as procedure with args ipc_message_t *
 $define %func ipc_message_build as function with args ipc_endpoint_t *, ipc_message_t *, const api_ipc_message *, const void *
 $define %func ipc_message_copyout as function with args const ipc_message_t *, api_ipc_message *, void *
 $define %func ipc_endpoint_target as function with args ipc_endpoint_t *, const ipc_message_t *
@@ -70,6 +71,7 @@ $space %internal ipc_name_valid, ipc_service_find, ipc_endpoint_alloc
 $space %internal ipc_endpoint_free, ipc_service_access
 $space %internal ipc_service_client, ipc_queue_push, ipc_queue_pop
 $space %internal ipc_queue_unpop
+$space %internal ipc_message_release_handles
 $space %internal ipc_message_build, ipc_message_copyout
 $space %internal ipc_endpoint_target, ipc_waiter_alloc
 $space %internal ipc_waiter_release, ipc_cancel_add, ipc_cancel_take
@@ -99,6 +101,8 @@ typedef struct ipc_waiter {
 
 static ipc_service_t	ipc_services[IPC_MAX_SERVICES];
 static ipc_waiter_t	ipc_waiters[IPC_MAX_WAITERS];
+
+static void	ipc_message_release_handles(ipc_message_t *message);
 
 static int
 ipc_name_valid(const char *name)
@@ -159,8 +163,16 @@ ipc_endpoint_alloc(int role)
 static void
 ipc_endpoint_free(ipc_endpoint_t *endpoint)
 {
+	u32	i;
+
 	if (!endpoint) {
 		return;
+	}
+	for (i = 0; i < endpoint->queue_count; i++) {
+		u32	index;
+
+		index = (endpoint->queue_head + i) % IPC_QUEUE_MESSAGES;
+		ipc_message_release_handles(&endpoint->queue[index]);
 	}
 	memset(endpoint, 0, sizeof(*endpoint));
 	kmem_free(endpoint);
@@ -295,15 +307,38 @@ ipc_queue_unpop(ipc_endpoint_t *endpoint, const ipc_message_t *message)
 	event_notify_ipc_change(endpoint);
 }
 
+static void
+ipc_message_release_handles(ipc_message_t *message)
+{
+	u32	i;
+
+	if (!message) {
+		return;
+	}
+	for (i = 0; i < message->handle_count; i++) {
+		if (message->handles[i].id != 0) {
+			entity_release(message->handles[i].id);
+			message->handles[i].id = 0;
+		}
+	}
+	message->handle_count = 0;
+}
+
 static int
 ipc_message_build(ipc_endpoint_t *endpoint, ipc_message_t *out,
     const struct api_ipc_message *message, const void *payload)
 {
 	process_t	*proc;
+	entity_id_t	id;
+	u32		access, i;
+	int		ret;
 
 	if (!endpoint || !out || !message ||
-	    message->length > IPC_MAX_PAYLOAD) {
-		return (-API_ERR_INVAL);
+	    message->length > IPC_MAX_PAYLOAD ||
+	    message->handle_count > IPC_MAX_HANDLES) {
+		return (message != NULL &&
+		    message->handle_count > IPC_MAX_HANDLES ?
+		    -API_ERR_TOO_BIG : -API_ERR_INVAL);
 	}
 	if (message->length > 0 && !payload) {
 		return (-API_ERR_BAD_ADDR);
@@ -328,6 +363,22 @@ ipc_message_build(ipc_endpoint_t *endpoint, ipc_message_t *out,
 	if (out->length > 0) {
 		memcpy(out->data, payload, out->length);
 	}
+	for (i = 0; i < message->handle_count; i++) {
+		if (!proc) {
+			ipc_message_release_handles(out);
+			return (-API_ERR_BAD_HANDLE);
+		}
+		ret = entity_handle_lookup(proc, message->handles[i], &id,
+		    &access);
+		if (ret != 0) {
+			ipc_message_release_handles(out);
+			return (ret);
+		}
+		out->handles[i].id = id;
+		out->handles[i].access = access;
+		entity_retain(id);
+		out->handle_count++;
+	}
 	return (0);
 }
 
@@ -335,7 +386,11 @@ static int
 ipc_message_copyout(const ipc_message_t *source,
     struct api_ipc_message *message, void *payload)
 {
+	process_t	*proc;
 	u32	copy_len;
+	u32	i;
+	int	installed[IPC_MAX_HANDLES];
+	int	ret;
 
 	if (!source || !message) {
 		return (-API_ERR_INVAL);
@@ -350,6 +405,28 @@ ipc_message_copyout(const ipc_message_t *source,
 	if (copy_len > 0 && !payload) {
 		return (-API_ERR_BAD_ADDR);
 	}
+	if (source->handle_count > message->handle_capacity) {
+		return (-API_ERR_TOO_BIG);
+	}
+	if (source->handle_count > 0 && !process_current()) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	memset(installed, 0, sizeof(installed));
+	proc = process_current();
+	for (i = 0; i < source->handle_count; i++) {
+		ret = entity_handle_alloc(proc, source->handles[i].id,
+		    source->handles[i].access);
+		if (ret < 0) {
+			while (i > 0) {
+				i--;
+				if (installed[i] != 0) {
+					(void)entity_handle_free(proc, installed[i]);
+				}
+			}
+			return (ret);
+		}
+		installed[i] = ret;
+	}
 	message->id = source->id;
 	message->reply_to = source->reply_to;
 	message->peer = source->peer;
@@ -357,6 +434,10 @@ ipc_message_copyout(const ipc_message_t *source,
 	message->flags = source->flags;
 	message->length = source->length;
 	message->cred = source->cred;
+	message->handle_count = source->handle_count;
+	for (i = 0; i < source->handle_count; i++) {
+		message->handles[i] = installed[i];
+	}
 	if (copy_len > 0) {
 		memcpy(payload, source->data, copy_len);
 	}
@@ -628,13 +709,19 @@ ipc_endpoint_send(ipc_endpoint_t *endpoint,
 	}
 	target = ipc_endpoint_target(endpoint, &queued);
 	if (!target || target->closed) {
+		ipc_message_release_handles(&queued);
 		return (-API_ERR_NOT_FOUND);
 	}
 	if (queued.reply_to != 0 &&
 	    ipc_cancel_take(target, queued.reply_to)) {
+		ipc_message_release_handles(&queued);
 		return (0);
 	}
-	return (ipc_queue_push(target, &queued, message->flags));
+	ret = ipc_queue_push(target, &queued, message->flags);
+	if (ret != 0) {
+		ipc_message_release_handles(&queued);
+	}
+	return (ret);
 }
 
 int
@@ -654,6 +741,8 @@ ipc_endpoint_recv(ipc_endpoint_t *endpoint,
 	ret = ipc_message_copyout(&queued, message, payload);
 	if (ret == -API_ERR_TOO_BIG) {
 		ipc_queue_unpop(endpoint, &queued);
+	} else {
+		ipc_message_release_handles(&queued);
 	}
 	return (ret);
 }
@@ -670,7 +759,8 @@ ipc_endpoint_call(ipc_endpoint_t *endpoint,
 	int		ret;
 
 	if (!endpoint || endpoint->role != IPC_ENDPOINT_CLIENT ||
-	    !request || !reply) {
+	    endpoint->closed || endpoint->service == NULL ||
+	    endpoint->service->server == NULL || !request || !reply) {
 		return (-API_ERR_INVAL);
 	}
 	ret = ipc_message_build(endpoint, &out, request, request_payload);
@@ -681,6 +771,7 @@ ipc_endpoint_call(ipc_endpoint_t *endpoint,
 	request_id = out.id;
 	ret = ipc_queue_push(endpoint->service->server, &out, request->flags);
 	if (ret != 0) {
+		ipc_message_release_handles(&out);
 		return (ret);
 	}
 	if (timeout_ms < 0) {
@@ -692,6 +783,8 @@ ipc_endpoint_call(ipc_endpoint_t *endpoint,
 		ret = ipc_message_copyout(&queued, reply, reply_payload);
 		if (ret == -API_ERR_TOO_BIG) {
 			ipc_queue_unpop(endpoint, &queued);
+		} else {
+			ipc_message_release_handles(&queued);
 		}
 		return (ret);
 	}
@@ -699,11 +792,16 @@ ipc_endpoint_call(ipc_endpoint_t *endpoint,
 		ret = ipc_queue_pop(endpoint, &queued, request_id,
 		    reply->flags | IPC_MSG_NONBLOCK);
 		if (ret != 0) {
+			if (ret == -API_ERR_RETRY) {
+				ipc_cancel_add(endpoint, request_id);
+			}
 			return (ret);
 		}
 		ret = ipc_message_copyout(&queued, reply, reply_payload);
 		if (ret == -API_ERR_TOO_BIG) {
 			ipc_queue_unpop(endpoint, &queued);
+		} else {
+			ipc_message_release_handles(&queued);
 		}
 		return (ret);
 	}
@@ -714,6 +812,7 @@ ipc_endpoint_call(ipc_endpoint_t *endpoint,
 	deadline = timer_get_ticks() + ticks;
 	waiter = ipc_waiter_alloc(endpoint, deadline);
 	if (!waiter) {
+		ipc_cancel_add(endpoint, request_id);
 		return (-API_ERR_BUSY);
 	}
 	for (;;) {
@@ -725,6 +824,8 @@ ipc_endpoint_call(ipc_endpoint_t *endpoint,
 			    reply_payload);
 			if (ret == -API_ERR_TOO_BIG) {
 				ipc_queue_unpop(endpoint, &queued);
+			} else {
+				ipc_message_release_handles(&queued);
 			}
 			return (ret);
 		}

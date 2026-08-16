@@ -89,6 +89,14 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 		string Dest = "/bin/srapi_demo"
 	}
 
+	key Modules.swm {
+		string Dest = "/bin/swm"
+	}
+
+	key Modules.de {
+		string Dest = "/bin/de"
+	}
+
 	key Modules.udp_echo {
 		string Dest = "/bin/udp_echo"
 	}

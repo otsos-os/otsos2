@@ -43,9 +43,14 @@ $space %export errno, __errno_location
 #define EPIPE		32
 #define ENOSYS		38
 #define ENOTEMPTY	39
+#define EPROTO		71
+#define EBADMSG		74
+#define EOVERFLOW	75
 #define ENOTSUP		95
+#define ETIMEDOUT	110
 
 int	*__errno_location(void);
+char	*strerror(int errnum);
 
 #define errno (*__errno_location())
 

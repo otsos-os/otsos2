@@ -62,6 +62,7 @@ $space %export ipc_endpoint_pending, ipc_timer_tick
 #define KERNEL_IPC_IPC_H
 
 #include <kernel/api/api.h>
+#include <kernel/entity/entity.h>
 #include <mlibc/mlibc.h>
 
 #define	IPC_NAME_MAX		48
@@ -69,6 +70,7 @@ $space %export ipc_endpoint_pending, ipc_timer_tick
 #define	IPC_MAX_SESSIONS	64
 #define	IPC_QUEUE_MESSAGES	32
 #define	IPC_MAX_PAYLOAD		1024
+#define	IPC_MAX_HANDLES		8
 #define	IPC_MAX_WAITERS	64
 #define	IPC_CANCEL_SLOTS	16
 #define	IPC_ENDPOINT_SERVER	1
@@ -106,6 +108,9 @@ struct api_ipc_message {
 	u32	capacity;
 	void	*data;
 	struct api_ipc_cred cred;
+	u32	handle_count;
+	u32	handle_capacity;
+	int	handles[IPC_MAX_HANDLES];
 };
 
 struct api_ipc_call {
@@ -135,6 +140,11 @@ typedef struct ipc_message {
 	u32	flags;
 	u32	length;
 	struct api_ipc_cred cred;
+	u32	handle_count;
+	struct {
+		entity_id_t	id;
+		u32		access;
+	} handles[IPC_MAX_HANDLES];
 	u8	data[IPC_MAX_PAYLOAD];
 } ipc_message_t;
 

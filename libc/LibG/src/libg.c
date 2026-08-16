@@ -1,12 +1,15 @@
 /* !DEFINES!
 
 $define %type libg_context as LibG immediate UI context
+$define %type libg_present_state as target damage callback state
 $define %type libg_rect_t as integer rectangle
 $define %type libg_style_t as UI color palette
 $define %type uint32_t as 32 bit unsigned
 $define %type int32_t as 32 bit signed
 $define %func libgDefaultStyle as procedure with args libg_style_t *
 $define %func libgCreate as function with args srapi_device_t *, style, out
+$define %func libgCreateForTarget as function with args pixels, width, height, pitch, callback, userdata, style, out
+$define %func libgHandleInput as function with args context, input event
 $define %func libgDestroy as procedure with args libg_context_t *
 $define %func libg_update_mouse as procedure with args context, event
 $define %func libgBegin as function with args context, color
@@ -31,13 +34,15 @@ $define %func libgSlider as function with args context, id, rect, value
 
 /* !SPACE!
 
-$space %internal libg_from_srapi, libg_abs_i32, libg_clamp_i32
+$space %internal libg_from_srapi, libg_image_present, libg_abs_i32
+$space %internal libg_clamp_i32
 $space %internal libg_rect_contains, libg_blend, libg_put_pixel
 $space %internal libg_update_mouse, libg_poll_input, libg_draw_text_cell
 $space %internal libg_circle_points, libg_draw_centered_text
 $space %internal libg_finish_button_state, libg_apply_text_input
 $space %export libgDefaultStyle, libgCreate, libgDestroy
-$space %export libgBegin, libgPresent, libgWidth, libgHeight
+$space %export libgCreateForTarget
+$space %export libgBegin, libgPresent, libgHandleInput, libgWidth, libgHeight
 $space %export libgSetStyle, libgGetStyle, libgMousePosition
 $space %export libgFillRect, libgStrokeRect, libgLine
 $space %export libgFillCircle, libgStrokeCircle
@@ -63,6 +68,8 @@ $space %export libgPanel, libgButton, libgTextField, libgSlider
 
 struct libg_context {
 	srapi_device_t		*device;
+	libg_present_fn		present;
+	void			*present_userdata;
 	srapi_surface_t		*surface;
 	srapi_cmd_buffer_t	*cmd;
 	libg_style_t		style;
@@ -86,6 +93,23 @@ struct libg_context {
 	uint32_t		backspace_count;
 	int			submit_pressed;
 };
+
+static int
+libg_image_present(void *userdata, const struct srapi_region *region)
+{
+	return (srapiImageDamage((srapi_image_t *)userdata, region));
+}
+
+static void
+libg_frame_reset(libg_context_t *ctx)
+{
+	ctx->hot_id = 0;
+	ctx->mouse_pressed = 0;
+	ctx->mouse_released = 0;
+	ctx->text_count = 0;
+	ctx->backspace_count = 0;
+	ctx->submit_pressed = 0;
+}
 
 static int
 libg_from_srapi(int ret)
@@ -183,6 +207,17 @@ libg_update_mouse(libg_context_t *ctx, const struct srapi_input_event *event)
 		return (LIBG_ERR_INVAL);
 	}
 
+	if ((event->flags & SRAPI_MOUSE_ABSOLUTE) != 0) {
+		ctx->mouse_x = libg_clamp_i32(event->x, 0,
+		    ctx->width > 0 ? (int32_t)ctx->width - 1 : 0);
+		ctx->mouse_y = libg_clamp_i32(event->y, 0,
+		    ctx->height > 0 ? (int32_t)ctx->height - 1 : 0);
+		ctx->raw_mouse_x = event->x;
+		ctx->raw_mouse_y = event->y;
+		ctx->have_raw_mouse = 0;
+		return (LIBG_OK);
+	}
+
 	if (ctx->have_raw_mouse) {
 		dx = event->x - ctx->raw_mouse_x;
 		dy = event->y - ctx->raw_mouse_y;
@@ -201,12 +236,53 @@ libg_update_mouse(libg_context_t *ctx, const struct srapi_input_event *event)
 	return (LIBG_OK);
 }
 
+int
+libgHandleInput(libg_context_t *ctx, const struct srapi_input_event *event)
+{
+	uint32_t old_buttons;
+	int ret;
+
+	if (ctx == NULL || event == NULL) {
+		return (LIBG_ERR_INVAL);
+	}
+	if (event->type == SRAPI_INPUT_MOUSE) {
+		old_buttons = ctx->mouse_buttons;
+		ret = libg_update_mouse(ctx, event);
+		if (ret != LIBG_OK) {
+			return (ret);
+		}
+		ctx->mouse_buttons = event->buttons;
+		if ((ctx->mouse_buttons & LIBG_MOUSE_LEFT) != 0 &&
+		    (old_buttons & LIBG_MOUSE_LEFT) == 0) {
+			ctx->mouse_pressed = 1;
+		}
+		if ((ctx->mouse_buttons & LIBG_MOUSE_LEFT) == 0 &&
+		    (old_buttons & LIBG_MOUSE_LEFT) != 0) {
+			ctx->mouse_released = 1;
+		}
+	} else if (event->type == SRAPI_INPUT_KEYBOARD &&
+	    (event->flags & (SRAPI_KEY_PRESS | SRAPI_KEY_REPEAT)) != 0) {
+		if (event->key == LIBG_KEY_ENTER || event->ch == '\n' ||
+		    event->ch == '\r') {
+			ctx->submit_pressed = 1;
+		} else if (event->key == LIBG_KEY_BACKSPACE ||
+		    event->ch == '\b') {
+			ctx->backspace_count++;
+		} else if (event->ch >= 32 && event->ch < 127 &&
+		    ctx->text_count < LIBG_TEXT_INPUT_MAX - 1) {
+			ctx->text_input[ctx->text_count] = (char)event->ch;
+			ctx->text_count++;
+			ctx->text_input[ctx->text_count] = '\0';
+		}
+	}
+	return (LIBG_OK);
+}
+
 static int
 libg_poll_input(libg_context_t *ctx)
 {
 	struct srapi_input_event	events[LIBG_INPUT_BATCH];
-	struct srapi_input_event	*event;
-	uint32_t		i, old_buttons;
+	uint32_t		i;
 	int			ret;
 
 	ctx->mouse_pressed = 0;
@@ -221,34 +297,7 @@ libg_poll_input(libg_context_t *ctx)
 	}
 
 	for (i = 0; i < (uint32_t)ret; i++) {
-		event = &events[i];
-		if (event->type == SRAPI_INPUT_MOUSE) {
-			old_buttons = ctx->mouse_buttons;
-			(void)libg_update_mouse(ctx, event);
-			ctx->mouse_buttons = event->buttons;
-			if ((ctx->mouse_buttons & LIBG_MOUSE_LEFT) != 0 &&
-			    (old_buttons & LIBG_MOUSE_LEFT) == 0) {
-				ctx->mouse_pressed = 1;
-			}
-			if ((ctx->mouse_buttons & LIBG_MOUSE_LEFT) == 0 &&
-			    (old_buttons & LIBG_MOUSE_LEFT) != 0) {
-				ctx->mouse_released = 1;
-			}
-		} else if (event->type == SRAPI_INPUT_KEYBOARD &&
-		    (event->flags & (SRAPI_KEY_PRESS | SRAPI_KEY_REPEAT))) {
-			if (event->key == LIBG_KEY_ENTER ||
-			    event->ch == '\n' || event->ch == '\r') {
-				ctx->submit_pressed = 1;
-			} else if (event->key == LIBG_KEY_BACKSPACE ||
-			    event->ch == '\b') {
-				ctx->backspace_count++;
-			} else if (event->ch >= 32 && event->ch < 127 &&
-			    ctx->text_count < LIBG_TEXT_INPUT_MAX - 1) {
-				ctx->text_input[ctx->text_count] =
-				    (char)event->ch;
-				ctx->text_count++;
-			}
-		}
+		(void)libgHandleInput(ctx, &events[i]);
 	}
 	ctx->text_input[ctx->text_count] = '\0';
 	return (LIBG_OK);
@@ -443,6 +492,53 @@ libgCreate(srapi_device_t *device, const libg_style_t *style,
 	return (LIBG_OK);
 }
 
+int
+libgCreateForImage(srapi_image_t *image, const libg_style_t *style,
+    libg_context_t **out)
+{
+	if (image == NULL || out == NULL || srapiImagePixels(image) == NULL ||
+	    srapiImageWidth(image) == 0 || srapiImageHeight(image) == 0 ||
+	    srapiImagePitch(image) < srapiImageWidth(image) * sizeof(uint32_t) ||
+	    srapiImageBpp(image) != 32) {
+		return (LIBG_ERR_INVAL);
+	}
+	return (libgCreateForTarget(srapiImagePixels(image),
+	    srapiImageWidth(image), srapiImageHeight(image),
+	    srapiImagePitch(image), libg_image_present, image, style, out));
+}
+
+int
+libgCreateForTarget(void *pixels, uint32_t width, uint32_t height,
+    uint32_t pitch, libg_present_fn present, void *userdata,
+    const libg_style_t *style, libg_context_t **out)
+{
+	libg_context_t *ctx;
+
+	if (pixels == NULL || width == 0 || height == 0 ||
+	    pitch < width * sizeof(uint32_t) || present == NULL || out == NULL) {
+		return (LIBG_ERR_INVAL);
+	}
+	*out = NULL;
+	ctx = calloc(1, sizeof(*ctx));
+	if (ctx == NULL) {
+		return (LIBG_ERR_NOMEM);
+	}
+	ctx->pixels = pixels;
+	ctx->width = width;
+	ctx->height = height;
+	ctx->pitch = pitch;
+	ctx->present = present;
+	ctx->present_userdata = userdata;
+	ctx->mouse_x = (int32_t)(width / 2);
+	ctx->mouse_y = (int32_t)(height / 2);
+	libgDefaultStyle(&ctx->style);
+	if (style != NULL) {
+		ctx->style = *style;
+	}
+	*out = ctx;
+	return (LIBG_OK);
+}
+
 void
 libgDestroy(libg_context_t *ctx)
 {
@@ -470,11 +566,11 @@ libgBegin(libg_context_t *ctx, uint32_t clear_color)
 	if (!ctx) {
 		return (LIBG_ERR_INVAL);
 	}
+	libg_frame_reset(ctx);
 	ret = libg_poll_input(ctx);
 	if (ret != LIBG_OK) {
 		return (ret);
 	}
-	ctx->hot_id = 0;
 
 	rect.x = 0;
 	rect.y = 0;
@@ -485,11 +581,28 @@ libgBegin(libg_context_t *ctx, uint32_t clear_color)
 }
 
 int
+libgBeginOverlay(libg_context_t *ctx)
+{
+	if (ctx == NULL || ctx->pixels == NULL) {
+		return (LIBG_ERR_INVAL);
+	}
+	libg_frame_reset(ctx);
+	return (LIBG_OK);
+}
+
+int
 libgPresent(libg_context_t *ctx)
 {
 	int	ret;
 
-	if (!ctx || !ctx->cmd || !ctx->surface) {
+	if (ctx == NULL) {
+		return (LIBG_ERR_INVAL);
+	}
+	if (ctx->present != NULL) {
+		return (libg_from_srapi(ctx->present(ctx->present_userdata,
+		    NULL)));
+	}
+	if (ctx->cmd == NULL || ctx->surface == NULL) {
 		return (LIBG_ERR_INVAL);
 	}
 	ret = srapiCmdBegin(ctx->cmd);

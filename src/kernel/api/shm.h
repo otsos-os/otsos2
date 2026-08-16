@@ -32,6 +32,7 @@ $define %type api_shmmap_args as struct with id, addr, size, prot, flags
 $define %type api_shminfo_args as struct with id, key, size, refs, mode
 
 $define %func shm_get as function with args int
+$define %func shm_init as procedure with args void
 $define %func shm_put as procedure with args shm_segment_t *
 $define %func shm_get_or_create as function with args u64, u64, int, int *
 $define %func shm_remove as function with args int
@@ -47,7 +48,7 @@ $define %func api_shm_ctl as function with args int, int, void *
 
 /* !SPACE!
 
-$space %export shm_get, shm_put, shm_get_or_create, shm_remove
+$space %export shm_init, shm_get, shm_put, shm_get_or_create, shm_remove
 $space %export shm_attach, shm_detach
 $space %export shm_map, shm_info
 $space %export api_shm_get, api_shm_map, api_shm_ctl
@@ -60,7 +61,7 @@ $space %export api_shm_get, api_shm_map, api_shm_ctl
 #include <mlibc/mlibc.h>
 #include <mm/vm/vm_object.h>
 
-#define SHM_MAX_SEGMENTS	64
+#define SHM_MAX_SEGMENTS	256
 #define SHM_PRIVATE		0
 #define SHM_CREAT		01000
 #define SHM_EXCL		02000
@@ -73,7 +74,7 @@ typedef struct shm_segment {
 	int		removed;
 	int		id;
 	u64		entity;
-	int		entity_handle;
+	int		entity_owner_ref;
 	u32		mode;
 	u32		refs;
 	u32		attaches;
@@ -106,6 +107,7 @@ struct api_shminfo_args {
 	u64	size;
 };
 
+void		shm_init(void);
 shm_segment_t	*shm_get(int id);
 void		shm_put(shm_segment_t *seg);
 shm_segment_t	*shm_get_or_create(u64 key, u64 size, int flags,

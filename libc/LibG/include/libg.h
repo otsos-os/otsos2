@@ -3,12 +3,17 @@
 $define %type libg_context as opaque LibG UI context
 $define %type libg_rect as integer rectangle
 $define %type libg_style as immediate UI color palette
+$define %type libg_present_fn as external target present callback
 $define %type uint32_t as 32 bit unsigned
 $define %type int32_t as 32 bit signed
 $define %func libgDefaultStyle as procedure with args libg_style *
 $define %func libgCreate as function with args srapi_device_t *, style, out
+$define %func libgCreateForImage as function with args srapi_image_t *, style, out
+$define %func libgCreateForTarget as function with args pixels, width, height, pitch, callback, userdata, style, out
 $define %func libgDestroy as procedure with args context
 $define %func libgBegin as function with args context, color
+$define %func libgBeginOverlay as function with args context
+$define %func libgHandleInput as procedure with args context, input event
 $define %func libgPresent as function with args context
 $define %func libgWidth as function with args context
 $define %func libgHeight as function with args context
@@ -32,7 +37,9 @@ $define %func libgSlider as function with args context, id, rect, value
 
 $space %export libg_context_t, libg_rect_t, libg_style_t
 $space %export libgDefaultStyle, libgCreate, libgDestroy
-$space %export libgBegin, libgPresent, libgWidth, libgHeight
+$space %export libgCreateForImage, libgCreateForTarget
+$space %export libgBegin, libgBeginOverlay, libgHandleInput
+$space %export libgPresent, libgWidth, libgHeight
 $space %export libgSetStyle, libgGetStyle, libgMousePosition
 $space %export libgFillRect, libgStrokeRect, libgLine
 $space %export libgFillCircle, libgStrokeCircle
@@ -65,7 +72,9 @@ $space %export libgPanel, libgButton, libgTextField, libgSlider
 #define LIBG_WIDGET_CHANGED	0x00000002U
 #define LIBG_WIDGET_SUBMIT	0x00000004U
 
-typedef struct libg_context	libg_context_t;
+typedef struct libg_context libg_context_t;
+typedef int (*libg_present_fn)(void *userdata,
+    const struct srapi_region *region);
 
 typedef struct libg_rect {
 	int32_t	x;
@@ -93,9 +102,17 @@ typedef struct libg_style {
 void	libgDefaultStyle(libg_style_t *out);
 int	libgCreate(srapi_device_t *device, const libg_style_t *style,
 	    libg_context_t **out);
+int	libgCreateForImage(srapi_image_t *image, const libg_style_t *style,
+    libg_context_t **out);
+int	libgCreateForTarget(void *pixels, uint32_t width, uint32_t height,
+    uint32_t pitch, libg_present_fn present, void *userdata,
+    const libg_style_t *style, libg_context_t **out);
 void	libgDestroy(libg_context_t *ctx);
 
 int	libgBegin(libg_context_t *ctx, uint32_t clear_color);
+int	libgBeginOverlay(libg_context_t *ctx);
+int	libgHandleInput(libg_context_t *ctx,
+    const struct srapi_input_event *event);
 int	libgPresent(libg_context_t *ctx);
 uint32_t	libgWidth(const libg_context_t *ctx);
 uint32_t	libgHeight(const libg_context_t *ctx);

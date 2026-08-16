@@ -128,9 +128,15 @@ Monolithic kernel with the following rough layers:
 - `console/` — kernel terminal, pty, and console rendering.
 - `event/` — kqueue-style event system (read, write, timer, proc, signal, user,
   keyboard, mouse, and native IPC filters).
+  Positive `kevent` timeouts arm the current thread's `sleep_target_ticks`;
+  `time_tick()` wakes the waiter at its deadline.  A timed wait must never call
+  `proc_sleep()` without arming and later clearing that deadline.
 - `ipc/` — named native IPC services and connected sessions with atomic
   messages, credentials, correlation IDs, bounded queues, backpressure, timed
-  calls, handle lifecycle integration, and `EVFILT_IPC` readiness.
+  calls, handle lifecycle integration, and `EVFILT_IPC` readiness. Messages
+  may transfer up to `IPC_MAX_HANDLES` entity capabilities; queued messages
+  retain their entities, and receivers get process-local handles preserving
+  the sender's access mask.
 - `trace/` — kernel observability core: DTrace-like providers/probes, safe
   per-session programs with predicates/actions, per-session per-CPU buffers,
   kernel aggregations, PMU samples from `drivers/pmu`, and syscall/IRQ/
@@ -237,6 +243,11 @@ Monolithic kernel with the following rough layers:
   `termRestoreMode()`.  Interactive native programs such as SSH should save the
   current `struct api_term_mode`, enter raw mode for byte-granular terminal IO,
   and restore the saved mode before exit.
+- Native shared memory uses process-local entity handles. `shmGet()` creates or
+  opens a segment, `shmMap()` maps it, `shmCtl()` provides `STAT`/`RMID`, and
+  `shmClose()` releases the handle. SHM handles can be transferred through
+  native IPC capability slots; raw SysV SHM ids remain internal to the POSIX
+  personality.
 - `stdio` is buffered
 - Builds `lib/crt0.o` and `lib/libc.a` for freestanding userspace binaries.
 - Keep POSIX-only work on musl / personality layer; do not blur the two.
@@ -451,6 +462,11 @@ User need to test, dont run test manually, ask user.
   accepts `auto`, `ps2`, or `usb`. The input consumer switches only registered
   drivers; hardware sources continue to be drained while inactive without
   publishing their events. Refresh it with `API_REG_CONSUMER_INPUT`.
+- Relative mouse hardware publishes `dx`/`dy`; display-space pointer position
+  belongs to the compositor, which integrates and clamps those deltas to its
+  output.  Sprot pointer coordinates are absolute within the target surface
+  and DE/LibG marks them with `SRAPI_MOUSE_ABSOLUTE`.  Do not make the kernel
+  input layer depend on DRM dimensions.
 - Network stack policy lives under `NETWORK.Stack`: `Enabled`, `PollHz`
   (1-1000),
   and `DefaultTtl` (1-255). Interface keys may set `Mtu`; Ethernet interfaces
