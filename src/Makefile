@@ -1745,7 +1745,7 @@ virtio_tcp_nodis: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_NODISPLAY_OPTS) -device virtio-gpu-pci -netdev user,id=net0,hostfwd=tcp::10007-:7 -device virtio-net-pci,netdev=net0,disable-legacy=on -device i6300esb -watchdog-action reset $(QEMU_MEM_OPTS)
 debug: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  DEBUG   QEMU"
-	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) -d int,cpu_reset > debug.txt 2>&1 -no-reboot $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset $(QEMU_MEM_OPTS)
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) -d int,cpu_reset > debug.txt 2>&1 -no-reboot $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset $(QEMU_MEM_OPTS) --smp 2
 
 clean:
 	@echo "  CLEAN"

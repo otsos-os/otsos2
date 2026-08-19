@@ -61,6 +61,7 @@ $define %func smp_send_init as procedure with args u8
 $define %func smp_send_sipi as procedure with args u8, u8
 $define %func smp_wait_us as procedure with args u32
 $define %func smp_trampoline_setup as procedure with args u64, u64, u8
+$define %func smp_ap_ready_clear as procedure with args void
 
 */
 
@@ -69,7 +70,7 @@ $define %func smp_trampoline_setup as procedure with args u64, u64, u8
 $space %internal smp_init_bsp, smp_start_ap, smp_cpu_index_from_lapic
 $space %internal smp_ap_count_cb, smp_ap_list_cb
 $space %internal smp_send_init, smp_send_sipi, smp_wait_us
-$space %internal smp_trampoline_setup
+$space %internal smp_trampoline_setup, smp_ap_ready_clear
 $space %export smp_init, smp_init_single_cpu, smp_lock, smp_unlock, smp_lock_held
 $space %export smp_cpu_id, smp_cpu_index, smp_cpu_count_var
 $space %export smp_tss_current, smp_tss_register
@@ -99,11 +100,12 @@ struct smp_cpu	smp_cpu_map[SMP_MAX_CPUS];
 tss_t		*smp_tss_by_lapic[256];
 u8		smp_bsp_lapic_id;
 u8		smp_ap_cpu_index;
-static u8	smp_ap_ready[SMP_MAX_CPUS];
+static volatile u8	smp_ap_ready[SMP_MAX_CPUS];
 static int	smp_cpu_count_var;
 static int	smp_initialized;
 extern char	ap_trampoline_start[];
 extern char	ap_trampoline_end[];
+extern void	pit_delay_us(u32 us);
 #define	TRAMPOLINE_BASE	0x8000
 #define	TRAMPOLINE_VADDR	TRAMPOLINE_BASE
 #define	OFF_CR3		0x100
@@ -119,6 +121,16 @@ static inline u8
 lapic_id_from_entry(acpi_madt_local_apic_t *lapic)
 {
 	return (lapic->apic_id);
+}
+
+static void
+smp_ap_ready_clear(void)
+{
+	int	i;
+
+	for (i = 0; i < SMP_MAX_CPUS; i++) {
+		smp_ap_ready[i] = 0;
+	}
 }
 
 static int
@@ -194,7 +206,7 @@ smp_init_single_cpu(void)
 	smp_bkl.owner = 0;
 	memset(smp_cpu_map, 0, sizeof(smp_cpu_map));
 	memset(smp_tss_by_lapic, 0, sizeof(smp_tss_by_lapic));
-	memset(smp_ap_ready, 0, sizeof(smp_ap_ready));
+	smp_ap_ready_clear();
 	smp_bsp_lapic_id = 0;
 	smp_ap_cpu_index = 0;
 	smp_cpu_count_var = 1;
@@ -293,16 +305,7 @@ smp_lock_held(void)
 static void
 smp_wait_us(u32 us)
 {
-	u64	target;
-	u64	now;
-	now = timer_get_ticks();
-	target = now + (u64)us * timer_get_frequency() / 1000000ULL;
-	if (target == now) {
-		target++;
-	}
-	while (timer_get_ticks() < target) {
-		__asm__ volatile("pause");
-	}
+	pit_delay_us(us);
 }
 
 static void
@@ -468,7 +471,7 @@ smp_init_bsp(void)
 	smp_bsp_lapic_id = bsp_id;
 	memset(smp_cpu_map, 0, sizeof(smp_cpu_map));
 	memset(smp_tss_by_lapic, 0, sizeof(smp_tss_by_lapic));
-	memset(smp_ap_ready, 0, sizeof(smp_ap_ready));
+	smp_ap_ready_clear();
 	smp_cpu_count_var = 1;
 	smp_ap_cpu_index = 0;
 

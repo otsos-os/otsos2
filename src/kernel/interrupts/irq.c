@@ -10,6 +10,8 @@ $define %func irq_desc_alloc as function with args irq_source_t
 $define %func irq_request as function with args irq_source_t, irq_handler_t *, void *, const char *, void **
 $define %func irq_release as function with args void *
 $define %func irq_dispatch as function with args u32, registers_t *
+$define %func irq_eoi_source as procedure with args irq_source_t *
+$define %func irq_eoi_orphan as procedure with args u32
 
 */
 
@@ -17,6 +19,7 @@ $define %func irq_dispatch as function with args u32, registers_t *
 
 $space %internal irq_vector_alloc, irq_vector_free, irq_desc_find
 $space %internal irq_desc_alloc, irq_route, irq_mask, irq_unmask, irq_eoi
+$space %internal irq_eoi_source, irq_eoi_orphan
 $space %export irq_init, irq_source_isa, irq_source_gsi
 $space %export irq_source_local, irq_request, irq_release
 $space %export irq_dispatch, irq_ioapic_online, irq_stats_dump
@@ -34,6 +37,8 @@ $space %export irq_dispatch, irq_ioapic_online, irq_stats_dump
 #define	IRQ_MAX_ACTIONS		128
 #define	IRQ_STORM_THRESHOLD	100000
 #define	IRQ_UNHANDLED_LOG_INTERVAL	1024
+#define	IRQ_PIC_VECTOR_BASE	32
+#define	IRQ_PIC_VECTOR_COUNT	16
 
 extern void	pic_mask_irq(unsigned char irq);
 extern int	pic_is_spurious(unsigned char irq);
@@ -181,13 +186,35 @@ irq_unmask(irq_desc_t *desc)
 }
 
 static void
+irq_eoi_source(irq_source_t *source)
+{
+	if (source->domain == IRQ_DOMAIN_IOAPIC ||
+	    source->domain == IRQ_DOMAIN_LOCAL) {
+		lapic_eoi();
+	} else if (source->domain == IRQ_DOMAIN_PIC) {
+		pic_send_eoi((u8)source->hwirq);
+	}
+}
+
+static void
 irq_eoi(irq_desc_t *desc)
 {
-	if (desc->source.domain == IRQ_DOMAIN_IOAPIC ||
-	    desc->source.domain == IRQ_DOMAIN_LOCAL) {
+	irq_eoi_source(&desc->source);
+}
+
+
+static void
+irq_eoi_orphan(u32 vector)
+{
+	if (irq_vector_source_valid[vector]) {
+		irq_eoi_source(&irq_vector_sources[vector]);
+		return;
+	}
+	if (lapic_is_enabled()) {
 		lapic_eoi();
-	} else if (desc->source.domain == IRQ_DOMAIN_PIC) {
-		pic_send_eoi((u8)desc->source.hwirq);
+	} else if (vector >= IRQ_PIC_VECTOR_BASE &&
+	    vector < IRQ_PIC_VECTOR_BASE + IRQ_PIC_VECTOR_COUNT) {
+		pic_send_eoi((u8)(vector - IRQ_PIC_VECTOR_BASE));
 	}
 }
 
@@ -380,16 +407,8 @@ irq_dispatch(u32 vector, registers_t *regs)
 	}
 	desc = irq_vectors[vector];
 	if (desc == NULL) {
-		if (vector == IRQ_VECTOR_SPURIOUS ||
-		    !irq_vector_source_valid[vector]) {
-			return (0);
-		}
-		if (irq_vector_sources[vector].domain == IRQ_DOMAIN_IOAPIC ||
-		    irq_vector_sources[vector].domain == IRQ_DOMAIN_LOCAL) {
-			lapic_eoi();
-		} else if (irq_vector_sources[vector].domain == IRQ_DOMAIN_PIC) {
-			pic_send_eoi((unsigned char)
-			    irq_vector_sources[vector].hwirq);
+		if (vector != IRQ_VECTOR_SPURIOUS) {
+			irq_eoi_orphan(vector);
 		}
 		return (0);
 	}

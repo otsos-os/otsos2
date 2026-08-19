@@ -53,7 +53,7 @@ $space %export timer_is_initialized, timer_get_frequency
 #include <mlibc/mlibc.h>
 
 static struct eventtimer	*timer_et;
-static u64			timer_ticks;
+static volatile u64		timer_ticks;
 static u32			timer_frequency;
 static int			timer_initialized;
 

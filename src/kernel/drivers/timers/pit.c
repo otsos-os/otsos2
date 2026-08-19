@@ -33,6 +33,8 @@ $define %type int as 32 bit signed
 
 $define %func pit_init as procedure with args void
 $define %func pit_irq_disable as procedure with args void
+$define %func pit_ch2_wait as procedure with args u16
+$define %func pit_delay_us as procedure with args u32
 
 $define %const PIT_FREQUENCY as 1193182
 $define %const PIT_COMMAND as 0x43
@@ -43,7 +45,8 @@ $define %const PIT_MAX_DIVISOR as 65535
 
 /* !SPACE!
 
-$space %export pit_init, pit_irq_disable
+$space %internal pit_ch2_wait
+$space %export pit_init, pit_irq_disable, pit_delay_us
 
 */
 
@@ -56,7 +59,14 @@ $space %export pit_init, pit_irq_disable
 #define PIT_FREQUENCY	1193182ULL
 #define PIT_COMMAND	0x43
 #define PIT_CHANNEL0	0x40
+#define PIT_CHANNEL2	0x42
 #define PIT_MAX_DIVISOR	65535
+#define PIT_NMI_CTRL	0x61
+#define PIT_NMI_GATE2	0x01
+#define PIT_NMI_SPKR2	0x02
+#define PIT_NMI_OUT2	0x20
+#define PIT_CH2_MODE0	0xB0
+#define PIT_CH2_MAX_US	50000U
 
 static struct eventtimer	pit_et;
 static void			*pit_irq_cookie;
@@ -69,6 +79,54 @@ pit_irq_disable(void)
 	if (pit_irq_cookie != NULL) {
 		irq_release(pit_irq_cookie);
 		pit_irq_cookie = NULL;
+	}
+}
+
+
+static void
+pit_ch2_wait(u16 count)
+{
+	u8	ctrl;
+	u32	guard;
+
+	ctrl = inb(PIT_NMI_CTRL);
+	outb(PIT_NMI_CTRL, (u8)((ctrl & ~(PIT_NMI_GATE2 |
+	    PIT_NMI_SPKR2))));
+
+	outb(PIT_COMMAND, PIT_CH2_MODE0);
+	outb(PIT_CHANNEL2, (u8)(count & 0xFF));
+	outb(PIT_CHANNEL2, (u8)((count >> 8) & 0xFF));
+
+	outb(PIT_NMI_CTRL, (u8)(((ctrl & ~PIT_NMI_SPKR2) |
+	    PIT_NMI_GATE2)));
+
+	guard = (u32)count * 2U + 4096U;
+	while ((inb(PIT_NMI_CTRL) & PIT_NMI_OUT2) == 0) {
+		if (guard-- == 0) {
+			break;
+		}
+	}
+
+	outb(PIT_NMI_CTRL, (u8)(ctrl & ~(PIT_NMI_GATE2 |
+	    PIT_NMI_SPKR2)));
+}
+
+void
+pit_delay_us(u32 us)
+{
+	u32	chunk;
+	u64	count;
+
+	while (us > 0) {
+		chunk = (us > PIT_CH2_MAX_US) ? PIT_CH2_MAX_US : us;
+		count = (PIT_FREQUENCY * (u64)chunk + 999999ULL) /
+		    1000000ULL;
+		if (count < 1)
+			count = 1;
+		else if (count > PIT_MAX_DIVISOR)
+			count = PIT_MAX_DIVISOR;
+		pit_ch2_wait((u16)count);
+		us -= chunk;
 	}
 }
 

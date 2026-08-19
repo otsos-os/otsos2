@@ -33,7 +33,7 @@ $define %type struct eventtimer as event timer descriptor
 
 $define %func apic_timer_start as static function with args struct eventtimer *, u64, u64
 $define %func apic_timer_stop as static function with args struct eventtimer *
-$define %func apic_timer_init as procedure with args void
+$define %func apic_timer_init as function with args void
 
 */
 
@@ -96,7 +96,7 @@ apic_timer_stop(struct eventtimer *et)
 	return (0);
 }
 
-void
+int
 apic_timer_init(void)
 {
 	int	enabled, quality;
@@ -107,20 +107,20 @@ apic_timer_init(void)
 	enabled = cm_get_bool_default("SYSTEM", "Timer",
 	    "ApicEnabled", 1);
 	if (!enabled)
-		return;
+		return (-1);
 	memset(default_timer, 0, sizeof(default_timer));
 	cm_get_string_default("SYSTEM", "Timer", "DefaultTimer",
 	    default_timer, sizeof(default_timer), "apic");
 	if (strcmp(default_timer, "apic") != 0)
-		return;
+		return (-1);
 	if (!lapic_is_enabled())
-		return;
+		return (-1);
 
 	apic_freq = lapic_timer_calibrate();
 	if (apic_freq == 0) {
 		drivers_log("[APIC] calibration fail "
 		    "let skip it?\n");
-		return;
+		return (-1);
 	}
 
 	quality = (int)cm_get_u32_default("SYSTEM", "Timer",
@@ -148,6 +148,11 @@ apic_timer_init(void)
 	drivers_log("[APIC] switching to lapic timer %u with hz "
 	    " %d\n", timer_hz, quality);
 	timer_reinit(timer_hz);
+	if (!timer_is_initialized()) {
+		drivers_log("[APIC] lapic timer failed to start\n");
+		return (-1);
+	}
+	return (0);
 }
 
 static void
@@ -174,12 +179,19 @@ apic_timer_attach(device_t dev)
 {
 	irq_source_t	source;
 
-	apic_timer_init();
+	(void)dev;
 	source = irq_source_local(APIC_TIMER_VECTOR);
 	if (irq_request(source, irq_system_tick, NULL, "lapic-timer",
 	    &apic_irq_cookie) != 0) {
 		return (-1);
 	}
+
+	if (apic_timer_init() != 0) {
+		irq_release(apic_irq_cookie);
+		apic_irq_cookie = NULL;
+		return (0);
+	}
+
 	pit_irq_disable();
 	return (0);
 }
