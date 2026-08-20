@@ -81,6 +81,7 @@ $space %export xhci_pci_register
 #define	XHCI_USBCMD_HCRST	0x02
 #define	XHCI_USBCMD_INTE	0x04
 #define	XHCI_USBSTS_HCH		0x01
+#define	XHCI_USBSTS_EINT	0x08
 #define	XHCI_USBSTS_CNR		0x800
 #define	XHCI_IMAN_IP		0x01
 #define	XHCI_IMAN_IE		0x02
@@ -1152,6 +1153,7 @@ static int
 xhci_intr(void *arg)
 {
 	xhci_state_t	*state;
+	volatile u32	*status;
 	volatile u32	*iman;
 	u32		value;
 
@@ -1159,12 +1161,16 @@ xhci_intr(void *arg)
 	if (state == NULL) {
 		return (-1);
 	}
-	iman = (volatile u32 *)(state->runtime + XHCI_IMAN);
-	value = *iman;
-	if ((value & XHCI_IMAN_IP) == 0) {
+	status = (volatile u32 *)(state->op + XHCI_USBSTS);
+	if ((*status & XHCI_USBSTS_EINT) == 0) {
 		return (-1);
 	}
-	*iman = value | XHCI_IMAN_IP | XHCI_IMAN_IE;
+	*status = XHCI_USBSTS_EINT;
+	iman = (volatile u32 *)(state->runtime + XHCI_IMAN);
+	value = *iman;
+	if ((value & XHCI_IMAN_IP) != 0) {
+		*iman = value | XHCI_IMAN_IP | XHCI_IMAN_IE;
+	}
 	xhci_poll(state);
 	return (0);
 }

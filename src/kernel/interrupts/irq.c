@@ -81,7 +81,8 @@ irq_vector_alloc(void)
 {
 	u32	vector;
 
-	for (vector = IRQ_VECTOR_FIRST; vector <= IRQ_VECTOR_LAST; vector++) {
+	for (vector = IRQ_VECTOR_DYNAMIC_FIRST; vector <= IRQ_VECTOR_LAST;
+	    vector++) {
 		if (!irq_vector_used[vector]) {
 			irq_vector_used[vector] = 1;
 			return ((int)vector);
@@ -387,6 +388,7 @@ irq_release(void *cookie)
 	if (desc->action_count == 0) {
 		irq_mask(desc);
 		irq_vectors[desc->source.vector] = NULL;
+		irq_vector_source_valid[desc->source.vector] = 0;
 		irq_vector_free(desc->source.vector);
 		memset(desc, 0, sizeof(*desc));
 	}

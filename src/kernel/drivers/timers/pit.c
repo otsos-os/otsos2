@@ -35,6 +35,7 @@ $define %func pit_init as procedure with args void
 $define %func pit_irq_disable as procedure with args void
 $define %func pit_ch2_wait as procedure with args u16
 $define %func pit_delay_us as procedure with args u32
+$define %func pit_stop as function with args struct eventtimer *
 
 $define %const PIT_FREQUENCY as 1193182
 $define %const PIT_COMMAND as 0x43
@@ -45,7 +46,7 @@ $define %const PIT_MAX_DIVISOR as 65535
 
 /* !SPACE!
 
-$space %internal pit_ch2_wait
+$space %internal pit_ch2_wait, pit_stop
 $space %export pit_init, pit_irq_disable, pit_delay_us
 
 */
@@ -72,6 +73,8 @@ static struct eventtimer	pit_et;
 static void			*pit_irq_cookie;
 
 extern irq_result_t irq_system_tick(registers_t *regs, void *arg);
+extern void	pic_mask_irq(unsigned char irq);
+static int	pit_stop(struct eventtimer *et);
 
 void
 pit_irq_disable(void)
@@ -80,6 +83,8 @@ pit_irq_disable(void)
 		irq_release(pit_irq_cookie);
 		pit_irq_cookie = NULL;
 	}
+	(void)pit_stop(&pit_et);
+	pic_mask_irq(0);
 }
 
 

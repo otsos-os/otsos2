@@ -35,6 +35,7 @@ $space %export irq_vector_info
 
 #define	IRQ_VECTOR_FIRST	32
 #define	IRQ_VECTOR_LAST		254
+#define	IRQ_VECTOR_DYNAMIC_FIRST	64
 #define	IRQ_VECTOR_SYSCALL	128
 #define	IRQ_VECTOR_LAPIC_TIMER	48
 #define	IRQ_VECTOR_SPURIOUS	255
