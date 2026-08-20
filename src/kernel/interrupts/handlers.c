@@ -108,6 +108,10 @@ irq_system_tick(registers_t *regs, void *arg)
 }
 
 void irq_handler(registers_t *regs) {
+  if (regs->int_no == IRQ_VECTOR_YIELD) {
+    scheduler_yield(regs);
+    return;
+  }
   trace_irq_enter(regs);
   if (regs->int_no != IRQ_VECTOR_SPURIOUS)
     (void)irq_dispatch((u32)regs->int_no, regs);

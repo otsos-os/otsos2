@@ -56,10 +56,7 @@ $space %export api_input_read, api_input_poll, api_input_flush
 static void
 input_poll_hardware(void)
 {
-	keyboard_start_direct_input();
 	keyboard_poll();
-	keyboard_stop_direct_input();
-	keyboard_flush_chars();
 }
 
 static void

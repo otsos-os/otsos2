@@ -12,6 +12,7 @@ $define %func irq_source_local as function with args u32
 $define %func irq_request as function with args irq_source_t, irq_handler_t *, void *, const char *, void **
 $define %func irq_release as function with args void *
 $define %func irq_dispatch as function with args u32, registers_t *
+$define %func irq_vector_is_software as function with args u32
 $define %func irq_ioapic_online as function with args u32, u32
 $define %func irq_stats_dump as procedure with args void
 $define %func irq_vector_info as function with args u32, u32 *, u32 *
@@ -23,7 +24,7 @@ $define %func irq_vector_info as function with args u32, u32 *, u32 *
 $space %export irq_init, irq_source_isa, irq_source_gsi
 $space %export irq_source_local, irq_request, irq_release
 $space %export irq_dispatch, irq_ioapic_online, irq_stats_dump
-$space %export irq_vector_info
+$space %export irq_vector_info, irq_vector_is_software
 
 */
 
@@ -38,6 +39,7 @@ $space %export irq_vector_info
 #define	IRQ_VECTOR_DYNAMIC_FIRST	64
 #define	IRQ_VECTOR_SYSCALL	128
 #define	IRQ_VECTOR_LAPIC_TIMER	48
+#define	IRQ_VECTOR_YIELD	49
 #define	IRQ_VECTOR_SPURIOUS	255
 
 #define	IRQF_SHARED		0x0001
@@ -74,6 +76,7 @@ int		irq_request(irq_source_t source, irq_handler_t *handler,
 		    void *arg, const char *name, void **cookiep);
 int		irq_release(void *cookie);
 int		irq_dispatch(u32 vector, registers_t *regs);
+int		irq_vector_is_software(u32 vector);
 int		irq_ioapic_online(u32 gsi_base, u32 count);
 void		irq_stats_dump(void);
 int		irq_vector_info(u32 vector, u32 *domain, u32 *hwirq);

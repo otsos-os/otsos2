@@ -39,7 +39,9 @@ $define %func pick_any_runnable_thread as function with args thread_t *
 $define %func scheduler_retire_zombies as procedure with args thread_t *
 $define %func scheduler_reap_orphans as procedure with args thread_t *
 $define %func scheduler_cm_update as function with args u32
+$define %func scheduler_switch as procedure with args registers_t *, int
 $define %func scheduler_tick as procedure with args registers_t *
+$define %func scheduler_yield as procedure with args registers_t *
 
 */
 
@@ -48,7 +50,8 @@ $define %func scheduler_tick as procedure with args registers_t *
 $space %internal scheduler_load_config
 $space %internal pick_next_thread, pick_any_runnable_thread
 $space %internal scheduler_retire_zombies, scheduler_reap_orphans
-$space %export scheduler_cm_update, scheduler_tick
+$space %internal scheduler_switch
+$space %export scheduler_cm_update, scheduler_tick, scheduler_yield
 
 */
 
@@ -330,36 +333,13 @@ scheduler_reap_orphans(thread_t *skip)
 	}
 }
 
-void
-scheduler_tick(registers_t *regs)
+static void
+scheduler_switch(registers_t *regs, int voluntary)
 {
-	static u32	last_magic = 0;
 	thread_t	*current, *next;
 	process_t	*cur_proc;
 	u32		trace_reason;
 	int		locked_here;
-
-	if (last_magic == 0) {
-		last_magic = g_chainfs.superblock.magic;
-	} else if (g_chainfs.superblock.magic != last_magic) {
-		process_t *proc = process_current();
-		printk("[CHAINFS] magic changed in tick "
-		    "(pid=%d) old=0x%x new=0x%x "
-		    "rip=%p cs=0x%x cr3=%p phys=%p init_phys=%p\n",
-		    proc ? proc->pid : -1, last_magic,
-		    g_chainfs.superblock.magic,
-		    (void *)(regs ? regs->rip : 0),
-		    regs ? regs->cs : 0,
-		    (void *)pmap_get_cr3(),
-		    (void *)pmap_extract((u64)&g_chainfs),
-		    (void *)g_chainfs_phys);
-		last_magic = g_chainfs.superblock.magic;
-	}
-
-	if (!regs) {
-		return;
-	}
-	trace_sched_tick(regs);
 
 	current = thread_current();
 	if (!current) {
@@ -388,7 +368,7 @@ scheduler_tick(registers_t *regs)
 
 	cur_proc = current->proc;
 
-	if ((regs->cs & 3) == 0 &&
+	if (!voluntary && (regs->cs & 3) == 0 &&
 	    current->state == PROC_STATE_RUNNING) {
 		return;
 	}
@@ -478,4 +458,43 @@ scheduler_tick(registers_t *regs)
 	}
 
 	thread_load_context(next, regs);
+}
+
+void
+scheduler_tick(registers_t *regs)
+{
+	static u32	last_magic = 0;
+	process_t	*proc;
+
+	if (last_magic == 0) {
+		last_magic = g_chainfs.superblock.magic;
+	} else if (g_chainfs.superblock.magic != last_magic) {
+		proc = process_current();
+		printk("[CHAINFS] magic changed in tick "
+		    "(pid=%d) old=0x%x new=0x%x "
+		    "rip=%p cs=0x%x cr3=%p phys=%p init_phys=%p\n",
+		    proc ? proc->pid : -1, last_magic,
+		    g_chainfs.superblock.magic,
+		    (void *)(regs ? regs->rip : 0),
+		    regs ? regs->cs : 0,
+		    (void *)pmap_get_cr3(),
+		    (void *)pmap_extract((u64)&g_chainfs),
+		    (void *)g_chainfs_phys);
+		last_magic = g_chainfs.superblock.magic;
+	}
+
+	if (!regs) {
+		return;
+	}
+	trace_sched_tick(regs);
+	scheduler_switch(regs, 0);
+}
+
+void
+scheduler_yield(registers_t *regs)
+{
+	if (!regs) {
+		return;
+	}
+	scheduler_switch(regs, 1);
 }

@@ -10,6 +10,7 @@ $define %func irq_desc_alloc as function with args irq_source_t
 $define %func irq_request as function with args irq_source_t, irq_handler_t *, void *, const char *, void **
 $define %func irq_release as function with args void *
 $define %func irq_dispatch as function with args u32, registers_t *
+$define %func irq_vector_is_software as function with args u32
 $define %func irq_eoi_source as procedure with args irq_source_t *
 $define %func irq_eoi_orphan as procedure with args u32
 
@@ -23,6 +24,7 @@ $space %internal irq_eoi_source, irq_eoi_orphan
 $space %export irq_init, irq_source_isa, irq_source_gsi
 $space %export irq_source_local, irq_request, irq_release
 $space %export irq_dispatch, irq_ioapic_online, irq_stats_dump
+$space %export irq_vector_is_software
 
 */
 
@@ -230,7 +232,13 @@ irq_init(void)
 	memset(irq_vector_source_valid, 0, sizeof(irq_vector_source_valid));
 	irq_vector_used[IRQ_VECTOR_SYSCALL] = 1;
 	irq_vector_used[IRQ_VECTOR_LAPIC_TIMER] = 1;
+	irq_vector_used[IRQ_VECTOR_YIELD] = 1;
 	irq_vector_used[IRQ_VECTOR_SPURIOUS] = 1;
+}
+int
+irq_vector_is_software(u32 vector)
+{
+	return (vector == IRQ_VECTOR_YIELD);
 }
 
 int
@@ -405,6 +413,9 @@ irq_dispatch(u32 vector, registers_t *regs)
 
 	(void)regs;
 	if (vector > IRQ_VECTOR_SPURIOUS) {
+		return (0);
+	}
+	if (irq_vector_is_software(vector)) {
 		return (0);
 	}
 	desc = irq_vectors[vector];

@@ -62,6 +62,7 @@ $space %export process_get, process_create, process_create_kernel
 
 #include <kernel/gdt.h>
 #include <mm/vm/pmap.h>
+#include <kernel/interrupts/irq.h>
 #include <kernel/panic.h>
 #include <kernel/process.h>
 #include <kernel/scheduler.h>
@@ -236,7 +237,7 @@ process_yield(void)
 		smp_unlock();
 	}
 
-	__asm__ volatile("int $32");
+	__asm__ volatile("int %0" :: "i"(IRQ_VECTOR_YIELD) : "memory");
 
 	if (had_lock) {
 		smp_lock();

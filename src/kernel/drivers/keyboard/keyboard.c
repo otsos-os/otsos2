@@ -454,26 +454,25 @@ void
 kbd_event_put(u16 key, u16 raw, u32 flags, u32 mods, u32 ch)
 {
 	struct kbd_event	*ev;
+	u64			timestamp;
 	int			next;
 
+	timestamp = timer_get_ticks();
 	next = (kbd_event_head + 1) % KBD_EVENT_RING_SIZE;
 	if (next == kbd_event_tail) {
-		return;
+		kbd_event_tail = (kbd_event_tail + 1) % KBD_EVENT_RING_SIZE;
 	}
 
 	ev = &kbd_event_ring[kbd_event_head];
-	ev->timestamp = timer_get_ticks();
+	ev->timestamp = timestamp;
 	ev->key = key;
 	ev->raw = raw;
 	ev->flags = flags;
 	ev->mods = mods;
 	ev->ch = ch;
-
 	kbd_event_head = next;
-	input_event_keyboard(ev->timestamp, key, raw, flags, mods, ch);
 
-	extern void knote_notify_all(s16 filter, u64 ident, u32 fflags,
-	    s64 data);
+	input_event_keyboard(timestamp, key, raw, flags, mods, ch);
 	knote_notify_all(EVFILT_KBD, 0, 0, 1);
 }
 
