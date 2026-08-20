@@ -48,10 +48,17 @@
 #define	I8042_CONFIG_PORT1_CLOCK		0x10
 #define	I8042_CONFIG_PORT2_CLOCK		0x20
 #define	I8042_CONFIG_TRANSLATION		0x40
+typedef void	(*i8042_sink_t)(u8 data);
 
 u64	i8042_irq_save(void);
 void	i8042_irq_restore(u64 flags);
 u8	i8042_status(void);
+void	i8042_set_kbd_sink(i8042_sink_t sink);
+void	i8042_set_aux_sink(i8042_sink_t sink);
+#define	I8042_DISPATCH_KBD_UNIT		0x10000U
+u32	i8042_dispatch(void);
+void	i8042_cmd_begin(void);
+void	i8042_cmd_end(void);
 int	i8042_wait_input_clear(void);
 int	i8042_wait_output_full(void);
 void	i8042_flush_output(void);

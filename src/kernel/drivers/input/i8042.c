@@ -25,6 +25,7 @@
  */
 
 #include <kernel/drivers/input/i8042.h>
+#include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/newbus/newbus.h>
 #include <mlibc/mlibc.h>
 
@@ -32,6 +33,17 @@
 #define	I8042_STATUS_PORT	0x64
 #define	I8042_CMD_PORT		0x64
 #define	I8042_RFLAGS_IF		0x200
+#define	I8042_DISPATCH_LIMIT	64
+#define	I8042_DISPATCH_KBD	I8042_DISPATCH_KBD_UNIT
+#define	I8042_DISPATCH_MASK	0xFFFFU
+#define	I8042_STALL_TICKS	2
+
+static i8042_sink_t	i8042_kbd_sink;
+static i8042_sink_t	i8042_aux_sink;
+static volatile int	i8042_cmd_active;
+static volatile int	i8042_dispatch_busy;
+static volatile int	i8042_dispatch_retry;
+static u32		i8042_stall_ticks;
 
 u64
 i8042_irq_save(void)
@@ -106,6 +118,72 @@ i8042_read_data(u8 *data)
 	}
 	*data = inb(I8042_DATA_PORT);
 	return (0);
+}
+void
+i8042_set_kbd_sink(i8042_sink_t sink)
+{
+	i8042_kbd_sink = sink;
+}
+void
+i8042_set_aux_sink(i8042_sink_t sink)
+{
+	i8042_aux_sink = sink;
+}
+
+
+void
+i8042_cmd_begin(void)
+{
+	i8042_cmd_active++;
+}
+void
+i8042_cmd_end(void)
+{
+	if (i8042_cmd_active > 0) {
+		i8042_cmd_active--;
+	}
+}
+u32
+i8042_dispatch(void)
+{
+	i8042_sink_t	sink;
+	u32		handled;
+	u32		guard;
+	u8		status, data;
+	if (i8042_dispatch_busy) {
+		i8042_dispatch_retry = 1;
+		return (0);
+	}
+	i8042_dispatch_busy = 1;
+	handled = 0;
+	do {
+		i8042_dispatch_retry = 0;
+		guard = 0;
+		while (guard < I8042_DISPATCH_LIMIT) {
+			if (i8042_cmd_active) {
+				break;
+			}
+			status = i8042_status();
+			if ((status & I8042_STATUS_OBF) == 0) {
+				break;
+			}
+			data = inb(I8042_DATA_PORT);
+			guard++;
+			if (status & I8042_STATUS_AUX) {
+				sink = i8042_aux_sink;
+				handled++;
+			} else {
+				sink = i8042_kbd_sink;
+				handled += I8042_DISPATCH_KBD;
+			}
+			if (sink != NULL) {
+				sink(data);
+			}
+		}
+	} while (i8042_dispatch_retry && !i8042_cmd_active);
+
+	i8042_dispatch_busy = 0;
+	return (handled);
 }
 
 int
@@ -204,14 +282,42 @@ i8042_probe(device_t dev)
 	return (0);
 }
 
+static void
+i8042_poll(void *arg)
+{
+	u32	handled;
+	(void)arg;
+
+	if (i8042_cmd_active) {
+		return;
+	}
+	if ((i8042_status() & I8042_STATUS_OBF) == 0) {
+		i8042_stall_ticks = 0;
+		return;
+	}
+	i8042_stall_ticks++;
+	if (i8042_stall_ticks < I8042_STALL_TICKS) {
+		return;
+	}
+	i8042_stall_ticks = 0;
+	handled = i8042_dispatch();
+	if (handled >= I8042_DISPATCH_KBD) {
+		keyboard_input_settle();
+	}
+}
+
 static int
 i8042_attach(device_t dev)
 {
 	device_t	child;
+	void		*poll_cookie;
 
 	bus_set_resource(dev, SYS_RES_IOPORT, 0, I8042_DATA_PORT, 1, 0);
 	bus_set_resource(dev, SYS_RES_IOPORT, 1, I8042_CMD_PORT, 1, 0);
 
+	poll_cookie = NULL;
+	(void)bus_setup_poll(dev, NB_POLL_TIMER, i8042_poll, NULL,
+	    &poll_cookie);
 	child = device_find_child(dev, "atkbd", 0);
 	if (child == NULL) {
 		child = device_add_child(dev, "atkbd", 0);

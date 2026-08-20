@@ -39,7 +39,8 @@ $define %func ps2_aux_enable_wheel as procedure with args void
 $define %func mouse_input_put as procedure with args s32, s32, s32, u32, u32
 $define %func ps2_mouse_process_packet as procedure with args void
 $define %func ps2_mouse_process_byte as procedure with args u8
-$define %func ps2_mouse_drain as procedure with args const char *
+$define %func ps2_mouse_sink as procedure with args u8
+$define %func ps2_mouse_dispatch as procedure with args void
 $define %func ps2_mouse_init as function with args void
 $define %func ps2_mouse_handler as procedure with args void
 $define %func ps2_mouse_poll as procedure with args void
@@ -52,7 +53,7 @@ $define %func ps2_mouse_is_ready as function with args void
 $space %internal ps2_aux_command, ps2_aux_command_arg, ps2_aux_get_id
 $space %internal ps2_aux_enable_wheel, mouse_input_put
 $space %internal ps2_mouse_process_packet, ps2_mouse_process_byte
-$space %internal ps2_mouse_drain
+$space %internal ps2_mouse_sink, ps2_mouse_dispatch
 $space %export ps2_mouse_init, ps2_mouse_handler, ps2_mouse_poll
 $space %export ps2_mouse_is_ready
 
@@ -60,6 +61,7 @@ $space %export ps2_mouse_is_ready
 
 #include <kernel/drivers/input/i8042.h>
 #include <kernel/drivers/input/input.h>
+#include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/mouse/mouse.h>
 #include <kernel/drivers/newbus/newbus.h>
 #include <kernel/drivers/timer.h>
@@ -253,22 +255,19 @@ ps2_mouse_process_byte(u8 data)
 	mouse_packet_index = 0;
 }
 
+/*
+ * Sink for AUX bytes handed over by the i8042 dispatcher.
+ *
+ * The byte is already out of the shared output buffer, so a byte belonging to
+ * the keyboard can no longer be left behind here and stall both ISA lines.
+ */
 static void
-ps2_mouse_drain(const char *tag)
+ps2_mouse_sink(u8 data)
 {
-	u8	status, data;
-
-	(void)tag;
-	while (i8042_status() & I8042_STATUS_OBF) {
-		status = i8042_status();
-		if ((status & I8042_STATUS_AUX) == 0) {
-			return;
-		}
-		if (i8042_read_data(&data) != 0) {
-			return;
-		}
-		ps2_mouse_process_byte(data);
+	if (!mouse_ready) {
+		return;
 	}
+	ps2_mouse_process_byte(data);
 }
 
 int
@@ -293,6 +292,7 @@ ps2_mouse_init(void)
 	ret = -1;
 	port1_disabled = 0;
 	irq_flags = i8042_irq_save();
+	i8042_cmd_begin();
 
 	if (i8042_write_cmd(I8042_CMD_DISABLE_PORT1) == 0) {
 		port1_disabled = 1;
@@ -359,33 +359,41 @@ out:
 	if (port1_disabled) {
 		(void)i8042_write_cmd(I8042_CMD_ENABLE_PORT1);
 	}
+	i8042_cmd_end();
+	if (ret == 0) {
+		i8042_set_aux_sink(ps2_mouse_sink);
+	}
 	i8042_irq_restore(irq_flags);
 	return (ret);
+}
+
+/*
+ * The dispatcher drains the whole shared buffer, so a mouse interrupt can carry
+ * off keyboard bytes that arrived alongside.  Those bytes are decoded into the
+ * keyboard buffer but nothing downstream knows yet, so the keyboard stack has to
+ * be settled from here too.
+ */
+static void
+ps2_mouse_dispatch(void)
+{
+	u32	handled;
+
+	handled = i8042_dispatch();
+	if (handled >= I8042_DISPATCH_KBD_UNIT) {
+		keyboard_input_settle();
+	}
 }
 
 void
 ps2_mouse_handler(void)
 {
-	if (!mouse_ready) {
-		return;
-	}
-	ps2_mouse_drain("irq");
+	ps2_mouse_dispatch();
 }
 
 void
 ps2_mouse_poll(void)
 {
-	u8	status;
-
-	if (!mouse_ready) {
-		return;
-	}
-
-	status = i8042_status();
-	if ((status & (I8042_STATUS_OBF | I8042_STATUS_AUX)) ==
-	    (I8042_STATUS_OBF | I8042_STATUS_AUX)) {
-		ps2_mouse_drain("poll");
-	}
+	ps2_mouse_dispatch();
 }
 
 int

@@ -52,6 +52,7 @@ $define %func keyboard_handle_scancode as procedure with args u8, int, int
 $define %func keyboard_get_driver_name as function with args void
 $define %func keyboard_driver_is_active as function with args keyboard_driver_t *
 $define %func keyboard_driver_handler as procedure with args keyboard_driver_t *
+$define %func keyboard_input_settle as procedure with args void
 $define %func keyboard_cm_update as function with args u32
 $define %func keyboard_driver_priority as function with args keyboard_driver_t *
 $define %func keyboard_driver_matches as function with args keyboard_driver_t *, const char *
@@ -75,6 +76,7 @@ $space %export keyboard_start_direct_input, keyboard_stop_direct_input, scanf
 $space %export keyboard_set_scancode_callback, keyboard_handle_scancode
 $space %export keyboard_get_driver_name
 $space %export keyboard_driver_is_active, keyboard_driver_handler
+$space %export keyboard_input_settle
 $space %export keyboard_cm_update
 $space %internal keyboard_driver_priority, keyboard_driver_matches
 $space %internal keyboard_find_preferred
@@ -327,18 +329,10 @@ keyboard_getchar_blocking(void)
 }
 
 void
-keyboard_driver_handler(keyboard_driver_t *driver)
+keyboard_input_settle(void)
 {
 	void	*ch;
 
-	if (!driver || !driver->handler) {
-		return;
-	}
-
-	driver->handler();
-	if (driver != current_driver) {
-		return;
-	}
 	if (direct_input_depth == 0) {
 		terminal_input_poll();
 	}
@@ -348,6 +342,19 @@ keyboard_driver_handler(keyboard_driver_t *driver)
 		proc_wakeup(ch);
 	}
 	posix_poll_notify();
+}
+
+void
+keyboard_driver_handler(keyboard_driver_t *driver)
+{
+	if (!driver || !driver->handler) {
+		return;
+	}
+	driver->handler();
+	if (driver != current_driver) {
+		return;
+	}
+	keyboard_input_settle();
 }
 
 void
@@ -359,29 +366,12 @@ keyboard_common_handler(void)
 void
 keyboard_poll(void)
 {
-	u8	status;
-
 	if (!current_driver || !current_driver->poll) {
 		return;
 	}
 
-	status = inb(0x64);
-	if (!(status & 0x01)) {
-		return;
-	}
-
 	current_driver->poll();
-	if (direct_input_depth == 0) {
-		terminal_input_poll();
-	}
-
-	void	*ch;
-
-	ch = terminal_get_input_channel();
-	if (ch) {
-		proc_wakeup(ch);
-	}
-	posix_poll_notify();
+	keyboard_input_settle();
 }
 
 void

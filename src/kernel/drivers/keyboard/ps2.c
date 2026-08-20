@@ -32,8 +32,11 @@ $define %type int as 32 bit signed
 $define %type char as 8 bit signed
 
 $define %func ps2_debug_status as procedure with args const char *, u8, u8
+$define %func ps2_update_leds_locked as function with args void
 $define %func ps2_update_leds as function with args void
+$define %func ps2_keyboard_init_locked as function with args void
 $define %func ps2_keyboard_init as function with args void
+$define %func ps2_keyboard_sink as procedure with args u8
 $define %func buffer_write as procedure with args char
 $define %func ps2_mods as function with args void
 $define %func ps2_update_modifier as procedure with args u16, int
@@ -41,7 +44,6 @@ $define %func ps2_keyboard_reset_state as procedure with args void
 $define %func ps2_keyboard_flush as procedure with args void
 $define %func ps2_keyboard_getchar as function with args void
 $define %func ps2_process_scancode as procedure with args u8
-$define %func ps2_handle_input as procedure with args const char *
 $define %func ps2_keyboard_handler as procedure with args void
 $define %func ps2_keyboard_poll as procedure with args void
 $define %func ps2_read_char_blocking as function with args void
@@ -52,9 +54,10 @@ $define %func ps2Scanf as function with args const char *, ...
 /* !SPACE!
 
 $space %internal ps2_debug_status, ps2_update_leds
+$space %internal ps2_update_leds_locked, ps2_keyboard_init_locked
 $space %internal buffer_write, ps2_mods
 $space %internal ps2_update_modifier, ps2_process_scancode
-$space %internal ps2_handle_input, ps2_read_char_blocking
+$space %internal ps2_keyboard_sink, ps2_read_char_blocking
 $space %export ps2_keyboard_init, ps2_keyboard_handler
 $space %export ps2_keyboard_getchar, ps2_keyboard_poll
 $space %export ps2_keyboard_reset_state, ps2_keyboard_flush, ps2Scanf
@@ -96,6 +99,10 @@ static int	scancode_extended;
 static int	ps2_debug;
 static int	kshell_hotkey_latch;
 static keyboard_driver_t atkbd_keyboard_driver;
+static int	ps2_keyboard_init_locked(void);
+static int	ps2_update_leds_locked(void);
+static int	ps2_update_leds(void);
+static void	ps2_keyboard_sink(u8 scancode);
 
 static void
 ps2_debug_status(const char *tag, u8 status, u8 data)
@@ -108,7 +115,7 @@ ps2_debug_status(const char *tag, u8 status, u8 data)
 }
 
 static int
-ps2_update_leds(void)
+ps2_update_leds_locked(void)
 {
 	u8	led_mask;
 	int	attempt;
@@ -152,8 +159,19 @@ ps2_update_leds(void)
 	return (-1);
 }
 
-int
-ps2_keyboard_init(void)
+static int
+ps2_update_leds(void)
+{
+	int	ret;
+
+	i8042_cmd_begin();
+	ret = ps2_update_leds_locked();
+	i8042_cmd_end();
+	return (ret);
+}
+
+static int
+ps2_keyboard_init_locked(void)
 {
 	u8	config;
 
@@ -264,6 +282,20 @@ ps2_keyboard_init(void)
 
 	ps2_ready = 1;
 	return (0);
+}
+int
+ps2_keyboard_init(void)
+{
+	int	ret;
+
+	i8042_cmd_begin();
+	ret = ps2_keyboard_init_locked();
+	i8042_cmd_end();
+
+	if (ret == 0) {
+		i8042_set_kbd_sink(ps2_keyboard_sink);
+	}
+	return (ret);
 }
 
 static void
@@ -448,46 +480,25 @@ ps2_process_scancode(u8 scancode)
 }
 
 static void
-ps2_handle_input(const char *tag)
+ps2_keyboard_sink(u8 scancode)
 {
-	u8	status, scancode;
-
-	while (i8042_status() & I8042_STATUS_OBF) {
-		status = i8042_status();
-		if (status & I8042_STATUS_AUX) {
-			return;
-		}
-		if (i8042_read_data(&scancode) != 0) {
-			return;
-		}
-		ps2_debug_status(tag, status, scancode);
-		ps2_process_scancode(scancode);
+	if (!ps2_ready) {
+		return;
 	}
+	ps2_debug_status("sink", i8042_status(), scancode);
+	ps2_process_scancode(scancode);
 }
 
 void
 ps2_keyboard_handler(void)
 {
-	if (!ps2_ready) {
-		return;
-	}
-	ps2_handle_input("irq");
+	(void)i8042_dispatch();
 }
 
 void
 ps2_keyboard_poll(void)
 {
-	u8	status;
-
-	if (!ps2_ready) {
-		return;
-	}
-
-	status = i8042_status();
-	if ((status & (I8042_STATUS_OBF | I8042_STATUS_AUX)) ==
-	    I8042_STATUS_OBF) {
-		ps2_handle_input("poll");
-	}
+	(void)i8042_dispatch();
 }
 
 static char
