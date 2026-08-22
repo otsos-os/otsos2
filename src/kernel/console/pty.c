@@ -56,6 +56,8 @@ typedef struct pty_pair {
 	int		to_master_head;
 	int		to_master_tail;
 	int		to_master_count;
+	char		line_buf[PTY_BUF_SIZE];
+	int		line_len;
 } pty_pair_t;
 
 static pty_pair_t	pty_pairs[PTY_COUNT];
@@ -248,6 +250,7 @@ pty_clear_to_slave(pty_pair_t *p)
 	p->to_slave_head = 0;
 	p->to_slave_tail = 0;
 	p->to_slave_count = 0;
+	p->line_len = 0;
 	proc_wakeup(&p->to_slave_count);
 	posix_poll_notify();
 }
@@ -372,6 +375,111 @@ pty_name(int id, char *buf, int len)
 	return (0);
 }
 
+static void
+pty_echo_master(pty_pair_t *p, char c)
+{
+	if ((p->term.c_lflag & ECHO) == 0) {
+		return;
+	}
+	(void)pty_to_master_put(p, c);
+}
+
+static void
+pty_input_char(pty_pair_t *p, char c)
+{
+	int lflag, iflag, i;
+
+	lflag = p->term.c_lflag;
+	iflag = p->term.c_iflag;
+
+	if ((iflag & ISTRIP) != 0) {
+		c &= 0x7f;
+	}
+	if (c == '\r') {
+		if ((iflag & IGNCR) != 0) {
+			return;
+		}
+		if ((iflag & ICRNL) != 0) {
+			c = '\n';
+		}
+	} else if (c == '\n') {
+		if ((iflag & INLCR) != 0) {
+			c = '\r';
+		}
+	}
+
+	if ((lflag & ISIG) != 0) {
+		if (c == p->term.c_cc[VINTR]) {
+			pty_signal_pgrp(p, SIGINT);
+			return;
+		}
+		if (c == p->term.c_cc[VQUIT]) {
+			pty_signal_pgrp(p, SIGQUIT);
+			return;
+		}
+		if (c == p->term.c_cc[VSUSP]) {
+			pty_signal_pgrp(p, SIGTSTP);
+			return;
+		}
+	}
+
+	if ((lflag & ICANON) != 0) {
+		if (c == p->term.c_cc[VERASE] || c == 0x7f || c == '\b') {
+			if (p->line_len > 0) {
+				p->line_len--;
+				if ((lflag & ECHOE) != 0) {
+					pty_echo_master(p, '\b');
+					pty_echo_master(p, ' ');
+					pty_echo_master(p, '\b');
+				} else {
+					pty_echo_master(p, p->term.c_cc[VERASE]);
+				}
+			}
+			return;
+		}
+		if (c == p->term.c_cc[VKILL]) {
+			while (p->line_len > 0) {
+				p->line_len--;
+				if ((lflag & ECHO) != 0) {
+					pty_echo_master(p, '\b');
+					pty_echo_master(p, ' ');
+					pty_echo_master(p, '\b');
+				}
+			}
+			return;
+		}
+		if (c == p->term.c_cc[VEOF]) {
+			for (i = 0; i < p->line_len; i++) {
+				(void)pty_to_slave_put(p, p->line_buf[i]);
+			}
+			p->line_len = 0;
+			return;
+		}
+		if (c == '\n' || c == p->term.c_cc[VEOL] || c == p->term.c_cc[VEOL2]) {
+			if (p->line_len < PTY_BUF_SIZE - 1) {
+				p->line_buf[p->line_len++] = c;
+			}
+			for (i = 0; i < p->line_len; i++) {
+				(void)pty_to_slave_put(p, p->line_buf[i]);
+			}
+			p->line_len = 0;
+			if ((lflag & (ECHO | ECHONL)) != 0) {
+				pty_echo_master(p, '\r');
+				pty_echo_master(p, '\n');
+			}
+			return;
+		}
+		if (p->line_len < PTY_BUF_SIZE - 1) {
+			p->line_buf[p->line_len++] = c;
+			pty_echo_master(p, c);
+		}
+		return;
+	}
+
+	(void)pty_to_slave_put(p, c);
+	pty_echo_master(p, c);
+}
+
 int
 pty_master_read(vnode_t *vn, void *buf, u32 count, int nonblock)
 {
@@ -389,7 +497,7 @@ pty_master_read(vnode_t *vn, void *buf, u32 count, int nonblock)
 	while (n < (int)count) {
 		if (pty_to_master_get(p, &c) == 0) {
 			out[n++] = c;
-		} else if (nonblock) {
+		} else if (n > 0 || nonblock) {
 			if (n == 0) {
 				return (-POSIX_EAGAIN);
 			}
@@ -408,21 +516,14 @@ pty_master_write(vnode_t *vn, const void *buf, u32 count, int nonblock)
 	const char	*data;
 	int		 i;
 
+	(void)nonblock;
 	p = (pty_pair_t *)vn->data;
 	if (!p || p->id == 0) {
 		return (-POSIX_EBADF);
 	}
 	data = (const char *)buf;
 	for (i = 0; i < (int)count; i++) {
-		while (pty_to_slave_put(p, data[i]) != 0) {
-			if (nonblock) {
-				if (i == 0) {
-					return (-POSIX_EAGAIN);
-				}
-				return (i);
-			}
-			proc_sleep(&p->to_slave_count);
-		}
+		pty_input_char(p, data[i]);
 	}
 	return ((int)count);
 }
@@ -600,7 +701,11 @@ pty_slave_read(vnode_t *vn, void *buf, u32 count, int nonblock)
 	while (n < (int)count) {
 		if (pty_to_slave_get(p, &c) == 0) {
 			out[n++] = c;
-		} else if (nonblock) {
+			if ((p->term.c_lflag & ICANON) != 0 &&
+			    (c == '\n' || c == p->term.c_cc[VEOL] || c == p->term.c_cc[VEOL2])) {
+				break;
+			}
+		} else if (n > 0 || nonblock) {
 			if (n == 0) {
 				return (-POSIX_EAGAIN);
 			}
