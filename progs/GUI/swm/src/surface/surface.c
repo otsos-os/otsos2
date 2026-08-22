@@ -230,6 +230,9 @@ swm_surface_raise(swm_state_t *swm, swm_surface_t *surface)
 	    swm_surface_role_is_panel(surface->role)) {
 		return;
 	}
+	if (surface == swm_surface_topmost_window(swm)) {
+		return;
+	}
 	surface->z = ++swm->next_z;
 	swm_damage_all(swm);
 	swm_protocol_shell_changed(swm);

@@ -3,7 +3,8 @@ build/de/de.o: src/de/de.c ../../../libc/LibG/include/libg.h \
   ../../../libc/native/include/stddef.h \
   ../../../libc/native/include/stdint.h \
   ../../../libc/native/include/native.h ../sprot/include/sprot/client.h \
-  ../sprot/include/sprot/sprot.h ../../../libc/native/include/stdio.h \
+  ../sprot/include/sprot/sprot.h ../../../libc/native/include/errno.h \
+  ../../../libc/native/include/stdio.h \
   ../../../libc/native/include/stdarg.h \
   ../../../libc/native/include/stdlib.h \
   ../../../libc/native/include/string.h
@@ -14,6 +15,7 @@ build/de/de.o: src/de/de.c ../../../libc/LibG/include/libg.h \
 ../../../libc/native/include/native.h:
 ../sprot/include/sprot/client.h:
 ../sprot/include/sprot/sprot.h:
+../../../libc/native/include/errno.h:
 ../../../libc/native/include/stdio.h:
 ../../../libc/native/include/stdarg.h:
 ../../../libc/native/include/stdlib.h:

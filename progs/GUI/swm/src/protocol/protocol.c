@@ -712,7 +712,6 @@ dispatch_message(swm_state_t *swm, swm_client_t *client,
 		surface->committed = 1;
 		surface->has_pending = 0;
 		surface->content_serial++;
-		swm_protocol_shell_changed(swm);
 		return (0);
 	}
 	case SPROT_REQ_SURFACE_DAMAGE: {

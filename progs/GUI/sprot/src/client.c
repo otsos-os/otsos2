@@ -827,11 +827,13 @@ sprot_poll_event(sprot_connection_t *conn, sprot_event_t *event,
 		ret = sprot_recv_message_from(conn->endpoint, NULL, &hdr, body,
 		    sizeof(body), &handle, IPC_MSG_NONBLOCK);
 		if (ret < 0) {
-			if (errno == EAGAIN &&
-			    (kev.fflags & NOTE_IPC_HUP) != 0) {
-				memset(event, 0, sizeof(*event));
-				event->kind = SPROT_EVENT_DISCONNECT;
-				return (1);
+			if (errno == EAGAIN) {
+				if ((kev.fflags & NOTE_IPC_HUP) != 0) {
+					memset(event, 0, sizeof(*event));
+					event->kind = SPROT_EVENT_DISCONNECT;
+					return (1);
+				}
+				return (0);
 			}
 			set_error("sprot: receive event: %s", strerror(errno));
 			return (-1);

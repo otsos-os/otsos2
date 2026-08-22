@@ -47,6 +47,7 @@ $space %export main
 #include <native.h>
 #include <sprot/client.h>
 
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -229,6 +230,14 @@ de_window_update(struct de *desktop, const sprot_body_shell_window_t *body)
 		}
 		window = &desktop->windows[desktop->window_count++];
 		memset(window, 0, sizeof(*window));
+	} else if (window->id == body->id &&
+	    window->state == body->state &&
+	    window->x == body->x &&
+	    window->y == body->y &&
+	    window->width == body->width &&
+	    window->height == body->height &&
+	    strncmp(window->title, body->title, sizeof(window->title)) == 0) {
+		return;
 	}
 	window->id = body->id;
 	window->state = body->state;
@@ -543,7 +552,7 @@ de_launch_terminal(void)
 {
 	const char *argv[] = { "term", NULL };
 
-	(void)procSpawn("/bin/term", (char *const *)argv, NULL);
+	(void)procSpawnNative("/bin/term", (char *const *)argv, NULL);
 }
 
 static void
@@ -689,6 +698,9 @@ main(void)
 		input_pending = 0;
 		ret = sprot_poll_event(desktop.connection, &event, DE_FRAME_MS);
 		if (ret < 0) {
+			if (errno == EAGAIN || errno == EINTR) {
+				continue;
+			}
 			break;
 		}
 		if (ret > 0) {
@@ -697,12 +709,15 @@ main(void)
 			}
 			input_pending |= de_handle_event(&desktop, &event);
 		}
-		while (sprot_poll_event(desktop.connection, &event, 0) > 0) {
+		while ((ret = sprot_poll_event(desktop.connection, &event, 0)) > 0) {
 			if (event.kind == SPROT_EVENT_DISCONNECT) {
 				disconnected = 1;
 				break;
 			}
 			input_pending |= de_handle_event(&desktop, &event);
+		}
+		if (ret < 0 && errno != EAGAIN && errno != EINTR) {
+			break;
 		}
 		if (disconnected) {
 			break;
