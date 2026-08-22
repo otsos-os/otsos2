@@ -695,6 +695,20 @@ sprot_set_visible(sprot_surface_t *surface, int visible)
 }
 
 int
+sprot_set_fullscreen(sprot_surface_t *surface, int fullscreen)
+{
+	sprot_body_surface_set_fullscreen_t body;
+
+	if (surface == NULL || surface->conn == NULL || surface->id == 0) {
+		errno = EINVAL;
+		return (-1);
+	}
+	body.fullscreen = fullscreen != 0;
+	return (send_surface_message(surface, SPROT_REQ_SURFACE_SET_FULLSCREEN,
+	    &body, sizeof(body), -1));
+}
+
+int
 sprot_set_cursor(sprot_surface_t *surface, uint32_t cursor_type)
 {
 	sprot_body_set_cursor_t body;

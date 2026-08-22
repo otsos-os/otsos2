@@ -274,7 +274,8 @@ static void collect_damage(swm_state_t *swm, swm_surface_t **list, int n,
         rec->outer.y = oy;
         rec->outer.w = ow;
         rec->outer.h = oh;
-        rec->has_chrome = (!swm_surface_role_is_child(s->role) &&
+        rec->has_chrome = (!s->fullscreen &&
+                           !swm_surface_role_is_child(s->role) &&
                            !swm_surface_role_is_panel(s->role));
         rec->focused = (s == focused);
         rec->pixels = (s->buffer != NULL) ? swm_buffer_pixels(s->buffer) : NULL;
@@ -437,7 +438,8 @@ void swm_render_composite(swm_state_t *swm, srapi_image_t *image,
 
     for (int i = 0; i < n; i++) {
         swm_surface_t *s = list[i];
-		if (!swm_surface_role_is_child(s->role) &&
+		if (!s->fullscreen &&
+		    !swm_surface_role_is_child(s->role) &&
 		    !swm_surface_role_is_panel(s->role)) {
             draw_titlebar_chrome(swm, &target, s, s == focused);
         }

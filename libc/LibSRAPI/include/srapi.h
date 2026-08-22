@@ -169,6 +169,7 @@ enum srapi_key_event_flags {
 #define SRAPI_KEY_ENTER		0x0028
 #define SRAPI_KEY_ESCAPE	0x0029
 #define SRAPI_KEY_BACKSPACE	0x002A
+#define SRAPI_KEY_F11		0x0044
 #define SRAPI_KEY_LALT		0x00E2
 #define SRAPI_KEY_LSUPER	0x00E3
 #define SRAPI_KEY_RSUPER	0x00E7

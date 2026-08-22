@@ -81,6 +81,7 @@ int sprot_request_frame(sprot_surface_t *surface);
 int sprot_set_title(sprot_surface_t *surface, const char *title);
 int sprot_set_role(sprot_surface_t *surface, uint32_t role, uint32_t parent_id, int32_t x, int32_t y);
 int sprot_set_visible(sprot_surface_t *surface, int visible);
+int sprot_set_fullscreen(sprot_surface_t *surface, int fullscreen);
 int sprot_set_cursor(sprot_surface_t *surface, uint32_t cursor_type);
 int sprot_set_cursor_image(
     sprot_surface_t *surface,

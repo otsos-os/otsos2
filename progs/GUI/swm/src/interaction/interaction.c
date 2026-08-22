@@ -24,6 +24,7 @@ $space %export swm_interaction_forward_input
 #include "interaction.h"
 
 #include "../protocol/protocol.h"
+#include "../render/render.h"
 #include "../surface/surface.h"
 
 #include <string.h>
@@ -127,7 +128,10 @@ send_configure_to(swm_state_t *swm, swm_surface_t *surface,
 	if (surface == NULL || surface->owner == NULL) {
 		return;
 	}
-	if (surface->maximized) {
+	if (surface->fullscreen) {
+		width = (int32_t)swm->display_w;
+		height = (int32_t)swm->display_h;
+	} else if (surface->maximized) {
 		swm_surface_maximize_target(swm, &width, &height);
 	} else if (surface->saved_width > 0 && surface->saved_height > 0) {
 		width = (int32_t)surface->saved_width;
@@ -151,10 +155,48 @@ send_configure_to(swm_state_t *swm, swm_surface_t *surface,
 	    sizeof(body));
 }
 
+void
+swm_surface_toggle_fullscreen(swm_state_t *swm, swm_surface_t *surface)
+{
+	uint32_t state;
+
+	if (surface == NULL || !swm_surface_role_is_window(surface->role)) {
+		return;
+	}
+	if (!surface->fullscreen) {
+		if (!surface->maximized) {
+			surface->saved_pos_x = surface->pos_x;
+			surface->saved_pos_y = surface->pos_y;
+			surface->saved_width = surface->width;
+			surface->saved_height = surface->height;
+		}
+		surface->fullscreen = 1;
+	} else {
+		surface->fullscreen = 0;
+		if (!surface->maximized) {
+			surface->pos_x = surface->saved_pos_x;
+			surface->pos_y = surface->saved_pos_y;
+		}
+	}
+	state = SPROT_SURFACE_STATE_FOCUSED;
+	if (surface->fullscreen) {
+		state |= SPROT_SURFACE_STATE_FULLSCREEN;
+	} else if (surface->maximized) {
+		state |= SPROT_SURFACE_STATE_MAXIMIZED;
+	}
+	send_configure_to(swm, surface, state);
+	swm_damage_all(swm);
+	swm_protocol_shell_changed(swm);
+}
+
 static void
 toggle_maximize(swm_state_t *swm, swm_surface_t *surface)
 {
 	if (surface == NULL) {
+		return;
+	}
+	if (surface->fullscreen) {
+		swm_surface_toggle_fullscreen(swm, surface);
 		return;
 	}
 	if (!surface->maximized) {
@@ -364,6 +406,15 @@ swm_interaction_forward_input(swm_state_t *swm,
 			    swm->shell_client->peer, SPROT_EVT_KEY,
 			    swm->shell_surface != NULL ? swm->shell_surface->id : 0,
 			    0, &key, sizeof(key));
+			return;
+		}
+	}
+	if ((event->flags & SRAPI_KEY_PRESS) != 0 &&
+	    (event->key == SRAPI_KEY_F11 ||
+	     (event->key == SRAPI_KEY_ENTER && (event->mods & SRAPI_MOD_ALT) != 0))) {
+		focused = swm_surface_topmost_window(swm);
+		if (focused != NULL) {
+			swm_surface_toggle_fullscreen(swm, focused);
 			return;
 		}
 	}

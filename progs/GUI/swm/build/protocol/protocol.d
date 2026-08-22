@@ -3,7 +3,9 @@ build/protocol/protocol.o: src/protocol/protocol.c \
   ../../../libc/LibSRAPI/include/srapi.h \
   ../../../libc/native/include/stddef.h \
   ../../../libc/native/include/stdint.h ../sprot/include/sprot/sprot.h \
-  src/protocol/../buffer/buffer.h src/protocol/../surface/surface.h \
+  src/protocol/../buffer/buffer.h \
+  src/protocol/../interaction/interaction.h \
+  src/protocol/../surface/surface.h \
   ../../../libc/native/include/native.h \
   ../../../libc/native/include/errno.h \
   ../../../libc/native/include/limits.h \
@@ -18,6 +20,7 @@ include/swm/swm.h:
 ../../../libc/native/include/stdint.h:
 ../sprot/include/sprot/sprot.h:
 src/protocol/../buffer/buffer.h:
+src/protocol/../interaction/interaction.h:
 src/protocol/../surface/surface.h:
 ../../../libc/native/include/native.h:
 ../../../libc/native/include/errno.h:

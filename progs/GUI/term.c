@@ -64,6 +64,8 @@ $space %export main
 
 #define TERM_COLS		80
 #define TERM_ROWS		24
+#define TERM_MAX_COLS		320
+#define TERM_MAX_ROWS		160
 #define TERM_CELL_W		8
 #define TERM_CELL_H		16
 #define TERM_PAD_X		4
@@ -181,6 +183,7 @@ struct terminal_app {
 	int			running;
 	int			dirty;
 	int			focused;
+	int			fullscreen;
 	int			cursor_x;
 	int			cursor_y;
 	int			saved_x;
@@ -198,7 +201,7 @@ struct terminal_app {
 	int			esc_params[TERM_MAX_PARAMS];
 	int			esc_param_count;
 	int			esc_private;
-	struct term_cell	cells[TERM_ROWS][TERM_COLS];
+	struct term_cell	cells[TERM_MAX_ROWS][TERM_MAX_COLS];
 };
 
 static int
@@ -847,6 +850,66 @@ term_render(struct terminal_app *app)
 	(void)libgPresent(app->ui);
 }
 
+static void
+term_resize(struct terminal_app *app, uint32_t width, uint32_t height)
+{
+	libg_style_t style;
+	struct api_winsize ws;
+	uint32_t new_cols, new_rows;
+
+	if (width == 0 || height == 0) {
+		return;
+	}
+	if (width == app->width && height == app->height) {
+		return;
+	}
+	new_cols = (width - 2 * TERM_PAD_X) / TERM_CELL_W;
+	new_rows = (height - 2 * TERM_PAD_Y) / TERM_CELL_H;
+	if (new_cols > TERM_MAX_COLS) {
+		new_cols = TERM_MAX_COLS;
+	}
+	if (new_rows > TERM_MAX_ROWS) {
+		new_rows = TERM_MAX_ROWS;
+	}
+	if (new_cols < 10) {
+		new_cols = 10;
+	}
+	if (new_rows < 4) {
+		new_rows = 4;
+	}
+	if (sprot_resize_surface(app->surface, width, height) != 0) {
+		return;
+	}
+	if (app->ui != NULL) {
+		libgDestroy(app->ui);
+		app->ui = NULL;
+	}
+	libgDefaultStyle(&style);
+	style.background = app->default_bg;
+	(void)libgCreateForTarget(sprot_surface_pixels(app->surface), width, height,
+	    sprot_surface_stride(app->surface), term_present, app->surface,
+	    &style, &app->ui);
+	app->width = width;
+	app->height = height;
+	app->cols = new_cols;
+	app->rows = new_rows;
+	if (app->cursor_x >= (int)app->cols) {
+		app->cursor_x = (int)app->cols - 1;
+	}
+	if (app->cursor_y >= (int)app->rows) {
+		app->cursor_y = (int)app->rows - 1;
+	}
+	if (app->master_fd >= 0) {
+		ws.ws_col = (uint16_t)app->cols;
+		ws.ws_row = (uint16_t)app->rows;
+		ws.ws_xpixel = (uint16_t)app->width;
+		ws.ws_ypixel = (uint16_t)app->height;
+		(void)entityIoctl(app->master_fd, API_TIOCSWINSZ, &ws);
+	}
+	term_clear_screen(app, 2);
+	app->dirty = 1;
+}
+
 static int
 term_handle_event(struct terminal_app *app, const sprot_event_t *event)
 {
@@ -860,11 +923,23 @@ term_handle_event(struct terminal_app *app, const sprot_event_t *event)
 	if (event->kind == SPROT_EVENT_SURFACE_CONFIGURE) {
 		app->focused = (event->u.configure.state &
 		    SPROT_SURFACE_STATE_FOCUSED) != 0;
+		app->fullscreen = (event->u.configure.state &
+		    SPROT_SURFACE_STATE_FULLSCREEN) != 0;
+		if (event->u.configure.width != 0 && event->u.configure.height != 0 &&
+		    (event->u.configure.width != app->width ||
+		     event->u.configure.height != app->height)) {
+			term_resize(app, event->u.configure.width,
+			    event->u.configure.height);
+		}
 		app->dirty = 1;
 		return (1);
 	}
 	if (event->kind == SPROT_EVENT_KEY &&
 	    event->u.key.state == SPROT_KEY_STATE_PRESSED) {
+		if (event->u.key.scancode == KEY_F11) {
+			(void)sprot_set_fullscreen(app->surface, !app->fullscreen);
+			return (1);
+		}
 		len = term_translate_key(event->u.key.scancode,
 		    event->u.key.modifiers, key_buf, sizeof(key_buf));
 		if (len > 0 && app->master_fd >= 0) {

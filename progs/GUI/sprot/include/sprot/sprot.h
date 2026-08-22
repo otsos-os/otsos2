@@ -35,6 +35,7 @@ typedef enum {
     SPROT_REQ_SURFACE_SET_TITLE = 0x0016,
     SPROT_REQ_SURFACE_SET_ROLE = 0x0017,
     SPROT_REQ_SURFACE_SET_VISIBLE = 0x001A,
+    SPROT_REQ_SURFACE_SET_FULLSCREEN = 0x001B,
     SPROT_REQ_SET_CURSOR       = 0x0018,
     SPROT_REQ_SET_CURSOR_IMAGE      = 0x0019,
     SPROT_REQ_SHELL_SUBSCRIBE       = 0x0020,
@@ -140,6 +141,10 @@ typedef struct {
 } sprot_body_surface_set_visible_t;
 
 typedef struct {
+	uint32_t	fullscreen;
+} sprot_body_surface_set_fullscreen_t;
+
+typedef struct {
     uint32_t cursor_type;
 } sprot_body_set_cursor_t;
 
@@ -218,6 +223,7 @@ typedef struct {
 #define SPROT_SURFACE_STATE_MAXIMIZED  (1u << 0)
 #define SPROT_SURFACE_STATE_MINIMIZED  (1u << 1)
 #define SPROT_SURFACE_STATE_FOCUSED    (1u << 2)
+#define SPROT_SURFACE_STATE_FULLSCREEN (1u << 3)
 
 #define SPROT_ERROR_PROTOCOL       0x0001
 #define SPROT_ERROR_INVALID_ARG    0x0002

@@ -31,6 +31,7 @@
 #include "protocol.h"
 
 #include "../buffer/buffer.h"
+#include "../interaction/interaction.h"
 #include "../surface/surface.h"
 
 #include <native.h>
@@ -497,6 +498,28 @@ handle_cursor_image(swm_state_t *swm, swm_client_t *client,
 }
 
 static int
+handle_surface_set_fullscreen(swm_state_t *swm, swm_client_t *client,
+    const sprot_header_t *hdr, const void *data, size_t length)
+{
+	sprot_body_surface_set_fullscreen_t body;
+	swm_surface_t *surface;
+
+	if (length < sizeof(body)) {
+		return (-1);
+	}
+	memcpy(&body, data, sizeof(body));
+	surface = swm_surface_find(swm, hdr->object_id);
+	if (!surface_owned(surface, client) ||
+	    !swm_surface_role_is_window(surface->role)) {
+		return (0);
+	}
+	if ((body.fullscreen != 0) != surface->fullscreen) {
+		swm_surface_toggle_fullscreen(swm, surface);
+	}
+	return (0);
+}
+
+static int
 shell_send_state(swm_state_t *swm, swm_surface_t *surface)
 {
 	sprot_body_shell_window_t body;
@@ -512,6 +535,9 @@ shell_send_state(swm_state_t *swm, swm_surface_t *surface)
 	    SPROT_SURFACE_STATE_NORMAL;
 	if (surface->maximized) {
 		body.state |= SPROT_SURFACE_STATE_MAXIMIZED;
+	}
+	if (surface->fullscreen) {
+		body.state |= SPROT_SURFACE_STATE_FULLSCREEN;
 	}
 	if (surface == swm_surface_topmost_window(swm)) {
 		body.state |= SPROT_SURFACE_STATE_FOCUSED;
@@ -801,6 +827,9 @@ dispatch_message(swm_state_t *swm, swm_client_t *client,
 		}
 		return (0);
 	}
+	case SPROT_REQ_SURFACE_SET_FULLSCREEN:
+		return (handle_surface_set_fullscreen(swm, client, hdr, data,
+		    length));
 	case SPROT_REQ_SET_CURSOR: {
 		swm_surface_t *surface = swm_surface_find(swm, hdr->object_id);
 		if (surface_owned(surface, client) && length >=

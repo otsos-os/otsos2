@@ -150,6 +150,9 @@ surface_layer(const swm_surface_t *s)
 {
 	if (s->role == SPROT_SURFACE_ROLE_POPUP ||
 	    s->role == SPROT_SURFACE_ROLE_SUBSURFACE) {
+		return (4);
+	}
+	if (s->fullscreen) {
 		return (3);
 	}
 	if (s->role == SPROT_SURFACE_ROLE_PANEL) {
@@ -264,6 +267,13 @@ swm_surface_effective_rect(swm_state_t *swm, const swm_surface_t *surface,
 	swm_surface_t *parent;
 	int32_t parent_x, parent_y, parent_width, parent_height;
 
+	if (surface->fullscreen) {
+		*x = 0;
+		*y = 0;
+		*width = (int32_t)swm->display_w;
+		*height = (int32_t)swm->display_h;
+		return;
+	}
 	if (swm_surface_role_is_child(surface->role) ||
 	    swm_surface_role_is_panel(surface->role)) {
 		parent = swm_surface_find(swm, surface->parent_id);
@@ -313,7 +323,7 @@ swm_surface_outer_rect(swm_state_t *swm, const swm_surface_t *surface,
 	int32_t ex, ey, ew, eh;
 
 	swm_surface_effective_rect(swm, surface, &ex, &ey, &ew, &eh);
-	if (swm_surface_role_is_child(surface->role) ||
+	if (surface->fullscreen || swm_surface_role_is_child(surface->role) ||
 	    swm_surface_role_is_panel(surface->role)) {
 		*x = ex;
 		*y = ey;

@@ -86,6 +86,7 @@ typedef struct swm_surface {
 	int		visible;
 	int		minimized;
 	int		maximized;
+	int		fullscreen;
 	int		wants_frame;
 	int		z;
 	swm_rect_t	damage;
