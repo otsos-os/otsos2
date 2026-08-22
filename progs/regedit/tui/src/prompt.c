@@ -59,14 +59,14 @@ rt_prompt_line(rt_state_t *st, const char *label, const char *text)
 
 	rt_screen_move(st->rows, 1);
 	rt_screen_color(RT_PROMPT_COLOR);
-	room = st->cols - (int)strlen(label) - 3;
+	room = st->cols - (int)strlen(label) - 4;
 	if (room < 1) {
 		room = 1;
 	}
 	len = (int)strlen(text);
 	skip = len > room ? len - room : 0;
 	snprintf(line, sizeof(line), " %s%s_", label, text + skip);
-	rt_screen_field(line, st->cols);
+	rt_screen_field_tail(line, st->cols);
 	rt_screen_reset();
 }
 

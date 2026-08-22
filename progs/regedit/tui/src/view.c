@@ -331,7 +331,7 @@ rt_draw_status(rt_state_t *st)
 	rt_screen_move(st->rows, 1);
 	rt_screen_color(RT_COLOR_STATUS);
 	snprintf(line, sizeof(line), " %s", st->status);
-	rt_screen_field(line, st->cols);
+	rt_screen_field_tail(line, st->cols);
 	rt_screen_reset();
 }
 

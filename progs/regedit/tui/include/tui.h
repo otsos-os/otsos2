@@ -43,6 +43,7 @@ $define %func rt_screen_put as procedure with args const char *
 $define %func rt_screen_put_n as procedure with args const char *, int
 $define %func rt_screen_pad as procedure with args char, int
 $define %func rt_screen_field as procedure with args const char *, int
+$define %func rt_screen_field_tail as procedure with args const char *, int
 $define %func rt_key_read as procedure with args api_key_event *
 $define %func rt_reload as procedure with args rt_state *
 $define %func rt_status as procedure with args rt_state *, const char *
@@ -64,7 +65,8 @@ $space %export rt_focus_t, rt_state_t
 $space %export rt_screen_size, rt_screen_home, rt_screen_clear
 $space %export rt_screen_move, rt_screen_color, rt_screen_reset
 $space %export rt_screen_erase_line, rt_screen_put, rt_screen_put_n
-$space %export rt_screen_pad, rt_screen_field, rt_key_read
+$space %export rt_screen_pad, rt_screen_field, rt_screen_field_tail
+$space %export rt_key_read
 $space %export rt_reload, rt_status, rt_status_fmt, rt_status_error
 $space %export rt_rows_visible, rt_key_count, rt_draw, rt_help
 $space %export rt_prompt, rt_confirm, rt_dispatch
@@ -148,6 +150,7 @@ void	rt_screen_put(const char *text);
 void	rt_screen_put_n(const char *text, int len);
 void	rt_screen_pad(char fill, int count);
 void	rt_screen_field(const char *text, int width);
+void	rt_screen_field_tail(const char *text, int width);
 void	rt_key_read(struct api_key_event *ev);
 
 void	rt_reload(rt_state_t *st);

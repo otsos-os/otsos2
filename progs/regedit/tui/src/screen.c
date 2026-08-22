@@ -44,6 +44,7 @@ $define %func rt_screen_put as procedure with args const char *
 $define %func rt_screen_put_n as procedure with args const char *, int
 $define %func rt_screen_pad as procedure with args char, int
 $define %func rt_screen_field as procedure with args const char *, int
+$define %func rt_screen_field_tail as procedure with args const char *, int
 $define %func rt_key_read as procedure with args api_key_event *
 
 */
@@ -54,7 +55,8 @@ $space %internal rt_write
 $space %export rt_screen_size, rt_screen_home, rt_screen_clear
 $space %export rt_screen_move, rt_screen_color, rt_screen_reset
 $space %export rt_screen_erase_line, rt_screen_put, rt_screen_put_n
-$space %export rt_screen_pad, rt_screen_field, rt_key_read
+$space %export rt_screen_pad, rt_screen_field, rt_screen_field_tail
+$space %export rt_key_read
 
 */
 
@@ -200,6 +202,12 @@ rt_screen_field(const char *text, int width)
 	}
 	rt_write(text, len);
 	rt_screen_pad(' ', width - len);
+}
+
+void
+rt_screen_field_tail(const char *text, int width)
+{
+	rt_screen_field(text, width - 1);
 }
 
 void
