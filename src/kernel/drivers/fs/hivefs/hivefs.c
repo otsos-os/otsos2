@@ -114,6 +114,7 @@ $define %func hivefs_set_value as function with args hive, key, value, type
 $define %func hivefs_delete_value as function with args hive, key, value
 $define %func hivefs_value_info as function with args hive, key, value, type
 $define %func hivefs_access_info as function with args hive, key, value, flags
+$define %func hivefs_hive_name as function with args u32, char *, u32
 $define %func hivefs_back_ops as function with args void
 
 */
@@ -151,7 +152,7 @@ $space %export hivefs_load_store, hivefs_sync
 $space %export hivefs_create_key, hivefs_delete_key
 $space %export hivefs_set_value, hivefs_delete_value
 $space %export hivefs_value_info, hivefs_access_info
-$space %export hivefs_back_ops
+$space %export hivefs_hive_name, hivefs_back_ops
 
 */
 
@@ -2186,6 +2187,23 @@ hivefs_access_info(const char *hive_name, const char *key,
 	hivefs_access_merge(HIVEFS_ACCESS_DEFAULT, &read, &add, &edit);
 	*flags = hivefs_access_pack(read, add, edit);
 	return (0);
+}
+
+int
+hivefs_hive_name(u32 index, char *out, u32 out_size)
+{
+	if (!g_hivefs.loaded || !out || out_size == 0) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (out_size < HIVEFS_NAME_SIZE) {
+		return (-API_ERR_TOO_BIG);
+	}
+	if (index >= g_hivefs.hive_count) {
+		return (0);
+	}
+	memset(out, 0, out_size);
+	hivefs_name_copy(g_hivefs.hives[index].name, out);
+	return (1);
 }
 
 static int

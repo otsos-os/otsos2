@@ -5,6 +5,7 @@ $define %type uint8_t as 8 bit unsigned
 $define %type uint32_t as 32 bit unsigned
 $define %type api_reg_value as native registry value IO descriptor
 $define %type api_reg_entry as native registry enumeration entry
+$define %type api_reg_hive as native registry hive enumeration entry
 
 $define %func regGetFixed as function with args int, const char *, uint32_t
 $define %func regSetFixed as function with args int, const char *, uint32_t
@@ -16,6 +17,7 @@ $define %func regCreateKey as function with args int, const char *
 $define %func regDeleteKey as function with args int, const char *
 $define %func regDeleteValue as function with args int, const char *
 $define %func regEnum as function with args int, api_reg_entry *
+$define %func regEnumHives as function with args api_reg_hive *
 $define %func regUpd as function with args uint32_t
 $define %func regGetBool as function with args int, const char *, int *
 $define %func regSetBool as function with args int, const char *, int
@@ -32,7 +34,8 @@ $define %func regSetString as function with args int, const char *, const char *
 
 $space %internal regGetFixed, regSetFixed
 $space %export regOpen, regClose, regGet, regSet, regCreateKey
-$space %export regDeleteKey, regDeleteValue, regEnum, regUpd
+$space %export regDeleteKey, regDeleteValue, regEnum, regEnumHives
+$space %export regUpd
 $space %export regGetBool, regSetBool, regGetU32, regSetU32
 $space %export regGetIpv4, regSetIpv4, regGetString, regSetString
 
@@ -135,6 +138,13 @@ regEnum(int reg, struct api_reg_entry *entry)
 {
 	return (__sysret_int(__syscall2(CALL_REG_ENUM, (long)reg,
 	    (long)entry)));
+}
+
+int
+regEnumHives(struct api_reg_hive *hive)
+{
+	return (__sysret_int(__syscall1(CALL_REG_ENUM_HIVES,
+	    (long)hive)));
 }
 
 int

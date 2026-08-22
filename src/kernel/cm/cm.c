@@ -59,6 +59,7 @@ $define %func cm_foreach_key as function with args hive, key, cb, ctx
 $define %func cm_key_exists as function with args hive, key
 $define %func cm_value_info as function with args hive, key, value, type
 $define %func cm_enum_entry as function with args hive, key, index, entry
+$define %func cm_enum_hive as function with args index, hive, kusr
 $define %func cm_check_access as function with args hive, key, value, op
 $define %func cm_register_consumer as function with args id, name, update
 $define %func cm_update_consumer as function with args id, flags
@@ -97,7 +98,7 @@ $space %internal cm_read_exact, cm_access_get, cm_access_allowed
 $space %internal cm_mount_registry
 $space %export cm_init, cm_is_initialized, cm_mount_path
 $space %export cm_foreach_key, cm_key_exists, cm_value_info
-$space %export cm_enum_entry, cm_check_access
+$space %export cm_enum_entry, cm_enum_hive, cm_check_access
 $space %export cm_register_consumer, cm_update_consumer
 $space %export cm_update_consumer_user
 $space %export cm_read_value, cm_get_bool, cm_get_i32
@@ -554,6 +555,42 @@ cm_enum_entry(const char *hive, const char *key, u32 index,
 	entry->kind = CM_ENTRY_VALUE;
 	entry->type = type;
 	entry->size = size;
+	return (1);
+}
+
+int
+cm_enum_hive(u32 index, cm_hive_t *hive, int is_kusr)
+{
+	char	name[32];
+	u32	access;
+	int	ret;
+	if (!g_cm_initialized) {
+		return (-API_ERR_NOT_FOUND);
+	}
+	if (!hive) {
+		return (-API_ERR_BAD_VALUE);
+	}
+
+	memset(name, 0, sizeof(name));
+	ret = hivefs_hive_name(index, name, sizeof(name));
+	if (ret <= 0) {
+		return (ret);
+	}
+
+	access = 0;
+	if (cm_check_access(name, "", NULL, CM_ACCESS_READ, is_kusr) == 0) {
+		access |= CM_HIVE_CAN_READ;
+	}
+	if (cm_check_access(name, "", NULL, CM_ACCESS_ADD, is_kusr) == 0) {
+		access |= CM_HIVE_CAN_ADD;
+	}
+	if (cm_check_access(name, "", NULL, CM_ACCESS_EDIT, is_kusr) == 0) {
+		access |= CM_HIVE_CAN_EDIT;
+	}
+
+	memset(hive, 0, sizeof(*hive));
+	hive->access = access;
+	cm_str_copy(hive->name, sizeof(hive->name), name);
 	return (1);
 }
 

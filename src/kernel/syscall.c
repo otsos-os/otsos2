@@ -381,6 +381,9 @@ void syscall_handler(registers_t *regs) {
   case CALL_REG_UPD:
     regs->rax = (u64)api_reg_upd((u32)arg1);
     break;
+  case CALL_REG_ENUM_HIVES:
+    regs->rax = (u64)api_reg_enum_hives((struct api_reg_hive *)arg1);
+    break;
   case CALL_IPC_CREATE:
     regs->rax = (u64)api_ipc_create((const char *)arg1,
                                     (u32)arg2, (u32)arg3);

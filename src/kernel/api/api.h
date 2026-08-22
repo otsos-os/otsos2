@@ -358,6 +358,9 @@ struct api_net_msg {
 
 #define	API_REG_KIND_KEY	1
 #define	API_REG_KIND_VALUE	2
+#define	API_REG_HIVE_CAN_READ	0x1
+#define	API_REG_HIVE_CAN_ADD	0x2
+#define	API_REG_HIVE_CAN_EDIT	0x4
 
 #define	API_REG_CONSUMER_NET		1
 #define	API_REG_CONSUMER_SCHEDULER	2
@@ -405,6 +408,12 @@ struct api_reg_entry {
 	u32	kind;
 	u32	type;
 	u32	size;
+	char	name[32];
+};
+
+struct api_reg_hive {
+	u32	index;
+	u32	access;
 	char	name[32];
 };
 
@@ -989,6 +998,7 @@ int api_reg_create_key(int handle, const char *name);
 int api_reg_delete_key(int handle, const char *name);
 int api_reg_delete_value(int handle, const char *name);
 int api_reg_enum(int handle, struct api_reg_entry *uentry);
+int api_reg_enum_hives(struct api_reg_hive *uhive);
 int api_reg_upd(u32 consumer);
 int api_trace_open(u32 flags);
 int api_trace_close(int trace);

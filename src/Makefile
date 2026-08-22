@@ -39,6 +39,7 @@ YES_BIN = $(PROGS_DIR)/yes
 FETCH_BIN = $(PROGS_DIR)/fetch
 SHELL_BIN = $(PROGS_DIR)/sh
 OVEN_BIN = $(PROGS_DIR)/oven
+REGEDIT_BIN = $(PROGS_DIR)/regedit/regedit
 CURSORD_BIN = $(PROGS_DIR)/demons/cursord
 SRAPI_DEMO_BIN = $(PROGS_DIR)/srapi_demo
 SWM_BIN = $(PROGS_DIR)/GUI/swm/swm
@@ -515,6 +516,11 @@ $(OVEN_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    progs/oven"
 	@$(MAKE) -C $(PROGS_DIR) oven LIBC_ENABLED=$(LIBC_ENABLED)
 
+.PHONY: $(REGEDIT_BIN)
+$(REGEDIT_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
+	@echo "  MAKE    progs/regedit"
+	@$(MAKE) -C $(PROGS_DIR) regedit/regedit LIBC_ENABLED=$(LIBC_ENABLED)
+
 .PHONY: $(CURSORD_BIN)
 $(CURSORD_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    progs/demons/cursord"
@@ -725,7 +731,7 @@ $(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BU
 		exit 1; \
 	fi
 
-$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SWM_BIN) $(DE_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(HELLO_DRIVER_KOFO) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
+$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(REGEDIT_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SWM_BIN) $(DE_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(HELLO_DRIVER_KOFO) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
 	@rm -rf $(BIOS_PAYLOAD_DIR)
 	@mkdir -p $(BIOS_PAYLOAD_DIR)
 	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
@@ -739,6 +745,7 @@ $(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $
 			sh) src=$(SHELL_BIN);; \
 			ls|cat|touch|pwd|whoami|rm|mkdir|rmdir|cp|mv|mmod|unzip|profile|lse|ecat) src=$(YABOX_DIR)/$$m;; \
 			oven) src=$(OVEN_BIN);; \
+			regedit) src=$(REGEDIT_BIN);; \
 			cursord) src=$(CURSORD_BIN);; \
 			srapi_demo) src=$(SRAPI_DEMO_BIN);; \
 			swm) src=$(SWM_BIN);; \

@@ -81,6 +81,10 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 		string Dest = "/bin/oven"
 	}
 
+	key Modules.regedit {
+		string Dest = "/bin/regedit"
+	}
+
 	key Modules.cursord {
 		string Dest = "/bin/cursord"
 	}

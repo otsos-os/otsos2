@@ -300,6 +300,7 @@ $space %export entityRead, entityWrite, entitySeek, entityIoctl
 #define CALL_REG_DELETE_VALUE	0xA06
 #define CALL_REG_ENUM		0xA07
 #define CALL_REG_UPD		0xA08
+#define CALL_REG_ENUM_HIVES	0xA09
 #define CALL_PERSONALITY	0xFFFF
 
 #define API_OPEN_READ		0x0001
@@ -370,6 +371,10 @@ $space %export entityRead, entityWrite, entitySeek, entityIoctl
 
 #define API_REG_KIND_KEY	1
 #define API_REG_KIND_VALUE	2
+
+#define API_REG_HIVE_CAN_READ	0x1
+#define API_REG_HIVE_CAN_ADD	0x2
+#define API_REG_HIVE_CAN_EDIT	0x4
 
 #define API_REG_CONSUMER_NET		1
 #define API_REG_CONSUMER_SCHEDULER	2
@@ -966,6 +971,12 @@ struct api_reg_entry {
 	char		name[32];
 };
 
+struct api_reg_hive {
+	uint32_t	index;
+	uint32_t	access;
+	char		name[32];
+};
+
 struct api_kofo_info {
 	uint32_t	size;
 	uint32_t	id;
@@ -1429,6 +1440,7 @@ int	regCreateKey(int reg, const char *name);
 int	regDeleteKey(int reg, const char *name);
 int	regDeleteValue(int reg, const char *name);
 int	regEnum(int reg, struct api_reg_entry *entry);
+int	regEnumHives(struct api_reg_hive *hive);
 int	regUpd(uint32_t consumer);
 int	regGetBool(int reg, const char *name, int *out);
 int	regSetBool(int reg, const char *name, int value);

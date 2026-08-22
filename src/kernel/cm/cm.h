@@ -35,6 +35,7 @@ $define %type char as 8 bit signed
 $define %type cm_key_cb as function pointer with args const char *, void *
 $define %type cm_consumer_update_t as function pointer with args u32
 $define %type cm_entry as registry key or value enumeration record
+$define %type cm_hive as registry hive enumeration record with access mask
 
 $define %func cm_init as function with args void
 $define %func cm_is_initialized as function with args void
@@ -43,6 +44,7 @@ $define %func cm_foreach_key as function with args hive, key, cb, ctx
 $define %func cm_key_exists as function with args hive, key
 $define %func cm_value_info as function with args hive, key, value, type
 $define %func cm_enum_entry as function with args hive, key, index, entry
+$define %func cm_enum_hive as function with args index, hive, kusr
 $define %func cm_check_access as function with args hive, key, value, op
 $define %func cm_register_consumer as function with args id, name, update
 $define %func cm_update_consumer as function with args id, flags
@@ -76,7 +78,7 @@ $define %func cm_get_string_default as function with args hive, key, value, out
 
 $space %export cm_init, cm_is_initialized, cm_mount_path
 $space %export cm_foreach_key, cm_key_exists, cm_value_info
-$space %export cm_enum_entry, cm_check_access
+$space %export cm_enum_entry, cm_enum_hive, cm_check_access
 $space %export cm_register_consumer, cm_update_consumer
 $space %export cm_update_consumer_user
 $space %export cm_read_value, cm_get_bool, cm_get_i32
@@ -112,6 +114,9 @@ $space %export cm_get_string_default
 #define	CM_ACCESS_READ		1
 #define	CM_ACCESS_ADD		2
 #define	CM_ACCESS_EDIT		3
+#define	CM_HIVE_CAN_READ	0x1
+#define	CM_HIVE_CAN_ADD		0x2
+#define	CM_HIVE_CAN_EDIT	0x4
 
 #define	CM_SUBJECT_USER		0
 #define	CM_SUBJECT_KUSR		1
@@ -132,6 +137,11 @@ typedef struct cm_entry {
 	char	name[32];
 } cm_entry_t;
 
+typedef struct cm_hive {
+	u32	access;
+	char	name[32];
+} cm_hive_t;
+
 int		cm_init(void);
 int		cm_is_initialized(void);
 const char	*cm_mount_path(void);
@@ -142,6 +152,7 @@ int		cm_value_info(const char *hive, const char *key,
 		    const char *value, u32 *type, u32 *size);
 int		cm_enum_entry(const char *hive, const char *key,
 		    u32 index, cm_entry_t *entry);
+int		cm_enum_hive(u32 index, cm_hive_t *hive, int is_kusr);
 int		cm_check_access(const char *hive, const char *key,
 		    const char *value, u32 op, int is_kusr);
 int		cm_register_consumer(u32 id, const char *name,

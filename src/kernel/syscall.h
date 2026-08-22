@@ -121,6 +121,7 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_REG_DELETE_VALUE	0xA06
 #define	CALL_REG_ENUM		0xA07
 #define	CALL_REG_UPD		0xA08
+#define	CALL_REG_ENUM_HIVES	0xA09
 
 #define	CALL_IPC_CREATE	0xB00
 #define	CALL_IPC_CONNECT	0xB01

@@ -41,6 +41,7 @@ $define %func hivefs_set_value as function with args hive, key, value, type
 $define %func hivefs_delete_value as function with args hive, key, value
 $define %func hivefs_value_info as function with args hive, key, value, type
 $define %func hivefs_access_info as function with args hive, key, value, flags
+$define %func hivefs_hive_name as function with args u32, char *, u32
 $define %func hivefs_back_ops as function with args void
 
 */
@@ -53,7 +54,7 @@ $space %export hivefs_load_store, hivefs_sync
 $space %export hivefs_create_key, hivefs_delete_key
 $space %export hivefs_set_value, hivefs_delete_value
 $space %export hivefs_value_info, hivefs_access_info
-$space %export hivefs_back_ops
+$space %export hivefs_hive_name, hivefs_back_ops
 
 */
 
@@ -104,6 +105,8 @@ int				hivefs_value_info(const char *hive,
 int				hivefs_access_info(const char *hive,
 				    const char *key, const char *value,
 				    u32 *flags);
+int				hivefs_hive_name(u32 index, char *out,
+				    u32 out_size);
 const vfs_back_ops_t		*hivefs_back_ops(void);
 
 #endif

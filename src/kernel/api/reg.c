@@ -33,7 +33,9 @@ $define %type int as 32 bit signed
 $define %type entity_id as 64 bit packed archetype/generation/index
 $define %type api_reg_value as native registry value IO descriptor
 $define %type api_reg_entry as native registry enumeration entry
+$define %type api_reg_hive as native registry hive enumeration entry
 $define %type cm_entry as registry key or value enumeration record
+$define %type cm_hive as registry hive enumeration record with access mask
 
 $define %func api_reg_copy_string as function with args const char *, int
 $define %func api_reg_flags_valid as function with args u32
@@ -54,6 +56,7 @@ $define %func api_reg_create_key as function with args int, const char *
 $define %func api_reg_delete_key as function with args int, const char *
 $define %func api_reg_delete_value as function with args int, const char *
 $define %func api_reg_enum as function with args int, api_reg_entry *
+$define %func api_reg_enum_hives as function with args api_reg_hive *
 $define %func api_reg_upd as function with args u32
 
 */
@@ -67,7 +70,8 @@ $space %internal api_reg_object_key, api_reg_join_key, api_reg_install
 $space %internal api_reg_parent_key, api_reg_check_write_open
 $space %export api_reg_open, api_reg_close, api_reg_get, api_reg_set
 $space %export api_reg_create_key, api_reg_delete_key
-$space %export api_reg_delete_value, api_reg_enum, api_reg_upd
+$space %export api_reg_delete_value, api_reg_enum, api_reg_enum_hives
+$space %export api_reg_upd
 
 */
 
@@ -680,6 +684,33 @@ api_reg_enum(int handle, struct api_reg_entry *uentry)
 	entry.size = cm_entry.size;
 	memcpy(entry.name, cm_entry.name, sizeof(entry.name));
 	memcpy(uentry, &entry, sizeof(entry));
+	return (1);
+}
+
+int
+api_reg_enum_hives(struct api_reg_hive *uhive)
+{
+	struct api_reg_hive	hive;
+	cm_hive_t		cm_hive;
+	u32			index;
+	int			ret;
+
+	if (!uhive || !is_user_address(uhive, sizeof(*uhive)) ||
+	    !user_range_fault_in(uhive, sizeof(*uhive), 1)) {
+		return (-API_ERR_BAD_ADDR);
+	}
+	memcpy(&hive, uhive, sizeof(hive));
+	index = hive.index;
+	memset(&cm_hive, 0, sizeof(cm_hive));
+	ret = cm_enum_hive(index, &cm_hive, api_reg_is_kusr());
+	if (ret <= 0) {
+		return (ret);
+	}
+	memset(&hive, 0, sizeof(hive));
+	hive.index = index;
+	hive.access = cm_hive.access;
+	memcpy(hive.name, cm_hive.name, sizeof(hive.name));
+	memcpy(uhive, &hive, sizeof(hive));
 	return (1);
 }
 

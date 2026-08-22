@@ -216,6 +216,7 @@ Monolithic kernel with the following rough layers:
   `cp`, `mv`, `rm`, `mkdir`, `unzip`, and `profile`.
 - `progs/toolchain/` contains native OTSOS toolchain programs such as `as` and
   `ld`.
+- `progs/regedit/` is the registry editor.
 - `ports/lua/` — Lua interpreter port, uses musl's `Scrt1.o` and is dynamically
   linked as a PIE against shared `libc.so` (via `-pie -dynamic-linker /lib/ld-musl-x86_64.so.1`).
   Patched via `ports/lua/diff.patch`, set up by `ports/lua/setup.sh`.
