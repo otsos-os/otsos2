@@ -4,12 +4,15 @@ $define %type swm_client as native Sprot client state
 $define %type swm_surface as compositor surface state
 $define %type swm_state as compositor global state
 $define %type swm_interact as active compositor interaction
+$define %type swm_rect as signed screen-space rectangle
+$define %type swm_paint_record as per-slot record of the last painted frame
 
 */
 
 /* !SPACE!
 
 $space %export swm_client_t, swm_surface_t, swm_state_t, swm_interact_t
+$space %export swm_rect_t, swm_paint_record_t
 
 */
 
@@ -40,6 +43,22 @@ typedef enum swm_interact {
 	SWM_INTERACT_NONE = 0,
 	SWM_INTERACT_MOVE = 1
 } swm_interact_t;
+typedef struct swm_rect {
+	int32_t		x;
+	int32_t		y;
+	int32_t		w;
+	int32_t		h;
+} swm_rect_t;
+
+typedef struct swm_paint_record {
+	swm_rect_t	outer;
+	const void	*pixels;
+	uint32_t	content_serial;
+	uint32_t	title_hash;
+	int		painted;
+	int		focused;
+	int		has_chrome;
+} swm_paint_record_t;
 
 typedef struct swm_surface {
 	swm_client_t	*owner;
@@ -69,6 +88,9 @@ typedef struct swm_surface {
 	int		maximized;
 	int		wants_frame;
 	int		z;
+	swm_rect_t	damage;
+	int		damage_valid;
+	uint32_t	content_serial;
 	char		title[128];
 } swm_surface_t;
 
@@ -118,8 +140,17 @@ typedef struct swm_state {
 	int		should_quit;
 	int		next_z;
 	int		shell_dirty;
+	swm_rect_t	damage;
+	int		damage_valid;
+	int		damage_full;
+	swm_rect_t	cursor_prev;
+	const void	*cursor_prev_pixels;
+	uint32_t	cursor_prev_type;
+	int		cursor_prev_valid;
+	int		cursor_prev_visible;
 	swm_client_t	clients[SWM_MAX_CLIENTS];
 	swm_surface_t	surfaces[SWM_MAX_SURFACES];
+	swm_paint_record_t paint[SWM_MAX_SURFACES];
 } swm_state_t;
 
 #endif

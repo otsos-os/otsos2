@@ -330,7 +330,7 @@ static int fbdev_init(const void *boot_info) {
   }
 
   u64 size = (u64)boot->pitch * boot->height;
-  mapped = pmap_map_mmio(boot->hw_address, size);
+  mapped = pmap_map_framebuffer(boot->hw_address, size);
   if (!mapped) {
     return -1;
   }
@@ -352,7 +352,9 @@ static int fbdev_init(const void *boot_info) {
   drm_crtc_set_mode_geometry(boot->width, boot->height, boot->pitch,
                              boot->bpp, boot->hw_address);
 
-  drivers_log("[FBDEV] hw fb mapped: %ux%u\n", boot->width, boot->height);
+  drivers_log("[FBDEV] hw fb mapped: %ux%u (%s)\n", boot->width,
+              boot->height,
+              pmap_pat_is_wc_available() ? "WC" : "UC");
   return 0;
 }
 
@@ -508,6 +510,7 @@ static int fbdev_atomic_commit(const drm_kms_state_t *state) {
     g_cursor_valid = 0;
   }
   g_primary_fb_id = fb_id;
+  pmap_wc_fence();
   return 0;
 }
 
@@ -619,6 +622,7 @@ drm_fbdev_vnode_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
     return rc;
   }
   memcpy(g_hw_base + offset, buf, n);
+  pmap_wc_fence();
   return (int)n;
 }
 

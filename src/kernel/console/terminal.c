@@ -1603,6 +1603,9 @@ terminal_pump_keyboard(u32 flags)
 	}
 
 	if (got_data) {
+		if (g_con) {
+			kms_console_flush(g_con);
+		}
 		knote_notify_all(EVFILT_READ, 0, 0, 1);
 		posix_poll_notify();
 	}
@@ -1782,9 +1785,6 @@ terminal_emit_to(int terminal_idx, char c)
 		terminal_suppress_com1_mirror = 1;
 		uart_write_byte((u8)c);
 		terminal_suppress_com1_mirror = 0;
-		if (g_con) {
-			kms_console_flush(g_con);
-		}
 	}
 }
 

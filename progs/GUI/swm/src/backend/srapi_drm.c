@@ -128,7 +128,7 @@ swm_output_backbuffer(swm_output_t *output)
 }
 
 int
-swm_output_present(swm_output_t *output)
+swm_output_present(swm_output_t *output, const struct srapi_region *region)
 {
 	int ret;
 
@@ -136,7 +136,8 @@ swm_output_present(swm_output_t *output)
 	    output->backbuffer == NULL) {
 		return (SRAPI_ERR_INVALID);
 	}
-	ret = srapiImageDamage(output->backbuffer, NULL);
+
+	ret = srapiImageDamage(output->backbuffer, region);
 	if (ret == SRAPI_OK) {
 		ret = srapiCmdReset(output->commands);
 	}

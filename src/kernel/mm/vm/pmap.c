@@ -53,7 +53,12 @@ $define %func pmap_clear_user_range as procedure with args u64, u64
 $define %func pmap_clone as function with args u64
 $define %func pmap_destroy as procedure with args u64
 $define %func pmap_destroy_page_tables_only as procedure with args u64
+$define %func pmap_cpuid as procedure with args u32, u32 *, u32 *, u32 *, u32 *
+$define %func pmap_pat_init as procedure with args void
+$define %func pmap_pat_is_wc_available as function with args void
+$define %func pmap_map_range as function with args u64, u64, u64
 $define %func pmap_map_mmio as function with args u64, u64
+$define %func pmap_map_framebuffer as function with args u64, u64
 
 */
 
@@ -63,12 +68,14 @@ $space %internal pmap_alloc_table, pmap_alloc_zeroed_page
 $space %internal pmap_free_phys_page, pmap_wrmsr, pmap_rdmsr
 $space %internal split_huge_pde, get_next_level_from
 $space %internal pmap_share_user_pages_cow
+$space %internal pmap_cpuid, pmap_map_range
 $space %export pmap_init, pmap_is_initialized, pmap_enter
 $space %export pmap_remove, pmap_extract, pmap_enter_in
 $space %export pmap_create, pmap_kernel_cr3, pmap_extract_flags
 $space %export pmap_clear_user_range, pmap_clone, pmap_destroy
 $space %export pmap_destroy_page_tables_only
-$space %export pmap_map_mmio
+$space %export pmap_pat_init, pmap_pat_is_wc_available
+$space %export pmap_map_mmio, pmap_map_framebuffer
 
 */
 
@@ -79,9 +86,19 @@ $space %export pmap_map_mmio
 
 #define MSR_EFER		0xC0000080
 #define EFER_NXE		(1ULL << 11)
+#define MSR_IA32_PAT		0x277
+#define PAT_TYPE_UC		0x00ULL
+#define PAT_TYPE_WC		0x01ULL
+#define PAT_TYPE_WT		0x04ULL
+#define PAT_TYPE_WP		0x05ULL
+#define PAT_TYPE_UC_MINUS	0x07ULL
+#define PAT_TYPE_WB		0x06ULL
+#define PAT_ENTRY(idx, type)	((type) << ((idx) * 8))
+#define CPUID_FEAT_EDX_PAT	(1U << 16)
 
 static u64	g_kernel_cr3 = 0;
 static int	pmap_initialized = 0;
+static int	pmap_pat_wc_ready = 0;
 static u64 *
 pmap_table_ptr(u64 phys)
 {
@@ -145,6 +162,59 @@ pmap_rdmsr(u32 msr)
 	return (((u64)high << 32) | low);
 }
 
+static void
+pmap_cpuid(u32 leaf, u32 *eax, u32 *ebx, u32 *ecx, u32 *edx)
+{
+	u32	a, b, c, d;
+
+	__asm__ volatile("cpuid"
+	    : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+	    : "a"(leaf), "c"(0));
+	if (eax) {
+		*eax = a;
+	}
+	if (ebx) {
+		*ebx = b;
+	}
+	if (ecx) {
+		*ecx = c;
+	}
+	if (edx) {
+		*edx = d;
+	}
+}
+
+void
+pmap_pat_init(void)
+{
+	u64	pat;
+	u32	edx;
+
+	pmap_pat_wc_ready = 0;
+	edx = 0;
+	pmap_cpuid(1, NULL, NULL, NULL, &edx);
+	if (!(edx & CPUID_FEAT_EDX_PAT)) {
+		printk("[PMAP] PAT unsupported, framebuffer stays UC\n");
+		return;
+	}
+
+	pat = pmap_rdmsr(MSR_IA32_PAT);
+	pat &= ~(0xFFULL << (4 * 8));
+	pat |= PAT_ENTRY(4, PAT_TYPE_WC);
+
+	pmap_wrmsr(MSR_IA32_PAT, pat);
+	pmap_load(pmap_get_cr3());
+
+	pmap_pat_wc_ready = 1;
+	printk("[PMAP] PAT programmed, PA4=WC\n");
+}
+
+int
+pmap_pat_is_wc_available(void)
+{
+	return (pmap_pat_wc_ready);
+}
+
 static u64 *
 split_huge_pde(u64 *pd, u16 pd_index, u64 flags)
 {
@@ -201,6 +271,7 @@ pmap_init(void)
 	if (!(efer & EFER_NXE)) {
 		pmap_wrmsr(MSR_EFER, efer | EFER_NXE);
 	}
+	pmap_pat_init();
 	cr3 = pmap_get_cr3();
 	if (g_kernel_cr3 == 0) {
 		g_kernel_cr3 = cr3;
@@ -376,8 +447,8 @@ pmap_remove(u64 vaddr)
 	pmap_invlpg(vaddr);
 }
 
-void *
-pmap_map_mmio(u64 paddr, u64 size)
+static void *
+pmap_map_range(u64 paddr, u64 size, u64 cache_flags)
 {
 	u64	end, last, page;
 
@@ -391,10 +462,24 @@ pmap_map_mmio(u64 paddr, u64 size)
 	end = (last + PAGE_SIZE) & ~((u64)PAGE_SIZE - 1);
 	for (page = paddr & ~((u64)PAGE_SIZE - 1); page < end;
 	    page += PAGE_SIZE) {
-		pmap_enter(DMAP_BASE + page, page,
-		    PTE_RW | PTE_PCD | PTE_PWT);
+		pmap_enter(DMAP_BASE + page, page, PTE_RW | cache_flags);
 	}
 	return ((void *)(DMAP_BASE + paddr));
+}
+
+void *
+pmap_map_mmio(u64 paddr, u64 size)
+{
+	return (pmap_map_range(paddr, size, PMAP_CACHE_UC));
+}
+
+void *
+pmap_map_framebuffer(u64 paddr, u64 size)
+{
+	u64	cache;
+
+	cache = pmap_pat_wc_ready ? PMAP_CACHE_WC : PMAP_CACHE_UC;
+	return (pmap_map_range(paddr, size, cache));
 }
 
 u64

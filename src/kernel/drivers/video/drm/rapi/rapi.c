@@ -79,6 +79,35 @@ static u32 buf_height(drm_gem_buffer_t *buf, u32 pitch) {
   return (u32)(buf->size / pitch);
 }
 
+static void rapi_fill_span(u8 *row, u32 bytes_pp, u32 count, u32 color) {
+  u32 *p32;
+  u16 *p16;
+  u32 i;
+
+  if (count == 0) {
+    return;
+  }
+  if (bytes_pp == 4) {
+    p32 = (u32 *)row;
+    for (i = 0; i < count; i++) {
+      p32[i] = color;
+    }
+  } else if (bytes_pp == 3) {
+    for (i = 0; i < count; i++) {
+      row[i * 3] = (u8)(color & 0xFF);
+      row[i * 3 + 1] = (u8)((color >> 8) & 0xFF);
+      row[i * 3 + 2] = (u8)((color >> 16) & 0xFF);
+    }
+  } else if (bytes_pp == 2) {
+    p16 = (u16 *)row;
+    for (i = 0; i < count; i++) {
+      p16[i] = (u16)(color & 0xFFFF);
+    }
+  } else {
+    memset(row, (int)(color & 0xFF), count);
+  }
+}
+
 int rapi_put_pixel(drm_gem_buffer_t *buf, u32 pitch, u8 bpp, u32 x, u32 y,
                    u32 color) {
   if (!buf || !buf->data || pitch == 0 || bpp == 0) {
@@ -96,13 +125,19 @@ int rapi_put_pixel(drm_gem_buffer_t *buf, u32 pitch, u8 bpp, u32 x, u32 y,
 
 int rapi_fill_rect(drm_gem_buffer_t *buf, u32 pitch, u8 bpp, rapi_rect_t rect,
                    u32 color) {
-  u32 h, w, x2, y2, y, x;
+  u8 *first, *row;
+  u64 span_bytes;
+  u32 bytes_pp, h, w, x2, y2, y;
 
   if (!buf || !buf->data || pitch == 0 || bpp == 0) {
     return DRM_ERR_INVAL;
   }
+  bytes_pp = (u32)(bpp / 8);
+  if (bytes_pp == 0) {
+    return DRM_ERR_INVAL;
+  }
   h = buf_height(buf, pitch);
-  w = pitch / (u32)(bpp / 8);
+  w = pitch / bytes_pp;
   if (rect.x >= w || rect.y >= h || rect.width == 0 || rect.height == 0) {
     return DRM_ERR_RANGE;
   }
@@ -110,51 +145,73 @@ int rapi_fill_rect(drm_gem_buffer_t *buf, u32 pitch, u8 bpp, rapi_rect_t rect,
   y2 = rect.y + rect.height;
   if (x2 > w) x2 = w;
   if (y2 > h) y2 = h;
-  for (y = rect.y; y < y2; y++) {
-    for (x = rect.x; x < x2; x++) {
-      store_pixel(buf->data, pitch, bpp, x, y, color);
-    }
+  span_bytes = (u64)(x2 - rect.x) * bytes_pp;
+  first = buf->data + (u64)rect.y * pitch + (u64)rect.x * bytes_pp;
+  rapi_fill_span(first, bytes_pp, x2 - rect.x, color);
+  for (y = rect.y + 1; y < y2; y++) {
+    row = buf->data + (u64)y * pitch + (u64)rect.x * bytes_pp;
+    memcpy(row, first, span_bytes);
   }
   return DRM_OK;
 }
 
 int rapi_clear(drm_gem_buffer_t *buf, u32 pitch, u8 bpp, u32 color) {
-  u32 h, y, x;
+  rapi_rect_t rect;
+  u32 bytes_pp, h;
 
   if (!buf || !buf->data || pitch == 0 || bpp == 0) {
     return DRM_ERR_INVAL;
   }
-  h = buf_height(buf, pitch);
-  for (y = 0; y < h; y++) {
-    for (x = 0; x * (u32)(bpp / 8) < pitch; x++) {
-      store_pixel(buf->data, pitch, bpp, x, y, color);
-    }
+  bytes_pp = (u32)(bpp / 8);
+  if (bytes_pp == 0) {
+    return DRM_ERR_INVAL;
   }
-  return DRM_OK;
+  h = buf_height(buf, pitch);
+  if (h == 0) {
+    return DRM_ERR_RANGE;
+  }
+
+  rect.x = 0;
+  rect.y = 0;
+  rect.width = pitch / bytes_pp;
+  rect.height = h;
+  return (rapi_fill_rect(buf, pitch, bpp, rect, color));
 }
 
 int rapi_blit(drm_gem_buffer_t *src, u32 src_pitch, u8 bpp, rapi_rect_t srect,
               drm_gem_buffer_t *dst, u32 dst_pitch, u32 dx, u32 dy) {
-  u32 bpp_bytes, row, col, sy, dyy, sx, dxx;
-  u64 soff, doff;
+  u64 soff, doff, avail;
+  u32 bpp_bytes, row, sy, dyy, cols;
 
   if (!src || !dst || !src->data || !dst->data || bpp == 0) {
     return DRM_ERR_INVAL;
   }
   bpp_bytes = (u32)(bpp / 8);
+  if (bpp_bytes == 0) {
+    return DRM_ERR_INVAL;
+  }
   for (row = 0; row < srect.height; row++) {
     sy = srect.y + row;
     dyy = dy + row;
-    for (col = 0; col < srect.width; col++) {
-      sx = srect.x + col;
-      dxx = dx + col;
-      soff = (u64)sy * src_pitch + (u64)sx * bpp_bytes;
-      doff = (u64)dyy * dst_pitch + (u64)dxx * bpp_bytes;
-      if (soff + bpp_bytes > src->size || doff + bpp_bytes > dst->size) {
-        continue;
-      }
-      memcpy(dst->data + doff, src->data + soff, bpp_bytes);
+    soff = (u64)sy * src_pitch + (u64)srect.x * bpp_bytes;
+    doff = (u64)dyy * dst_pitch + (u64)dx * bpp_bytes;
+    if (soff + bpp_bytes > src->size || doff + bpp_bytes > dst->size) {
+      continue;
     }
+
+    cols = srect.width;
+    avail = (src->size - soff) / bpp_bytes;
+    if (avail < cols) {
+      cols = (u32)avail;
+    }
+    avail = (dst->size - doff) / bpp_bytes;
+    if (avail < cols) {
+      cols = (u32)avail;
+    }
+    if (cols == 0) {
+      continue;
+    }
+    memcpy(dst->data + doff, src->data + soff, (u64)cols * bpp_bytes);
   }
   return DRM_OK;
 }
@@ -214,8 +271,9 @@ rapi_blend_argb32_to_raw(const drm_framebuffer_t *src, u8 *dst,
 
 int rapi_scroll_up(drm_gem_buffer_t *buf, u32 pitch, u8 bpp, u32 lines,
                     u32 bg) {
-  u32 h, move_bytes, bottom_bytes, bpp_bytes, w, y, x;
+  rapi_rect_t r;
   u8 *bottom;
+  u32 h, move_bytes, bottom_bytes, bpp_bytes;
 
   if (!buf || !buf->data || pitch == 0 || bpp == 0 || lines == 0) {
     return DRM_ERR_INVAL;
@@ -232,12 +290,15 @@ int rapi_scroll_up(drm_gem_buffer_t *buf, u32 pitch, u8 bpp, u32 lines,
     memset(bottom, 0, bottom_bytes);
   } else {
     bpp_bytes = (u32)(bpp / 8);
-    w = pitch / bpp_bytes;
-    for (y = h - lines; y < h; y++) {
-      for (x = 0; x < w; x++) {
-        store_pixel(buf->data, pitch, bpp, x, y, bg);
-      }
+    if (bpp_bytes == 0) {
+      return DRM_ERR_INVAL;
     }
+
+    r.x = 0;
+    r.y = h - lines;
+    r.width = pitch / bpp_bytes;
+    r.height = lines;
+    rapi_fill_rect(buf, pitch, bpp, r, bg);
   }
   return DRM_OK;
 }
@@ -247,21 +308,43 @@ extern const u8 *get_font_data(char c);
 int rapi_glyph(drm_gem_buffer_t *buf, u32 pitch, u8 bpp, u32 x, u32 y, char c,
                 u32 fg, u32 bg) {
   const u8 *glyph;
+  u8 *rowp;
+  u32 *p32;
+  u64 span, last;
+  u32 bytes_pp, bits, color;
   int row, col;
 
   if (!buf || !buf->data || pitch == 0 || bpp == 0) {
+    return DRM_ERR_INVAL;
+  }
+  bytes_pp = (u32)(bpp / 8);
+  if (bytes_pp == 0) {
     return DRM_ERR_INVAL;
   }
   glyph = get_font_data(c);
   if (!glyph) {
     return DRM_ERR_NOENT;
   }
+  span = (u64)8 * bytes_pp;
+  last = (u64)(y + 15) * pitch + (u64)x * bytes_pp + span;
+  if (last > buf->size) {
+    return DRM_ERR_RANGE;
+  }
+  rowp = buf->data + (u64)y * pitch + (u64)x * bytes_pp;
   for (row = 0; row < 16; row++) {
-    u8 bits = glyph[row];
-    for (col = 0; col < 8; col++) {
-      u32 color = (bits & (1 << (7 - col))) ? fg : bg;
-      store_pixel(buf->data, pitch, bpp, x + col, y + row, color);
+    bits = glyph[row];
+    if (bytes_pp == 4) {
+      p32 = (u32 *)rowp;
+      for (col = 0; col < 8; col++) {
+        p32[col] = (bits & (1u << (7 - col))) ? fg : bg;
+      }
+    } else {
+      for (col = 0; col < 8; col++) {
+        color = (bits & (1u << (7 - col))) ? fg : bg;
+        rapi_fill_span(rowp + (u64)col * bytes_pp, bytes_pp, 1, color);
+      }
     }
+    rowp += pitch;
   }
   return DRM_OK;
 }

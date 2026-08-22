@@ -37,6 +37,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -710,11 +711,64 @@ dispatch_message(swm_state_t *swm, swm_client_t *client,
 		}
 		surface->committed = 1;
 		surface->has_pending = 0;
+		surface->content_serial++;
 		swm_protocol_shell_changed(swm);
 		return (0);
 	}
-	case SPROT_REQ_SURFACE_DAMAGE:
+	case SPROT_REQ_SURFACE_DAMAGE: {
+		swm_surface_t *surface = swm_surface_find(swm, hdr->object_id);
+		sprot_body_surface_damage_t body;
+		int32_t x2, y2;
+
+		if (!surface_owned(surface, client)) {
+			return (-1);
+		}
+		if (data == NULL || length < sizeof(body)) {
+			surface->damage_valid = 0;
+			surface->content_serial++;
+			return (0);
+		}
+		memcpy(&body, data, sizeof(body));
+		if (body.width == 0 || body.height == 0) {
+			return (0);
+		}
+		if (body.width > (uint32_t)INT32_MAX ||
+		    body.height > (uint32_t)INT32_MAX) {
+			surface->damage_valid = 0;
+			surface->content_serial++;
+			return (0);
+		}
+		x2 = body.x + (int32_t)body.width;
+		y2 = body.y + (int32_t)body.height;
+		if (x2 < body.x || y2 < body.y) {
+			surface->damage_valid = 0;
+			surface->content_serial++;
+			return (0);
+		}
+		if (!surface->damage_valid) {
+			surface->damage.x = body.x;
+			surface->damage.y = body.y;
+			surface->damage.w = (int32_t)body.width;
+			surface->damage.h = (int32_t)body.height;
+			surface->damage_valid = 1;
+			return (0);
+		}
+		if (body.x < surface->damage.x) {
+			surface->damage.w += surface->damage.x - body.x;
+			surface->damage.x = body.x;
+		}
+		if (body.y < surface->damage.y) {
+			surface->damage.h += surface->damage.y - body.y;
+			surface->damage.y = body.y;
+		}
+		if (x2 > surface->damage.x + surface->damage.w) {
+			surface->damage.w = x2 - surface->damage.x;
+		}
+		if (y2 > surface->damage.y + surface->damage.h) {
+			surface->damage.h = y2 - surface->damage.y;
+		}
 		return (0);
+	}
 	case SPROT_REQ_SURFACE_DESTROY: {
 		swm_surface_t *surface = swm_surface_find(swm, hdr->object_id);
 		if (surface_owned(surface, client)) {

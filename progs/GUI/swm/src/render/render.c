@@ -5,22 +5,30 @@
 
 #include <string.h>
 
-static void fill_rect(uint32_t *dst, int32_t dst_w, int32_t dst_h, int32_t dst_pitch_px,
+typedef struct render_target {
+    uint32_t *pixels;
+    int32_t pitch_px;
+    int32_t w, h;
+    int32_t cx0, cy0, cx1, cy1;
+} render_target_t;
+
+static void fill_rect(const render_target_t *t,
                       int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color) {
-    if (x < 0) { w += x; x = 0; }
-    if (y < 0) { h += y; y = 0; }
-    if (x + w > dst_w) w = dst_w - x;
-    if (y + h > dst_h) h = dst_h - y;
-    if (w <= 0 || h <= 0) return;
-    for (int32_t row = 0; row < h; row++) {
-        uint32_t *dr = dst + (y + row) * dst_pitch_px + x;
-        for (int32_t col = 0; col < w; col++) dr[col] = color;
+    int32_t x0 = x, y0 = y, x1 = x + w, y1 = y + h;
+    if (x0 < t->cx0) x0 = t->cx0;
+    if (y0 < t->cy0) y0 = t->cy0;
+    if (x1 > t->cx1) x1 = t->cx1;
+    if (y1 > t->cy1) y1 = t->cy1;
+    if (x0 >= x1 || y0 >= y1) return;
+    for (int32_t row = y0; row < y1; row++) {
+        uint32_t *dr = t->pixels + row * t->pitch_px;
+        for (int32_t col = x0; col < x1; col++) dr[col] = color;
     }
 }
 
 static const uint8_t SWM_FONT_5x7[95][7];
 
-static void draw_glyph(uint32_t *dst, int32_t dst_w, int32_t dst_h, int32_t dst_pitch_px,
+static void draw_glyph(const render_target_t *t,
                        int32_t x, int32_t y, char c, uint32_t color) {
     int idx = (c >= 32 && c <= 126) ? (c - 32) : ('?' - 32);
     const uint8_t *g = SWM_FONT_5x7[idx];
@@ -29,26 +37,27 @@ static void draw_glyph(uint32_t *dst, int32_t dst_w, int32_t dst_h, int32_t dst_
         for (int gx = 0; gx < 5; gx++) {
             if (row & (1 << (4 - gx))) {
                 int32_t px = x + gx, py = y + gy;
-                if (px >= 0 && px < dst_w && py >= 0 && py < dst_h) {
-                    dst[py * dst_pitch_px + px] = color;
+                if (px >= t->cx0 && px < t->cx1 &&
+                    py >= t->cy0 && py < t->cy1) {
+                    t->pixels[py * t->pitch_px + px] = color;
                 }
             }
         }
     }
 }
 
-static int32_t draw_text(uint32_t *dst, int32_t dst_w, int32_t dst_h, int32_t dst_pitch_px,
+static int32_t draw_text(const render_target_t *t,
                          int32_t x, int32_t y, const char *s, uint32_t color, int32_t max_w) {
     int32_t cur = x;
     for (; *s; s++) {
         if (cur + 5 > x + max_w) break;
-        draw_glyph(dst, dst_w, dst_h, dst_pitch_px, cur, y, *s, color);
+        draw_glyph(t, cur, y, *s, color);
         cur += 6;
     }
     return cur;
 }
 
-static void draw_cursor(uint32_t *dst, int32_t dst_w, int32_t dst_h, int32_t dst_pitch_px,
+static void draw_cursor(const render_target_t *t,
                         int32_t cx, int32_t cy, uint32_t cursor_type) {
     static const uint8_t arrow[16][12] = {
         {1,0,0,0,0,0,0,0,0,0,0,0},
@@ -114,13 +123,14 @@ static void draw_cursor(uint32_t *dst, int32_t dst_w, int32_t dst_h, int32_t dst
             uint8_t v = sprite[y][x];
             if (v == 0) continue;
             int32_t px = cx + x + off_x, py = cy + y + off_y;
-            if (px < 0 || px >= dst_w || py < 0 || py >= dst_h) continue;
-            dst[py * dst_pitch_px + px] = (v == 1) ? 0xFF000000u : 0xFFFFFFFFu;
+            if (px < t->cx0 || px >= t->cx1 ||
+                py < t->cy0 || py >= t->cy1) continue;
+            t->pixels[py * t->pitch_px + px] = (v == 1) ? 0xFF000000u : 0xFFFFFFFFu;
         }
     }
 }
 
-static void draw_cursor_image(swm_state_t *swm, uint32_t *dst, int32_t dst_w, int32_t dst_h, int32_t dst_pitch_px,
+static void draw_cursor_image(swm_state_t *swm, const render_target_t *t,
                               int32_t cx, int32_t cy) {
     swm_buffer_t *buffer = swm->cursor_buffer;
     if (buffer == NULL || !swm->cursor_visible) return;
@@ -134,12 +144,12 @@ static void draw_cursor_image(swm_state_t *swm, uint32_t *dst, int32_t dst_w, in
     if (src != NULL) {
         for (int32_t y = 0; y < src_h; y++) {
             int32_t dy = y0 + y;
-            if (dy < 0 || dy >= dst_h) continue;
+            if (dy < t->cy0 || dy >= t->cy1) continue;
             const uint32_t *sr = src + y * src_pitch_px;
-            uint32_t *dr = dst + dy * dst_pitch_px;
+            uint32_t *dr = t->pixels + dy * t->pitch_px;
             for (int32_t x = 0; x < src_w; x++) {
                 int32_t dx = x0 + x;
-                if (dx < 0 || dx >= dst_w) continue;
+                if (dx < t->cx0 || dx >= t->cx1) continue;
                 uint32_t sp = sr[x];
                 uint32_t a = sp >> 24;
                 if (a == 0) continue;
@@ -166,7 +176,7 @@ static uint32_t blend_premul_pixel(uint32_t dst, uint32_t src) {
     return 0xFF000000u | (rb & 0x00FF00FFu) | (g & 0x0000FF00u);
 }
 
-static void draw_titlebar_chrome(swm_state_t *swm, uint32_t *dst, int32_t dst_w, int32_t dst_h, int32_t dst_pitch_px,
+static void draw_titlebar_chrome(swm_state_t *swm, const render_target_t *t,
                                  swm_surface_t *s, int is_focused) {
     uint32_t bar_color    = is_focused ? 0xFF3A6CB0u : 0xFF333742u;
     uint32_t border_color = is_focused ? 0xFF5AA0F0u : 0xFF4A4F5Bu;
@@ -174,39 +184,213 @@ static void draw_titlebar_chrome(swm_state_t *swm, uint32_t *dst, int32_t dst_w,
     int32_t outer_x, outer_y, outer_w, outer_h;
     swm_surface_outer_rect(swm, s, &outer_x, &outer_y, &outer_w, &outer_h);
 
-    fill_rect(dst, dst_w, dst_h, dst_pitch_px, outer_x, outer_y, outer_w, SWM_BORDER, border_color);
-    fill_rect(dst, dst_w, dst_h, dst_pitch_px, outer_x, outer_y + outer_h - SWM_BORDER, outer_w, SWM_BORDER, border_color);
-    fill_rect(dst, dst_w, dst_h, dst_pitch_px, outer_x, outer_y, SWM_BORDER, outer_h, border_color);
-    fill_rect(dst, dst_w, dst_h, dst_pitch_px, outer_x + outer_w - SWM_BORDER, outer_y, SWM_BORDER, outer_h, border_color);
-    fill_rect(dst, dst_w, dst_h, dst_pitch_px,
-              outer_x + SWM_BORDER, outer_y + SWM_BORDER,
+    fill_rect(t, outer_x, outer_y, outer_w, SWM_BORDER, border_color);
+    fill_rect(t, outer_x, outer_y + outer_h - SWM_BORDER, outer_w, SWM_BORDER, border_color);
+    fill_rect(t, outer_x, outer_y, SWM_BORDER, outer_h, border_color);
+    fill_rect(t, outer_x + outer_w - SWM_BORDER, outer_y, SWM_BORDER, outer_h, border_color);
+    fill_rect(t, outer_x + SWM_BORDER, outer_y + SWM_BORDER,
               outer_w - 2 * SWM_BORDER, SWM_TITLEBAR_H, bar_color);
 
     int32_t bmin, bmax, bclose, by;
     swm_surface_titlebar_button_rects(swm, s, &bmin, &bmax, &bclose, &by);
-    fill_rect(dst, dst_w, dst_h, dst_pitch_px, bmin,   by, SWM_BTN_SIZE, SWM_BTN_SIZE, 0xFFD0B040u);
-    fill_rect(dst, dst_w, dst_h, dst_pitch_px, bmax,   by, SWM_BTN_SIZE, SWM_BTN_SIZE, 0xFF40C060u);
-    fill_rect(dst, dst_w, dst_h, dst_pitch_px, bclose, by, SWM_BTN_SIZE, SWM_BTN_SIZE, 0xFFE05050u);
+    fill_rect(t, bmin,   by, SWM_BTN_SIZE, SWM_BTN_SIZE, 0xFFD0B040u);
+    fill_rect(t, bmax,   by, SWM_BTN_SIZE, SWM_BTN_SIZE, 0xFF40C060u);
+    fill_rect(t, bclose, by, SWM_BTN_SIZE, SWM_BTN_SIZE, 0xFFE05050u);
 
     int32_t title_x = outer_x + SWM_BORDER + 6;
     int32_t title_y = outer_y + SWM_BORDER + (SWM_TITLEBAR_H - 7) / 2;
     int32_t title_max = bmin - title_x - 6;
     if (title_max > 0) {
-        draw_text(dst, dst_w, dst_h, dst_pitch_px, title_x, title_y, s->title, text_color, title_max);
+        draw_text(t, title_x, title_y, s->title, text_color, title_max);
     }
 }
 
-void swm_render_composite(swm_state_t *swm, srapi_image_t *image, uint32_t bg_color) {
+void swm_damage_add(swm_state_t *swm, int32_t x, int32_t y,
+                    int32_t w, int32_t h) {
+    int32_t x2, y2;
+
+    if (swm == NULL || swm->damage_full || w <= 0 || h <= 0) return;
+    x2 = x + w;
+    y2 = y + h;
+    if (!swm->damage_valid) {
+        swm->damage.x = x;
+        swm->damage.y = y;
+        swm->damage.w = w;
+        swm->damage.h = h;
+        swm->damage_valid = 1;
+        return;
+    }
+    if (x < swm->damage.x) {
+        swm->damage.w += swm->damage.x - x;
+        swm->damage.x = x;
+    }
+    if (y < swm->damage.y) {
+        swm->damage.h += swm->damage.y - y;
+        swm->damage.y = y;
+    }
+    if (x2 > swm->damage.x + swm->damage.w) swm->damage.w = x2 - swm->damage.x;
+    if (y2 > swm->damage.y + swm->damage.h) swm->damage.h = y2 - swm->damage.y;
+}
+
+void swm_damage_all(swm_state_t *swm) {
+    if (swm == NULL) return;
+    swm->damage_full = 1;
+    swm->damage_valid = 1;
+}
+
+static uint32_t title_hash(const char *s) {
+    uint32_t hash = 2166136261u;
+    for (; *s; s++) {
+        hash ^= (uint8_t)*s;
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+static void damage_record(swm_state_t *swm, const swm_paint_record_t *rec) {
+    if (rec->painted) {
+        swm_damage_add(swm, rec->outer.x, rec->outer.y,
+                       rec->outer.w, rec->outer.h);
+    }
+}
+
+static void collect_damage(swm_state_t *swm, swm_surface_t **list, int n,
+                           swm_surface_t *focused, swm_paint_record_t *cur) {
+    int slot, i;
+
+    memset(cur, 0, sizeof(*cur) * SWM_MAX_SURFACES);
+
+    for (i = 0; i < n; i++) {
+        swm_surface_t *s = list[i];
+        swm_paint_record_t *rec;
+        int32_t ox, oy, ow, oh;
+
+        slot = (int)(s - swm->surfaces);
+        if (slot < 0 || slot >= SWM_MAX_SURFACES) continue;
+        rec = &cur[slot];
+
+        swm_surface_outer_rect(swm, s, &ox, &oy, &ow, &oh);
+        rec->outer.x = ox;
+        rec->outer.y = oy;
+        rec->outer.w = ow;
+        rec->outer.h = oh;
+        rec->has_chrome = (!swm_surface_role_is_child(s->role) &&
+                           !swm_surface_role_is_panel(s->role));
+        rec->focused = (s == focused);
+        rec->pixels = (s->buffer != NULL) ? swm_buffer_pixels(s->buffer) : NULL;
+        rec->content_serial = s->content_serial;
+        rec->title_hash = title_hash(s->title);
+        rec->painted = 1;
+    }
+
+    for (slot = 0; slot < SWM_MAX_SURFACES; slot++) {
+        swm_paint_record_t *old = &swm->paint[slot];
+        swm_paint_record_t *now = &cur[slot];
+        swm_surface_t *s = &swm->surfaces[slot];
+
+        if (!now->painted) {
+            damage_record(swm, old);
+            continue;
+        }
+        if (!old->painted) {
+            damage_record(swm, now);
+            continue;
+        }
+        if (old->outer.x != now->outer.x || old->outer.y != now->outer.y ||
+            old->outer.w != now->outer.w || old->outer.h != now->outer.h ||
+            old->focused != now->focused ||
+            old->has_chrome != now->has_chrome ||
+            old->title_hash != now->title_hash ||
+            old->pixels != now->pixels) {
+            damage_record(swm, old);
+            damage_record(swm, now);
+            continue;
+        }
+
+        if (old->content_serial != now->content_serial) {
+            int32_t ex, ey, ew, eh;
+
+            swm_surface_effective_rect(swm, s, &ex, &ey, &ew, &eh);
+            if (s->damage_valid) {
+                int32_t dx = ex + s->damage.x;
+                int32_t dy = ey + s->damage.y;
+                int32_t dw = s->damage.w;
+                int32_t dh = s->damage.h;
+                if (dx < ex) { dw -= ex - dx; dx = ex; }
+                if (dy < ey) { dh -= ey - dy; dy = ey; }
+                if (dx + dw > ex + ew) dw = ex + ew - dx;
+                if (dy + dh > ey + eh) dh = ey + eh - dy;
+                swm_damage_add(swm, dx, dy, dw, dh);
+            } else {
+                swm_damage_add(swm, ex, ey, ew, eh);
+            }
+        }
+    }
+
+}
+
+static void cursor_rect(swm_state_t *swm, swm_rect_t *out) {
+    int32_t w = 12, h = 16, hx = 0, hy = 8;
+
+    if (swm->cursor_buffer != NULL) {
+        w = (int32_t)swm_buffer_width(swm->cursor_buffer);
+        h = (int32_t)swm_buffer_height(swm->cursor_buffer);
+        hx = swm->cursor_hotspot_x;
+        hy = swm->cursor_hotspot_y;
+    }
+    out->x = swm->mouse_x - hx - 8;
+    out->y = swm->mouse_y - hy - 8;
+    out->w = w + 16;
+    out->h = h + 16;
+}
+
+static void collect_cursor_damage(swm_state_t *swm, const swm_rect_t *now) {
+    const void *pixels;
+    int visible, moved;
+
+    pixels = (swm->cursor_buffer != NULL) ?
+        swm_buffer_pixels(swm->cursor_buffer) : NULL;
+    visible = (swm->cursor_buffer != NULL && swm->cursor_visible);
+
+    if (!swm->cursor_prev_valid) {
+        swm_damage_add(swm, now->x, now->y, now->w, now->h);
+        return;
+    }
+    moved = (swm->cursor_prev.x != now->x || swm->cursor_prev.y != now->y ||
+             swm->cursor_prev.w != now->w || swm->cursor_prev.h != now->h);
+    if (!moved && swm->cursor_prev_pixels == pixels &&
+        swm->cursor_prev_type == swm->current_cursor &&
+        swm->cursor_prev_visible == visible) {
+        return;
+    }
+    swm_damage_add(swm, swm->cursor_prev.x, swm->cursor_prev.y,
+                   swm->cursor_prev.w, swm->cursor_prev.h);
+    swm_damage_add(swm, now->x, now->y, now->w, now->h);
+}
+
+static void cursor_commit(swm_state_t *swm, const swm_rect_t *now) {
+    swm->cursor_prev = *now;
+    swm->cursor_prev_pixels = (swm->cursor_buffer != NULL) ?
+        swm_buffer_pixels(swm->cursor_buffer) : NULL;
+    swm->cursor_prev_type = swm->current_cursor;
+    swm->cursor_prev_visible = (swm->cursor_buffer != NULL &&
+        swm->cursor_visible);
+    swm->cursor_prev_valid = 1;
+}
+
+void swm_render_composite(swm_state_t *swm, srapi_image_t *image,
+                          uint32_t bg_color, swm_rect_t *out_region,
+                          int *out_valid) {
+    swm_paint_record_t cur[SWM_MAX_SURFACES];
+    render_target_t target;
+    swm_rect_t crect;
     uint32_t *dst = srapiImagePixels(image);
     int32_t dst_w = (int32_t)srapiImageWidth(image);
     int32_t dst_h = (int32_t)srapiImageHeight(image);
     int32_t dst_pitch_px = (int32_t)(srapiImagePitch(image) / 4u);
-    if (dst == NULL) return;
 
-    for (int32_t y = 0; y < dst_h; y++) {
-        uint32_t *row = dst + (size_t)y * dst_pitch_px;
-        for (int32_t x = 0; x < dst_w; x++) row[x] = bg_color;
-    }
+    if (out_valid != NULL) *out_valid = 0;
+    if (dst == NULL) return;
 
     swm_surface_t *list[SWM_MAX_SURFACES];
     int n = swm_surface_collect_z_asc(swm, list, SWM_MAX_SURFACES);
@@ -218,11 +402,44 @@ void swm_render_composite(swm_state_t *swm, srapi_image_t *image, uint32_t bg_co
         }
     }
 
+    collect_damage(swm, list, n, focused, cur);
+    cursor_rect(swm, &crect);
+    collect_cursor_damage(swm, &crect);
+
+    target.pixels = dst;
+    target.pitch_px = dst_pitch_px;
+    target.w = dst_w;
+    target.h = dst_h;
+    if (swm->damage_full || !swm->damage_valid) {
+        target.cx0 = 0;
+        target.cy0 = 0;
+        target.cx1 = dst_w;
+        target.cy1 = dst_h;
+    } else {
+        target.cx0 = swm->damage.x < 0 ? 0 : swm->damage.x;
+        target.cy0 = swm->damage.y < 0 ? 0 : swm->damage.y;
+        target.cx1 = swm->damage.x + swm->damage.w;
+        target.cy1 = swm->damage.y + swm->damage.h;
+        if (target.cx1 > dst_w) target.cx1 = dst_w;
+        if (target.cy1 > dst_h) target.cy1 = dst_h;
+    }
+
+    if (target.cx0 >= target.cx1 || target.cy0 >= target.cy1) {
+        swm->damage_valid = 0;
+        swm->damage_full = 0;
+        memcpy(swm->paint, cur, sizeof(cur));
+        cursor_commit(swm, &crect);
+        return;
+    }
+
+    fill_rect(&target, target.cx0, target.cy0,
+              target.cx1 - target.cx0, target.cy1 - target.cy0, bg_color);
+
     for (int i = 0; i < n; i++) {
         swm_surface_t *s = list[i];
 		if (!swm_surface_role_is_child(s->role) &&
 		    !swm_surface_role_is_panel(s->role)) {
-            draw_titlebar_chrome(swm, dst, dst_w, dst_h, dst_pitch_px, s, s == focused);
+            draw_titlebar_chrome(swm, &target, s, s == focused);
         }
 
         if (s->buffer == NULL) continue;
@@ -237,11 +454,12 @@ void swm_render_composite(swm_state_t *swm, srapi_image_t *image, uint32_t bg_co
         int32_t sx0 = 0, sy0 = 0;
         int32_t w = src_w, h = src_h;
         int32_t dx = ex, dy = ey;
-        if (dx < 0) { sx0 = -dx; w -= sx0; dx = 0; }
-        if (dy < 0) { sy0 = -dy; h -= sy0; dy = 0; }
-        if (dx + w > dst_w) w = dst_w - dx;
-        if (dy + h > dst_h) h = dst_h - dy;
-        if (w > 0 && h > 0) {
+
+        if (dx < target.cx0) { sx0 = target.cx0 - dx; w -= sx0; dx = target.cx0; }
+        if (dy < target.cy0) { sy0 = target.cy0 - dy; h -= sy0; dy = target.cy0; }
+        if (dx + w > target.cx1) w = target.cx1 - dx;
+        if (dy + h > target.cy1) h = target.cy1 - dy;
+        if (w > 0 && h > 0 && sx0 < src_w && sy0 < src_h) {
             int blend_child = swm_surface_role_is_child(s->role) && s->buffer_has_alpha;
             for (int32_t row = 0; row < h; row++) {
                 const uint32_t *sr = src + (sy0 + row) * src_pitch_px + sx0;
@@ -257,9 +475,25 @@ void swm_render_composite(swm_state_t *swm, srapi_image_t *image, uint32_t bg_co
         }
     }
     if (swm->cursor_buffer != NULL && swm->cursor_visible) {
-        draw_cursor_image(swm, dst, dst_w, dst_h, dst_pitch_px, swm->mouse_x, swm->mouse_y);
+        draw_cursor_image(swm, &target, swm->mouse_x, swm->mouse_y);
     } else {
-        draw_cursor(dst, dst_w, dst_h, dst_pitch_px, swm->mouse_x, swm->mouse_y, swm->current_cursor);
+        draw_cursor(&target, swm->mouse_x, swm->mouse_y, swm->current_cursor);
+    }
+
+    if (out_region != NULL) {
+        out_region->x = target.cx0;
+        out_region->y = target.cy0;
+        out_region->w = target.cx1 - target.cx0;
+        out_region->h = target.cy1 - target.cy0;
+    }
+    if (out_valid != NULL) *out_valid = 1;
+
+    memcpy(swm->paint, cur, sizeof(cur));
+    cursor_commit(swm, &crect);
+    swm->damage_valid = 0;
+    swm->damage_full = 0;
+    for (int i = 0; i < SWM_MAX_SURFACES; i++) {
+        swm->surfaces[i].damage_valid = 0;
     }
 }
 

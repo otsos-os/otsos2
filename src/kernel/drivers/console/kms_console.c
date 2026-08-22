@@ -14,6 +14,7 @@
 
 #define FONT_W 8
 #define FONT_H 16
+#define KMS_CON_PAN_ROWS	(8 * FONT_H)
 
 static kms_console_t	g_kernel_con;
 static int		g_kernel_con_ready;
@@ -119,9 +120,14 @@ kms_console_init(kms_console_t *con)
 		return (DRM_ERR_NODEV);
 	}
 
-	buf_h = h;
+	buf_h = h + KMS_CON_PAN_ROWS;
 	size = (u64)pitch * buf_h;
 	con->gem = drm_gem_create(size);
+	if (con->gem == 0) {
+		buf_h = h;
+		size = (u64)pitch * buf_h;
+		con->gem = drm_gem_create(size);
+	}
 	if (con->gem == 0) {
 		return (DRM_ERR_NOMEM);
 	}
@@ -192,6 +198,7 @@ kms_console_flush(kms_console_t *con)
 	drm_atomic_req_t	reqs[6];
 	drm_plane_t		*plane;
 	u32			dx, dy, dw, dh;
+	u32			pan_y;
 	int			rc;
 
 	if (!con || !con->ready) {
@@ -211,12 +218,21 @@ kms_console_flush(kms_console_t *con)
 	dw = con->dirty_x2 - con->dirty_x1;
 	dh = con->dirty_y2 - con->dirty_y1;
 
+	pan_y = con->pan_y;
+	if (con->buf_h < con->height) {
+		return (DRM_ERR_INVAL);
+	}
+	if (pan_y > con->buf_h - con->height) {
+		pan_y = con->buf_h - con->height;
+		con->pan_y = pan_y;
+	}
+
 	reqs[0].obj_id = plane->id;
 	reqs[0].prop_id = DRM_PROP_PLANE_FB_ID;
 	reqs[0].value = con->fb;
 	reqs[1].obj_id = plane->id;
 	reqs[1].prop_id = DRM_PROP_PLANE_SRC_Y;
-	reqs[1].value = con->pan_y;
+	reqs[1].value = pan_y;
 	reqs[2].obj_id = plane->id;
 	reqs[2].prop_id = DRM_PROP_PLANE_DIRTY_X;
 	reqs[2].value = dx;

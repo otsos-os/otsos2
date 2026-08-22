@@ -236,6 +236,7 @@ evr_writer_enter(void)
 static void
 evr_writer_leave(void)
 {
+	pmap_wc_fence();
 	__atomic_store_n(&evr_state.busy, 0, __ATOMIC_RELEASE);
 	__atomic_sub_fetch(&evr_state.writers, 1, __ATOMIC_RELEASE);
 }
@@ -414,7 +415,7 @@ evr_start(const evr_boot_info_t *info)
 		return (-1);
 	}
 	size = (u64)info->pitch * info->height;
-	mapped = pmap_map_mmio(info->address, size);
+	mapped = pmap_map_framebuffer(info->address, size);
 	if (mapped == NULL) {
 		return (-1);
 	}

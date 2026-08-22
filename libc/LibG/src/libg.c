@@ -92,7 +92,56 @@ struct libg_context {
 	uint32_t		text_count;
 	uint32_t		backspace_count;
 	int			submit_pressed;
+	int32_t			dirty_x1, dirty_y1, dirty_x2, dirty_y2;
+	int			dirty_valid;
 };
+static void
+libg_mark_dirty(libg_context_t *ctx, int32_t x, int32_t y,
+    int32_t w, int32_t h)
+{
+	int32_t	x2, y2;
+
+	if (ctx == NULL || w <= 0 || h <= 0) {
+		return;
+	}
+	x2 = x + w;
+	y2 = y + h;
+	if (x < 0) {
+		x = 0;
+	}
+	if (y < 0) {
+		y = 0;
+	}
+	if (x2 > (int32_t)ctx->width) {
+		x2 = (int32_t)ctx->width;
+	}
+	if (y2 > (int32_t)ctx->height) {
+		y2 = (int32_t)ctx->height;
+	}
+	if (x >= x2 || y >= y2) {
+		return;
+	}
+	if (!ctx->dirty_valid) {
+		ctx->dirty_x1 = x;
+		ctx->dirty_y1 = y;
+		ctx->dirty_x2 = x2;
+		ctx->dirty_y2 = y2;
+		ctx->dirty_valid = 1;
+		return;
+	}
+	if (x < ctx->dirty_x1) {
+		ctx->dirty_x1 = x;
+	}
+	if (y < ctx->dirty_y1) {
+		ctx->dirty_y1 = y;
+	}
+	if (x2 > ctx->dirty_x2) {
+		ctx->dirty_x2 = x2;
+	}
+	if (y2 > ctx->dirty_y2) {
+		ctx->dirty_y2 = y2;
+	}
+}
 
 static int
 libg_image_present(void *userdata, const struct srapi_region *region)
@@ -195,7 +244,18 @@ libg_put_pixel(libg_context_t *ctx, int32_t x, int32_t y, uint32_t color)
 	}
 	pixel = (uint32_t *)(void *)(ctx->pixels + (uint32_t)y * ctx->pitch +
 	    (uint32_t)x * sizeof(uint32_t));
-	*pixel = libg_blend(*pixel, color);
+
+	switch ((color >> 24) & 0xff) {
+	case 0xff:
+		*pixel = color;
+		break;
+	case 0x00:
+		return;
+	default:
+		*pixel = libg_blend(*pixel, color);
+		break;
+	}
+	libg_mark_dirty(ctx, x, y, 1, 1);
 }
 
 static int
@@ -593,14 +653,27 @@ libgBeginOverlay(libg_context_t *ctx)
 int
 libgPresent(libg_context_t *ctx)
 {
-	int	ret;
+	struct srapi_region	region;
+	const struct srapi_region *region_ptr;
+	int			ret;
 
 	if (ctx == NULL) {
 		return (LIBG_ERR_INVAL);
 	}
+
+	region_ptr = NULL;
+	if (ctx->dirty_valid) {
+		region.x = (uint32_t)ctx->dirty_x1;
+		region.y = (uint32_t)ctx->dirty_y1;
+		region.width = (uint32_t)(ctx->dirty_x2 - ctx->dirty_x1);
+		region.height = (uint32_t)(ctx->dirty_y2 - ctx->dirty_y1);
+		region_ptr = &region;
+	}
+	ctx->dirty_valid = 0;
+
 	if (ctx->present != NULL) {
 		return (libg_from_srapi(ctx->present(ctx->present_userdata,
-		    NULL)));
+		    region_ptr)));
 	}
 	if (ctx->cmd == NULL || ctx->surface == NULL) {
 		return (LIBG_ERR_INVAL);
@@ -673,6 +746,7 @@ void
 libgFillRect(libg_context_t *ctx, libg_rect_t rect, uint32_t color)
 {
 	uint32_t	*p;
+	uint32_t	alpha;
 	int32_t		x0, y0, x1, y1, x, y;
 
 	if (!ctx || !ctx->pixels || rect.width <= 0 || rect.height <= 0) {
@@ -697,13 +771,24 @@ libgFillRect(libg_context_t *ctx, libg_rect_t rect, uint32_t color)
 	if (x0 >= x1 || y0 >= y1) {
 		return;
 	}
+	alpha = (color >> 24) & 0xff;
+	if (alpha == 0) {
+		return;
+	}
+	libg_mark_dirty(ctx, x0, y0, x1 - x0, y1 - y0);
 
 	for (y = y0; y < y1; y++) {
 		p = (uint32_t *)(void *)(ctx->pixels + (uint32_t)y *
 		    ctx->pitch + (uint32_t)x0 * sizeof(uint32_t));
-		for (x = x0; x < x1; x++) {
-			*p = libg_blend(*p, color);
-			p++;
+		if (alpha == 0xff) {
+			for (x = x0; x < x1; x++) {
+				p[x - x0] = color;
+			}
+		} else {
+			for (x = x0; x < x1; x++) {
+				*p = libg_blend(*p, color);
+				p++;
+			}
 		}
 	}
 }

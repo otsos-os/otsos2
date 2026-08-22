@@ -38,7 +38,11 @@ $define %func pmap_enter as procedure with args u64, u64, u64
 $define %func pmap_remove as procedure with args u64
 $define %func pmap_extract as function with args u64
 $define %func pmap_extract_flags as function with args u64
+$define %func pmap_pat_init as procedure with args void
+$define %func pmap_pat_is_wc_available as function with args void
 $define %func pmap_map_mmio as function with args u64, u64
+$define %func pmap_map_framebuffer as function with args u64, u64
+$define %func pmap_wc_fence as procedure with args void
 $define %func pmap_create as function with args void
 $define %func pmap_clone as function with args u64
 $define %func pmap_destroy as procedure with args u64
@@ -59,7 +63,8 @@ $space %export pmap_extract, pmap_extract_flags, pmap_create, pmap_clone
 $space %export pmap_destroy, pmap_destroy_page_tables_only, pmap_enter_in
 $space %export pmap_kernel_cr3, pmap_clear_user_range
 $space %export pmap_invlpg, pmap_load, pmap_get_cr3
-$space %export pmap_map_mmio
+$space %export pmap_pat_init, pmap_pat_is_wc_available
+$space %export pmap_map_mmio, pmap_map_framebuffer, pmap_wc_fence
 
 */
 
@@ -81,6 +86,9 @@ $space %export pmap_map_mmio
 #define PTE_GLOBAL		0x100
 #define PTE_COW			0x200
 #define PTE_NX			(1ULL << 63)
+#define PTE_PAT			0x80
+#define PMAP_CACHE_UC		(PTE_PCD | PTE_PWT)
+#define PMAP_CACHE_WC		(PTE_PAT)
 
 #define PTE_ADDR_MASK		0x000FFFFFFFFFF000ULL
 #define PTE_FLAGS_MASK		0xFFF0000000000FFFULL
@@ -91,7 +99,10 @@ void	pmap_enter(u64 vaddr, u64 paddr, u64 flags);
 void	pmap_remove(u64 vaddr);
 u64	pmap_extract(u64 vaddr);
 u64	pmap_extract_flags(u64 vaddr);
+void	pmap_pat_init(void);
+int	pmap_pat_is_wc_available(void);
 void	*pmap_map_mmio(u64 paddr, u64 size);
+void	*pmap_map_framebuffer(u64 paddr, u64 size);
 u64	pmap_create(void);
 u64	pmap_clone(u64 src_cr3);
 void	pmap_destroy(u64 cr3);
@@ -120,6 +131,12 @@ pmap_get_cr3(void)
 
 	__asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
 	return (cr3);
+}
+
+static inline void
+pmap_wc_fence(void)
+{
+	__asm__ volatile("sfence" ::: "memory");
 }
 
 #endif

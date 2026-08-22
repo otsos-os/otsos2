@@ -207,9 +207,12 @@ swm_run(swm_state_t *swm)
 {
 	struct kevent event;
 	struct swm_frame_delivery delivery;
+	struct srapi_region region;
 	srapi_image_t *backbuffer;
-	int changed, ret;
+	swm_rect_t damage;
+	int changed, painted, ret;
 
+	swm_damage_all(swm);
 	changed = 1;
 	while (!swm->should_quit) {
 		memset(&event, 0, sizeof(event));
@@ -238,11 +241,20 @@ swm_run(swm_state_t *swm)
 		if (backbuffer == NULL) {
 			return (-1);
 		}
-		swm_render_composite(swm, backbuffer, SWM_BACKGROUND);
-		if (swm_output_present(swm->output) != SRAPI_OK) {
-			return (-1);
+		painted = 0;
+		swm_render_composite(swm, backbuffer, SWM_BACKGROUND, &damage,
+		    &painted);
+		if (painted) {
+			region.x = (uint32_t)damage.x;
+			region.y = (uint32_t)damage.y;
+			region.width = (uint32_t)damage.w;
+			region.height = (uint32_t)damage.h;
+			if (swm_output_present(swm->output, &region) !=
+			    SRAPI_OK) {
+				return (-1);
+			}
+			swm->frame_count++;
 		}
-		swm->frame_count++;
 		delivery = swm_deliver_frames(swm);
 		(void)delivery;
 		changed = 0;
