@@ -4,7 +4,8 @@ $define %type de_window as shell window cache entry
 $define %type de as native Sprot desktop client
 $define %func de_present as target present callback
 $define %func de_wait_surface as function with args connection, surface
-$define %func de_handle_event as procedure with args desktop, event
+$define %func de_send_input as function with args desktop, event
+$define %func de_handle_event as function with args desktop, event
 $define %func de_render as procedure with args desktop
 $define %func de_set_menu as procedure with args desktop, visible
 $define %func de_cleanup as procedure with args desktop
@@ -14,7 +15,7 @@ $define %func main as start with args void
 
 /* !SPACE!
 
-$space %internal de_present, de_wait_surface, de_handle_event
+$space %internal de_present, de_wait_surface, de_send_input, de_handle_event
 $space %internal de_window_find, de_window_update, de_window_remove
 $space %internal de_format_clock, de_format_stats, de_draw_panel
 $space %internal de_draw_menu, de_set_menu, de_cleanup
@@ -291,7 +292,7 @@ de_format_stats(struct de *desktop, uint64_t now_ms)
 	desktop->panel_dirty = 1;
 }
 
-static void
+static int
 de_send_input(struct de *desktop, const sprot_event_t *event)
 {
 	struct srapi_input_event input;
@@ -319,6 +320,7 @@ de_send_input(struct de *desktop, const sprot_event_t *event)
 			desktop->panel_mouse_y = input.y;
 			(void)libgHandleInput(desktop->panel_ui, &input);
 		}
+		return (0);
 	} else if (event->kind == SPROT_EVENT_POINTER_BUTTON) {
 		input.type = SRAPI_INPUT_MOUSE;
 		input.flags = SRAPI_MOUSE_BUTTON | SRAPI_MOUSE_ABSOLUTE;
@@ -341,6 +343,7 @@ de_send_input(struct de *desktop, const sprot_event_t *event)
 			input.y = desktop->panel_mouse_y;
 			(void)libgHandleInput(desktop->panel_ui, &input);
 		}
+		return (1);
 	} else if (event->kind == SPROT_EVENT_KEY) {
 		input.type = SRAPI_INPUT_KEYBOARD;
 		input.flags = event->u.key.state == SPROT_KEY_STATE_PRESSED ?
@@ -348,12 +351,16 @@ de_send_input(struct de *desktop, const sprot_event_t *event)
 		input.key = event->u.key.scancode;
 		input.mods = event->u.key.modifiers;
 		(void)libgHandleInput(desktop->panel_ui, &input);
+		return (1);
 	}
+	return (0);
 }
 
-static void
+static int
 de_handle_event(struct de *desktop, const sprot_event_t *event)
 {
+	int pending;
+	pending = 0;
 	if (event->kind == SPROT_EVENT_SHELL_WINDOW) {
 		de_window_update(desktop, &event->u.shell_window);
 	} else if (event->kind == SPROT_EVENT_SHELL_REMOVE) {
@@ -362,7 +369,7 @@ de_handle_event(struct de *desktop, const sprot_event_t *event)
 	    event->kind == SPROT_EVENT_POINTER_ENTER ||
 	    event->kind == SPROT_EVENT_POINTER_BUTTON ||
 	    event->kind == SPROT_EVENT_KEY) {
-		de_send_input(desktop, event);
+		pending = de_send_input(desktop, event);
 		if (event->kind == SPROT_EVENT_KEY &&
 		    event->u.key.state == SPROT_KEY_STATE_PRESSED &&
 		    (event->u.key.scancode == SRAPI_KEY_LSUPER ||
@@ -373,6 +380,7 @@ de_handle_event(struct de *desktop, const sprot_event_t *event)
 	    event->object_id == sprot_surface_id(desktop->menu)) {
 		de_set_menu(desktop, 0);
 	}
+	return (pending);
 }
 
 static void
@@ -509,6 +517,8 @@ main(void)
 	sprot_event_t event;
 	uint64_t now_ms;
 	int ret;
+	int input_pending;
+	int disconnected;
 
 	memset(&desktop, 0, sizeof(desktop));
 	desktop.connection = sprot_connect(SPROT_DEFAULT_SERVICE);
@@ -564,26 +574,39 @@ main(void)
 		return (1);
 	}
 	desktop.panel_dirty = 1;
-	for (;;) {
+	disconnected = 0;
+	while (!disconnected) {
 		(void)libgBeginOverlay(desktop.panel_ui);
 		(void)libgBeginOverlay(desktop.menu_ui);
+		input_pending = 0;
 		ret = sprot_poll_event(desktop.connection, &event, DE_FRAME_MS);
-		if (ret < 0 || event.kind == SPROT_EVENT_DISCONNECT) {
+		if (ret < 0) {
 			break;
 		}
 		if (ret > 0) {
-			de_handle_event(&desktop, &event);
+			if (event.kind == SPROT_EVENT_DISCONNECT) {
+				break;
+			}
+			input_pending |= de_handle_event(&desktop, &event);
 		}
 		while (sprot_poll_event(desktop.connection, &event, 0) > 0) {
-			de_handle_event(&desktop, &event);
+			if (event.kind == SPROT_EVENT_DISCONNECT) {
+				disconnected = 1;
+				break;
+			}
+			input_pending |= de_handle_event(&desktop, &event);
+		}
+		if (disconnected) {
+			break;
 		}
 		memset(&timeinfo, 0, sizeof(timeinfo));
 		if (sysTimeInfo(&timeinfo) != 0) {
-			continue;
+			now_ms = desktop.last_frame_ms;
+		} else {
+			now_ms = timeinfo.uptime_sec * 1000 +
+			    timeinfo.uptime_nsec / 1000000;
 		}
-		now_ms = timeinfo.uptime_sec * 1000 +
-		    timeinfo.uptime_nsec / 1000000;
-		if (now_ms - desktop.last_frame_ms < DE_FRAME_MS &&
+		if (!input_pending && now_ms - desktop.last_frame_ms < DE_FRAME_MS &&
 		    !desktop.panel_dirty && !desktop.menu_dirty) {
 			continue;
 		}
