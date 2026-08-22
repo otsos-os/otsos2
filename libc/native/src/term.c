@@ -11,6 +11,7 @@ $define %func termGetMode as function with args struct api_term_mode *
 $define %func termSetMode as function with args const struct api_term_mode *
 $define %func termEnterRaw as function with args struct api_term_mode *
 $define %func termRestoreMode as function with args const struct api_term_mode *
+$define %func ptyOpen as function with args int *, int *
 
 */
 
@@ -20,6 +21,7 @@ $space %export termRead, termReadFlags, termWrite, termPrint
 $space %export termInfo, termPower, termMouse, termMode
 $space %export termGetMode, termSetMode
 $space %export termEnterRaw, termRestoreMode
+$space %export ptyOpen
 
 */
 
@@ -167,4 +169,29 @@ termRestoreMode(const struct api_term_mode *saved)
 		return (-1);
 	}
 	return (termSetMode(saved));
+}
+
+int
+ptyOpen(int *out_master_handle, int *out_pts_id)
+{
+	int	h, pts, ret;
+
+	h = entityCreate(API_ENTITY_ARCH_PTY,
+	    API_ENTITY_ACCESS_READ | API_ENTITY_ACCESS_WRITE, NULL);
+	if (h < 0) {
+		return (h);
+	}
+	pts = 0;
+	ret = entityIoctl(h, API_TIOCGPTN, &pts);
+	if (ret != 0) {
+		entityClose(h);
+		return (ret);
+	}
+	if (out_master_handle) {
+		*out_master_handle = h;
+	}
+	if (out_pts_id) {
+		*out_pts_id = pts;
+	}
+	return (0);
 }

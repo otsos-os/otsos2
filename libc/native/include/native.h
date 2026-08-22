@@ -22,8 +22,10 @@ $define %func dataOpen as function with args const char *, int
 $define %func dataDir as function with args uint32_t, const char *, const char *
 $define %func fsMnt as function with args mount tuple
 $define %func fsUmnt as function with args const char *, uint64_t
+$define %func ptyOpen as function with args int *, int *
 $define %func procSpawn as function with args spawn tuple
 $define %func procSpawnAbi as function with args spawn tuple, uint32_t
+$define %func procSpawnPty as function with args const char *, char *const [], char *const [], int, uint32_t
 $define %func netListen as function with args int, int
 $define %func netAccept as function with args int, api_net_addr *, uint32_t
 $define %func ipcCreate as function with args const char *, uint32_t, uint32_t
@@ -67,11 +69,12 @@ $define %func entityIoctl as function with args int, uint64_t, void *
 /* !SPACE!
 
 $space %export termRead, termReadFlags, termWrite, termPrint, termMouse
+$space %export ptyOpen
 $space %export dataOpen, dataClose, dataRead, dataWrite, dataReadFull
 $space %export dataWriteFull, dataSeek, dataPipe, dataDir
 $space %export fsChdir, fsGetcwd, fsListdir, fsStat, fsRename, fsUnlink
 $space %export fsMnt, fsUmnt
-$space %export procSpawn, procSpawnAbi, procSpawnNative, procWait
+$space %export procSpawn, procSpawnAbi, procSpawnNative, procSpawnPty, procWait
 $space %export procRun, procExit, procKill
 $space %export memMap, memUnmap, eventKqueue, eventWait, eventClose
 $space %export powerState
@@ -196,6 +199,27 @@ $space %export entityRead, entityWrite, entitySeek, entityIoctl
 #define API_TERM_CC_VEOL2	16
 
 #define API_TERM_SPEED_B38400	0000015
+
+#define API_TIOCGWINSZ		0x5413
+#define API_TIOCSWINSZ		0x5414
+#define API_TIOCGPGRP		0x540F
+#define API_TIOCSPGRP		0x5410
+#define API_TIOCGSID		0x5429
+#define API_TIOCSCTTY		0x540E
+#define API_TIOCGPTN		0x80045430
+#define API_TCGETS		0x5401
+#define API_TCSETS		0x5402
+#define API_TCSETSW		0x5403
+#define API_TCSETSF		0x5404
+#define API_TCFLSH		0x540B
+#define API_FIONREAD		0x541B
+
+struct api_winsize {
+	uint16_t	ws_row;
+	uint16_t	ws_col;
+	uint16_t	ws_xpixel;
+	uint16_t	ws_ypixel;
+};
 
 #define TERM_STATE_ACTIVE	0
 #define TERM_STATE_SUSPENDED	1
@@ -393,6 +417,26 @@ $space %export entityRead, entityWrite, entitySeek, entityIoctl
 #define API_ENTITY_NAME_MAX		64
 #define API_ENTITY_LIST_MAX_ENTRIES	256
 
+#define API_ENTITY_ARCH_GENERIC		1
+#define API_ENTITY_ARCH_FILE		2
+#define API_ENTITY_ARCH_PIPE		3
+#define API_ENTITY_ARCH_VNODE		4
+#define API_ENTITY_ARCH_NET		5
+#define API_ENTITY_ARCH_IPC		6
+#define API_ENTITY_ARCH_REG		7
+#define API_ENTITY_ARCH_KQUEUE		8
+#define API_ENTITY_ARCH_SHM		9
+#define API_ENTITY_ARCH_TRACE		10
+#define API_ENTITY_ARCH_GEM		11
+#define API_ENTITY_ARCH_KOFO		12
+#define API_ENTITY_ARCH_NB_INTERFACE	13
+#define API_ENTITY_ARCH_PROCESS		14
+#define API_ENTITY_ARCH_THREAD		15
+#define API_ENTITY_ARCH_TTY		16
+#define API_ENTITY_ARCH_DRM		17
+#define API_ENTITY_ARCH_PTY		18
+#define API_ENTITY_ARCH_NB_DEVICE	19
+
 #define ENTITY_ACCESS_READ		0x00000001
 #define ENTITY_ACCESS_WRITE		0x00000002
 #define ENTITY_ACCESS_EXEC		0x00000004
@@ -401,6 +445,12 @@ $space %export entityRead, entityWrite, entitySeek, entityIoctl
 					    ENTITY_ACCESS_EXEC)
 #define ENTITY_ACCESS_DEFAULT		(ENTITY_ACCESS_READ | \
 					    ENTITY_ACCESS_WRITE)
+
+#define API_ENTITY_ACCESS_READ		ENTITY_ACCESS_READ
+#define API_ENTITY_ACCESS_WRITE		ENTITY_ACCESS_WRITE
+#define API_ENTITY_ACCESS_EXEC		ENTITY_ACCESS_EXEC
+#define API_ENTITY_ACCESS_ALL		ENTITY_ACCESS_ALL
+#define API_ENTITY_ACCESS_DEFAULT	ENTITY_ACCESS_DEFAULT
 
 #define ENTITY_CTL_GET_INFO		1
 #define ENTITY_CTL_GET_DATA		2
@@ -745,6 +795,7 @@ struct api_proc_info {
 
 #define API_PROC_SPAWN_ABI_POSIX	0
 #define API_PROC_SPAWN_ABI_NATIVE	1
+#define API_PROC_SPAWN_SET_TTY		0x00000002
 #define API_PERSONALITY_NATIVE		0
 #define API_PERSONALITY_POSIX		1
 
@@ -752,7 +803,7 @@ struct api_proc_spawn_args {
 	uint32_t		size;
 	uint32_t		flags;
 	uint32_t		abi;
-	uint32_t		pad;
+	int32_t			tty;
 	const char		*path;
 	const char *const	*argv;
 	const char *const	*envp;
@@ -1304,6 +1355,7 @@ int	termGetMode(struct api_term_mode *mode);
 int	termSetMode(const struct api_term_mode *mode);
 int	termEnterRaw(struct api_term_mode *saved);
 int	termRestoreMode(const struct api_term_mode *saved);
+int	ptyOpen(int *out_master_handle, int *out_pts_id);
 int	inputRead(struct api_key_event *buf, uint32_t count, uint32_t flags);
 int	inputPoll(void);
 int	inputFlush(void);
@@ -1344,6 +1396,8 @@ int	procSpawn(const char *path, char *const argv[], char *const envp[]);
 int	procSpawnAbi(const char *path, char *const argv[], char *const envp[],
 	    uint32_t abi);
 int	procSpawnNative(const char *path, char *const argv[], char *const envp[]);
+int	procSpawnPty(const char *path, char *const argv[], char *const envp[],
+	    int pts_id, uint32_t abi);
 int	procWait(int *status);
 int	procRun(const char *path, char *const argv[], char *const envp[],
 	    int *status);

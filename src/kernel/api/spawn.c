@@ -35,6 +35,7 @@
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/console/terminal.h>
+#include <kernel/console/pty.h>
 #include <kernel/process.h>
 #include <kernel/scheduler.h>
 #include <kernel/thread.h>
@@ -375,7 +376,7 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
   current_cr3 = pmap_get_cr3();
   args_phys = pmap_extract((u64)uargs);
   memcpy(&args, uargs, sizeof(args));
-  if (args.size < sizeof(args) || args.flags != 0) {
+  if (args.size < sizeof(args) || (args.flags & ~API_PROC_SPAWN_SET_TTY) != 0) {
     printk("[SPAWN] Error: bad args size=%u flags=0x%x abi=%u "
         "pid=%d uargs=%p phys=%p cr3=%p parent_cr3=%p\n",
         args.size, args.flags, args.abi, parent->pid, (void *)uargs,
@@ -602,13 +603,20 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
   posix_copy_fds(child, parent);
   child->personality = child_personality;
   api_session_fork(parent, child);
-  if (parent->controlling_tty >= 0) {
+  if (args.flags & API_PROC_SPAWN_SET_TTY) {
+    child->controlling_tty = (int)args.tty;
+  }
+  if (parent->controlling_tty >= 0 && !(args.flags & API_PROC_SPAWN_SET_TTY)) {
     terminal_set_session(parent->controlling_tty, child->sid);
     terminal_set_pgrp(parent->controlling_tty, child->pgid);
   }
   if (child->controlling_tty >= 0) {
     child->pgid = child->pid;
     terminal_set_pgrp(child->controlling_tty, child->pgid);
+  } else if (child->controlling_tty < -1) {
+    int pty_num = -child->controlling_tty - 2;
+    child->pgid = child->pid;
+    pty_set_session_pgrp(pty_num, child->sid, child->pgid);
   }
   scheduler_assign_process(child);
   posix_setup_stdio(child);

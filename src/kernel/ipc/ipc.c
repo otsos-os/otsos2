@@ -357,8 +357,8 @@ ipc_message_build(ipc_endpoint_t *endpoint, ipc_message_t *out,
 	proc = process_current();
 	if (proc) {
 		out->cred.pid = proc->pid;
-		out->cred.uid = proc->euid;
-		out->cred.gid = proc->egid;
+		out->cred.uid = proc_has_privilege(proc) ? 0 : proc->euid;
+		out->cred.gid = proc_has_privilege(proc) ? 0 : proc->egid;
 	}
 	if (out->length > 0) {
 		memcpy(out->data, payload, out->length);

@@ -268,7 +268,6 @@ swm_interaction_forward_input(swm_state_t *swm,
 		region = hit_test(swm, swm->mouse_x, swm->mouse_y, &surface);
 		if (popup != NULL && surface != popup) {
 			send_close_to(swm, popup);
-			return;
 		}
 		if (surface != NULL) {
 			focused = window_ancestor(swm, surface);

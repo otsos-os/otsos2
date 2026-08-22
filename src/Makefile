@@ -44,6 +44,7 @@ CURSORD_BIN = $(PROGS_DIR)/demons/cursord
 SRAPI_DEMO_BIN = $(PROGS_DIR)/srapi_demo
 SWM_BIN = $(PROGS_DIR)/GUI/swm/swm
 DE_BIN = $(PROGS_DIR)/GUI/swm/de
+TERM_BIN = $(PROGS_DIR)/GUI/term
 SHMTEST_BIN = $(PROGS_DIR)/shmtest
 UDP_ECHO_BIN = $(PROGS_DIR)/udp_echo
 TCP_ECHO_BIN = $(PROGS_DIR)/tcp_echo
@@ -541,6 +542,11 @@ $(DE_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
 	@echo "  MAKE    progs/GUI/de"
 	@$(MAKE) -C $(PROGS_DIR) GUI/swm/de LIBC_ENABLED=$(LIBC_ENABLED)
 
+.PHONY: $(TERM_BIN)
+$(TERM_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
+	@echo "  MAKE    progs/GUI/term"
+	@$(MAKE) -C $(PROGS_DIR) GUI/term LIBC_ENABLED=$(LIBC_ENABLED)
+
 .PHONY: $(SHMTEST_BIN)
 $(SHMTEST_BIN): $(LIBC_DEPS)
 	@echo "  MAKE    progs/shmtest"
@@ -750,6 +756,7 @@ $(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $
 			srapi_demo) src=$(SRAPI_DEMO_BIN);; \
 			swm) src=$(SWM_BIN);; \
 			de) src=$(DE_BIN);; \
+			term) src=$(TERM_BIN);; \
 			shmtest) src=$(SHMTEST_BIN);; \
 			udp_echo) src=$(UDP_ECHO_BIN);; \
 			tcp_echo) src=$(TCP_ECHO_BIN);; \

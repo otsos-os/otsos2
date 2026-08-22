@@ -451,6 +451,7 @@ struct api_proc_info {
 };
 #define API_PROC_SPAWN_ABI_POSIX	0
 #define API_PROC_SPAWN_ABI_NATIVE	1
+#define API_PROC_SPAWN_SET_TTY		0x00000002
 #define	API_PROC_PERM_USER		0
 #define	API_PROC_PERM_KUSR		1
 
@@ -458,7 +459,7 @@ struct api_proc_spawn_args {
 	u32			size;
 	u32			flags;
 	u32			abi;
-	u32			pad;
+	s32			tty;
 	const char		*path;
 	const char *const	*argv;
 	const char *const	*envp;

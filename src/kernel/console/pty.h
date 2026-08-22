@@ -42,5 +42,12 @@ int	pty_slave_ioctl(vnode_t *vn, u64 cmd, void *arg);
 int	pty_read_available(vnode_t *vn);
 int	pty_write_available(vnode_t *vn);
 vnode_t	*pty_create_slave_vnode(int id);
+void	pty_set_session_pgrp(int id, u32 sid, u32 pgid);
+void	pty_get_winsize(int id, struct winsize *ws);
+void	pty_set_winsize(int id, const struct winsize *ws);
+void	pty_get_termios(int id, struct termios *t);
+void	pty_set_termios(int id, const struct termios *t);
+int	pty_slave_read_idx(int id, void *buf, u32 count, int nonblock);
+int	pty_slave_write_idx(int id, const void *buf, u32 count, int nonblock);
 
 #endif

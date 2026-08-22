@@ -43,6 +43,8 @@ $space %export api_term_mode
 
 #include <kernel/api/api.h>
 #include <kernel/console/terminal.h>
+#include <kernel/console/pty.h>
+#include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
 
@@ -75,13 +77,32 @@ api_term_mode(struct api_term_mode *uargs)
 {
 	struct api_term_mode	args;
 	struct termios		term;
-	int			ret, tty;
+	process_t		*proc;
+	int			ret, tty, pty_id;
 
 	if (!uargs || !is_user_address(uargs, sizeof(*uargs))) {
 		return (-API_ERR_BAD_ADDR);
 	}
 
 	memcpy(&args, uargs, sizeof(args));
+	proc = process_current();
+	if (args.tty == API_TERM_ACTIVE && proc && proc->controlling_tty < -1) {
+		pty_id = -proc->controlling_tty - 2;
+		if (args.op == API_TERM_MODE_GET) {
+			pty_get_termios(pty_id, &term);
+			api_term_mode_fill(&args, &term);
+			args.tty = proc->controlling_tty;
+			memcpy(uargs, &args, sizeof(args));
+			return (0);
+		} else if (args.op == API_TERM_MODE_SET) {
+			pty_get_termios(pty_id, &term);
+			api_term_mode_apply(&term, &args);
+			pty_set_termios(pty_id, &term);
+			return (0);
+		}
+		return (-API_ERR_INVAL);
+	}
+
 	tty = args.tty;
 	if (tty == API_TERM_ACTIVE) {
 		tty = terminal_get_active();

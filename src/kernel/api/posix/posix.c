@@ -29,6 +29,7 @@
 #include <kernel/api/api.h>
 #include <kernel/api/signal.h>
 #include <kernel/console/terminal.h>
+#include <kernel/console/pty.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
 #include <kernel/process.h>
 #include <kernel/signal.h>
@@ -690,8 +691,49 @@ void
 posix_setup_stdio(struct process *proc)
 {
 	vnode_t		*vn_in, *vn_out, *vn_err;
+	int		pty_id;
 
 	if (!proc) {
+		return;
+	}
+
+	if (proc->controlling_tty < -1) {
+		pty_id = -proc->controlling_tty - 2;
+		vn_in = pty_create_slave_vnode(pty_id);
+		vn_out = pty_create_slave_vnode(pty_id);
+		vn_err = pty_create_slave_vnode(pty_id);
+		if (!vn_in || !vn_out || !vn_err) {
+			if (vn_in) vnode_release(vn_in);
+			if (vn_out) vnode_release(vn_out);
+			if (vn_err) vnode_release(vn_err);
+			return;
+		}
+		if (proc->posix_fds[0].used && proc->posix_fds[0].vnode) {
+			vnode_release(proc->posix_fds[0].vnode);
+		}
+		if (proc->posix_fds[1].used && proc->posix_fds[1].vnode) {
+			vnode_release(proc->posix_fds[1].vnode);
+		}
+		if (proc->posix_fds[2].used && proc->posix_fds[2].vnode) {
+			vnode_release(proc->posix_fds[2].vnode);
+		}
+		proc->posix_fds[0].used = 1;
+		proc->posix_fds[0].cloexec = 0;
+		proc->posix_fds[0].flags = POSIX_O_RDONLY;
+		proc->posix_fds[0].offset = 0;
+		proc->posix_fds[0].vnode = vn_in;
+
+		proc->posix_fds[1].used = 1;
+		proc->posix_fds[1].cloexec = 0;
+		proc->posix_fds[1].flags = POSIX_O_WRONLY;
+		proc->posix_fds[1].offset = 0;
+		proc->posix_fds[1].vnode = vn_out;
+
+		proc->posix_fds[2].used = 1;
+		proc->posix_fds[2].cloexec = 0;
+		proc->posix_fds[2].flags = POSIX_O_WRONLY;
+		proc->posix_fds[2].offset = 0;
+		proc->posix_fds[2].vnode = vn_err;
 		return;
 	}
 

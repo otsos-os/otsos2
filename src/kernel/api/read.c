@@ -47,6 +47,7 @@ $space %export api_term_read, api_data_read
 #include <kernel/api/api.h>
 #include <kernel/api/errno.h>
 #include <kernel/console/terminal.h>
+#include <kernel/console/pty.h>
 #include <kernel/entity/entity.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
@@ -56,17 +57,24 @@ $space %export api_term_read, api_data_read
 int
 api_term_read(void *buf, u32 count, u32 flags)
 {
+	process_t	*proc;
+	thread_t	*td;
+	int		pty_id;
+
 	if (count == 0) {
 		return (0);
 	}
 	if (!is_user_address(buf, count)) {
-		thread_t	*td;
-
 		td = thread_current();
 		if (td && (td->context.cs & 3) == 3) {
 			process_exit(-1);
 		}
 		return (-API_ERR_BAD_ADDR);
+	}
+	proc = process_current();
+	if (proc && proc->controlling_tty < -1) {
+		pty_id = -proc->controlling_tty - 2;
+		return (pty_slave_read_idx(pty_id, buf, count, 0));
 	}
 	return (terminal_read(buf, count, flags));
 }

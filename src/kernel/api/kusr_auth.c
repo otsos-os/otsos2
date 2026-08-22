@@ -164,5 +164,9 @@ api_kusr_auth(const char *password)
 		return (-API_ERR_PERM);
 	}
 	proc->kusr_auth = 1;
+	proc->uid = 0;
+	proc->euid = 0;
+	proc->gid = 0;
+	proc->egid = 0;
 	return (0);
 }

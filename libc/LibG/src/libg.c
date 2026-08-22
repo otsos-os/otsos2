@@ -29,6 +29,10 @@ $define %func libgPanel as procedure with args context, rect
 $define %func libgButton as function with args context, id, rect, label
 $define %func libgTextField as function with args context, id, rect, buffer
 $define %func libgSlider as function with args context, id, rect, value
+$define %func libgAnimStart as procedure with args anim, from, to, duration, easing, now
+$define %func libgAnimUpdate as function with args anim, now, out_value
+$define %func libgLerp as function with args a, b, progress
+$define %func libgBlendColor as function with args color1, color2, alpha
 
 */
 
@@ -48,6 +52,7 @@ $space %export libgFillRect, libgStrokeRect, libgLine
 $space %export libgFillCircle, libgStrokeCircle
 $space %export libgText, libgTextScale, libgMeasureText
 $space %export libgPanel, libgButton, libgTextField, libgSlider
+$space %export libgAnimStart, libgAnimUpdate, libgLerp, libgBlendColor
 
 */
 
@@ -413,6 +418,7 @@ libg_finish_button_state(libg_context_t *ctx, uint32_t id, libg_rect_t rect)
 	inside = libg_rect_contains(rect, ctx->mouse_x, ctx->mouse_y);
 	if (inside) {
 		ctx->hot_id = id;
+		state |= LIBG_WIDGET_HOT;
 	}
 	if (id != 0 && inside && ctx->mouse_pressed) {
 		ctx->active_id = id;
@@ -1002,7 +1008,8 @@ uint32_t
 libgButton(libg_context_t *ctx, uint32_t id, libg_rect_t rect,
     const char *label)
 {
-	uint32_t	state, fill;
+	uint32_t	state, fill, scale;
+	int32_t		tw, th;
 
 	if (!ctx) {
 		return (LIBG_WIDGET_NONE);
@@ -1017,7 +1024,12 @@ libgButton(libg_context_t *ctx, uint32_t id, libg_rect_t rect,
 
 	libgFillRect(ctx, rect, fill);
 	libgStrokeRect(ctx, rect, ctx->style.panel_border);
-	libg_draw_centered_text(ctx, rect, label, ctx->style.text, 2);
+	scale = 1;
+	libgMeasureText(label, 2, &tw, &th);
+	if (tw + 4 <= rect.width && th + 4 <= rect.height) {
+		scale = 2;
+	}
+	libg_draw_centered_text(ctx, rect, label, ctx->style.text, scale);
 	return (state);
 }
 
@@ -1136,4 +1148,117 @@ libgSlider(libg_context_t *ctx, uint32_t id, libg_rect_t rect,
 	libgStrokeCircle(ctx, knob.x + 6, knob.y + 6, 7,
 	    ctx->style.panel_border);
 	return (state);
+}
+
+int32_t
+libgLerp(int32_t a, int32_t b, int32_t progress_256)
+{
+	if (progress_256 <= 0) {
+		return (a);
+	}
+	if (progress_256 >= 256) {
+		return (b);
+	}
+	return (a + ((b - a) * progress_256) / 256);
+}
+
+uint32_t
+libgBlendColor(uint32_t c1, uint32_t c2, int32_t alpha_256)
+{
+	uint32_t	a1, r1, g1, b1;
+	uint32_t	a2, r2, g2, b2;
+	uint32_t	a, r, g, b;
+
+	if (alpha_256 <= 0) {
+		return (c1);
+	}
+	if (alpha_256 >= 256) {
+		return (c2);
+	}
+	a1 = (c1 >> 24) & 0xff;
+	r1 = (c1 >> 16) & 0xff;
+	g1 = (c1 >> 8) & 0xff;
+	b1 = c1 & 0xff;
+
+	a2 = (c2 >> 24) & 0xff;
+	r2 = (c2 >> 16) & 0xff;
+	g2 = (c2 >> 8) & 0xff;
+	b2 = c2 & 0xff;
+
+	a = (a1 * (256 - (uint32_t)alpha_256) + a2 * (uint32_t)alpha_256) / 256;
+	r = (r1 * (256 - (uint32_t)alpha_256) + r2 * (uint32_t)alpha_256) / 256;
+	g = (g1 * (256 - (uint32_t)alpha_256) + g2 * (uint32_t)alpha_256) / 256;
+	b = (b1 * (256 - (uint32_t)alpha_256) + b2 * (uint32_t)alpha_256) / 256;
+
+	return ((a << 24) | (r << 16) | (g << 8) | b);
+}
+
+void
+libgAnimStart(libg_anim_t *anim, int32_t from, int32_t to,
+    uint32_t duration_ms, uint32_t easing, uint64_t now_ms)
+{
+	if (!anim) {
+		return;
+	}
+	anim->from = from;
+	anim->to = to;
+	anim->current = from;
+	anim->start_ms = now_ms;
+	anim->duration_ms = duration_ms > 0 ? duration_ms : 1;
+	anim->easing = easing;
+	anim->active = 1;
+}
+
+int
+libgAnimUpdate(libg_anim_t *anim, uint64_t now_ms, int32_t *out_val)
+{
+	uint64_t	elapsed;
+	int32_t		p, eased;
+
+	if (!anim || !anim->active) {
+		if (anim && out_val) {
+			*out_val = anim->current;
+		}
+		return (0);
+	}
+	if (now_ms <= anim->start_ms) {
+		anim->current = anim->from;
+		if (out_val) {
+			*out_val = anim->current;
+		}
+		return (1);
+	}
+	elapsed = now_ms - anim->start_ms;
+	if (elapsed >= anim->duration_ms) {
+		anim->current = anim->to;
+		anim->active = 0;
+		if (out_val) {
+			*out_val = anim->current;
+		}
+		return (0);
+	}
+	p = (int32_t)((elapsed * 256) / anim->duration_ms);
+	switch (anim->easing) {
+	case LIBG_EASE_IN:
+		eased = (p * p) / 256;
+		break;
+	case LIBG_EASE_OUT:
+		eased = 256 - ((256 - p) * (256 - p)) / 256;
+		break;
+	case LIBG_EASE_IN_OUT:
+		if (p < 128) {
+			eased = (2 * p * p) / 256;
+		} else {
+			eased = 256 - (2 * (256 - p) * (256 - p)) / 256;
+		}
+		break;
+	default:
+		eased = p;
+		break;
+	}
+	anim->current = libgLerp(anim->from, anim->to, eased);
+	if (out_val) {
+		*out_val = anim->current;
+	}
+	return (1);
 }

@@ -31,11 +31,17 @@ $define %func libgButton as function with args context, id, rect, label
 $define %func libgTextField as function with args context, id, rect, buffer
 $define %func libgSlider as function with args context, id, rect, value
 
+$define %type libg_anim as animation state structure
+$define %func libgAnimStart as procedure with args anim, from, to, duration, easing, now
+$define %func libgAnimUpdate as function with args anim, now, out_value
+$define %func libgLerp as function with args a, b, progress
+$define %func libgBlendColor as function with args color1, color2, alpha
+
 */
 
 /* !SPACE!
 
-$space %export libg_context_t, libg_rect_t, libg_style_t
+$space %export libg_context_t, libg_rect_t, libg_style_t, libg_anim_t
 $space %export libgDefaultStyle, libgCreate, libgDestroy
 $space %export libgCreateForImage, libgCreateForTarget
 $space %export libgBegin, libgBeginOverlay, libgHandleInput
@@ -45,6 +51,7 @@ $space %export libgFillRect, libgStrokeRect, libgLine
 $space %export libgFillCircle, libgStrokeCircle
 $space %export libgText, libgTextScale, libgMeasureText
 $space %export libgPanel, libgButton, libgTextField, libgSlider
+$space %export libgAnimStart, libgAnimUpdate, libgLerp, libgBlendColor
 
 */
 
@@ -71,6 +78,11 @@ $space %export libgPanel, libgButton, libgTextField, libgSlider
 #define LIBG_WIDGET_CLICKED	0x00000001U
 #define LIBG_WIDGET_CHANGED	0x00000002U
 #define LIBG_WIDGET_SUBMIT	0x00000004U
+#define LIBG_WIDGET_HOT		0x00000008U
+#define LIBG_EASE_LINEAR	0
+#define LIBG_EASE_IN		1
+#define LIBG_EASE_OUT		2
+#define LIBG_EASE_IN_OUT	3
 
 typedef struct libg_context libg_context_t;
 typedef int (*libg_present_fn)(void *userdata,
@@ -82,6 +94,16 @@ typedef struct libg_rect {
 	int32_t	width;
 	int32_t	height;
 } libg_rect_t;
+
+typedef struct libg_anim {
+	int32_t		from;
+	int32_t		to;
+	int32_t		current;
+	uint64_t	start_ms;
+	uint32_t	duration_ms;
+	uint32_t	easing;
+	int		active;
+} libg_anim_t;
 
 typedef struct libg_style {
 	uint32_t	background;
@@ -144,5 +166,11 @@ uint32_t	libgTextField(libg_context_t *ctx, uint32_t id,
 	    libg_rect_t rect, char *buf, size_t cap);
 uint32_t	libgSlider(libg_context_t *ctx, uint32_t id,
 	    libg_rect_t rect, int32_t min, int32_t max, int32_t *value);
+
+void	libgAnimStart(libg_anim_t *anim, int32_t from, int32_t to,
+	    uint32_t duration_ms, uint32_t easing, uint64_t now_ms);
+int	libgAnimUpdate(libg_anim_t *anim, uint64_t now_ms, int32_t *out_val);
+int32_t	libgLerp(int32_t a, int32_t b, int32_t progress_256);
+uint32_t libgBlendColor(uint32_t c1, uint32_t c2, int32_t alpha_256);
 
 #endif

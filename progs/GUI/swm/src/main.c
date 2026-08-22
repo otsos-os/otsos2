@@ -121,10 +121,7 @@ swm_drain_protocol(swm_state_t *swm)
 
 	for (;;) {
 		ret = swm_protocol_dispatch(swm);
-		if (ret < 0) {
-			return (-1);
-		}
-		if (ret == 0) {
+		if (ret <= 0) {
 			return (0);
 		}
 	}
@@ -221,14 +218,8 @@ swm_run(swm_state_t *swm)
 			return (-1);
 		}
 		if (ret > 0 && (event.fflags & NOTE_IPC_READ) != 0) {
-			if (swm_drain_protocol(swm) != 0) {
-				return (-1);
-			}
+			(void)swm_drain_protocol(swm);
 			changed = 1;
-		}
-		if (ret > 0 && (event.fflags & NOTE_IPC_HUP) != 0 &&
-		    (event.fflags & NOTE_IPC_READ) == 0) {
-			return (-1);
 		}
 		if (swm_poll_input(swm) > 0) {
 			changed = 1;

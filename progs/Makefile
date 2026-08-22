@@ -83,6 +83,8 @@ LIBCRYPTO = $(LIBCRYPTO_DIR)/lib/libcrypto.a
 LIBSPROT = $(SPROT_DIR)/lib/libsprot.a
 SWM_BIN = $(SWM_DIR)/swm
 DE_BIN = $(SWM_DIR)/de
+TERM_BIN = GUI/term
+TERM_OBJS = GUI/term.o
 NATIVE_DYN_LDFLAGS = -m elf_x86_64 -pie --oformat=elf64-x86-64 \
                      -nostdlib -dynamic-linker /lib/drld \
                      --export-dynamic
@@ -91,9 +93,9 @@ MUSL_TEST_OBJS = musl_test.o
 LIBC_ENABLED ?= true
 
 ifeq ($(LIBC_ENABLED),true)
-ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SWM_BIN) $(DE_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) yabox $(REGEDIT_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(MUSL_TEST_BIN)
+ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SWM_BIN) $(DE_BIN) $(TERM_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) yabox $(REGEDIT_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(MUSL_TEST_BIN)
 else
-ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SWM_BIN) $(DE_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) yabox $(REGEDIT_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN)
+ALL_TARGETS = $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(OVEN_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SWM_BIN) $(DE_BIN) $(TERM_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) yabox $(REGEDIT_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN)
 endif
 
 all: $(ALL_TARGETS)
@@ -325,6 +327,24 @@ srapi_demo.o: srapi_demo.c $(NATIVE_HDR) $(LIBSRAPI_DIR)/include/srapi.h \
 	    -I$(LIBSRAPI_DIR)/include -I$(LIBG_DIR)/include \
 	    -c $< -o $@
 
+GUI/term.o: GUI/term.c $(NATIVE_HDR) $(LIBSRAPI_DIR)/include/srapi.h \
+    $(LIBG_DIR)/include/libg.h $(SPROT_DIR)/include/sprot/client.h \
+    $(SPROT_DIR)/include/sprot/sprot.h
+	@echo "  CC      $< (GUI terminal)"
+	@$(CC) $(CFLAGS) -fPIE -Iinclude -I$(NATIVE_DIR)/include \
+	    -I$(LIBSRAPI_DIR)/include -I$(LIBG_DIR)/include \
+	    -I$(SPROT_DIR)/include \
+	    -c $< -o $@
+
+$(TERM_BIN): $(NATIVE_CRT0) $(TERM_OBJS) $(LIBG) $(LIBSPROT) $(LIBSRAPI) \
+    $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO)
+	@echo "  LLD      $@"
+	@$(LD) $(NATIVE_DYN_LDFLAGS) $(NATIVE_CRT0) $(TERM_OBJS) \
+	    $(LIBG) $(LIBSPROT) $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) \
+	    $(NATIVE_SO) -o $@
+	@echo "  SIZE    $@"
+	@$(SIZE) $@
+
 musl_test.o: musl_test.c
 	@echo "  CC      $< (musl)"
 	@$(CC) $(TARGET_CFLAGS) -O2 -g -fno-pic -fno-stack-protector \
@@ -332,7 +352,7 @@ musl_test.o: musl_test.c
 	    -I$(MUSL_DIR)/obj/include -I$(MUSL_DIR)/include -c $< -o $@
 
 clean:
-	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN) $(OVEN_OBJS) $(OVEN_BIN) $(CURSORD_OBJS) $(CURSORD_BIN) $(POWERD_OBJS) $(POWERD_BIN) $(SRAPI_DEMO_OBJS) $(SRAPI_DEMO_BIN) $(SHMTEST_OBJS) $(SHMTEST_BIN) $(UDP_ECHO_OBJS) $(UDP_ECHO_BIN) $(TCP_ECHO_OBJS) $(TCP_ECHO_BIN) $(SEND_OBJS) $(SEND_BIN) $(SSH_OBJS) $(SSH_BIN) $(DHCPC_OBJS) $(DHCPC_BIN) $(DHCPD_OBJS) $(DHCPD_BIN) $(POSIX_HELLO_OBJS) $(POSIX_HELLO_BIN) $(MUSL_TEST_OBJS) $(MUSL_TEST_BIN)
+	rm -f $(YES_OBJS) $(YES_BIN) $(FETCH_OBJS) $(FETCH_BIN) $(SHELL_OBJS) $(SHELL_BIN) $(OVEN_OBJS) $(OVEN_BIN) $(CURSORD_OBJS) $(CURSORD_BIN) $(POWERD_OBJS) $(POWERD_BIN) $(SRAPI_DEMO_OBJS) $(SRAPI_DEMO_BIN) $(TERM_OBJS) $(TERM_BIN) $(SHMTEST_OBJS) $(SHMTEST_BIN) $(UDP_ECHO_OBJS) $(UDP_ECHO_BIN) $(TCP_ECHO_OBJS) $(TCP_ECHO_BIN) $(SEND_OBJS) $(SEND_BIN) $(SSH_OBJS) $(SSH_BIN) $(DHCPC_OBJS) $(DHCPC_BIN) $(DHCPD_OBJS) $(DHCPD_BIN) $(POSIX_HELLO_OBJS) $(POSIX_HELLO_BIN) $(MUSL_TEST_OBJS) $(MUSL_TEST_BIN)
 	$(MAKE) -C $(YABOX_DIR) clean
 	$(MAKE) -C $(REGEDIT_DIR) clean
 	$(MAKE) -C $(TOOLCHAIN_AS_DIR) clean

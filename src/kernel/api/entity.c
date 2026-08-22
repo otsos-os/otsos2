@@ -75,6 +75,7 @@ $space %export api_entity_read, api_entity_write, api_entity_seek
 
 #include <kernel/api/api.h>
 #include <kernel/api/errno.h>
+#include <kernel/console/pty.h>
 #include <kernel/entity/entity.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
@@ -185,6 +186,7 @@ api_entity_create(const struct api_entity_create_args *uargs)
 {
 	struct api_entity_create_args	args;
 	process_t			*proc;
+	vnode_t				*master_vn;
 	entity_id_t			id;
 	char				name[ENTITY_PATH_MAX];
 	u32				uid, gid, euid, egid;
@@ -229,6 +231,15 @@ api_entity_create(const struct api_entity_create_args *uargs)
 	    proc ? proc->pid : 0, uid, gid, euid, egid, kusr);
 	if (id == 0) {
 		return (-API_ERR_NO_MEMORY);
+	}
+	if (args.archetype == ENTITY_ARCH_PTY) {
+		master_vn = NULL;
+		ret = pty_open_master(&master_vn);
+		if (ret != 0 || master_vn == NULL) {
+			entity_destroy(id);
+			return (-API_ERR_NO_DEVICE);
+		}
+		(void)entity_set_data(id, 0, (u64)master_vn);
 	}
 	if (name[0] != '\0') {
 		ret = entity_ns_bind(name, id);

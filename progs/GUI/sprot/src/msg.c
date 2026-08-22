@@ -34,7 +34,8 @@
 static int
 message_type_flags(uint16_t type)
 {
-	return (type >= 0x4000 ? IPC_MSG_EVENT : IPC_MSG_REQUEST);
+	return (type >= 0x4000 ? (IPC_MSG_EVENT | IPC_MSG_NONBLOCK) :
+	    IPC_MSG_REQUEST);
 }
 
 int

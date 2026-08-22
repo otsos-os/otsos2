@@ -95,13 +95,14 @@ filt_read_detach(knote_t *kn)
 static int
 filt_read_event(knote_t *kn, u32 nevents)
 {
-	int			fd;
 	entity_id_t		id;
+	struct process		*proc;
+	pipe_t			*p;
+	posix_fd_t		*pfd;
+	vnode_t			*vn;
 	u32			access;
 	u16			arch;
-	pipe_t			*p;
-	struct process		*proc;
-	posix_fd_t		*pfd;
+	int			fd;
 	int			idx;
 	int			avail;
 	int			ret;
@@ -181,7 +182,22 @@ filt_read_event(knote_t *kn, u32 nevents)
 		return (0);
 	}
 
-	if (arch == ENTITY_ARCH_FILE || arch == ENTITY_ARCH_VNODE) {
+	if (arch == ENTITY_ARCH_FILE) {
+		kn->data = 1;
+		return (1);
+	}
+
+	if (arch == ENTITY_ARCH_VNODE || arch == ENTITY_ARCH_PTY) {
+		vn = (vnode_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+		if (vn && (vn->ioctl_fn == pty_master_ioctl ||
+		    vn->ioctl_fn == pty_slave_ioctl)) {
+			avail = pty_read_available(vn);
+			if (avail > 0) {
+				kn->data = avail;
+				return (1);
+			}
+			return (0);
+		}
 		kn->data = 1;
 		return (1);
 	}

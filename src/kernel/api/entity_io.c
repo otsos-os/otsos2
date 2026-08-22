@@ -424,6 +424,8 @@ entity_io_init(void)
 	    kqueue_entity_release);
 	entity_arch_release_register(ENTITY_ARCH_TRACE,
 	    api_trace_entity_release);
+	entity_arch_release_register(ENTITY_ARCH_PTY,
+	    entity_io_release_file);
 	shm_init();
 	terminal_entity_register_all();
 	entity_arch_io_register(ENTITY_ARCH_FILE, &entity_io_file_ops);
@@ -431,6 +433,7 @@ entity_io_init(void)
 	entity_arch_io_register(ENTITY_ARCH_PIPE, &entity_io_pipe_ops);
 	entity_arch_io_register(ENTITY_ARCH_NB_INTERFACE,
 	    &entity_io_nb_ops);
+	entity_arch_io_register(ENTITY_ARCH_PTY, &entity_io_vnode_ops);
 	newbus_entity_init();
 }
 

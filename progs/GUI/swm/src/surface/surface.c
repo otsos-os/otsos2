@@ -6,6 +6,8 @@ $define %func swm_surface_role_is_panel as function with args role
 $define %func swm_surface_alloc as function with args state
 $define %func swm_surface_free as procedure with args state, surface
 $define %func swm_surface_find as function with args state, id
+$define %func surface_layer as function with args surface
+$define %func surface_z_gt as function with args a, b
 $define %func sort_surfaces_by_z as procedure with args list, count
 $define %func surface_tree_is_visible as function with args state, surface, depth
 
@@ -16,7 +18,8 @@ $define %func surface_tree_is_visible as function with args state, surface, dept
 $space %export swm_surface_role_is_child, swm_surface_role_is_window
 $space %export swm_surface_role_is_panel, swm_surface_alloc
 $space %export swm_surface_free, swm_surface_find
-$space %internal sort_surfaces_by_z, surface_tree_is_visible
+$space %internal surface_layer, surface_z_gt, sort_surfaces_by_z
+$space %internal surface_tree_is_visible
 $space %export swm_surface_collect_z_asc, swm_surface_raise
 $space %export swm_surface_raise_tree, swm_surface_effective_rect
 $space %export swm_surface_outer_rect, swm_surface_titlebar_button_rects
@@ -33,6 +36,7 @@ $space %export swm_surface_topmost_window, swm_surface_topmost_popup
 
 #include "../buffer/buffer.h"
 #include "../protocol/protocol.h"
+#include "../render/render.h"
 
 #include <limits.h>
 #include <string.h>
@@ -121,6 +125,7 @@ swm_surface_free(swm_state_t *swm, swm_surface_t *surface)
 		}
 	}
 	memset(surface, 0, sizeof(*surface));
+	swm_damage_all(swm);
 	swm_protocol_shell_changed(swm);
 }
 
@@ -140,6 +145,32 @@ swm_surface_find(swm_state_t *swm, uint32_t id)
 	return (NULL);
 }
 
+static int
+surface_layer(const swm_surface_t *s)
+{
+	if (s->role == SPROT_SURFACE_ROLE_POPUP ||
+	    s->role == SPROT_SURFACE_ROLE_SUBSURFACE) {
+		return (3);
+	}
+	if (s->role == SPROT_SURFACE_ROLE_PANEL) {
+		return (2);
+	}
+	return (1);
+}
+
+static int
+surface_z_gt(const swm_surface_t *a, const swm_surface_t *b)
+{
+	int la, lb;
+
+	la = surface_layer(a);
+	lb = surface_layer(b);
+	if (la != lb) {
+		return (la > lb);
+	}
+	return (a->z > b->z);
+}
+
 static void
 sort_surfaces_by_z(swm_surface_t **list, int count)
 {
@@ -149,7 +180,7 @@ sort_surfaces_by_z(swm_surface_t **list, int count)
 	for (i = 1; i < count; i++) {
 		surface = list[i];
 		j = i - 1;
-		while (j >= 0 && list[j]->z > surface->z) {
+		while (j >= 0 && surface_z_gt(list[j], surface)) {
 			list[j + 1] = list[j];
 			j--;
 		}
@@ -200,6 +231,7 @@ swm_surface_raise(swm_state_t *swm, swm_surface_t *surface)
 		return;
 	}
 	surface->z = ++swm->next_z;
+	swm_damage_all(swm);
 	swm_protocol_shell_changed(swm);
 }
 

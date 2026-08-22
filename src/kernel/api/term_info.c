@@ -39,6 +39,8 @@ $space %export api_term_info
 
 #include <kernel/api/api.h>
 #include <kernel/console/terminal.h>
+#include <kernel/console/pty.h>
+#include <kernel/process.h>
 #include <kernel/useraddr.h>
 #include <mlibc/mlibc.h>
 
@@ -46,10 +48,24 @@ int
 api_term_info(struct api_term_info *info)
 {
 	struct winsize	ws;
-	int		tty;
+	process_t	*proc;
+	int		pty_id, tty;
 
 	if (!info || !is_user_address(info, sizeof(*info))) {
 		return (-API_ERR_BAD_ADDR);
+	}
+
+	proc = process_current();
+	if (proc && proc->controlling_tty < -1) {
+		pty_id = -proc->controlling_tty - 2;
+		pty_get_winsize(pty_id, &ws);
+		info->tty = proc->controlling_tty;
+		info->state = 0;
+		info->rows = ws.ws_row;
+		info->cols = ws.ws_col;
+		info->xpixel = ws.ws_xpixel;
+		info->ypixel = ws.ws_ypixel;
+		return (0);
 	}
 
 	tty = terminal_get_active();

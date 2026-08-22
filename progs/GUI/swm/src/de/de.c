@@ -6,8 +6,10 @@ $define %func de_present as target present callback
 $define %func de_wait_surface as function with args connection, surface
 $define %func de_send_input as function with args desktop, event
 $define %func de_handle_event as function with args desktop, event
+$define %func de_draw_tooltip as procedure with args desktop
 $define %func de_render as procedure with args desktop
 $define %func de_set_menu as procedure with args desktop, visible
+$define %func de_launch_terminal as procedure with args void
 $define %func de_cleanup as procedure with args desktop
 $define %func main as start with args void
 
@@ -18,7 +20,8 @@ $define %func main as start with args void
 $space %internal de_present, de_wait_surface, de_send_input, de_handle_event
 $space %internal de_window_find, de_window_update, de_window_remove
 $space %internal de_format_clock, de_format_stats, de_draw_panel
-$space %internal de_draw_menu, de_set_menu, de_cleanup
+$space %internal de_draw_menu, de_draw_tooltip, de_launch_terminal
+$space %internal de_set_menu, de_cleanup
 $space %export main
 
 */
@@ -50,15 +53,18 @@ $space %export main
 #include <string.h>
 
 #define DE_TASKBAR_H	32
-#define DE_LAUNCHER_W	72
+#define DE_LAUNCHER_W	60
 #define DE_STATS_W	132
 #define DE_CLOCK_W	54
+#define DE_WIN_BTN_W	36
+#define DE_TOOLTIP_W	200
+#define DE_TOOLTIP_H	24
 #define DE_ITEM_GAP	4
 #define DE_PADDING	4
 #define DE_MAX_WINDOWS	12
 #define DE_MENU_W	180
 #define DE_MENU_ITEM_H	22
-#define DE_MENU_ENTRIES	4
+#define DE_MENU_ENTRIES	5
 #define DE_FRAME_MS	16
 
 #define DE_COLOR_BAR		0xff12141aU
@@ -86,13 +92,16 @@ struct de {
 	sprot_connection_t	*connection;
 	sprot_surface_t		*panel;
 	sprot_surface_t		*menu;
+	sprot_surface_t		*tooltip;
 	libg_context_t		*panel_ui;
 	libg_context_t		*menu_ui;
+	libg_context_t		*tooltip_ui;
 	uint32_t		width;
 	uint32_t		height;
 	int			menu_open;
 	int			panel_dirty;
 	int			menu_dirty;
+	int			tooltip_dirty;
 	int32_t		panel_mouse_x;
 	int32_t		panel_mouse_y;
 	uint32_t		panel_buttons;
@@ -106,6 +115,9 @@ struct de {
 	uint64_t		last_frame_ms;
 	char			clock_text[8];
 	char			stats_text[40];
+	int			tooltip_window;
+	int			tooltip_open;
+	libg_anim_t		tooltip_anim;
 };
 
 static void
@@ -124,8 +136,12 @@ de_cleanup(struct de *desktop)
 	if (desktop == NULL) {
 		return;
 	}
+	libgDestroy(desktop->tooltip_ui);
 	libgDestroy(desktop->menu_ui);
 	libgDestroy(desktop->panel_ui);
+	if (desktop->tooltip != NULL) {
+		sprot_destroy_surface(desktop->tooltip);
+	}
 	if (desktop->menu != NULL) {
 		sprot_destroy_surface(desktop->menu);
 	}
@@ -389,8 +405,9 @@ de_draw_panel(struct de *desktop)
 	const struct de_window *window;
 	libg_rect_t rect;
 	uint32_t color, state;
-	int32_t item_width, item_x, text_width, text_height;
-	int i;
+	int32_t item_x, text_width, text_height;
+	int i, hovered_idx;
+	char label[16];
 
 	rect.x = 0;
 	rect.y = 0;
@@ -398,15 +415,7 @@ de_draw_panel(struct de *desktop)
 	rect.height = DE_TASKBAR_H;
 	libgFillRect(desktop->panel_ui, rect, DE_COLOR_BAR);
 	libgStrokeRect(desktop->panel_ui, rect, DE_COLOR_BORDER);
-	item_width = 120;
 	item_x = DE_LAUNCHER_W + 2 * DE_PADDING;
-	if (desktop->width > DE_LAUNCHER_W + DE_STATS_W + DE_CLOCK_W + 5 * DE_PADDING) {
-		item_width = ((int32_t)desktop->width - item_x - DE_STATS_W -
-		    DE_CLOCK_W - 4 * DE_PADDING) / DE_MAX_WINDOWS;
-	}
-	if (item_width < 48) {
-		item_width = 48;
-	}
 	rect.x = DE_PADDING;
 	rect.y = DE_PADDING;
 	rect.width = DE_LAUNCHER_W;
@@ -415,11 +424,12 @@ de_draw_panel(struct de *desktop)
 	if ((state & LIBG_WIDGET_CLICKED) != 0) {
 		de_set_menu(desktop, !desktop->menu_open);
 	}
+	hovered_idx = -1;
 	for (i = 0; i < desktop->window_count; i++) {
 		window = &desktop->windows[i];
-		rect.x = item_x + i * (item_width + DE_ITEM_GAP);
+		rect.x = item_x + i * (DE_WIN_BTN_W + DE_ITEM_GAP);
 		rect.y = DE_PADDING;
-		rect.width = item_width;
+		rect.width = DE_WIN_BTN_W;
 		rect.height = DE_TASKBAR_H - 2 * DE_PADDING;
 		color = (window->state & SPROT_SURFACE_STATE_FOCUSED) != 0 ?
 		    DE_COLOR_ACTIVE : DE_COLOR_IDLE;
@@ -427,8 +437,12 @@ de_draw_panel(struct de *desktop)
 			color = DE_COLOR_BAR;
 		}
 		libgFillRect(desktop->panel_ui, rect, color);
+		snprintf(label, sizeof(label), "#%d", i + 1);
 		state = libgButton(desktop->panel_ui, 1000 + (uint32_t)i, rect,
-		    window->title[0] != '\0' ? window->title : "(window)");
+		    label);
+		if ((state & LIBG_WIDGET_HOT) != 0) {
+			hovered_idx = i;
+		}
 		if ((state & LIBG_WIDGET_CLICKED) != 0) {
 			if ((window->state & SPROT_SURFACE_STATE_FOCUSED) != 0 &&
 			    (window->state & SPROT_SURFACE_STATE_MINIMIZED) == 0) {
@@ -437,6 +451,35 @@ de_draw_panel(struct de *desktop)
 			} else {
 				(void)sprot_shell_action(desktop->connection,
 				    SPROT_SHELL_ACTION_FOCUS, window->id);
+			}
+		}
+	}
+	if (hovered_idx != desktop->tooltip_window) {
+		if (hovered_idx >= 0) {
+			int32_t tx;
+			tx = item_x + hovered_idx * (DE_WIN_BTN_W + DE_ITEM_GAP) +
+			    DE_WIN_BTN_W / 2 - DE_TOOLTIP_W / 2;
+			if (tx < 4) {
+				tx = 4;
+			}
+			if (tx + DE_TOOLTIP_W > (int32_t)desktop->width - 4) {
+				tx = (int32_t)desktop->width - DE_TOOLTIP_W - 4;
+			}
+			(void)sprot_set_role(desktop->tooltip,
+			    SPROT_SURFACE_ROLE_POPUP,
+			    sprot_surface_id(desktop->panel), tx,
+			    -(DE_TOOLTIP_H + 4));
+			libgAnimStart(&desktop->tooltip_anim, 0, 255, 180,
+			    LIBG_EASE_OUT, desktop->last_frame_ms);
+			(void)sprot_set_visible(desktop->tooltip, 1);
+			desktop->tooltip_open = 1;
+			desktop->tooltip_window = hovered_idx;
+			desktop->tooltip_dirty = 1;
+		} else {
+			if (desktop->tooltip_open) {
+				(void)sprot_set_visible(desktop->tooltip, 0);
+				desktop->tooltip_open = 0;
+				desktop->tooltip_window = -1;
 			}
 		}
 	}
@@ -457,10 +500,57 @@ de_draw_panel(struct de *desktop)
 }
 
 static void
+de_draw_tooltip(struct de *desktop)
+{
+	const struct de_window *window;
+	libg_rect_t rect;
+	uint32_t bg, border, text_color;
+	int32_t alpha, tw, th;
+	const char *title;
+
+	if (!desktop->tooltip_open || desktop->tooltip_window < 0 ||
+	    desktop->tooltip_window >= desktop->window_count) {
+		return;
+	}
+	window = &desktop->windows[desktop->tooltip_window];
+	title = window->title[0] != '\0' ? window->title : "(window)";
+
+	(void)libgAnimUpdate(&desktop->tooltip_anim, desktop->last_frame_ms,
+	    &alpha);
+	if (desktop->tooltip_anim.active) {
+		desktop->tooltip_dirty = 1;
+	}
+
+	rect.x = 0;
+	rect.y = 0;
+	rect.width = DE_TOOLTIP_W;
+	rect.height = DE_TOOLTIP_H;
+
+	bg = libgBlendColor(DE_COLOR_BAR, DE_COLOR_MENU, alpha);
+	border = libgBlendColor(DE_COLOR_BORDER, DE_COLOR_ACCENT, alpha);
+	text_color = libgBlendColor(DE_COLOR_MUTED, DE_COLOR_TEXT, alpha);
+
+	libgFillRect(desktop->tooltip_ui, rect, bg);
+	libgStrokeRect(desktop->tooltip_ui, rect, border);
+	libgMeasureText(title, 1, &tw, &th);
+	libgText(desktop->tooltip_ui, (rect.width - tw) / 2,
+	    (rect.height - th) / 2, title, text_color);
+	(void)libgPresent(desktop->tooltip_ui);
+}
+
+static void
+de_launch_terminal(void)
+{
+	const char *argv[] = { "term", NULL };
+
+	(void)procSpawn("/bin/term", (char *const *)argv, NULL);
+}
+
+static void
 de_draw_menu(struct de *desktop)
 {
 	static const char *labels[DE_MENU_ENTRIES] = {
-		"Tile windows", "Cascade", "Minimize all", "Quit SWM"
+		"Terminal", "Tile windows", "Cascade", "Minimize all", "Quit SWM"
 	};
 	libg_rect_t rect;
 	uint32_t state;
@@ -483,8 +573,12 @@ de_draw_menu(struct de *desktop)
 		state = libgButton(desktop->menu_ui, 100 + (uint32_t)i, rect,
 		    labels[i]);
 		if ((state & LIBG_WIDGET_CLICKED) != 0) {
-			(void)sprot_shell_action(desktop->connection,
-			    SPROT_SHELL_ACTION_TILE + (uint32_t)i, 0);
+			if (i == 0) {
+				de_launch_terminal();
+			} else {
+				(void)sprot_shell_action(desktop->connection,
+				    SPROT_SHELL_ACTION_TILE + (uint32_t)(i - 1), 0);
+			}
 			de_set_menu(desktop, 0);
 		}
 	}
@@ -500,12 +594,14 @@ de_render(struct de *desktop)
 	if (sysTimeInfo(&timeinfo) == 0) {
 		de_format_clock(desktop, &timeinfo);
 		de_format_stats(desktop, timeinfo.uptime_sec * 1000 +
-		    timeinfo.uptime_nsec / 1000000);
+			timeinfo.uptime_nsec / 1000000);
 	}
 	de_draw_panel(desktop);
 	de_draw_menu(desktop);
+	de_draw_tooltip(desktop);
 	desktop->panel_dirty = 0;
 	desktop->menu_dirty = 0;
+	desktop->tooltip_dirty = 0;
 }
 
 int
@@ -521,6 +617,7 @@ main(void)
 	int disconnected;
 
 	memset(&desktop, 0, sizeof(desktop));
+	desktop.tooltip_window = -1;
 	desktop.connection = sprot_connect(SPROT_DEFAULT_SERVICE);
 	if (desktop.connection == NULL) {
 		termPrint("de: cannot connect to swm\n");
@@ -536,9 +633,13 @@ main(void)
 	    DE_TASKBAR_H);
 	desktop.menu = sprot_create_surface(desktop.connection, DE_MENU_W,
 	    DE_MENU_ITEM_H * DE_MENU_ENTRIES + 8);
+	desktop.tooltip = sprot_create_surface(desktop.connection, DE_TOOLTIP_W,
+	    DE_TOOLTIP_H);
 	if (desktop.panel == NULL || desktop.menu == NULL ||
+	    desktop.tooltip == NULL ||
 	    de_wait_surface(desktop.connection, desktop.panel) != 0 ||
-	    de_wait_surface(desktop.connection, desktop.menu) != 0) {
+	    de_wait_surface(desktop.connection, desktop.menu) != 0 ||
+	    de_wait_surface(desktop.connection, desktop.tooltip) != 0) {
 		termPrint("de: cannot create surfaces\n");
 		de_cleanup(&desktop);
 		return (1);
@@ -548,7 +649,10 @@ main(void)
 	    sprot_set_role(desktop.menu, SPROT_SURFACE_ROLE_POPUP,
 	    sprot_surface_id(desktop.panel), 4,
 	    -(DE_MENU_ITEM_H * DE_MENU_ENTRIES + 12)) != 0 ||
+	    sprot_set_role(desktop.tooltip, SPROT_SURFACE_ROLE_POPUP,
+	    sprot_surface_id(desktop.panel), 0, -(DE_TOOLTIP_H + 4)) != 0 ||
 	    sprot_set_visible(desktop.menu, 0) != 0 ||
+	    sprot_set_visible(desktop.tooltip, 0) != 0 ||
 	    sprot_shell_subscribe(desktop.connection) != 0) {
 		termPrint("de: shell registration failed\n");
 		de_cleanup(&desktop);
@@ -568,7 +672,10 @@ main(void)
 	    libgCreateForTarget(sprot_surface_pixels(desktop.menu), DE_MENU_W,
 	    DE_MENU_ITEM_H * DE_MENU_ENTRIES + 8,
 	    sprot_surface_stride(desktop.menu), de_present, desktop.menu, &style,
-	    &desktop.menu_ui) != LIBG_OK) {
+	    &desktop.menu_ui) != LIBG_OK ||
+	    libgCreateForTarget(sprot_surface_pixels(desktop.tooltip), DE_TOOLTIP_W,
+	    DE_TOOLTIP_H, sprot_surface_stride(desktop.tooltip), de_present,
+	    desktop.tooltip, &style, &desktop.tooltip_ui) != LIBG_OK) {
 		termPrint("de: LibG initialization failed\n");
 		de_cleanup(&desktop);
 		return (1);
@@ -578,6 +685,7 @@ main(void)
 	while (!disconnected) {
 		(void)libgBeginOverlay(desktop.panel_ui);
 		(void)libgBeginOverlay(desktop.menu_ui);
+		(void)libgBeginOverlay(desktop.tooltip_ui);
 		input_pending = 0;
 		ret = sprot_poll_event(desktop.connection, &event, DE_FRAME_MS);
 		if (ret < 0) {
@@ -607,7 +715,8 @@ main(void)
 			    timeinfo.uptime_nsec / 1000000;
 		}
 		if (!input_pending && now_ms - desktop.last_frame_ms < DE_FRAME_MS &&
-		    !desktop.panel_dirty && !desktop.menu_dirty) {
+		    !desktop.panel_dirty && !desktop.menu_dirty &&
+		    !desktop.tooltip_dirty) {
 			continue;
 		}
 		desktop.last_frame_ms = now_ms;

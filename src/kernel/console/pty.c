@@ -625,6 +625,18 @@ pty_slave_write(vnode_t *vn, const void *buf, u32 count, int nonblock)
 	}
 	data = (const char *)buf;
 	for (i = 0; i < (int)count; i++) {
+		if ((p->term.c_oflag & (OPOST | ONLCR)) == (OPOST | ONLCR) &&
+		    data[i] == '\n') {
+			while (pty_to_master_put(p, '\r') != 0) {
+				if (nonblock) {
+					if (i == 0) {
+						return (-POSIX_EAGAIN);
+					}
+					return (i);
+				}
+				proc_sleep(&p->to_master_count);
+			}
+		}
 		while (pty_to_master_put(p, data[i]) != 0) {
 			if (nonblock) {
 				if (i == 0) {
@@ -777,4 +789,168 @@ vnode_pty_slave_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
 {
 	(void)offset;
 	return (pty_slave_write(vn, buf, (u32)count, 0));
+}
+
+void
+pty_set_session_pgrp(int id, u32 sid, u32 pgid)
+{
+	pty_pair_t	*p;
+
+	if (id <= 0 || id > PTY_COUNT) {
+		return;
+	}
+	p = &pty_pairs[id - 1];
+	if (p->id != id) {
+		return;
+	}
+	p->session = sid;
+	p->foreground_pgrp = pgid;
+}
+
+void
+pty_get_winsize(int id, struct winsize *ws)
+{
+	pty_pair_t	*p;
+
+	if (!ws) {
+		return;
+	}
+	if (id <= 0 || id > PTY_COUNT) {
+		memset(ws, 0, sizeof(*ws));
+		ws->ws_row = 24;
+		ws->ws_col = 80;
+		return;
+	}
+	p = &pty_pairs[id - 1];
+	if (p->id != id) {
+		memset(ws, 0, sizeof(*ws));
+		ws->ws_row = 24;
+		ws->ws_col = 80;
+		return;
+	}
+	*ws = p->ws;
+}
+
+void
+pty_set_winsize(int id, const struct winsize *ws)
+{
+	pty_pair_t	*p;
+
+	if (!ws || id <= 0 || id > PTY_COUNT) {
+		return;
+	}
+	p = &pty_pairs[id - 1];
+	if (p->id != id) {
+		return;
+	}
+	p->ws = *ws;
+	pty_signal_pgrp(p, SIGWINCH);
+}
+
+void
+pty_get_termios(int id, struct termios *t)
+{
+	pty_pair_t	*p;
+
+	if (!t) {
+		return;
+	}
+	if (id <= 0 || id > PTY_COUNT) {
+		memset(t, 0, sizeof(*t));
+		return;
+	}
+	p = &pty_pairs[id - 1];
+	if (p->id != id) {
+		memset(t, 0, sizeof(*t));
+		return;
+	}
+	*t = p->term;
+}
+
+void
+pty_set_termios(int id, const struct termios *t)
+{
+	pty_pair_t	*p;
+
+	if (!t || id <= 0 || id > PTY_COUNT) {
+		return;
+	}
+	p = &pty_pairs[id - 1];
+	if (p->id != id) {
+		return;
+	}
+	p->term = *t;
+}
+
+int
+pty_slave_read_idx(int id, void *buf, u32 count, int nonblock)
+{
+	pty_pair_t	*p;
+	char		*out;
+	char		 c;
+	int		 n;
+
+	if (id <= 0 || id > PTY_COUNT || !buf) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	p = &pty_pairs[id - 1];
+	if (p->id != id) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	out = (char *)buf;
+	n = 0;
+	while (n < (int)count) {
+		if (pty_to_slave_get(p, &c) == 0) {
+			out[n++] = c;
+		} else if (nonblock) {
+			if (n == 0) {
+				return (-API_ERR_BUSY);
+			}
+			break;
+		} else {
+			proc_sleep(&p->to_slave_count);
+		}
+	}
+	return (n);
+}
+
+int
+pty_slave_write_idx(int id, const void *buf, u32 count, int nonblock)
+{
+	pty_pair_t	*p;
+	const char	*data;
+	int		 i;
+
+	if (id <= 0 || id > PTY_COUNT || !buf) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	p = &pty_pairs[id - 1];
+	if (p->id != id) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	data = (const char *)buf;
+	for (i = 0; i < (int)count; i++) {
+		if ((p->term.c_oflag & (OPOST | ONLCR)) == (OPOST | ONLCR) &&
+		    data[i] == '\n') {
+			while (pty_to_master_put(p, '\r') != 0) {
+				if (nonblock) {
+					if (i == 0) {
+						return (-API_ERR_BUSY);
+					}
+					return (i);
+				}
+				proc_sleep(&p->to_master_count);
+			}
+		}
+		while (pty_to_master_put(p, data[i]) != 0) {
+			if (nonblock) {
+				if (i == 0) {
+					return (-API_ERR_BUSY);
+				}
+				return (i);
+			}
+			proc_sleep(&p->to_master_count);
+		}
+	}
+	return ((int)count);
 }

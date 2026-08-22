@@ -49,6 +49,7 @@ $space %export api_data_open
 
 #include <kernel/api/api.h>
 #include <kernel/api/errno.h>
+#include <kernel/console/pty.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/entity/entity.h>
 #include <kernel/other/restrict.h>
@@ -165,6 +166,17 @@ api_data_open(const char *path, int flags)
 		vnode_release(vn);
 		kmem_free(kpath);
 		return (-API_ERR_IS_DIR);
+	}
+	if (vn->type == VCHR && strcmp(vn->name, "ptmx") == 0) {
+		vnode_t	*master_vn;
+
+		vnode_release(vn);
+		ret = pty_open_master(&master_vn);
+		if (ret != 0) {
+			kmem_free(kpath);
+			return (ret);
+		}
+		vn = master_vn;
 	}
 	if (vn->type == VCHR && strcmp(vn->name, "fb0") == 0 &&
 	    !proc_has_privilege(process_current())) {
