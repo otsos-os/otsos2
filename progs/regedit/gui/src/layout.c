@@ -34,6 +34,10 @@ $define %type rg_state as regedit gui global state
 $define %func rg_button_label as function with args int
 $define %func rg_rect_hit as function with args libg_rect, int32_t, int32_t
 $define %func rg_row_count as function with args rg_state *, int
+$define %func rg_row_rect as function with args libg_rect, int
+$define %func rg_crumb_last as function with args rg_state *
+$define %func rg_hot_row as function with args rg_state *, pane_rect, pane, off, y
+$define %func rg_hot_update as function with args rg_state *, rg_layout *
 $define %func rg_clamp_view as procedure with args rg_state *, rg_layout *
 $define %func rg_crumbs_build as procedure with args rg_state *, libg_rect
 $define %func rg_dialog_body_rows as function with args rg_dialog *
@@ -45,8 +49,9 @@ $define %func rg_layout_compute as procedure with args rg_state *, rg_layout *
 /* !SPACE!
 
 $space %internal rg_crumbs_build, rg_dialog_body_rows, rg_layout_dialog
+$space %internal rg_hot_row
 $space %export rg_button_label, rg_rect_hit, rg_row_count, rg_clamp_view
-$space %export rg_layout_compute
+$space %export rg_layout_compute, rg_row_rect, rg_crumb_last, rg_hot_update
 
 */
 
@@ -97,6 +102,34 @@ rg_row_count(const rg_state_t *st, int pane)
 		return ((int)st->hives.count);
 	}
 	return ((int)st->keys.count);
+}
+
+libg_rect_t
+rg_row_rect(libg_rect_t pane, int slot)
+{
+	libg_rect_t	row;
+
+	row = pane;
+	row.y = pane.y + slot * RG_ROW_H;
+	row.height = RG_ROW_H;
+	return (row);
+}
+
+int
+rg_crumb_last(const rg_state_t *st)
+{
+	int	i, last;
+
+	last = -1;
+	if (st == NULL) {
+		return (last);
+	}
+	for (i = 0; i < st->crumb_count; i++) {
+		if (st->crumbs[i].rect.width > 0) {
+			last = i;
+		}
+	}
+	return (last);
 }
 
 void
@@ -438,4 +471,107 @@ rg_layout_compute(rg_state_t *st, rg_layout_t *out)
 
 	rg_crumbs_build(st, out->crumbs);
 	rg_layout_dialog(st, out);
+}
+
+static int
+rg_hot_row(const rg_state_t *st, libg_rect_t pane, int which, int off,
+    int32_t y)
+{
+	libg_rect_t	row;
+	int		slot, count;
+
+	if (pane.height <= 0) {
+		return (-1);
+	}
+	slot = (int)((y - pane.y) / RG_ROW_H);
+	if (slot < 0) {
+		return (-1);
+	}
+	count = rg_row_count(st, which);
+	if (off + slot >= count) {
+		return (-1);
+	}
+	row = rg_row_rect(pane, slot);
+	if (row.y + row.height > pane.y + pane.height) {
+		return (-1);
+	}
+	return (slot);
+}
+
+int
+rg_hot_update(rg_state_t *st, const rg_layout_t *lay)
+{
+	int	zone, index, i, slot, count;
+
+	if (st == NULL || lay == NULL) {
+		return (0);
+	}
+	zone = RG_HOT_NONE;
+	index = -1;
+
+	if (st->help) {
+		goto done;
+	}
+	if (st->dialog.kind != RG_DLG_NONE) {
+		if (rg_rect_hit(lay->dlg_ok, st->mouse_x, st->mouse_y)) {
+			zone = RG_HOT_DLG_OK;
+			goto done;
+		}
+		if (rg_rect_hit(lay->dlg_cancel, st->mouse_x, st->mouse_y)) {
+			zone = RG_HOT_DLG_CANCEL;
+			goto done;
+		}
+		if (st->dialog.kind == RG_DLG_CHOICE &&
+		    rg_rect_hit(lay->dlg_field, st->mouse_x, st->mouse_y)) {
+			count = rg_choice_count(st->dialog.choice_kind);
+			slot = (int)((st->mouse_y - lay->dlg_field.y) /
+			    RG_ROW_H);
+			if (slot >= 0 && slot < count) {
+				zone = RG_HOT_CHOICE;
+				index = slot;
+			}
+		}
+		goto done;
+	}
+
+	for (i = 0; i < RG_BTN_COUNT; i++) {
+		if (rg_rect_hit(lay->buttons[i], st->mouse_x, st->mouse_y)) {
+			zone = RG_HOT_BUTTON;
+			index = i;
+			goto done;
+		}
+	}
+	for (i = 0; i < st->crumb_count; i++) {
+		if (rg_rect_hit(st->crumbs[i].rect, st->mouse_x,
+		    st->mouse_y)) {
+			zone = RG_HOT_CRUMB;
+			index = i;
+			goto done;
+		}
+	}
+	if (rg_rect_hit(lay->keys, st->mouse_x, st->mouse_y)) {
+		slot = rg_hot_row(st, lay->keys, RG_FOCUS_KEYS, st->key_off,
+		    st->mouse_y);
+		if (slot >= 0) {
+			zone = RG_HOT_KEY_ROW;
+			index = slot;
+		}
+		goto done;
+	}
+	if (rg_rect_hit(lay->values, st->mouse_x, st->mouse_y)) {
+		slot = rg_hot_row(st, lay->values, RG_FOCUS_VALUES,
+		    st->value_off, st->mouse_y);
+		if (slot >= 0) {
+			zone = RG_HOT_VALUE_ROW;
+			index = slot;
+		}
+	}
+
+done:
+	if (zone == st->hot_zone && index == st->hot_index) {
+		return (0);
+	}
+	st->hot_zone = zone;
+	st->hot_index = index;
+	return (1);
 }

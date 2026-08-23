@@ -38,6 +38,7 @@ $define %func rg_move_pane as procedure with args rg_state *, pane, delta
 $define %func rg_focus_pane as procedure with args rg_state *, int
 $define %func rg_toolbar_action as procedure with args rg_state *, int
 $define %func rg_hit_row as function with args libg_rect, int32_t, off, count
+$define %func rg_hot_update as function with args rg_state *, rg_layout *
 $define %func rg_click_row as procedure with args rg_state *, pane, row
 $define %func rg_bar_jump as procedure with args rg_state *, pane, rect, y, rows
 $define %func rg_click as procedure with args rg_state *, layout, x, y
@@ -481,13 +482,17 @@ rg_dispatch(rg_state_t *st, const sprot_event_t *ev)
 	case SPROT_EVENT_POINTER_MOTION:
 		st->mouse_x = ev->u.pointer_motion.x;
 		st->mouse_y = ev->u.pointer_motion.y;
-		st->dirty = 1;
+		if (rg_hot_update(st, &lay) && !st->dirty) {
+			st->hot_only = 1;
+		}
 		break;
 	case SPROT_EVENT_POINTER_LEAVE:
 		st->mouse_x = -1;
 		st->mouse_y = -1;
 		st->buttons = 0;
-		st->dirty = 1;
+		if (rg_hot_update(st, &lay) && !st->dirty) {
+			st->hot_only = 1;
+		}
 		break;
 	case SPROT_EVENT_POINTER_BUTTON:
 		if (ev->u.pointer_button.state == SPROT_BUTTON_STATE_PRESSED) {
@@ -498,7 +503,9 @@ rg_dispatch(rg_state_t *st, const sprot_event_t *ev)
 			}
 		} else {
 			st->buttons &= ~ev->u.pointer_button.button;
-			st->dirty = 1;
+		}
+		if (!st->dirty) {
+			st->hot_only = 1;
 		}
 		break;
 	case SPROT_EVENT_POINTER_AXIS:

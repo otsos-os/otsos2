@@ -72,7 +72,7 @@ rg_run(rg_state_t *st)
 	burst = 0;
 	while (st->running) {
 		ret = sprot_poll_event(st->conn, &event,
-		    st->dirty ? 0 : RG_IDLE_MS);
+		    (st->dirty || st->hot_only) ? 0 : RG_IDLE_MS);
 		if (ret < 0) {
 			st->running = 0;
 			break;
@@ -85,11 +85,17 @@ rg_run(rg_state_t *st)
 			}
 		}
 		burst = 0;
-		if (!st->dirty) {
+		if (!st->dirty && !st->hot_only) {
 			continue;
 		}
-		st->dirty = 0;
-		rg_draw(st);
+		if (st->dirty) {
+			st->dirty = 0;
+			st->hot_only = 0;
+			rg_draw(st);
+		} else {
+			st->hot_only = 0;
+			rg_draw_hot(st);
+		}
 		if (rg_window_present(st) != 0) {
 			st->running = 0;
 			break;

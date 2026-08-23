@@ -42,6 +42,10 @@ $define %func rg_layout_compute as procedure with args rg_state *, rg_layout *
 $define %func rg_button_label as function with args int
 $define %func rg_rect_hit as function with args libg_rect, int32_t, int32_t
 $define %func rg_row_count as function with args rg_state *, int
+$define %func rg_row_rect as function with args libg_rect, int
+$define %func rg_crumb_last as function with args rg_state *
+$define %func rg_hot_update as function with args rg_state *, rg_layout *
+$define %func rg_draw_hot as procedure with args rg_state *
 $define %func rg_window_open as function with args rg_state *, const char *
 $define %func rg_window_close as procedure with args rg_state *
 $define %func rg_window_resize as function with args rg_state *, uint32_t, uint32_t
@@ -79,6 +83,7 @@ $define %func rg_act_notify as function with args rg_state *, const char *
 
 $space %export rg_focus_t, rg_dialog_t, rg_crumb_t, rg_layout_t, rg_state_t
 $space %export rg_layout_compute, rg_button_label, rg_rect_hit, rg_row_count
+$space %export rg_row_rect, rg_crumb_last, rg_hot_update, rg_draw_hot
 $space %export rg_window_open, rg_window_close, rg_window_resize
 $space %export rg_window_present, rg_now_ms
 $space %export rg_reload, rg_status, rg_status_fmt, rg_status_error
@@ -153,6 +158,14 @@ $space %export rg_act_write, rg_act_new_key, rg_act_notify
 #define RG_DLG_HIT_NONE		0
 #define RG_DLG_HIT_OK		1
 #define RG_DLG_HIT_CANCEL	2
+#define RG_HOT_NONE		0
+#define RG_HOT_BUTTON		1
+#define RG_HOT_CRUMB		2
+#define RG_HOT_KEY_ROW		3
+#define RG_HOT_VALUE_ROW	4
+#define RG_HOT_CHOICE		5
+#define RG_HOT_DLG_OK		6
+#define RG_HOT_DLG_CANCEL	7
 
 typedef enum rg_focus {
 	RG_FOCUS_KEYS = 0,
@@ -227,6 +240,11 @@ typedef struct rg_state {
 	int			click_row;
 	int			running;
 	int			dirty;
+	int			hot_only;
+	int			hot_zone;
+	int			hot_index;
+	int			prev_hot_zone;
+	int			prev_hot_index;
 	int			loaded;
 	int			focused;
 	int			fullscreen;
@@ -240,6 +258,9 @@ void		rg_layout_compute(rg_state_t *st, rg_layout_t *out);
 const char	*rg_button_label(int id);
 int		rg_rect_hit(libg_rect_t rect, int32_t x, int32_t y);
 int	rg_row_count(const rg_state_t *st, int pane);
+libg_rect_t	rg_row_rect(libg_rect_t pane, int slot);
+int		rg_crumb_last(const rg_state_t *st);
+int		rg_hot_update(rg_state_t *st, const rg_layout_t *lay);
 
 int	rg_window_open(rg_state_t *st, const char *title);
 void	rg_window_close(rg_state_t *st);
@@ -254,6 +275,7 @@ void	rg_status_error(rg_state_t *st, const char *what, int code);
 void	rg_clamp_view(rg_state_t *st, const rg_layout_t *lay);
 
 void	rg_draw(rg_state_t *st);
+void	rg_draw_hot(rg_state_t *st);
 void	rg_dispatch(rg_state_t *st, const sprot_event_t *ev);
 uint32_t	rg_key_char(uint32_t key, uint32_t mods);
 int		rg_choice_count(int kind);

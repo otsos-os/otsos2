@@ -39,8 +39,18 @@ $define %func rg_draw_crumbs as procedure with args rg_state *, layout
 $define %func rg_draw_toolbar as procedure with args rg_state *, layout
 $define %func rg_draw_columns as procedure with args rg_state *, layout
 $define %func rg_draw_bar as procedure with args ctx, style, rect, off, rows, count
+$define %func rg_draw_button as procedure with args rg_state *, layout, int
+$define %func rg_draw_crumb as procedure with args rg_state *, int
+$define %func rg_draw_keys_cut as procedure with args rg_state *, layout, clip
+$define %func rg_draw_values_cut as procedure with args rg_state *, layout, clip
+$define %func rg_draw_key_row as procedure with args rg_state *, layout, slot
+$define %func rg_draw_value_row as procedure with args rg_state *, layout, slot
 $define %func rg_draw_keys as procedure with args rg_state *, layout
 $define %func rg_draw_values as procedure with args rg_state *, layout
+$define %func rg_draw_choice as procedure with args rg_state *, layout, int
+$define %func rg_draw_dlg_button as procedure with args rg_state *, layout, int
+$define %func rg_draw_element as procedure with args rg_state *, layout, zone, index
+$define %func rg_draw_hot as procedure with args rg_state *
 $define %func rg_draw_status as procedure with args rg_state *, layout
 $define %func rg_draw_field as procedure with args rg_state *, layout
 $define %func rg_draw_dialog as procedure with args rg_state *, layout
@@ -55,7 +65,10 @@ $space %internal rg_clip_text, rg_text_at, rg_draw_header, rg_draw_crumbs
 $space %internal rg_draw_toolbar, rg_draw_columns, rg_draw_bar, rg_draw_keys
 $space %internal rg_draw_values, rg_draw_status, rg_draw_field
 $space %internal rg_draw_dialog, rg_draw_help
-$space %export rg_draw
+$space %internal rg_draw_button, rg_draw_crumb, rg_draw_keys_cut
+$space %internal rg_draw_values_cut, rg_draw_key_row, rg_draw_value_row
+$space %internal rg_draw_choice, rg_draw_dlg_button, rg_draw_element
+$space %export rg_draw, rg_draw_hot
 
 */
 
@@ -182,42 +195,53 @@ rg_draw_header(rg_state_t *st, const rg_layout_t *lay)
 }
 
 static void
-rg_draw_crumbs(rg_state_t *st, const rg_layout_t *lay)
+rg_draw_crumb(rg_state_t *st, int index)
 {
 	const rg_crumb_t	*crumb;
 	libg_rect_t		rect;
 	uint32_t		color;
-	int			i, hot, last;
+	int			hot, last;
+
+	if (index < 0 || index >= st->crumb_count) {
+		return;
+	}
+	crumb = &st->crumbs[index];
+	if (crumb->rect.width <= 0) {
+		return;
+	}
+	last = rg_crumb_last(st);
+	hot = st->hot_zone == RG_HOT_CRUMB && st->hot_index == index;
+	if (index == last) {
+		libgFillRect(st->ui, crumb->rect, st->style.control_active);
+	} else if (hot) {
+		libgFillRect(st->ui, crumb->rect, st->style.control_hot);
+	} else {
+		libgFillRect(st->ui, crumb->rect, st->style.control);
+	}
+	color = index == last ? st->style.text :
+	    (hot ? st->style.accent_hot : st->style.text_muted);
+	rect = crumb->rect;
+	rect.x += (crumb->rect.width -
+	    (int32_t)strlen(crumb->label) * RG_GLYPH_W) / 2;
+	rg_text_at(st->ui, rect, crumb->label, color,
+	    (int)strlen(crumb->label));
+}
+
+static void
+rg_draw_crumbs(rg_state_t *st, const rg_layout_t *lay)
+{
+	const rg_crumb_t	*crumb;
+	libg_rect_t		rect;
+	int			i, last;
 
 	libgFillRect(st->ui, lay->crumbs, st->style.background);
-	last = -1;
-	for (i = 0; i < st->crumb_count; i++) {
-		if (st->crumbs[i].rect.width > 0) {
-			last = i;
-		}
-	}
+	last = rg_crumb_last(st);
 	for (i = 0; i < st->crumb_count; i++) {
 		crumb = &st->crumbs[i];
 		if (crumb->rect.width <= 0) {
 			continue;
 		}
-		hot = rg_rect_hit(crumb->rect, st->mouse_x, st->mouse_y);
-		if (i == last) {
-			libgFillRect(st->ui, crumb->rect,
-			    st->style.control_active);
-		} else if (hot) {
-			libgFillRect(st->ui, crumb->rect,
-			    st->style.control_hot);
-		} else {
-			libgFillRect(st->ui, crumb->rect, st->style.control);
-		}
-		color = i == last ? st->style.text :
-		    (hot ? st->style.accent_hot : st->style.text_muted);
-		rect = crumb->rect;
-		rect.x += (crumb->rect.width -
-		    (int32_t)strlen(crumb->label) * RG_GLYPH_W) / 2;
-		rg_text_at(st->ui, rect, crumb->label, color,
-		    (int)strlen(crumb->label));
+		rg_draw_crumb(st, i);
 		if (i != last) {
 			rect = crumb->rect;
 			rect.x = crumb->rect.x + crumb->rect.width + 2;
@@ -229,12 +253,46 @@ rg_draw_crumbs(rg_state_t *st, const rg_layout_t *lay)
 }
 
 static void
-rg_draw_toolbar(rg_state_t *st, const rg_layout_t *lay)
+rg_draw_button(rg_state_t *st, const rg_layout_t *lay, int index)
 {
 	libg_rect_t	rect;
 	const char	*label;
 	uint32_t	fill, color;
-	int		i, hot, off;
+	int		hot, off;
+
+	if (index < 0 || index >= RG_BTN_COUNT ||
+	    lay->buttons[index].width <= 0) {
+		return;
+	}
+	label = rg_button_label(index);
+	off = 0;
+	if (st->path.hive[0] == '\0' &&
+	    (index == RG_BTN_UP || index == RG_BTN_NEW_KEY ||
+	    index == RG_BTN_NEW_VALUE || index == RG_BTN_DELETE)) {
+		off = 1;
+	}
+	hot = st->hot_zone == RG_HOT_BUTTON && st->hot_index == index;
+	fill = st->style.control;
+	if (hot) {
+		fill = (st->buttons & SRAPI_MOUSE_LEFT) != 0 ?
+		    st->style.control_active : st->style.control_hot;
+	}
+	libgFillRect(st->ui, lay->buttons[index], fill);
+	libgStrokeRect(st->ui, lay->buttons[index],
+	    hot ? st->style.accent : st->style.panel_border);
+	color = off ? st->style.panel_border : st->style.text;
+	if (index == RG_BTN_DELETE && !off) {
+		color = hot ? st->style.danger : st->style.text;
+	}
+	rect = lay->buttons[index];
+	rect.x += (rect.width - (int32_t)strlen(label) * RG_GLYPH_W) / 2;
+	rg_text_at(st->ui, rect, label, color, (int)strlen(label));
+}
+
+static void
+rg_draw_toolbar(rg_state_t *st, const rg_layout_t *lay)
+{
+	int	i;
 
 	libgFillRect(st->ui, lay->toolbar, st->style.panel);
 	libgLine(st->ui, lay->toolbar.x,
@@ -243,33 +301,7 @@ rg_draw_toolbar(rg_state_t *st, const rg_layout_t *lay)
 	    lay->toolbar.y + lay->toolbar.height - 1, st->style.panel_border);
 
 	for (i = 0; i < RG_BTN_COUNT; i++) {
-		if (lay->buttons[i].width <= 0) {
-			continue;
-		}
-		label = rg_button_label(i);
-		off = 0;
-		if (st->path.hive[0] == '\0' &&
-		    (i == RG_BTN_UP || i == RG_BTN_NEW_KEY ||
-		    i == RG_BTN_NEW_VALUE || i == RG_BTN_DELETE)) {
-			off = 1;
-		}
-		hot = rg_rect_hit(lay->buttons[i], st->mouse_x, st->mouse_y);
-		fill = st->style.control;
-		if (hot) {
-			fill = (st->buttons & SRAPI_MOUSE_LEFT) != 0 ?
-			    st->style.control_active : st->style.control_hot;
-		}
-		libgFillRect(st->ui, lay->buttons[i], fill);
-		libgStrokeRect(st->ui, lay->buttons[i],
-		    hot ? st->style.accent : st->style.panel_border);
-		color = off ? st->style.panel_border : st->style.text;
-		if (i == RG_BTN_DELETE && !off) {
-			color = hot ? st->style.danger : st->style.text;
-		}
-		rect = lay->buttons[i];
-		rect.x += (rect.width -
-		    (int32_t)strlen(label) * RG_GLYPH_W) / 2;
-		rg_text_at(st->ui, rect, label, color, (int)strlen(label));
+		rg_draw_button(st, lay, i);
 	}
 }
 
@@ -339,59 +371,100 @@ rg_draw_bar(libg_context_t *ctx, const libg_style_t *style, libg_rect_t rect,
 }
 
 static void
-rg_draw_keys(rg_state_t *st, const rg_layout_t *lay)
+rg_draw_keys_cut(rg_state_t *st, const rg_layout_t *lay,
+    const libg_rect_t *clip)
+{
+	libg_rect_t	row;
+
+	if (st->keys.truncated == 0 || st->path.hive[0] == '\0') {
+		return;
+	}
+	row = lay->keys;
+	row.x += RG_GUTTER;
+	row.y += lay->keys.height - RG_ROW_H;
+	row.height = RG_ROW_H;
+	if (clip != NULL && (clip->y >= row.y + row.height ||
+	    clip->y + clip->height <= row.y)) {
+		return;
+	}
+	libgFillRect(st->ui, row, st->style.panel);
+	rg_text_at(st->ui, row, "list truncated", st->style.danger,
+	    row.width / RG_GLYPH_W);
+}
+
+static void
+rg_draw_key_row(rg_state_t *st, const rg_layout_t *lay, int slot)
 {
 	libg_rect_t	row, text;
 	const char	*name;
 	uint32_t	color;
-	int		i, index, count, locked, focus, sel;
+	int		index, count, locked, focus, sel;
+
+	if (slot < 0 || slot >= lay->rows) {
+		return;
+	}
+	count = rg_row_count(st, RG_FOCUS_KEYS);
+	index = st->key_off + slot;
+	if (index >= count) {
+		return;
+	}
+	row = rg_row_rect(lay->keys, slot);
+	if (row.y + row.height > lay->keys.y + lay->keys.height) {
+		return;
+	}
+	focus = st->focus == RG_FOCUS_KEYS;
+	sel = st->key_sel;
+	locked = 0;
+	if (st->path.hive[0] == '\0') {
+		name = st->hives.items[index].name;
+		locked = st->hives.items[index].access == RE_ACCESS_NONE;
+	} else {
+		name = st->keys.items[index].name;
+	}
+	if (index == sel) {
+		libgFillRect(st->ui, row, focus ? RG_COL_SEL :
+		    RG_COL_SEL_BLUR);
+	} else if (st->hot_zone == RG_HOT_KEY_ROW && st->hot_index == slot) {
+		libgFillRect(st->ui, row, RG_COL_HOVER);
+	} else if ((index & 1) != 0) {
+		libgFillRect(st->ui, row, RG_COL_ROW_ALT);
+	} else {
+		libgFillRect(st->ui, row, st->style.background);
+	}
+	color = locked ? st->style.panel_border : st->style.text;
+	if (index == sel && focus) {
+		color = st->style.text;
+	}
+	text = row;
+	text.x += RG_GUTTER;
+	text.width -= 2 * RG_GUTTER;
+	rg_text_at(st->ui, text, name, color, text.width / RG_GLYPH_W);
+	if (locked) {
+		text.x = row.x + row.width - RG_GUTTER - RG_GLYPH_W;
+		text.width = RG_GLYPH_W;
+		rg_text_at(st->ui, text, "-", st->style.danger, 1);
+	}
+	rg_draw_keys_cut(st, lay, &row);
+}
+
+static void
+rg_draw_keys(rg_state_t *st, const rg_layout_t *lay)
+{
+	libg_rect_t	row;
+	int		i, count;
 
 	libgFillRect(st->ui, lay->keys, st->style.background);
 	count = rg_row_count(st, RG_FOCUS_KEYS);
-	focus = st->focus == RG_FOCUS_KEYS;
-	sel = st->key_sel;
 
 	for (i = 0; i < lay->rows; i++) {
-		index = st->key_off + i;
-		row = lay->keys;
-		row.y = lay->keys.y + i * RG_ROW_H;
-		row.height = RG_ROW_H;
+		if (st->key_off + i >= count) {
+			break;
+		}
+		row = rg_row_rect(lay->keys, i);
 		if (row.y + row.height > lay->keys.y + lay->keys.height) {
 			break;
 		}
-		if (index >= count) {
-			break;
-		}
-		locked = 0;
-		if (st->path.hive[0] == '\0') {
-			name = st->hives.items[index].name;
-			locked = st->hives.items[index].access ==
-			    RE_ACCESS_NONE;
-		} else {
-			name = st->keys.items[index].name;
-		}
-		if (index == sel) {
-			libgFillRect(st->ui, row,
-			    focus ? RG_COL_SEL : RG_COL_SEL_BLUR);
-		} else if (rg_rect_hit(row, st->mouse_x, st->mouse_y)) {
-			libgFillRect(st->ui, row, RG_COL_HOVER);
-		} else if ((index & 1) != 0) {
-			libgFillRect(st->ui, row, RG_COL_ROW_ALT);
-		}
-		color = locked ? st->style.panel_border : st->style.text;
-		if (index == sel && focus) {
-			color = st->style.text;
-		}
-		text = row;
-		text.x += RG_GUTTER;
-		text.width -= 2 * RG_GUTTER;
-		rg_text_at(st->ui, text, name, color,
-		    text.width / RG_GLYPH_W);
-		if (locked) {
-			text.x = row.x + row.width - RG_GUTTER - RG_GLYPH_W;
-			text.width = RG_GLYPH_W;
-			rg_text_at(st->ui, text, "-", st->style.danger, 1);
-		}
+		rg_draw_key_row(st, lay, i);
 	}
 
 	if (count == 0) {
@@ -402,15 +475,7 @@ rg_draw_keys(rg_state_t *st, const rg_layout_t *lay)
 		    st->loaded ? "(no subkeys)" : "(unavailable)",
 		    st->style.text_muted, row.width / RG_GLYPH_W);
 	}
-	if (st->keys.truncated != 0 && st->path.hive[0] != '\0') {
-		row = lay->keys;
-		row.x += RG_GUTTER;
-		row.y += lay->keys.height - RG_ROW_H;
-		row.height = RG_ROW_H;
-		libgFillRect(st->ui, row, st->style.panel);
-		rg_text_at(st->ui, row, "list truncated", st->style.danger,
-		    row.width / RG_GLYPH_W);
-	}
+	rg_draw_keys_cut(st, lay, NULL);
 	rg_draw_bar(st->ui, &st->style, lay->keys_bar, st->key_off, lay->rows,
 	    count);
 	libgLine(st->ui, lay->values.x - RG_SCROLL_W, lay->keys.y,
@@ -419,57 +484,100 @@ rg_draw_keys(rg_state_t *st, const rg_layout_t *lay)
 }
 
 static void
-rg_draw_values(rg_state_t *st, const rg_layout_t *lay)
+rg_draw_values_cut(rg_state_t *st, const rg_layout_t *lay,
+    const libg_rect_t *clip)
+{
+	libg_rect_t	row;
+
+	if (st->values.truncated == 0) {
+		return;
+	}
+	row = lay->values;
+	row.x += RG_GUTTER;
+	row.y += lay->values.height - RG_ROW_H;
+	row.height = RG_ROW_H;
+	if (clip != NULL && (clip->y >= row.y + row.height ||
+	    clip->y + clip->height <= row.y)) {
+		return;
+	}
+	libgFillRect(st->ui, row, st->style.panel);
+	rg_text_at(st->ui, row, "list truncated", st->style.danger,
+	    row.width / RG_GLYPH_W);
+}
+
+static void
+rg_draw_value_row(rg_state_t *st, const rg_layout_t *lay, int slot)
 {
 	const re_value_t	*item;
 	libg_rect_t		row, text;
 	uint32_t		color;
-	int			i, index, count, focus, sel;
+	int			index, count, focus, sel;
+
+	if (slot < 0 || slot >= lay->rows) {
+		return;
+	}
+	count = (int)st->values.count;
+	index = st->value_off + slot;
+	if (index >= count) {
+		return;
+	}
+	row = rg_row_rect(lay->values, slot);
+	if (row.y + row.height > lay->values.y + lay->values.height) {
+		return;
+	}
+	focus = st->focus == RG_FOCUS_VALUES;
+	sel = st->value_sel;
+	item = &st->values.items[index];
+	if (index == sel) {
+		libgFillRect(st->ui, row, focus ? RG_COL_SEL :
+		    RG_COL_SEL_BLUR);
+	} else if (st->hot_zone == RG_HOT_VALUE_ROW &&
+	    st->hot_index == slot) {
+		libgFillRect(st->ui, row, RG_COL_HOVER);
+	} else if ((index & 1) != 0) {
+		libgFillRect(st->ui, row, RG_COL_ROW_ALT);
+	} else {
+		libgFillRect(st->ui, row, st->style.background);
+	}
+
+	text = row;
+	text.x = lay->values.x + RG_GUTTER;
+	text.width = lay->name_w - RG_GUTTER;
+	rg_text_at(st->ui, text, item->name, st->style.text,
+	    text.width / RG_GLYPH_W);
+
+	text.x = lay->values.x + lay->name_w;
+	text.width = lay->type_w;
+	rg_text_at(st->ui, text, re_type_name(item->type), st->style.accent,
+	    text.width / RG_GLYPH_W);
+
+	text.x = lay->values.x + lay->name_w + lay->type_w;
+	text.width = lay->data_w;
+	color = item->readable != 0 ? st->style.text_muted : st->style.danger;
+	rg_text_at(st->ui, text,
+	    item->readable != 0 ? item->preview : "(denied)", color,
+	    text.width / RG_GLYPH_W);
+	rg_draw_values_cut(st, lay, &row);
+}
+
+static void
+rg_draw_values(rg_state_t *st, const rg_layout_t *lay)
+{
+	libg_rect_t	row;
+	int		i, count;
 
 	libgFillRect(st->ui, lay->values, st->style.background);
 	count = (int)st->values.count;
-	focus = st->focus == RG_FOCUS_VALUES;
-	sel = st->value_sel;
 
 	for (i = 0; i < lay->rows; i++) {
-		index = st->value_off + i;
-		row = lay->values;
-		row.y = lay->values.y + i * RG_ROW_H;
-		row.height = RG_ROW_H;
+		if (st->value_off + i >= count) {
+			break;
+		}
+		row = rg_row_rect(lay->values, i);
 		if (row.y + row.height > lay->values.y + lay->values.height) {
 			break;
 		}
-		if (index >= count) {
-			break;
-		}
-		item = &st->values.items[index];
-		if (index == sel) {
-			libgFillRect(st->ui, row,
-			    focus ? RG_COL_SEL : RG_COL_SEL_BLUR);
-		} else if (rg_rect_hit(row, st->mouse_x, st->mouse_y)) {
-			libgFillRect(st->ui, row, RG_COL_HOVER);
-		} else if ((index & 1) != 0) {
-			libgFillRect(st->ui, row, RG_COL_ROW_ALT);
-		}
-
-		text = row;
-		text.x = lay->values.x + RG_GUTTER;
-		text.width = lay->name_w - RG_GUTTER;
-		rg_text_at(st->ui, text, item->name, st->style.text,
-		    text.width / RG_GLYPH_W);
-
-		text.x = lay->values.x + lay->name_w;
-		text.width = lay->type_w;
-		rg_text_at(st->ui, text, re_type_name(item->type),
-		    st->style.accent, text.width / RG_GLYPH_W);
-
-		text.x = lay->values.x + lay->name_w + lay->type_w;
-		text.width = lay->data_w;
-		color = item->readable != 0 ? st->style.text_muted :
-		    st->style.danger;
-		rg_text_at(st->ui, text,
-		    item->readable != 0 ? item->preview : "(denied)", color,
-		    text.width / RG_GLYPH_W);
+		rg_draw_value_row(st, lay, i);
 	}
 
 	if (count == 0) {
@@ -481,15 +589,7 @@ rg_draw_values(rg_state_t *st, const rg_layout_t *lay)
 		    "(no values)", st->style.text_muted,
 		    row.width / RG_GLYPH_W);
 	}
-	if (st->values.truncated != 0) {
-		row = lay->values;
-		row.x += RG_GUTTER;
-		row.y += lay->values.height - RG_ROW_H;
-		row.height = RG_ROW_H;
-		libgFillRect(st->ui, row, st->style.panel);
-		rg_text_at(st->ui, row, "list truncated", st->style.danger,
-		    row.width / RG_GLYPH_W);
-	}
+	rg_draw_values_cut(st, lay, NULL);
 	rg_draw_bar(st->ui, &st->style, lay->values_bar, st->value_off,
 	    lay->rows, count);
 }
@@ -573,12 +673,73 @@ rg_draw_field(rg_state_t *st, const rg_layout_t *lay)
 }
 
 static void
+rg_draw_choice(rg_state_t *st, const rg_layout_t *lay, int index)
+{
+	libg_rect_t	rect;
+	int		count;
+
+	count = rg_choice_count(st->dialog.choice_kind);
+	if (index < 0 || index >= count) {
+		return;
+	}
+	rect = rg_row_rect(lay->dlg_field, index);
+	if (rect.y + rect.height >
+	    lay->dlg_field.y + lay->dlg_field.height) {
+		return;
+	}
+	if (index == st->dialog.choice) {
+		libgFillRect(st->ui, rect, RG_COL_SEL);
+	} else if (st->hot_zone == RG_HOT_CHOICE &&
+	    st->hot_index == index) {
+		libgFillRect(st->ui, rect, RG_COL_HOVER);
+	} else {
+		libgFillRect(st->ui, rect, st->style.field);
+	}
+	rect.x += RG_GUTTER;
+	rect.width -= 2 * RG_GUTTER;
+	rg_text_at(st->ui, rect,
+	    rg_choice_item(st->dialog.choice_kind, index), st->style.text,
+	    rect.width / RG_GLYPH_W);
+}
+
+static void
+rg_draw_dlg_button(rg_state_t *st, const rg_layout_t *lay, int index)
+{
+	libg_rect_t	rect;
+	const char	*label;
+	uint32_t	color;
+	int		hot;
+
+	if (index < 0 || index > 1) {
+		return;
+	}
+	rect = index == 0 ? lay->dlg_ok : lay->dlg_cancel;
+	label = index == 0 ?
+	    (st->dialog.kind == RG_DLG_CONFIRM ? "Yes" : "OK") :
+	    (st->dialog.kind == RG_DLG_CONFIRM ? "No" : "Cancel");
+	hot = st->hot_zone == (index == 0 ? RG_HOT_DLG_OK : RG_HOT_DLG_CANCEL);
+	libgFillRect(st->ui, rect, hot ? st->style.control_hot :
+	    st->style.control);
+	color = st->style.text;
+	if (index == 0) {
+		libgStrokeRect(st->ui, rect,
+		    st->dialog.kind == RG_DLG_CONFIRM ? st->style.danger :
+		    st->style.accent);
+		if (st->dialog.kind == RG_DLG_CONFIRM) {
+			color = st->style.danger;
+		}
+	} else {
+		libgStrokeRect(st->ui, rect, st->style.panel_border);
+	}
+	rect.x += (rect.width - (int32_t)strlen(label) * RG_GLYPH_W) / 2;
+	rg_text_at(st->ui, rect, label, color, (int)strlen(label));
+}
+
+static void
 rg_draw_dialog(rg_state_t *st, const rg_layout_t *lay)
 {
 	libg_rect_t	rect, shade;
-	const char	*label;
-	uint32_t	color;
-	int		i, count, hot;
+	int		i, count;
 
 	shade.x = 0;
 	shade.y = 0;
@@ -605,24 +766,7 @@ rg_draw_dialog(rg_state_t *st, const rg_layout_t *lay)
 		    st->style.panel_border);
 		count = rg_choice_count(st->dialog.choice_kind);
 		for (i = 0; i < count; i++) {
-			rect = lay->dlg_field;
-			rect.y = lay->dlg_field.y + i * RG_ROW_H;
-			rect.height = RG_ROW_H;
-			if (rect.y + rect.height >
-			    lay->dlg_field.y + lay->dlg_field.height) {
-				break;
-			}
-			if (i == st->dialog.choice) {
-				libgFillRect(st->ui, rect, RG_COL_SEL);
-			} else if (rg_rect_hit(rect, st->mouse_x,
-			    st->mouse_y)) {
-				libgFillRect(st->ui, rect, RG_COL_HOVER);
-			}
-			rect.x += RG_GUTTER;
-			rect.width -= 2 * RG_GUTTER;
-			rg_text_at(st->ui, rect,
-			    rg_choice_item(st->dialog.choice_kind, i),
-			    st->style.text, rect.width / RG_GLYPH_W);
+			rg_draw_choice(st, lay, i);
 		}
 	}
 
@@ -646,27 +790,7 @@ rg_draw_dialog(rg_state_t *st, const rg_layout_t *lay)
 	}
 
 	for (i = 0; i < 2; i++) {
-		rect = i == 0 ? lay->dlg_ok : lay->dlg_cancel;
-		label = i == 0 ?
-		    (st->dialog.kind == RG_DLG_CONFIRM ? "Yes" : "OK") :
-		    (st->dialog.kind == RG_DLG_CONFIRM ? "No" : "Cancel");
-		hot = rg_rect_hit(rect, st->mouse_x, st->mouse_y);
-		libgFillRect(st->ui, rect, hot ? st->style.control_hot :
-		    st->style.control);
-		color = st->style.text;
-		if (i == 0) {
-			libgStrokeRect(st->ui, rect,
-			    st->dialog.kind == RG_DLG_CONFIRM ?
-			    st->style.danger : st->style.accent);
-			if (st->dialog.kind == RG_DLG_CONFIRM) {
-				color = st->style.danger;
-			}
-		} else {
-			libgStrokeRect(st->ui, rect, st->style.panel_border);
-		}
-		rect.x += (rect.width -
-		    (int32_t)strlen(label) * RG_GLYPH_W) / 2;
-		rg_text_at(st->ui, rect, label, color, (int)strlen(label));
+		rg_draw_dlg_button(st, lay, i);
 	}
 }
 
@@ -718,11 +842,40 @@ rg_draw_help(rg_state_t *st)
 	}
 }
 
+static void
+rg_draw_element(rg_state_t *st, const rg_layout_t *lay, int zone, int index)
+{
+	switch (zone) {
+	case RG_HOT_BUTTON:
+		rg_draw_button(st, lay, index);
+		break;
+	case RG_HOT_CRUMB:
+		rg_draw_crumb(st, index);
+		break;
+	case RG_HOT_KEY_ROW:
+		rg_draw_key_row(st, lay, index);
+		break;
+	case RG_HOT_VALUE_ROW:
+		rg_draw_value_row(st, lay, index);
+		break;
+	case RG_HOT_CHOICE:
+		rg_draw_choice(st, lay, index);
+		break;
+	case RG_HOT_DLG_OK:
+		rg_draw_dlg_button(st, lay, 0);
+		break;
+	case RG_HOT_DLG_CANCEL:
+		rg_draw_dlg_button(st, lay, 1);
+		break;
+	default:
+		break;
+	}
+}
+
 void
-rg_draw(rg_state_t *st)
+rg_draw_hot(rg_state_t *st)
 {
 	rg_layout_t	lay;
-	libg_rect_t	clear;
 
 	if (!st || !st->ui) {
 		return;
@@ -732,11 +885,31 @@ rg_draw(rg_state_t *st)
 	if (libgBeginOverlay(st->ui) != LIBG_OK) {
 		return;
 	}
-	clear.x = 0;
-	clear.y = 0;
-	clear.width = (int32_t)st->width;
-	clear.height = (int32_t)st->height;
-	libgFillRect(st->ui, clear, st->style.background);
+	(void)rg_hot_update(st, &lay);
+	if (st->prev_hot_zone != st->hot_zone ||
+	    st->prev_hot_index != st->hot_index) {
+		rg_draw_element(st, &lay, st->prev_hot_zone,
+		    st->prev_hot_index);
+	}
+	rg_draw_element(st, &lay, st->hot_zone, st->hot_index);
+	st->prev_hot_zone = st->hot_zone;
+	st->prev_hot_index = st->hot_index;
+}
+
+void
+rg_draw(rg_state_t *st)
+{
+	rg_layout_t	lay;
+
+	if (!st || !st->ui) {
+		return;
+	}
+	rg_layout_compute(st, &lay);
+	rg_clamp_view(st, &lay);
+	if (libgBeginOverlay(st->ui) != LIBG_OK) {
+		return;
+	}
+	(void)rg_hot_update(st, &lay);
 
 	rg_draw_header(st, &lay);
 	rg_draw_crumbs(st, &lay);
@@ -751,4 +924,6 @@ rg_draw(rg_state_t *st)
 	if (st->help) {
 		rg_draw_help(st);
 	}
+	st->prev_hot_zone = st->hot_zone;
+	st->prev_hot_index = st->hot_index;
 }
