@@ -4,11 +4,13 @@ AR ?= llvm-ar
 
 ROOT = ../..
 NATIVE_DIR = $(ROOT)/libc/native
+LIBSVG_DIR = $(ROOT)/libc/LibSVG
 LIBSRAPI_DIR = $(ROOT)/libc/LibSRAPI
 TARGET_CFLAGS ?= --target=$(TARGET)
 CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fPIE -fno-stack-protector \
 	-nostdlib -nostdinc -fno-builtin -O2 -Wall -Wextra \
-	-Iinclude -I$(NATIVE_DIR)/include -I$(LIBSRAPI_DIR)/include
+	-Iinclude -I$(LIBSVG_DIR)/include -I$(NATIVE_DIR)/include \
+	-I$(LIBSRAPI_DIR)/include
 
 LIB = lib/libg.a
 SRC = src/libg.c

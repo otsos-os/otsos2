@@ -18,11 +18,14 @@ $define %func libgPresent as function with args context
 $define %func libgWidth as function with args context
 $define %func libgHeight as function with args context
 $define %func libgMousePosition as procedure with args context, outputs
+$define %type libg_point as single precision 2d point
 $define %func libgFillRect as procedure with args context, rect, color
 $define %func libgStrokeRect as procedure with args context, rect, color
 $define %func libgLine as procedure with args context, endpoints, color
 $define %func libgFillCircle as procedure with args context, center, radius
 $define %func libgStrokeCircle as procedure with args context, center, radius
+$define %func libgSvgShape as procedure with args context, svg_shape *, affine map
+$define %func libgSvgDoc as procedure with args context, svg_doc *, rect
 $define %func libgText as procedure with args context, position, text, color
 $define %func libgTextScale as procedure with args context, position, text
 $define %func libgMeasureText as procedure with args text, scale, out size
@@ -49,6 +52,7 @@ $space %export libgPresent, libgWidth, libgHeight
 $space %export libgSetStyle, libgGetStyle, libgMousePosition
 $space %export libgFillRect, libgStrokeRect, libgLine
 $space %export libgFillCircle, libgStrokeCircle
+$space %export libgSvgShape, libgSvgDoc
 $space %export libgText, libgTextScale, libgMeasureText
 $space %export libgPanel, libgButton, libgTextField, libgSlider
 $space %export libgAnimStart, libgAnimUpdate, libgLerp, libgBlendColor
@@ -63,6 +67,7 @@ $space %export libgAnimStart, libgAnimUpdate, libgLerp, libgBlendColor
 #define LIBG_H
 
 #include <srapi.h>
+#include <svg.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -152,6 +157,11 @@ void	libgFillCircle(libg_context_t *ctx, int32_t cx, int32_t cy,
 	    int32_t radius, uint32_t color);
 void	libgStrokeCircle(libg_context_t *ctx, int32_t cx, int32_t cy,
 	    int32_t radius, uint32_t color);
+void	libgSvgShape(libg_context_t *ctx, const svg_shape_t *shape,
+	    const double m[6]);
+void	libgSvgDoc(libg_context_t *ctx, const svg_doc_t *doc,
+	    libg_rect_t rect);
+
 void	libgText(libg_context_t *ctx, int32_t x, int32_t y,
 	    const char *text, uint32_t color);
 void	libgTextScale(libg_context_t *ctx, int32_t x, int32_t y,

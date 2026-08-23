@@ -1,13 +1,14 @@
 /* !DEFINES!
 
-$define %func html_layout_render as procedure with args libg_context *, const html_layout *, int32_t, int32_t, int32_t, int32_t, int32_t
+$define %type html_image_draw_fn as host callback that paints replaced elements
+$define %func html_layout_render as procedure with args libg_context *, const html_layout *, int32_t, int32_t, int32_t, int32_t, int32_t, html_image_draw_fn, void *
 $define %func html_layout_hit_test as function with args const html_layout *, int32_t, int32_t
 
 */
 
 /* !SPACE!
 
-$space %internal html_layout_render_boxes
+$space %internal html_layout_render_boxes, html_layout_draw_placeholder
 $space %export html_layout_render, html_layout_hit_test
 
 */
@@ -21,16 +22,29 @@ $space %export html_layout_render, html_layout_hit_test
 /* Must match LibG's glyph box; strike and underline are placed off it. */
 #define HTML_GLYPH_HEIGHT	7
 
+static void
+html_layout_draw_placeholder(libg_context_t *ctx, libg_rect_t r,
+    uint32_t color)
+{
+	libgStrokeRect(ctx, r, color);
+	if (r.height > 14) {
+		libgLine(ctx, r.x, r.y + 7, r.x + r.width - 1, r.y + 7,
+		    color);
+	}
+}
+
 /*
  * Non-text geometry first, in one pass, so every rule and cell border ends up
  * beneath the glyphs regardless of the order layout emitted them in.
  */
 static void
 html_layout_render_boxes(libg_context_t *ctx, const html_layout_t *layout,
-    int32_t view_x, int32_t view_y, int32_t view_h, int32_t scroll_y)
+    int32_t view_x, int32_t view_y, int32_t view_h, int32_t scroll_y,
+    html_image_draw_fn draw, void *draw_user)
 {
 	const html_layout_box_t	*box;
 	libg_rect_t		r;
+	int			painted;
 
 	for (box = layout->boxes; box != NULL; box = box->next) {
 		r = box->rect;
@@ -50,6 +64,18 @@ html_layout_render_boxes(libg_context_t *ctx, const html_layout_t *layout,
 			libgLine(ctx, r.x, r.y, r.x + r.width, r.y,
 			    box->color);
 			break;
+		case HTML_BOX_IMAGE:
+			painted = 0;
+			if (draw != NULL && box->ref != NULL &&
+			    box->ref[0] != '\0') {
+				painted = (draw(draw_user, ctx, r,
+				    box->ref) == 0);
+			}
+			if (painted == 0) {
+				html_layout_draw_placeholder(ctx, r,
+				    box->color);
+			}
+			break;
 		}
 	}
 }
@@ -57,7 +83,7 @@ html_layout_render_boxes(libg_context_t *ctx, const html_layout_t *layout,
 void
 html_layout_render(libg_context_t *ctx, const html_layout_t *layout,
     int32_t view_x, int32_t view_y, int32_t view_w, int32_t view_h,
-    int32_t scroll_y)
+    int32_t scroll_y, html_image_draw_fn draw, void *draw_user)
 {
 	const html_layout_line_t	*line;
 	int32_t				sx, sy, sh, rule_y;
@@ -68,7 +94,7 @@ html_layout_render(libg_context_t *ctx, const html_layout_t *layout,
 	}
 
 	html_layout_render_boxes(ctx, layout, view_x, view_y, view_h,
-	    scroll_y);
+	    scroll_y, draw, draw_user);
 
 	for (line = layout->lines; line != NULL; line = line->next) {
 		sy = line->y - scroll_y + view_y;

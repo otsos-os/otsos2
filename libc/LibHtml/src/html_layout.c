@@ -122,19 +122,19 @@ static void	html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
  * the head instead is O(n) per word, which on a page of a few thousand words
  * made layout cost more than the network fetch.
  */
-static void
+static html_layout_box_t *
 html_layout_add_box(html_layout_ctx_t *ctx, int32_t x, int32_t y, int32_t w,
     int32_t h, uint32_t color, html_box_kind_t kind)
 {
 	html_layout_box_t	*box;
 
 	if (ctx == NULL || w <= 0 || h < 0) {
-		return;
+		return (NULL);
 	}
 
 	box = (html_layout_box_t *)malloc(sizeof(*box));
 	if (box == NULL) {
-		return;
+		return (NULL);
 	}
 	memset(box, 0, sizeof(*box));
 	box->rect.x = x;
@@ -157,6 +157,7 @@ html_layout_add_box(html_layout_ctx_t *ctx, int32_t x, int32_t y, int32_t w,
 	if (y + h > ctx->layout->content_height) {
 		ctx->layout->content_height = y + h;
 	}
+	return (box);
 }
 
 static void
@@ -920,6 +921,62 @@ html_layout_table(html_layout_ctx_t *ctx, const html_node_t *table,
 	}
 }
 
+#define HTML_SVG_DEF_W		300
+#define HTML_SVG_DEF_H		150
+#define HTML_SVG_MAX_DIM	4096
+
+static int32_t
+html_layout_len_attr(const char *s)
+{
+	int32_t	v;
+
+	if (s == NULL) {
+		return (0);
+	}
+	v = (int32_t)atoi(s);
+	if (v <= 0) {
+		return (0);
+	}
+	if (v > HTML_SVG_MAX_DIM) {
+		v = HTML_SVG_MAX_DIM;
+	}
+	return (v);
+}
+
+static void
+html_layout_svg_box(html_layout_ctx_t *ctx, const html_node_t *node,
+    const html_style_state_t *style)
+{
+	html_layout_box_t	*box;
+	const char		*src;
+	int32_t			w, h;
+
+	w = html_layout_len_attr(html_node_get_attr(node, "width"));
+	h = html_layout_len_attr(html_node_get_attr(node, "height"));
+	if (w == 0 || h == 0) {
+		w = HTML_SVG_DEF_W;
+		h = HTML_SVG_DEF_H;
+	}
+
+	if (!ctx->at_line_start) {
+		html_layout_new_line(ctx, 0);
+	}
+	html_layout_block_space(ctx, 4);
+	html_layout_flush_space(ctx);
+
+	box = html_layout_add_box(ctx, style->indent_x, ctx->cursor_y, w, h,
+	    HTML_COLOR_MUTED, HTML_BOX_IMAGE);
+	if (box != NULL) {
+		src = (node->text != NULL) ? node->text : "";
+		box->ref = strdup(src);
+	}
+
+	ctx->cursor_y += h + 6;
+	ctx->cursor_x = ctx->margin_left;
+	ctx->at_line_start = 1;
+	html_layout_block_space(ctx, 6);
+}
+
 static void
 html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
     html_style_state_t cur_style)
@@ -1004,6 +1061,10 @@ html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
 		}
 		style.color = HTML_COLOR_MUTED;
 		html_layout_format_text(ctx, attr, &style);
+		return;
+
+	case HTML_TAG_SVG:
+		html_layout_svg_box(ctx, node, &style);
 		return;
 
 	case HTML_TAG_INPUT:
@@ -1392,6 +1453,7 @@ html_layout_free(html_layout_t *layout)
 	box = layout->boxes;
 	while (box != NULL) {
 		next_box = box->next;
+		free(box->ref);
 		free(box);
 		box = next_box;
 	}

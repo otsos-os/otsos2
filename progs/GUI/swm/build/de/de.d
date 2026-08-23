@@ -2,6 +2,7 @@ build/de/de.o: src/de/de.c ../../../libc/LibG/include/libg.h \
   ../../../libc/LibSRAPI/include/srapi.h \
   ../../../libc/native/include/stddef.h \
   ../../../libc/native/include/stdint.h \
+  ../../../libc/LibSVG/include/svg.h \
   ../../../libc/native/include/native.h ../sprot/include/sprot/client.h \
   ../sprot/include/sprot/sprot.h ../../../libc/native/include/errno.h \
   ../../../libc/native/include/stdio.h \
@@ -12,6 +13,7 @@ build/de/de.o: src/de/de.c ../../../libc/LibG/include/libg.h \
 ../../../libc/LibSRAPI/include/srapi.h:
 ../../../libc/native/include/stddef.h:
 ../../../libc/native/include/stdint.h:
+../../../libc/LibSVG/include/svg.h:
 ../../../libc/native/include/native.h:
 ../sprot/include/sprot/client.h:
 ../sprot/include/sprot/sprot.h:

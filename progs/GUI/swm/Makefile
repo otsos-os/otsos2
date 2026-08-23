@@ -7,6 +7,7 @@ ROOT = ../../..
 NATIVE_DIR = $(ROOT)/libc/native
 LIBSRAPI_DIR = $(ROOT)/libc/LibSRAPI
 LIBG_DIR = $(ROOT)/libc/LibG
+LIBSVG_DIR = $(ROOT)/libc/LibSVG
 LIBAS_DIR = $(ROOT)/progs/toolchain/as
 LIBELF_DIR = $(ROOT)/libc/LibELF
 LIBEMIT_DIR = $(ROOT)/libc/LibEmit
@@ -16,7 +17,8 @@ TARGET_CFLAGS ?= --target=$(TARGET)
 CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fPIE -fno-stack-protector \
 	-nostdlib -nostdinc -fno-builtin -O2 -Wall -Wextra -MMD -MP \
 	-Iinclude -I$(SPROT_DIR)/include -I$(NATIVE_DIR)/include \
-	-I$(LIBSRAPI_DIR)/include -I$(LIBG_DIR)/include
+	-I$(LIBSRAPI_DIR)/include -I$(LIBG_DIR)/include \
+	-I$(LIBSVG_DIR)/include
 LDFLAGS ?= -m elf_x86_64 -pie --oformat=elf64-x86-64 -nostdlib \
 	-dynamic-linker /lib/drld --export-dynamic
 
@@ -24,6 +26,7 @@ NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
 NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 LIBSRAPI = $(LIBSRAPI_DIR)/lib/libsrapi.a
 LIBG = $(LIBG_DIR)/lib/libg.a
+LIBSVG = $(LIBSVG_DIR)/lib/libsvg.a
 LIBAS = $(LIBAS_DIR)/lib/libas.a
 LIBELF = $(LIBELF_DIR)/lib/libelf.a
 LIBEMIT = $(LIBEMIT_DIR)/lib/libemit.a
@@ -52,9 +55,13 @@ $(LIBSRAPI): FORCE
 	@echo "  MAKE    LibSRAPI"
 	@$(MAKE) -C $(LIBSRAPI_DIR)
 
-$(LIBG): $(LIBSRAPI) FORCE
+$(LIBG): $(LIBSRAPI) $(LIBSVG) FORCE
 	@echo "  MAKE    LibG"
 	@$(MAKE) -C $(LIBG_DIR)
+
+$(LIBSVG): FORCE
+	@echo "  MAKE    LibSVG"
+	@$(MAKE) -C $(LIBSVG_DIR)
 
 $(LIBAS): FORCE
 	@echo "  MAKE    progs/toolchain/as"
@@ -80,11 +87,12 @@ $(SWM_BIN): $(NATIVE_CRT0) $(SWM_OBJ) $(LIBSPROT) $(LIBSRAPI) \
 	@echo "  SIZE     $@"
 	@$(SIZE) $@
 
-$(DE_BIN): $(NATIVE_CRT0) $(DE_OBJ) $(LIBG) $(LIBSPROT) $(LIBSRAPI) \
+$(DE_BIN): $(NATIVE_CRT0) $(DE_OBJ) $(LIBG) $(LIBSVG) $(LIBSPROT) $(LIBSRAPI) \
 	$(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO)
 	@echo "  LLD      $@"
-	@$(LD) $(LDFLAGS) $(NATIVE_CRT0) $(DE_OBJ) $(LIBG) $(LIBSPROT) \
-	    $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO) -o $@
+	@$(LD) $(LDFLAGS) $(NATIVE_CRT0) $(DE_OBJ) $(LIBG) $(LIBSVG) \
+	    $(LIBSPROT) $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) \
+	    $(NATIVE_SO) -o $@
 	@echo "  SIZE     $@"
 	@$(SIZE) $@
 

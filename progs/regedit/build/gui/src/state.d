@@ -3,8 +3,8 @@ build/gui/src/state.o: gui/src/state.c ../../libc/native/include/errno.h \
   ../../libc/native/include/stddef.h ../../libc/native/include/string.h \
   gui/include/gui.h ../../libc/LibG/include/font.h \
   ../../libc/native/include/stdint.h ../../libc/LibG/include/libg.h \
-  ../../libc/LibSRAPI/include/srapi.h include/regedit/regedit.h \
-  ../../progs/GUI/sprot/include/sprot/client.h \
+  ../../libc/LibSRAPI/include/srapi.h ../../libc/LibSVG/include/svg.h \
+  include/regedit/regedit.h ../../progs/GUI/sprot/include/sprot/client.h \
   ../../progs/GUI/sprot/include/sprot/sprot.h
 ../../libc/native/include/errno.h:
 ../../libc/native/include/stdarg.h:
@@ -16,6 +16,7 @@ gui/include/gui.h:
 ../../libc/native/include/stdint.h:
 ../../libc/LibG/include/libg.h:
 ../../libc/LibSRAPI/include/srapi.h:
+../../libc/LibSVG/include/svg.h:
 include/regedit/regedit.h:
 ../../progs/GUI/sprot/include/sprot/client.h:
 ../../progs/GUI/sprot/include/sprot/sprot.h:

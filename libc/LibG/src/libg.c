@@ -22,6 +22,8 @@ $define %func libgStrokeRect as procedure with args context, rect, color
 $define %func libgLine as procedure with args context, endpoints, color
 $define %func libgFillCircle as procedure with args context, center, radius
 $define %func libgStrokeCircle as procedure with args context, center, radius
+$define %func libgSvgShape as procedure with args context, svg_shape *, affine map
+$define %func libgSvgDoc as procedure with args context, svg_doc *, rect
 $define %func libgText as procedure with args context, position, text, color
 $define %func libgTextScale as procedure with args context, position, text
 $define %func libgMeasureText as procedure with args text, scale, out size
@@ -43,6 +45,9 @@ $space %internal libg_clamp_i32
 $space %internal libg_rect_contains, libg_blend, libg_put_pixel
 $space %internal libg_update_mouse, libg_poll_input, libg_draw_text_cell
 $space %internal libg_circle_points, libg_draw_centered_text
+$space %internal libg_svg_point_t, libg_svg_cross_t
+$space %internal libg_svg_fill_poly, libg_svg_fill_edges, libg_svg_cross_cmp
+$space %internal libg_svg_thick_segment, libg_svg_stroke_subpath
 $space %internal libg_finish_button_state, libg_apply_text_input
 $space %export libgDefaultStyle, libgCreate, libgDestroy
 $space %export libgCreateForTarget
@@ -50,6 +55,7 @@ $space %export libgBegin, libgPresent, libgHandleInput, libgWidth, libgHeight
 $space %export libgSetStyle, libgGetStyle, libgMousePosition
 $space %export libgFillRect, libgStrokeRect, libgLine
 $space %export libgFillCircle, libgStrokeCircle
+$space %export libgSvgShape, libgSvgDoc
 $space %export libgText, libgTextScale, libgMeasureText
 $space %export libgPanel, libgButton, libgTextField, libgSlider
 $space %export libgAnimStart, libgAnimUpdate, libgLerp, libgBlendColor
@@ -902,6 +908,319 @@ libgStrokeCircle(libg_context_t *ctx, int32_t cx, int32_t cy,
 			x--;
 			err -= 2 * x + 1;
 		}
+	}
+}
+
+typedef struct libg_svg_point {
+	float	x;
+	float	y;
+} libg_svg_point_t;
+
+typedef struct libg_svg_cross {
+	float	x;
+	int	dir;
+} libg_svg_cross_t;
+
+static float
+libg_svg_sqrt(float v)
+{
+	float	guess;
+	int	i, k;
+
+	if (v <= 0.0f) {
+		return (0.0f);
+	}
+	k = 0;
+	while (v > 2.0f) {
+		v *= 0.25f;
+		k++;
+	}
+	while (v < 0.5f) {
+		v *= 4.0f;
+		k--;
+	}
+	guess = v * 0.5f + 0.5f;
+	for (i = 0; i < 24; i++) {
+		guess = 0.5f * (guess + v / guess);
+	}
+	while (k > 0) {
+		guess *= 2.0f;
+		k--;
+	}
+	while (k < 0) {
+		guess *= 0.5f;
+		k++;
+	}
+	return (guess);
+}
+
+static int
+libg_svg_cross_cmp(const void *pa, const void *pb)
+{
+	const libg_svg_cross_t	*a = pa;
+	const libg_svg_cross_t	*b = pb;
+
+	if (a->x < b->x) {
+		return (-1);
+	}
+	if (a->x > b->x) {
+		return (1);
+	}
+	return (0);
+}
+
+static void
+libg_svg_span(libg_context_t *ctx, float x0, float x1, int y, uint32_t color)
+{
+	int32_t	xa, xb, x;
+
+	if (color < 0xff000000u) {
+		return;
+	}
+	xa = (int32_t)x0;
+	if ((float)xa < x0) {
+		xa++;
+	}
+	xb = (int32_t)x1;
+	if (xa < 0) {
+		xa = 0;
+	}
+	if (xb > (int32_t)ctx->width) {
+		xb = (int32_t)ctx->width;
+	}
+	for (x = xa; x < xb; x++) {
+		libg_put_pixel(ctx, x, y, color);
+	}
+}
+
+static void
+libg_svg_fill_edges(libg_context_t *ctx, const libg_svg_point_t *pts,
+    int npts, const int *subs, int nsubs, uint32_t color)
+{
+	libg_svg_cross_t	*cross;
+	int			row, y0, y1, k, n, wind, s, i, s0, s1e, j;
+	float			miny, maxy, yc, t, span_x;
+
+	if (ctx == NULL || pts == NULL || subs == NULL ||
+	    nsubs <= 0 || npts < 3) {
+		return;
+	}
+
+	cross = (libg_svg_cross_t *)malloc((size_t)npts *
+	    sizeof(libg_svg_cross_t));
+	if (cross == NULL) {
+		return;
+	}
+
+	miny = maxy = pts[0].y;
+	for (i = 1; i < npts; i++) {
+		if (pts[i].y < miny) {
+			miny = pts[i].y;
+		}
+		if (pts[i].y > maxy) {
+			maxy = pts[i].y;
+		}
+	}
+
+	y0 = (int)(miny - 0.5f) + 1;
+	y1 = (int)(maxy - 0.5f);
+	for (row = y0; row <= y1; row++) {
+		if (row < 0) {
+			continue;
+		}
+		if (row >= (int32_t)ctx->height) {
+			break;
+		}
+		yc = (float)row + 0.5f;
+
+		n = 0;
+		for (s = 0; s < nsubs; s++) {
+			s0 = subs[s];
+			s1e = (s + 1 < nsubs) ? subs[s + 1] : npts;
+			if (s1e - s0 < 2) {
+				continue;
+			}
+			for (i = s0; i < s1e; i++) {
+				j = (i + 1 < s1e) ? i + 1 : s0;
+				if ((pts[i].y <= yc) == (pts[j].y <= yc)) {
+					continue;
+				}
+				t = (yc - pts[i].y) / (pts[j].y - pts[i].y);
+				cross[n].x = pts[i].x +
+				    t * (pts[j].x - pts[i].x);
+				cross[n].dir = (pts[j].y > pts[i].y) ? 1 : -1;
+				n++;
+			}
+		}
+		if (n < 2) {
+			continue;
+		}
+		qsort(cross, (size_t)n, sizeof(libg_svg_cross_t),
+		    libg_svg_cross_cmp);
+
+		wind = 0;
+		span_x = 0.0f;
+		for (k = 0; k < n; k++) {
+			if (wind == 0) {
+				span_x = cross[k].x;
+			}
+			wind += cross[k].dir;
+			if (wind == 0) {
+				libg_svg_span(ctx, span_x, cross[k].x,
+				    row, color);
+			}
+		}
+	}
+	free(cross);
+}
+
+static void
+libg_svg_thick_segment(libg_context_t *ctx,
+    const libg_svg_point_t *p0, const libg_svg_point_t *p1,
+    float width, uint32_t color)
+{
+	libg_svg_point_t	quad[4];
+	static const int	subs[1] = { 0 };
+	float			dx, dy, len, nx, ny;
+
+	dx = p1->x - p0->x;
+	dy = p1->y - p0->y;
+	len = libg_svg_sqrt(dx * dx + dy * dy);
+	if (len < 0.0001f) {
+		return;
+	}
+	nx = -dy / len * width * 0.5f;
+	ny = dx / len * width * 0.5f;
+
+	quad[0].x = p0->x + nx;
+	quad[0].y = p0->y + ny;
+	quad[1].x = p1->x + nx;
+	quad[1].y = p1->y + ny;
+	quad[2].x = p1->x - nx;
+	quad[2].y = p1->y - ny;
+	quad[3].x = p0->x - nx;
+	quad[3].y = p0->y - ny;
+
+	libg_svg_fill_edges(ctx, quad, 4, subs, 1, color);
+}
+
+static void
+libg_svg_stroke_subpath(libg_context_t *ctx, const libg_svg_point_t *pts,
+    int s0, int s1e, int loop, float width, uint32_t color)
+{
+	int32_t		r;
+	int		i;
+	const libg_svg_point_t	*p, *q;
+
+	if (s1e - s0 < 2) {
+		return;
+	}
+
+	for (i = s0; i + 1 < s1e; i++) {
+		libg_svg_thick_segment(ctx, &pts[i], &pts[i + 1], width,
+		    color);
+	}
+	if (loop != 0 && s1e - s0 >= 3) {
+		libg_svg_thick_segment(ctx, &pts[s1e - 1], &pts[s0], width,
+		    color);
+	}
+
+	r = (int32_t)(width * 0.5f) + 1;
+	for (i = s0; i < s1e; i++) {
+		p = &pts[i];
+		q = NULL;
+		if (i + 1 < s1e) {
+			q = &pts[i + 1];
+		} else if (loop != 0) {
+			q = &pts[s0];
+		}
+		(void)q;
+		libgFillCircle(ctx, (int32_t)(p->x + 0.5f),
+		    (int32_t)(p->y + 0.5f), r, color);
+	}
+}
+
+void
+libgSvgShape(libg_context_t *ctx, const svg_shape_t *shape,
+    const double m[6])
+{
+	libg_svg_point_t	*scr;
+	uint32_t		col;
+	float			width;
+	double			x, y;
+	int			i, a, s, s0, s1e;
+
+	if (ctx == NULL || shape == NULL || m == NULL ||
+	    shape->npts < 2 || shape->nsubs < 1) {
+		return;
+	}
+
+	scr = (libg_svg_point_t *)malloc((size_t)shape->npts *
+	    sizeof(libg_svg_point_t));
+	if (scr == NULL) {
+		return;
+	}
+	for (i = 0; i < shape->npts; i++) {
+		x = shape->pts[i * 2];
+		y = shape->pts[i * 2 + 1];
+		scr[i].x = (float)(m[0] * x + m[2] * y + m[4]);
+		scr[i].y = (float)(m[1] * x + m[3] * y + m[5]);
+	}
+
+	if ((shape->flags & SVG_FILL) != 0) {
+		a = (int)(shape->fill_opacity * 255.0 + 0.5);
+		if (a > 255) {
+			a = 255;
+		}
+		if (a > 0) {
+			col = ((uint32_t)a << 24) | (shape->fill & 0xffffffu);
+			libg_svg_fill_edges(ctx, scr, shape->npts,
+			    shape->subs, shape->nsubs, col);
+		}
+	}
+
+	if ((shape->flags & SVG_STROKE) != 0) {
+		width = (float)(shape->stroke_width *
+		    (m[0] < 0.0 ? -m[0] : m[0]));
+		a = (int)(shape->stroke_opacity * 255.0 + 0.5);
+		if (a > 255) {
+			a = 255;
+		}
+		if (width >= 0.05f && a > 0) {
+			col = ((uint32_t)a << 24) |
+			    (shape->stroke & 0xffffffu);
+			for (s = 0; s < shape->nsubs; s++) {
+				s0 = shape->subs[s];
+				s1e = (s + 1 < shape->nsubs) ?
+				    shape->subs[s + 1] : shape->npts;
+				libg_svg_stroke_subpath(ctx, scr, s0, s1e,
+				    (shape->flags & SVG_CLOSED) != 0, width,
+				    col);
+			}
+		}
+	}
+
+	free(scr);
+}
+
+void
+libgSvgDoc(libg_context_t *ctx, const svg_doc_t *doc, libg_rect_t rect)
+{
+	double	m[6];
+	int	i;
+
+	if (ctx == NULL || doc == NULL || rect.width <= 0 ||
+	    rect.height <= 0) {
+		return;
+	}
+	if (svg_view_transform(doc, (double)rect.width,
+	    (double)rect.height, m) != 0) {
+		return;
+	}
+	m[4] += rect.x;
+	m[5] += rect.y;
+	for (i = 0; i < doc->nshapes; i++) {
+		libgSvgShape(ctx, &doc->shapes[i], m);
 	}
 }
 

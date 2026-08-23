@@ -10,7 +10,8 @@ $define %func html_node_find as function with args const html_node *, html_tag
 $define %func html_node_text as function with args const html_node *
 $define %func html_layout_create as function with args const html_doc *, int32_t
 $define %func html_layout_free as procedure with args html_layout *
-$define %func html_layout_render as procedure with args libg_context *, const html_layout *, int32_t, int32_t, int32_t, int32_t, int32_t
+$define %type html_box_kind as enum of non-text box kinds
+$define %func html_layout_render as procedure with args libg_context *, const html_layout *, int32_t, int32_t, int32_t, int32_t, int32_t, html_image_draw_fn, void *
 $define %func html_layout_hit_test as function with args const html_layout *, int32_t, int32_t
 
 */
@@ -19,7 +20,7 @@ $define %func html_layout_hit_test as function with args const html_layout *, in
 
 $space %export html_tag_t, html_attr_t, html_node_t, html_doc_t
 $space %export html_link_box_t, html_layout_line_t, html_layout_t
-$space %export html_box_kind_t, html_layout_box_t
+$space %export html_box_kind_t, html_layout_box_t, html_image_draw_fn
 $space %export html_parse, html_doc_free, html_node_get_attr
 $space %export html_node_find, html_node_text
 $space %export html_layout_create, html_layout_free
@@ -131,7 +132,8 @@ typedef enum html_tag {
 	HTML_TAG_SOURCE,
 	HTML_TAG_TRACK,
 	HTML_TAG_AREA,
-	HTML_TAG_EMBED
+	HTML_TAG_EMBED,
+	HTML_TAG_SVG
 } html_tag_t;
 
 typedef struct html_attr {
@@ -182,7 +184,8 @@ typedef struct html_layout_line {
 typedef enum html_box_kind {
 	HTML_BOX_FILL = 0,
 	HTML_BOX_STROKE,
-	HTML_BOX_HLINE
+	HTML_BOX_HLINE,
+	HTML_BOX_IMAGE
 } html_box_kind_t;
 
 /*
@@ -194,6 +197,7 @@ typedef struct html_layout_box {
 	libg_rect_t		rect;
 	uint32_t		color;
 	html_box_kind_t		kind;
+	char			*ref;
 	struct html_layout_box	*next;
 } html_layout_box_t;
 
@@ -221,9 +225,13 @@ char		*html_node_text(const html_node_t *node);
 
 html_layout_t	*html_layout_create(const html_doc_t *doc, int32_t max_width);
 void		html_layout_free(html_layout_t *layout);
+typedef int (*html_image_draw_fn)(void *userdata, libg_context_t *ctx,
+	    libg_rect_t rect, const char *ref);
+
 void		html_layout_render(libg_context_t *ctx, const html_layout_t *layout,
-		    int32_t view_x, int32_t view_y, int32_t view_w, int32_t view_h,
-		    int32_t scroll_y);
+		    int32_t view_x, int32_t view_y, int32_t view_w,
+		    int32_t view_h, int32_t scroll_y,
+		    html_image_draw_fn draw, void *draw_user);
 const char	*html_layout_hit_test(const html_layout_t *layout, int32_t doc_x, int32_t doc_y);
 
 #endif

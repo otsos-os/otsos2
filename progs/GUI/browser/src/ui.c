@@ -646,7 +646,8 @@ draw_viewport(browser_state_t *st)
 	libgFillRect(st->ui, rect, 0xFFFFFFFF);
 
 	if (st->layout != NULL) {
-		html_layout_render(st->ui, st->layout, vx, vy, vw, vh, st->scroll_y);
+		html_layout_render(st->ui, st->layout, vx, vy, vw, vh,
+		    st->scroll_y, browser_svg_draw, st);
 	}
 
 	draw_scrollbar(st, vx, vy, vw, vh);

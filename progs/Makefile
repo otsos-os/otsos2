@@ -64,6 +64,7 @@ NATIVE_DIR = ../libc/native
 LIBSRAPI_DIR = ../libc/LibSRAPI
 LIBHTML_DIR = ../libc/LibHtml
 LIBG_DIR = ../libc/LibG
+LIBSVG_DIR = ../libc/LibSVG
 LIBELF_DIR = ../libc/LibELF
 LIBEMIT_DIR = ../libc/LibEmit
 LIBSSH_DIR = ../libc/LibSSH
@@ -78,6 +79,7 @@ NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
 NATIVE_HDR = $(NATIVE_DIR)/include/native.h
 LIBSRAPI = $(LIBSRAPI_DIR)/lib/libsrapi.a
 LIBG = $(LIBG_DIR)/lib/libg.a
+LIBSVG = $(LIBSVG_DIR)/lib/libsvg.a
 LIBHTML = $(LIBHTML_DIR)/lib/libhtml.a
 LIBAS = $(TOOLCHAIN_AS_DIR)/lib/libas.a
 LIBELF = $(LIBELF_DIR)/lib/libelf.a
@@ -124,7 +126,11 @@ $(LIBSRAPI): FORCE
 	@echo "  MAKE    LibSRAPI"
 	@$(MAKE) -C $(LIBSRAPI_DIR)
 
-$(LIBG): $(LIBSRAPI) FORCE
+$(LIBSVG): FORCE
+	@echo "  MAKE    LibSVG"
+	@$(MAKE) -C $(LIBSVG_DIR)
+
+$(LIBG): $(LIBSRAPI) $(LIBSVG) FORCE
 	@echo "  MAKE    LibG"
 	@$(MAKE) -C $(LIBG_DIR)
 
@@ -183,18 +189,18 @@ $(POWERD_BIN): $(NATIVE_CRT0) $(POWERD_OBJS) $(NATIVE_SO)
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
-$(SRAPI_DEMO_BIN): $(NATIVE_CRT0) $(SRAPI_DEMO_OBJS) $(LIBG) $(LIBSRAPI) \
-    $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO)
+$(SRAPI_DEMO_BIN): $(NATIVE_CRT0) $(SRAPI_DEMO_OBJS) $(LIBG) $(LIBSVG) \
+    $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO)
 	@echo "  LLD      $@"
 	@$(LD) $(NATIVE_DYN_LDFLAGS) $(NATIVE_CRT0) $(SRAPI_DEMO_OBJS) \
-	    $(LIBG) $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) \
+	    $(LIBG) $(LIBSVG) $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) \
 	    $(NATIVE_SO) -o $@
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
 .PHONY: $(SWM_BIN) $(DE_BIN)
 $(SWM_BIN) $(DE_BIN): $(NATIVE_CRT0) $(NATIVE_SO) $(LIBSPROT) \
-    $(LIBSRAPI) $(LIBG)
+    $(LIBSRAPI) $(LIBG) $(LIBSVG)
 	@echo "  MAKE    progs/GUI/swm"
 	@$(MAKE) -C $(SWM_DIR) $(notdir $@)
 
@@ -258,7 +264,7 @@ yabox: $(NATIVE_CRT0) $(NATIVE_SO)
 	@$(MAKE) -C $(YABOX_DIR)
 
 .PHONY: $(REGEDIT_BIN)
-$(REGEDIT_BIN): $(NATIVE_CRT0) $(NATIVE_SO) $(LIBG) $(LIBSPROT) \
+$(REGEDIT_BIN): $(NATIVE_CRT0) $(NATIVE_SO) $(LIBG) $(LIBSVG) $(LIBSPROT) \
     $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT)
 	@echo "  MAKE    progs/regedit"
 	@$(MAKE) -C $(REGEDIT_DIR)
@@ -331,30 +337,31 @@ demons/powerd.o: demons/powerd.c $(NATIVE_HDR)
 
 srapi_demo.o: srapi_demo.c $(NATIVE_HDR) $(LIBSRAPI_DIR)/include/srapi.h \
     $(LIBG_DIR)/include/libg.h $(LIBG_DIR)/include/font.h
-	@echo "  CC      $< (LibSRAPI/LibG)"
+	@echo "  CC       $< (LibSRAPI/LibG)"
 	@$(CC) $(CFLAGS) -fPIE -I$(NATIVE_DIR)/include \
 	    -I$(LIBSRAPI_DIR)/include -I$(LIBG_DIR)/include \
+	    -I$(LIBSVG_DIR)/include \
 	    -c $< -o $@
 
 GUI/term.o: GUI/term.c $(NATIVE_HDR) $(LIBSRAPI_DIR)/include/srapi.h \
     $(LIBG_DIR)/include/libg.h $(SPROT_DIR)/include/sprot/client.h \
     $(SPROT_DIR)/include/sprot/sprot.h
-	@echo "  CC      $< (GUI terminal)"
+	@echo "  CC       $< (GUI terminal)"
 	@$(CC) $(CFLAGS) -fPIE -Iinclude -I$(NATIVE_DIR)/include \
 	    -I$(LIBSRAPI_DIR)/include -I$(LIBG_DIR)/include \
-	    -I$(SPROT_DIR)/include \
+	    -I$(LIBSVG_DIR)/include -I$(SPROT_DIR)/include \
 	    -c $< -o $@
 
-$(TERM_BIN): $(NATIVE_CRT0) $(TERM_OBJS) $(LIBG) $(LIBSPROT) $(LIBSRAPI) \
+$(TERM_BIN): $(NATIVE_CRT0) $(TERM_OBJS) $(LIBG) $(LIBSVG) $(LIBSPROT) $(LIBSRAPI) \
     $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO)
 	@echo "  LLD      $@"
 	@$(LD) $(NATIVE_DYN_LDFLAGS) $(NATIVE_CRT0) $(TERM_OBJS) \
-	    $(LIBG) $(LIBSPROT) $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) \
+	    $(LIBG) $(LIBSVG) $(LIBSPROT) $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) \
 	    $(NATIVE_SO) -o $@
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
-$(BROWSER_BIN): $(LIBHTML) $(LIBG) $(LIBSPROT) $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO) $(NATIVE_CRT0) FORCE
+$(BROWSER_BIN): $(LIBHTML) $(LIBG) $(LIBSVG) $(LIBSPROT) $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO) $(NATIVE_CRT0) FORCE
 	@echo "  MAKE    browser"
 	@$(MAKE) -C $(BROWSER_DIR)
 
@@ -371,6 +378,7 @@ clean:
 	$(MAKE) -C $(TOOLCHAIN_AS_DIR) clean
 	$(MAKE) -C $(TOOLCHAIN_LD_DIR) clean
 	$(MAKE) -C $(LIBSRAPI_DIR) clean
+	$(MAKE) -C $(LIBSVG_DIR) clean
 	$(MAKE) -C $(LIBG_DIR) clean
 	$(MAKE) -C $(LIBHTML_DIR) clean
 	$(MAKE) -C $(SWM_DIR) clean

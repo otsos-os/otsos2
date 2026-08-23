@@ -127,6 +127,7 @@ html_tag_lookup(const char *name)
 	if (strcasecmp(name, "track") == 0) return (HTML_TAG_TRACK);
 	if (strcasecmp(name, "area") == 0) return (HTML_TAG_AREA);
 	if (strcasecmp(name, "embed") == 0) return (HTML_TAG_EMBED);
+	if (strcasecmp(name, "svg") == 0) return (HTML_TAG_SVG);
 	return (HTML_TAG_UNKNOWN);
 }
 
@@ -1041,6 +1042,55 @@ html_parse(const char *source, size_t len)
 				if (href != NULL && href[0] != '\0') {
 					doc->base_url = strdup(href);
 				}
+			}
+
+			if (tag_type == HTML_TAG_SVG) {
+				const char	*open_start;
+				const char	*scan;
+				char		*src;
+				size_t		total;
+
+				open_start = tag_start - 1;
+				if (!is_self_closing) {
+					scan = p;
+					while (scan < end) {
+						if (scan[0] != '<' ||
+						    scan[1] != '/') {
+							scan++;
+							continue;
+						}
+						if ((size_t)(end - scan) >=
+						    tag_len + 3 &&
+						    strncasecmp(scan + 2,
+						    tag_name, tag_len) == 0 &&
+						    (scan[2 + tag_len] ==
+						    '>' ||
+						    isspace((unsigned char)
+						    scan[2 + tag_len]))) {
+							break;
+						}
+						scan++;
+					}
+					if (scan < end) {
+						p = scan;
+						while (p < end && *p != '>') {
+							p++;
+						}
+						if (p < end) {
+							p++;
+						}
+					} else {
+						p = end;
+					}
+				}
+				total = (size_t)(p - open_start);
+				src = (char *)malloc(total + 1);
+				if (src != NULL) {
+					memcpy(src, open_start, total);
+					src[total] = '\0';
+					elem->text = src;
+				}
+				continue;
 			}
 
 			/*

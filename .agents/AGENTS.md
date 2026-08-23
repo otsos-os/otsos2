@@ -217,6 +217,7 @@ Monolithic kernel with the following rough layers:
 - `progs/toolchain/` contains native OTSOS toolchain programs such as `as` and
   `ld`.
 - `progs/regedit/` is the registry editor.
+- `progs/GUI/browser/` is the native web browser
 - `ports/lua/` — Lua interpreter port, uses musl's `Scrt1.o` and is dynamically
   linked as a PIE against shared `libc.so` (via `-pie -dynamic-linker /lib/ld-musl-x86_64.so.1`).
   Patched via `ports/lua/diff.patch`, set up by `ports/lua/setup.sh`.
@@ -279,6 +280,10 @@ Monolithic kernel with the following rough layers:
 - Native userspace SSH protocol library built on top of `libc/native` and
   `libc/LibCrypto`; it is intended to support a real native SSH client rather
   than a POSIX port.
+
+### Native SVG library (`libc/LibSVG`)
+
+- Parse-only SVG geometry library.
 
 ### Dynamic linking support
 

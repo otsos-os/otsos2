@@ -4,7 +4,8 @@ build/gui/src/main.o: gui/src/main.c ../../libc/native/include/errno.h \
   ../../libc/native/include/string.h gui/include/gui.h \
   ../../libc/LibG/include/font.h ../../libc/native/include/stdint.h \
   ../../libc/LibG/include/libg.h ../../libc/LibSRAPI/include/srapi.h \
-  include/regedit/regedit.h ../../progs/GUI/sprot/include/sprot/client.h \
+  ../../libc/LibSVG/include/svg.h include/regedit/regedit.h \
+  ../../progs/GUI/sprot/include/sprot/client.h \
   ../../progs/GUI/sprot/include/sprot/sprot.h
 ../../libc/native/include/errno.h:
 include/regedit/frontend.h:
@@ -17,6 +18,7 @@ gui/include/gui.h:
 ../../libc/native/include/stdint.h:
 ../../libc/LibG/include/libg.h:
 ../../libc/LibSRAPI/include/srapi.h:
+../../libc/LibSVG/include/svg.h:
 include/regedit/regedit.h:
 ../../progs/GUI/sprot/include/sprot/client.h:
 ../../progs/GUI/sprot/include/sprot/sprot.h:

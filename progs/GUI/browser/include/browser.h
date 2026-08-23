@@ -39,6 +39,12 @@
 
 /* Ceiling on a document walk, so a malformed tree cannot spin the UI. */
 #define BROWSER_MAX_NODES 200000
+#define BROWSER_SVG_CACHE_MAX 16
+
+typedef struct browser_svg_entry {
+	char		*ref;
+	svg_doc_t	*doc;
+} browser_svg_entry_t;
 
 typedef enum browser_load_state {
 	BROWSER_LOAD_IDLE = 0,
@@ -163,6 +169,8 @@ typedef struct browser_state {
 	 * received packet and the window would redraw hundreds of times a page.
 	 */
 	size_t			progress_kb;
+	browser_svg_entry_t	svg_cache[BROWSER_SVG_CACHE_MAX];
+	int			svg_count;
 } browser_state_t;
 
 /* URL and HTTP helpers (pure, no I/O) */
@@ -192,6 +200,10 @@ int	browser_loader_step(browser_loader_t *ld);
 void	browser_loader_abort(browser_loader_t *ld);
 void	browser_loader_reset(browser_loader_t *ld);
 int	browser_loader_timeout(const browser_loader_t *ld);
+
+void	browser_svg_cache_free(browser_state_t *st);
+int	browser_svg_draw(void *userdata, libg_context_t *ctx,
+	    libg_rect_t rect, const char *ref);
 
 /* Navigation */
 int	browser_navigate(browser_state_t *st, const char *url);
