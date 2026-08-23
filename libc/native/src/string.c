@@ -160,6 +160,21 @@ strstr(const char *haystack, const char *needle)
 }
 
 void *
+memchr(const void *s, int c, size_t n)
+{
+	const unsigned char	*p;
+	size_t			i;
+
+	p = (const unsigned char *)s;
+	for (i = 0; i < n; i++) {
+		if (p[i] == (unsigned char)c) {
+			return ((void *)(p + i));
+		}
+	}
+	return (NULL);
+}
+
+void *
 memcpy(void *dst, const void *src, size_t n)
 {
 	unsigned char		*d;

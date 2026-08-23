@@ -4,21 +4,15 @@ AR ?= llvm-ar
 
 ROOT = ../..
 NATIVE_DIR = $(ROOT)/libc/native
-LIBG_DIR = $(ROOT)/libc/LibG
-LIBSVG_DIR = $(ROOT)/libc/LibSVG
-LIBCSS_DIR = $(ROOT)/libc/LibCSS
-LIBSRAPI_DIR = $(ROOT)/libc/LibSRAPI
 TARGET_CFLAGS ?= --target=$(TARGET)
 CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fPIE -fno-stack-protector \
 	-nostdlib -nostdinc -fno-builtin -O2 -Wall -Wextra \
-	-Iinclude -I$(NATIVE_DIR)/include -I$(LIBG_DIR)/include \
-	-I$(LIBSVG_DIR)/include -I$(LIBCSS_DIR)/include \
-	-I$(LIBSRAPI_DIR)/include
+	-Iinclude -Isrc -I$(NATIVE_DIR)/include
 
-LIB = lib/libhtml.a
-SRC = src/html_parser.c src/html_layout.c src/html_render.c
+LIB = lib/libcss.a
+SRC = src/css_parser.c src/css_match.c
 OBJ = $(SRC:src/%.c=build/%.o)
-HDR = include/html.h
+HDR = include/css.h
 
 .PHONY: all clean
 

@@ -10,7 +10,7 @@ $define %func memset as function with args void *, int, size_t
 /* !SPACE!
 
 $space %export strlen, strcmp, strncmp, strcpy, strncpy, strcat, strchr
-$space %export strrchr, strstr, memcpy, memmove, memset, memcmp
+$space %export strrchr, strstr, memcpy, memmove, memset, memcmp, memchr
 
 */
 
@@ -32,6 +32,7 @@ char	*strstr(const char *haystack, const char *needle);
 void	*memcpy(void *dst, const void *src, size_t n);
 void	*memmove(void *dst, const void *src, size_t n);
 void	*memset(void *dst, int c, size_t n);
+void	*memchr(const void *s, int c, size_t n);
 int	memcmp(const void *a, const void *b, size_t n);
 char	*strdup(const char *s);
 char	*strndup(const char *s, size_t n);

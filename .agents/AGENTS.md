@@ -285,6 +285,10 @@ Monolithic kernel with the following rough layers:
 
 - Parse-only SVG geometry library.
 
+### Native CSS library (`libc/LibCSS`)
+
+- Generic stylesheet engine
+
 ### Dynamic linking support
 
 - The kernel already handles `PT_INTERP` in both `spawn.c` (`api_proc_spawn`)

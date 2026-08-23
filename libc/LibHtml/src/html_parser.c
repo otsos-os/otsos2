@@ -31,6 +31,7 @@ $space %export html_node_find, html_node_text
  */
 #define HTML_MAX_DEPTH		128
 #define HTML_TAG_NAME_MAX	64
+#define HTML_CSS_TEXT_MAX	(256u * 1024u)
 
 static html_tag_t
 html_tag_lookup(const char *name)
@@ -752,6 +753,9 @@ html_doc_free(html_doc_t *doc)
 	if (doc->base_url != NULL) {
 		free(doc->base_url);
 	}
+	if (doc->stylesheet != NULL) {
+		free(doc->stylesheet);
+	}
 	free(doc);
 }
 
@@ -774,6 +778,61 @@ html_in_preformatted(const html_node_t *node)
 		}
 	}
 	return (0);
+}
+
+static void
+html_collect_stylesheet(const html_node_t *node, char **buf, size_t *used,
+    size_t cap)
+{
+	const html_node_t	*child;
+	size_t			len;
+
+	if (node == NULL) {
+		return;
+	}
+	if (node->tag == HTML_TAG_STYLE && node->text != NULL) {
+		len = strlen(node->text);
+		if (*used + len + 2 > cap) {
+			len = (*used + 2 < cap) ? cap - *used - 2 : 0;
+		}
+		if (len != 0) {
+			if (*used == 0) {
+				memcpy(*buf, node->text, len);
+			} else {
+				(*buf)[*used - 1] = '\n';
+				memcpy(*buf + *used, node->text, len);
+				*used += 1;
+			}
+			*used += len;
+			(*buf)[*used] = '\0';
+		}
+	}
+	for (child = node->first_child; child != NULL;
+	    child = child->next_sibling) {
+		html_collect_stylesheet(child, buf, used, cap);
+	}
+}
+
+static void
+html_doc_collect_stylesheet(html_doc_t *doc)
+{
+	char	*buf;
+
+	buf = (char *)malloc(HTML_CSS_TEXT_MAX);
+	if (buf == NULL) {
+		return;
+	}
+	buf[0] = '\0';
+	{
+		size_t used = 0;
+
+		html_collect_stylesheet(doc->root, &buf, &used, HTML_CSS_TEXT_MAX);
+		if (used != 0) {
+			doc->stylesheet = buf;
+			return;
+		}
+	}
+	free(buf);
 }
 
 html_doc_t *
@@ -1120,26 +1179,31 @@ html_parse(const char *source, size_t len)
 					}
 					p++;
 				}
-				/*
-				 * TEXTAREA content is user-visible text; the
-				 * rest (style/script/template/noscript) is
-				 * dropped on the floor by design.
-				 */
-				if (tag_type == HTML_TAG_TEXTAREA &&
+				if ((tag_type == HTML_TAG_TEXTAREA ||
+				    tag_type == HTML_TAG_STYLE) &&
 				    p > body_start) {
 					char *raw = html_decode_entities(
 					    body_start,
 					    (size_t)(p - body_start));
 					if (raw != NULL) {
-						html_node_t *tn =
-						    html_node_create(
-						    HTML_TAG_TEXT, "#text");
-						if (tn != NULL) {
-							tn->text = raw;
-							html_node_add_child(
-							    elem, tn);
+						if (tag_type ==
+						    HTML_TAG_STYLE) {
+							free(elem->text);
+							elem->text = raw;
 						} else {
-							free(raw);
+							html_node_t *tn =
+							    html_node_create(
+							    HTML_TAG_TEXT,
+							    "#text");
+							if (tn != NULL) {
+								tn->text =
+								    raw;
+								html_node_add_child(
+								    elem,
+								    tn);
+							} else {
+								free(raw);
+							}
 						}
 					}
 				}
@@ -1221,6 +1285,8 @@ html_parse(const char *source, size_t len)
 			doc->title = html_node_text(title_node);
 		}
 	}
+
+	html_doc_collect_stylesheet(doc);
 
 	return (doc);
 }

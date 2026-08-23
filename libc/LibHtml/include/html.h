@@ -158,6 +158,7 @@ typedef struct html_doc {
 	html_node_t		*root;
 	char			*title;
 	char			*base_url;
+	char			*stylesheet;
 } html_doc_t;
 
 typedef struct html_link_box {
@@ -215,6 +216,7 @@ typedef struct html_layout {
 	html_layout_box_t	*boxes_tail;
 	int32_t			content_width;
 	int32_t			content_height;
+	void			*css_sheet;
 } html_layout_t;
 
 html_doc_t	*html_parse(const char *source, size_t len);

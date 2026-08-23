@@ -9,6 +9,7 @@ NATIVE_DIR = $(ROOT)/libc/native
 LIBHTML_DIR = $(ROOT)/libc/LibHtml
 LIBG_DIR = $(ROOT)/libc/LibG
 LIBSVG_DIR = $(ROOT)/libc/LibSVG
+LIBCSS_DIR = $(ROOT)/libc/LibCSS
 LIBSRAPI_DIR = $(ROOT)/libc/LibSRAPI
 SPROT_DIR = $(PROGS_ROOT)/GUI/sprot
 TOOLCHAIN_AS_DIR = $(PROGS_ROOT)/toolchain/as
@@ -20,13 +21,15 @@ CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fPIE -fno-stack-protector \
 	-nostdlib -nostdinc -fno-builtin -O2 -Wall -Wextra \
 	-Iinclude -I$(NATIVE_DIR)/include -I$(LIBHTML_DIR)/include \
 	-I$(LIBG_DIR)/include -I$(LIBSVG_DIR)/include \
-	-I$(LIBSRAPI_DIR)/include -I$(SPROT_DIR)/include
+	-I$(LIBCSS_DIR)/include -I$(LIBSRAPI_DIR)/include \
+	-I$(SPROT_DIR)/include
 
 NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
 NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 LIBHTML = $(LIBHTML_DIR)/lib/libhtml.a
 LIBG = $(LIBG_DIR)/lib/libg.a
 LIBSVG = $(LIBSVG_DIR)/lib/libsvg.a
+LIBCSS = $(LIBCSS_DIR)/lib/libcss.a
 LIBSPROT = $(SPROT_DIR)/lib/libsprot.a
 LIBSRAPI = $(LIBSRAPI_DIR)/lib/libsrapi.a
 LIBAS = $(TOOLCHAIN_AS_DIR)/lib/libas.a
@@ -45,12 +48,12 @@ OBJ = $(SRC:src/%.c=build/%.o)
 
 all: $(BIN)
 
-$(BIN): $(NATIVE_CRT0) $(OBJ) $(LIBHTML) $(LIBG) $(LIBSVG) $(LIBSPROT) \
-    $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO)
+$(BIN): $(NATIVE_CRT0) $(OBJ) $(LIBHTML) $(LIBCSS) $(LIBG) $(LIBSVG) \
+    $(LIBSPROT) $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO)
 	@echo "  LLD      $@"
 	@$(LD) $(NATIVE_DYN_LDFLAGS) $(NATIVE_CRT0) $(OBJ) \
-	    $(LIBHTML) $(LIBG) $(LIBSVG) $(LIBSPROT) $(LIBSRAPI) $(LIBAS) \
-	    $(LIBELF) $(LIBEMIT) \
+	    $(LIBHTML) $(LIBCSS) $(LIBG) $(LIBSVG) $(LIBSPROT) $(LIBSRAPI) \
+	    $(LIBAS) $(LIBELF) $(LIBEMIT) \
 	    $(NATIVE_SO) -o $@
 	@echo "  SIZE    $@"
 	@$(SIZE) $@

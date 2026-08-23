@@ -65,6 +65,7 @@ LIBSRAPI_DIR = ../libc/LibSRAPI
 LIBHTML_DIR = ../libc/LibHtml
 LIBG_DIR = ../libc/LibG
 LIBSVG_DIR = ../libc/LibSVG
+LIBCSS_DIR = ../libc/LibCSS
 LIBELF_DIR = ../libc/LibELF
 LIBEMIT_DIR = ../libc/LibEmit
 LIBSSH_DIR = ../libc/LibSSH
@@ -80,6 +81,7 @@ NATIVE_HDR = $(NATIVE_DIR)/include/native.h
 LIBSRAPI = $(LIBSRAPI_DIR)/lib/libsrapi.a
 LIBG = $(LIBG_DIR)/lib/libg.a
 LIBSVG = $(LIBSVG_DIR)/lib/libsvg.a
+LIBCSS = $(LIBCSS_DIR)/lib/libcss.a
 LIBHTML = $(LIBHTML_DIR)/lib/libhtml.a
 LIBAS = $(TOOLCHAIN_AS_DIR)/lib/libas.a
 LIBELF = $(LIBELF_DIR)/lib/libelf.a
@@ -130,11 +132,15 @@ $(LIBSVG): FORCE
 	@echo "  MAKE    LibSVG"
 	@$(MAKE) -C $(LIBSVG_DIR)
 
+$(LIBCSS): FORCE
+	@echo "  MAKE    LibCSS"
+	@$(MAKE) -C $(LIBCSS_DIR)
+
 $(LIBG): $(LIBSRAPI) $(LIBSVG) FORCE
 	@echo "  MAKE    LibG"
 	@$(MAKE) -C $(LIBG_DIR)
 
-$(LIBHTML): $(LIBG) $(LIBSRAPI) FORCE
+$(LIBHTML): $(LIBCSS) $(LIBG) $(LIBSRAPI) FORCE
 	@echo "  MAKE    LibHtml"
 	@$(MAKE) -C $(LIBHTML_DIR)
 
@@ -361,7 +367,7 @@ $(TERM_BIN): $(NATIVE_CRT0) $(TERM_OBJS) $(LIBG) $(LIBSVG) $(LIBSPROT) $(LIBSRAP
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
-$(BROWSER_BIN): $(LIBHTML) $(LIBG) $(LIBSVG) $(LIBSPROT) $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO) $(NATIVE_CRT0) FORCE
+$(BROWSER_BIN): $(LIBHTML) $(LIBCSS) $(LIBG) $(LIBSVG) $(LIBSPROT) $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO) $(NATIVE_CRT0) FORCE
 	@echo "  MAKE    browser"
 	@$(MAKE) -C $(BROWSER_DIR)
 
@@ -379,6 +385,7 @@ clean:
 	$(MAKE) -C $(TOOLCHAIN_LD_DIR) clean
 	$(MAKE) -C $(LIBSRAPI_DIR) clean
 	$(MAKE) -C $(LIBSVG_DIR) clean
+	$(MAKE) -C $(LIBCSS_DIR) clean
 	$(MAKE) -C $(LIBG_DIR) clean
 	$(MAKE) -C $(LIBHTML_DIR) clean
 	$(MAKE) -C $(SWM_DIR) clean

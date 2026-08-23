@@ -16,11 +16,13 @@ $space %internal html_layout_table_cells, html_layout_list_marker
 $space %internal html_layout_table, html_layout_table_row, html_layout_table_cols
 $space %internal html_layout_children, html_layout_center_range
 $space %internal html_layout_control, html_layout_span_attr
+$space %internal css_iface_tag, css_iface_attr, css_iface_parent, html_css_iface
 $space %export html_layout_create, html_layout_free
 
 */
 
 #include <ctype.h>
+#include <css.h>
 #include <html.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -95,6 +97,7 @@ typedef struct html_style_state {
 
 typedef struct html_layout_ctx {
 	html_layout_t	*layout;
+	const void	*css_sheet;
 	/* Ordered-list state, one entry per nesting level. */
 	int32_t		list_index[HTML_LIST_MAX_DEPTH];
 	int		list_ordered[HTML_LIST_MAX_DEPTH];
@@ -977,6 +980,54 @@ html_layout_svg_box(html_layout_ctx_t *ctx, const html_node_t *node,
 	html_layout_block_space(ctx, 6);
 }
 
+static const char *
+css_iface_tag(const void *n)
+{
+	const html_node_t	*node = n;
+
+	return ((node != NULL && node->tag_name != NULL) ?
+	    node->tag_name : "");
+}
+
+static const char *
+css_iface_attr(const void *n, const char *key)
+{
+	return (html_node_get_attr((const html_node_t *)n, key));
+}
+
+static const void *
+css_iface_parent(const void *n)
+{
+	return (((const html_node_t *)n)->parent);
+}
+
+static const css_node_iface_t html_css_iface = {
+	css_iface_tag,
+	css_iface_attr,
+	css_iface_parent
+};
+
+static void
+html_layout_apply_css(html_style_state_t *style, const css_computed_t *cc)
+{
+	if ((cc->set & CSS_PROP_COLOR) != 0) {
+		style->color = cc->color;
+	}
+	if ((cc->set & CSS_PROP_SCALE) != 0 && cc->font_scale >= 1 &&
+	    cc->font_scale <= 6) {
+		style->scale = (uint32_t)cc->font_scale;
+	}
+	if ((cc->set & CSS_PROP_BOLD) != 0) {
+		style->bold = cc->bold;
+	}
+	if ((cc->set & CSS_PROP_UNDERLINE) != 0) {
+		style->underline = cc->underline;
+	}
+	if ((cc->set & CSS_PROP_STRIKE) != 0) {
+		style->strike = cc->strike;
+	}
+}
+
 static void
 html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
     html_style_state_t cur_style)
@@ -985,7 +1036,9 @@ html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
 	html_layout_line_t	*mark_line;
 	html_link_box_t		*mark_link;
 	const char		*attr;
+	css_computed_t		cc;
 	int32_t			space_before, space_after, quote_top;
+	int			have_css;
 	int			is_block, is_table, centered, pushed_list;
 
 	if (node == NULL || ctx->depth >= HTML_LAYOUT_MAX_DEPTH) {
@@ -995,6 +1048,16 @@ html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
 	if (node->tag == HTML_TAG_TEXT) {
 		html_layout_format_text(ctx, node->text, &cur_style);
 		return;
+	}
+
+	have_css = 0;
+	if (ctx->css_sheet != NULL &&
+	    css_compute((const css_sheet_t *)ctx->css_sheet,
+	    &html_css_iface, node, &cc) == 0) {
+		if ((cc.set & CSS_PROP_DISPLAY_NONE) != 0) {
+			return;
+		}
+		have_css = 1;
 	}
 
 	style = cur_style;
@@ -1284,6 +1347,10 @@ html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
 		break;
 	}
 
+	if (have_css != 0) {
+		html_layout_apply_css(&style, &cc);
+	}
+
 	attr = html_node_get_attr(node, "align");
 	if (attr != NULL && strcasecmp(attr, "center") == 0) {
 		centered = 1;
@@ -1391,6 +1458,16 @@ html_layout_create(const html_doc_t *doc, int32_t max_width)
 	ctx.margin_left = HTML_MARGIN_LEFT;
 	ctx.at_line_start = 1;
 
+	if (doc->stylesheet != NULL) {
+		css_sheet_t	*sheet = NULL;
+
+		if (css_parse(doc->stylesheet, &sheet) == 0 &&
+		    sheet != NULL) {
+			layout->css_sheet = sheet;
+			ctx.css_sheet = sheet;
+		}
+	}
+
 	memset(&initial_style, 0, sizeof(initial_style));
 	initial_style.scale = HTML_SCALE_BASE;
 	initial_style.color = HTML_COLOR_TEXT;
@@ -1456,6 +1533,10 @@ html_layout_free(html_layout_t *layout)
 		free(box->ref);
 		free(box);
 		box = next_box;
+	}
+
+	if (layout->css_sheet != NULL) {
+		css_free((css_sheet_t *)layout->css_sheet);
 	}
 
 	free(layout);
