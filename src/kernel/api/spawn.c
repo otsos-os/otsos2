@@ -605,18 +605,24 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
   api_session_fork(parent, child);
   if (args.flags & API_PROC_SPAWN_SET_TTY) {
     child->controlling_tty = (int)args.tty;
-  }
-  if (parent->controlling_tty >= 0 && !(args.flags & API_PROC_SPAWN_SET_TTY)) {
-    terminal_set_session(parent->controlling_tty, child->sid);
-    terminal_set_pgrp(parent->controlling_tty, child->pgid);
-  }
-  if (child->controlling_tty >= 0) {
+    child->sid = child->pid;
     child->pgid = child->pid;
-    terminal_set_pgrp(child->controlling_tty, child->pgid);
-  } else if (child->controlling_tty < -1) {
-    int pty_num = -child->controlling_tty - 2;
+    child->is_session_leader = 1;
+    if (child->controlling_tty >= 0) {
+      terminal_set_session(child->controlling_tty, child->sid);
+      terminal_set_pgrp(child->controlling_tty, child->pgid);
+    } else if (child->controlling_tty < -1) {
+      int pty_num = -child->controlling_tty - 2;
+      pty_set_session_pgrp(pty_num, child->sid, child->pgid);
+    }
+  } else {
     child->pgid = child->pid;
-    pty_set_session_pgrp(pty_num, child->sid, child->pgid);
+    if (child->controlling_tty >= 0) {
+      terminal_set_pgrp(child->controlling_tty, child->pgid);
+    } else if (child->controlling_tty < -1) {
+      int pty_num = -child->controlling_tty - 2;
+      pty_set_session_pgrp(pty_num, child->sid, child->pgid);
+    }
   }
   scheduler_assign_process(child);
   posix_setup_stdio(child);
@@ -643,9 +649,6 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
 
   child->main_thread = td;
   child->cur_thread = td;
-  if (child->controlling_tty >= 0) {
-    terminal_set_pgrp(child->controlling_tty, child->pgid);
-  }
 
   printk("[SPAWN] Created '%s' (PID %d) from '%s'\n", child->name,
               child->pid, kpath);

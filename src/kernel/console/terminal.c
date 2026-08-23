@@ -1590,6 +1590,8 @@ terminal_pump_keyboard(u32 flags)
 
 	got_data = 0;
 	if (terminals[terminal_active].state != TERM_STATE_ACTIVE) {
+		while (keyboard_getchar() != 0) {
+		}
 		return;
 	}
 
@@ -1911,14 +1913,20 @@ terminal_power_set(int index, int state)
 
 	if (index == terminal_active) {
 		if (state == TERM_STATE_ACTIVE) {
+			keyboard_flush_chars();
+			terminal_flush_input_idx(index);
 			terminal_redraw(term);
 			terminal_indicator_end_time =
 			    timer_get_ticks() + timer_get_frequency();
 			terminal_indicator_active = 1;
 			terminal_draw_indicator(index);
-		} else if (state == TERM_STATE_SUSPENDED && g_con) {
-			rapi_console_clear(g_con, 0x000000);
-			kms_console_flush(g_con);
+		} else if (state == TERM_STATE_SUSPENDED) {
+			keyboard_flush_chars();
+			terminal_flush_input_idx(index);
+			if (g_con) {
+				rapi_console_clear(g_con, 0x000000);
+				kms_console_flush(g_con);
+			}
 		}
 	}
 

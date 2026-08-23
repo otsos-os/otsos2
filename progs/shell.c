@@ -217,13 +217,27 @@ static int
 read_line(char *buf, int max)
 {
 	ssize_t	n;
+	int	code;
 	int	pos;
 	char	c;
 
 	pos = 0;
 	for (;;) {
 		n = termReadFlags(&c, 1, TERM_READ_IGNORE_SIGINT);
-		if (n <= 0) {
+		if (n == 0) {
+			return (-1);
+		}
+		if (n < 0) {
+			code = errno;
+			if (code == EAGAIN || code == EINTR) {
+				continue;
+			}
+			return (-1);
+		}
+		if (c == 0x04) {
+			if (pos == 0) {
+				return (-1);
+			}
 			continue;
 		}
 		if (c == '\r' || c == '\n') {

@@ -249,6 +249,7 @@ process_exit(int code)
 {
 	process_t	*proc;
 	thread_t	*td;
+	int		 i;
 
 	proc = process_current();
 	if (!proc) {
@@ -303,6 +304,21 @@ process_exit(int code)
 		parent = process_get(proc->ppid);
 		if (parent) {
 			proc_wakeup((void *)parent);
+		}
+	}
+
+	for (i = 0; i < MAX_PROCESSES; i++) {
+		if (process_table[i].pid != 0 &&
+		    process_table[i].ppid == proc->pid) {
+			process_table[i].ppid = 1;
+			if (process_table[i].main_thread &&
+			    process_table[i].main_thread->state ==
+			    PROC_STATE_ZOMBIE) {
+				process_t *init_proc = process_get(1);
+				if (init_proc) {
+					proc_wakeup((void *)init_proc);
+				}
+			}
 		}
 	}
 
@@ -388,6 +404,7 @@ process_kill(u32 pid)
 	process_t	*proc;
 	thread_t	*td;
 	int		running;
+	int		i;
 
 	if (pid == 1) {
 		return (-1);
@@ -466,6 +483,21 @@ process_kill(u32 pid)
 		parent = process_get(proc->ppid);
 		if (parent) {
 			proc_wakeup((void *)parent);
+		}
+	}
+
+	for (i = 0; i < MAX_PROCESSES; i++) {
+		if (process_table[i].pid != 0 &&
+		    process_table[i].ppid == proc->pid) {
+			process_table[i].ppid = 1;
+			if (process_table[i].main_thread &&
+			    process_table[i].main_thread->state ==
+			    PROC_STATE_ZOMBIE) {
+				process_t *init_proc = process_get(1);
+				if (init_proc) {
+					proc_wakeup((void *)init_proc);
+				}
+			}
 		}
 	}
 

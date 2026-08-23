@@ -148,6 +148,17 @@ entity_io_release_file(entity_id_t id)
 }
 
 static void
+entity_io_release_pty(entity_id_t id)
+{
+	vnode_t	*vn;
+
+	vn = (vnode_t *)entity_io_ptr(id, ENTITY_IO_PTR_BACKING);
+	if (vn) {
+		vnode_release(vn);
+	}
+}
+
+static void
 entity_io_release_net(entity_id_t id)
 {
 	net_endpoint_t	*ep;
@@ -425,7 +436,7 @@ entity_io_init(void)
 	entity_arch_release_register(ENTITY_ARCH_TRACE,
 	    api_trace_entity_release);
 	entity_arch_release_register(ENTITY_ARCH_PTY,
-	    entity_io_release_file);
+	    entity_io_release_pty);
 	shm_init();
 	terminal_entity_register_all();
 	entity_arch_io_register(ENTITY_ARCH_FILE, &entity_io_file_ops);

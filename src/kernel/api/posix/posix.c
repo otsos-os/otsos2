@@ -576,7 +576,6 @@ void
 posix_init_process(struct process *proc)
 {
 	int	i;
-	int	tty;
 
 	if (!proc) {
 		return;
@@ -601,14 +600,6 @@ posix_init_process(struct process *proc)
 	proc->sigpending = 0;
 	proc->brk = 0;
 	proc->personality = 0;
-	proc->sid = proc->pid;
-	proc->pgid = proc->pid;
-	proc->is_session_leader = 1;
-	tty = terminal_get_active();
-	proc->controlling_tty = tty;
-
-	terminal_set_session(tty, proc->sid);
-	terminal_set_pgrp(tty, proc->pgid);
 }
 
 void

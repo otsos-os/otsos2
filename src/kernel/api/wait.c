@@ -28,6 +28,7 @@
 #include <mm/vm/vm_map.h>
 #include <kernel/event/event.h>
 #include <kernel/console/terminal.h>
+#include <kernel/console/pty.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
@@ -74,9 +75,11 @@ api_proc_wait(int *status)
 				if (current->controlling_tty >= 0) {
 					terminal_set_pgrp(current->controlling_tty,
 					    current->pgid);
+				} else if (current->controlling_tty < -1) {
+					int pty_num = -current->controlling_tty - 2;
+					pty_set_session_pgrp(pty_num, current->sid,
+					    current->pgid);
 				}
-				terminal_set_pgrp(terminal_get_active(),
-				    current->pgid);
 				child->ppid = 0;
 				return (pid);
 			}
@@ -98,9 +101,11 @@ api_proc_wait(int *status)
 			if (current->controlling_tty >= 0) {
 				terminal_set_pgrp(current->controlling_tty,
 				    current->pgid);
+			} else if (current->controlling_tty < -1) {
+				int pty_num = -current->controlling_tty - 2;
+				pty_set_session_pgrp(pty_num, current->sid,
+				    current->pgid);
 			}
-			terminal_set_pgrp(terminal_get_active(),
-			    current->pgid);
 			return (pid);
 		}
 

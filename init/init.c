@@ -201,7 +201,7 @@ kqueue_create(void)
 	return ((int)syscall1(CALL_EVENT_KQUEUE, 0));
 }
 
-static int
+static int __attribute__((unused))
 kqueue_close(int kq)
 {
 	return ((int)syscall1(CALL_EVENT_CLOSE, (long)kq));
@@ -306,16 +306,6 @@ _start(void)
 		kq = -1;
 	}
 
-	if (kq >= 0) {
-		changes[0].ident = 0;
-		changes[0].filter = EVFILT_READ;
-		changes[0].flags = EV_ADD | EV_CLEAR;
-		changes[0].fflags = 0;
-		changes[0].data = 0;
-		changes[0].udata = 0;
-		kevent(kq, changes, 1, 0, 0, -1);
-	}
-
 	child_pid = -1;
 
 	while (1) {
@@ -346,10 +336,10 @@ _start(void)
 			continue;
 		}
 
-		// print("child running\n");
 		child_pid = (int)pid;
 
 		if (kq >= 0) {
+			int child_exited;
 			changes[0].ident =
 			    (unsigned long long)child_pid;
 			changes[0].filter = EVFILT_PROC;
@@ -360,14 +350,22 @@ _start(void)
 			    (unsigned long long)child_pid;
 			kevent(kq, changes, 1, 0, 0, -1);
 
-			n = kevent(kq, 0, 0, events, 8, -1);
-			if (n > 0) {
-				for (i = 0; i < n; i++) {
-					if (events[i].filter ==
-					    EVFILT_PROC &&
-					    events[i].fflags & NOTE_EXIT) {
-						// print("child exited\n");
+			child_exited = 0;
+			while (!child_exited) {
+				n = kevent(kq, 0, 0, events, 8, -1);
+				if (n > 0) {
+					for (i = 0; i < n; i++) {
+						if (events[i].filter ==
+						    EVFILT_PROC &&
+						    events[i].ident ==
+						    (unsigned long long)child_pid &&
+						    (events[i].fflags & NOTE_EXIT)) {
+							child_exited = 1;
+							break;
+						}
 					}
+				} else if (n < 0) {
+					break;
 				}
 			}
 		} else {
@@ -377,7 +375,8 @@ _start(void)
 		}
 
 		status = 0;
-		procWait(&status);
+		while (procWait(&status) > 0) {
+		}
 		child_pid = -1;
 	}
 }

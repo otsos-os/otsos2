@@ -26,6 +26,7 @@
 #include <kernel/console/pty.h>
 #include <kernel/entity/entity.h>
 #include <kernel/drivers/fs/devfs/devfs.h>
+#include <kernel/api/errno.h>
 #include <kernel/api/posix/posix.h>
 #include <kernel/event/event.h>
 #include <kernel/process.h>
@@ -72,6 +73,7 @@ static int	pty_to_master_put(pty_pair_t *p, char c);
 static int	pty_to_master_get(pty_pair_t *p, char *c);
 static int	pty_slave_stat(vnode_t *vn, posix_stat_t *st);
 static int	pty_master_stat(vnode_t *vn, posix_stat_t *st);
+static void	vnode_pty_master_release(vnode_t *vn);
 static int	vnode_pty_master_read(vnode_t *vn, void *buf, u64 count,
     u64 offset);
 static int	vnode_pty_master_write(vnode_t *vn, const void *buf, u64 count,
@@ -342,6 +344,7 @@ pty_open_master(vnode_t **out)
 	vn->write_fn = vnode_pty_master_write;
 	vn->ioctl_fn = pty_master_ioctl;
 	vn->stat_fn = pty_master_stat;
+	vn->release_fn = vnode_pty_master_release;
 	vn->readdir_fn = NULL;
 
 	snprintf(name, sizeof(name), "pts/%d", p->id - 1);
@@ -483,6 +486,7 @@ pty_input_char(pty_pair_t *p, char c)
 int
 pty_master_read(vnode_t *vn, void *buf, u32 count, int nonblock)
 {
+	struct process	*proc;
 	pty_pair_t	*p;
 	char		*out;
 	char		 c;
@@ -497,13 +501,23 @@ pty_master_read(vnode_t *vn, void *buf, u32 count, int nonblock)
 	while (n < (int)count) {
 		if (pty_to_master_get(p, &c) == 0) {
 			out[n++] = c;
+		} else if (!p->open_slave && p->to_master_count == 0) {
+			break;
 		} else if (n > 0 || nonblock) {
 			if (n == 0) {
 				return (-POSIX_EAGAIN);
 			}
 			break;
 		} else {
+			proc = process_current();
+			if (proc && (proc->sigpending & ~proc->sigmask)) {
+				return (-POSIX_EINTR);
+			}
 			proc_sleep(&p->to_master_count);
+			proc = process_current();
+			if (proc && (proc->sigpending & ~proc->sigmask)) {
+				return (-POSIX_EINTR);
+			}
 		}
 	}
 	return (n);
@@ -687,6 +701,7 @@ pty_master_ioctl(vnode_t *vn, u64 cmd, void *arg)
 int
 pty_slave_read(vnode_t *vn, void *buf, u32 count, int nonblock)
 {
+	struct process	*proc;
 	pty_pair_t	*p;
 	char		*out;
 	char		 c;
@@ -702,16 +717,27 @@ pty_slave_read(vnode_t *vn, void *buf, u32 count, int nonblock)
 		if (pty_to_slave_get(p, &c) == 0) {
 			out[n++] = c;
 			if ((p->term.c_lflag & ICANON) != 0 &&
-			    (c == '\n' || c == p->term.c_cc[VEOL] || c == p->term.c_cc[VEOL2])) {
+			    (c == '\n' || c == p->term.c_cc[VEOL] ||
+			    c == p->term.c_cc[VEOL2])) {
 				break;
 			}
+		} else if (!p->open_master) {
+			break;
 		} else if (n > 0 || nonblock) {
 			if (n == 0) {
 				return (-POSIX_EAGAIN);
 			}
 			break;
 		} else {
+			proc = process_current();
+			if (proc && (proc->sigpending & ~proc->sigmask)) {
+				return (-POSIX_EINTR);
+			}
 			proc_sleep(&p->to_slave_count);
+			proc = process_current();
+			if (proc && (proc->sigpending & ~proc->sigmask)) {
+				return (-POSIX_EINTR);
+			}
 		}
 	}
 	return (n);
@@ -720,6 +746,7 @@ pty_slave_read(vnode_t *vn, void *buf, u32 count, int nonblock)
 int
 pty_slave_write(vnode_t *vn, const void *buf, u32 count, int nonblock)
 {
+	struct process	*proc;
 	pty_pair_t	*p;
 	const char	*data;
 	int		 i;
@@ -728,28 +755,59 @@ pty_slave_write(vnode_t *vn, const void *buf, u32 count, int nonblock)
 	if (!p || p->id == 0) {
 		return (-POSIX_EBADF);
 	}
+	if (!p->open_master) {
+		return (-POSIX_EPIPE);
+	}
 	data = (const char *)buf;
 	for (i = 0; i < (int)count; i++) {
+		if (!p->open_master) {
+			if (i == 0) {
+				return (-POSIX_EPIPE);
+			}
+			return (i);
+		}
 		if ((p->term.c_oflag & (OPOST | ONLCR)) == (OPOST | ONLCR) &&
 		    data[i] == '\n') {
 			while (pty_to_master_put(p, '\r') != 0) {
+				if (!p->open_master) {
+					return (i > 0 ? i : -POSIX_EPIPE);
+				}
 				if (nonblock) {
 					if (i == 0) {
 						return (-POSIX_EAGAIN);
 					}
 					return (i);
 				}
+				proc = process_current();
+				if (proc && (proc->sigpending & ~proc->sigmask)) {
+					return (i > 0 ? i : -POSIX_EINTR);
+				}
 				proc_sleep(&p->to_master_count);
+				proc = process_current();
+				if (proc && (proc->sigpending & ~proc->sigmask)) {
+					return (i > 0 ? i : -POSIX_EINTR);
+				}
 			}
 		}
 		while (pty_to_master_put(p, data[i]) != 0) {
+			if (!p->open_master) {
+				return (i > 0 ? i : -POSIX_EPIPE);
+			}
 			if (nonblock) {
 				if (i == 0) {
 					return (-POSIX_EAGAIN);
 				}
 				return (i);
 			}
+			proc = process_current();
+			if (proc && (proc->sigpending & ~proc->sigmask)) {
+				return (i > 0 ? i : -POSIX_EINTR);
+			}
 			proc_sleep(&p->to_master_count);
+			proc = process_current();
+			if (proc && (proc->sigpending & ~proc->sigmask)) {
+				return (i > 0 ? i : -POSIX_EINTR);
+			}
 		}
 	}
 	return ((int)count);
@@ -825,13 +883,64 @@ pty_create_slave_vnode(int id)
 	if (!vn) {
 		return (NULL);
 	}
+	p->open_slave++;
 	vn->data = p;
 	vn->read_fn = vnode_pty_slave_read;
 	vn->write_fn = vnode_pty_slave_write;
 	vn->ioctl_fn = pty_slave_ioctl;
 	vn->stat_fn = pty_slave_stat;
+	vn->release_fn = pty_slave_release;
 	vn->readdir_fn = NULL;
 	return (vn);
+}
+
+void
+pty_slave_release(vnode_t *vn)
+{
+	pty_pair_t	*p;
+	char		 name[32];
+
+	if (!vn || !vn->data) {
+		return;
+	}
+	p = (pty_pair_t *)vn->data;
+	if (p->id == 0) {
+		return;
+	}
+	if (p->open_slave > 0) {
+		p->open_slave--;
+	}
+	proc_wakeup(&p->to_slave_count);
+	proc_wakeup(&p->to_master_count);
+	if (!p->open_master && p->open_slave == 0) {
+		snprintf(name, sizeof(name), "pts/%d", p->id - 1);
+		devfs_unregister(name);
+		p->id = 0;
+	}
+}
+
+static void
+vnode_pty_master_release(vnode_t *vn)
+{
+	pty_pair_t	*p;
+	char		 name[32];
+
+	if (!vn || !vn->data) {
+		return;
+	}
+	p = (pty_pair_t *)vn->data;
+	if (p->id == 0) {
+		return;
+	}
+	p->open_master = 0;
+	pty_hangup(p->id);
+	proc_wakeup(&p->to_slave_count);
+	proc_wakeup(&p->to_master_count);
+	if (p->open_slave == 0) {
+		snprintf(name, sizeof(name), "pts/%d", p->id - 1);
+		devfs_unregister(name);
+		p->id = 0;
+	}
 }
 
 static int
@@ -894,6 +1003,33 @@ vnode_pty_slave_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
 {
 	(void)offset;
 	return (pty_slave_write(vn, buf, (u32)count, 0));
+}
+
+void
+pty_hangup(int id)
+{
+	struct process	*proc;
+	pty_pair_t	*p;
+	int		 i;
+
+	if (id <= 0 || id > PTY_COUNT) {
+		return;
+	}
+	p = &pty_pairs[id - 1];
+	if (p->id != id) {
+		return;
+	}
+	pty_signal_pgrp(p, SIGHUP);
+	for (i = 0; i < MAX_PROCESSES; i++) {
+		proc = &process_table[i];
+		if (proc->pid != 0 && (proc->controlling_tty == -2 - id ||
+		    (p->session != 0 && proc->sid == p->session))) {
+			process_send_signal(proc->pid, SIGHUP);
+			proc->controlling_tty = -1;
+		}
+	}
+	p->session = 0;
+	p->foreground_pgrp = 0;
 }
 
 void
@@ -990,6 +1126,7 @@ pty_set_termios(int id, const struct termios *t)
 int
 pty_slave_read_idx(int id, void *buf, u32 count, int nonblock)
 {
+	struct process	*proc;
 	pty_pair_t	*p;
 	char		*out;
 	char		 c;
@@ -1007,13 +1144,29 @@ pty_slave_read_idx(int id, void *buf, u32 count, int nonblock)
 	while (n < (int)count) {
 		if (pty_to_slave_get(p, &c) == 0) {
 			out[n++] = c;
+		} else if (!p->open_master) {
+			break;
 		} else if (nonblock) {
 			if (n == 0) {
 				return (-API_ERR_BUSY);
 			}
 			break;
 		} else {
+			proc = process_current();
+			if (proc && (proc->sigpending & ~proc->sigmask)) {
+				if (n > 0) {
+					return (n);
+				}
+				return (-API_ERR_INTR);
+			}
 			proc_sleep(&p->to_slave_count);
+			proc = process_current();
+			if (proc && (proc->sigpending & ~proc->sigmask)) {
+				if (n > 0) {
+					return (n);
+				}
+				return (-API_ERR_INTR);
+			}
 		}
 	}
 	return (n);
@@ -1022,6 +1175,7 @@ pty_slave_read_idx(int id, void *buf, u32 count, int nonblock)
 int
 pty_slave_write_idx(int id, const void *buf, u32 count, int nonblock)
 {
+	struct process	*proc;
 	pty_pair_t	*p;
 	const char	*data;
 	int		 i;
@@ -1033,28 +1187,59 @@ pty_slave_write_idx(int id, const void *buf, u32 count, int nonblock)
 	if (p->id != id) {
 		return (-API_ERR_BAD_HANDLE);
 	}
+	if (!p->open_master) {
+		return (-API_ERR_PIPE_CLOSED);
+	}
 	data = (const char *)buf;
 	for (i = 0; i < (int)count; i++) {
+		if (!p->open_master) {
+			if (i == 0) {
+				return (-API_ERR_PIPE_CLOSED);
+			}
+			return (i);
+		}
 		if ((p->term.c_oflag & (OPOST | ONLCR)) == (OPOST | ONLCR) &&
 		    data[i] == '\n') {
 			while (pty_to_master_put(p, '\r') != 0) {
+				if (!p->open_master) {
+					return (i > 0 ? i : -API_ERR_PIPE_CLOSED);
+				}
 				if (nonblock) {
 					if (i == 0) {
 						return (-API_ERR_BUSY);
 					}
 					return (i);
 				}
+				proc = process_current();
+				if (proc && (proc->sigpending & ~proc->sigmask)) {
+					return (i > 0 ? i : -API_ERR_INTR);
+				}
 				proc_sleep(&p->to_master_count);
+				proc = process_current();
+				if (proc && (proc->sigpending & ~proc->sigmask)) {
+					return (i > 0 ? i : -API_ERR_INTR);
+				}
 			}
 		}
 		while (pty_to_master_put(p, data[i]) != 0) {
+			if (!p->open_master) {
+				return (i > 0 ? i : -API_ERR_PIPE_CLOSED);
+			}
 			if (nonblock) {
 				if (i == 0) {
 					return (-API_ERR_BUSY);
 				}
 				return (i);
 			}
+			proc = process_current();
+			if (proc && (proc->sigpending & ~proc->sigmask)) {
+				return (i > 0 ? i : -API_ERR_INTR);
+			}
 			proc_sleep(&p->to_master_count);
+			proc = process_current();
+			if (proc && (proc->sigpending & ~proc->sigmask)) {
+				return (i > 0 ? i : -API_ERR_INTR);
+			}
 		}
 	}
 	return ((int)count);

@@ -375,6 +375,10 @@ devfs_lookup(const char *path)
 		vn->gid = 0;
 	}
 
+	if (dev->device_id == DEVFS_DEV_PTS) {
+		vn->release_fn = pty_slave_release;
+	}
+
 	if (dev->device_id == DEVFS_DEV_TTY) {
 		proc = process_current();
 		if (proc && proc->controlling_tty < -1) {

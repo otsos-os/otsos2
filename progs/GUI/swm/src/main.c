@@ -304,6 +304,9 @@ main(void)
 		return (1);
 	}
 	run_ret = swm_run(&swm);
+	if (de_pid > 0) {
+		(void)procKill((uint32_t)de_pid, 9);
+	}
 	for (i = 0; i < SWM_MAX_CLIENTS; i++) {
 		if (swm.clients[i].in_use) {
 			swm_protocol_drop_client(&swm, &swm.clients[i],

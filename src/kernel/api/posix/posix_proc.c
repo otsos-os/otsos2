@@ -30,6 +30,7 @@
 #include <kernel/api/auxv.h>
 #include <kernel/api/session.h>
 #include <kernel/console/terminal.h>
+#include <kernel/console/pty.h>
 #include <kernel/crypto/rng/rng.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/timer.h>
@@ -721,9 +722,11 @@ posix_wait4(u64 pid_u, u64 status_u, u64 options, u64 rusage_u,
 				if (current->controlling_tty >= 0) {
 					terminal_set_pgrp(current->controlling_tty,
 					    current->pgid);
+				} else if (current->controlling_tty < -1) {
+					int pty_num = -current->controlling_tty - 2;
+					pty_set_session_pgrp(pty_num, current->sid,
+					    current->pgid);
 				}
-				terminal_set_pgrp(terminal_get_active(),
-				    current->pgid);
 				child->ppid = 0;
 				return ((s64)reaped_pid);
 			}
@@ -745,9 +748,11 @@ posix_wait4(u64 pid_u, u64 status_u, u64 options, u64 rusage_u,
 			if (current->controlling_tty >= 0) {
 				terminal_set_pgrp(current->controlling_tty,
 				    current->pgid);
+			} else if (current->controlling_tty < -1) {
+				int pty_num = -current->controlling_tty - 2;
+				pty_set_session_pgrp(pty_num, current->sid,
+				    current->pgid);
 			}
-			terminal_set_pgrp(terminal_get_active(),
-			    current->pgid);
 			return ((s64)reaped_pid);
 		}
 
