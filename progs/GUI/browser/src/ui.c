@@ -4,6 +4,7 @@ $define %type browser_ui as UI layout and rendering
 $define %func browser_draw as procedure with args browser_state *
 $define %func browser_handle_event as procedure with args browser_state *, const sprot_event *
 $define %func browser_navigate as function with args browser_state *, const char *
+$define %func browser_load_poll as procedure with args browser_state *
 
 */
 
@@ -11,8 +12,10 @@ $define %func browser_navigate as function with args browser_state *, const char
 
 $space %internal draw_top_bar, draw_toolbar, draw_viewport, draw_status_bar, draw_scrollbar
 $space %internal translate_key_to_char, get_header_widget_id
+$space %internal browser_load_apply, browser_load_progress, browser_load_drop
+$space %internal browser_count_images
 $space %export browser_ui_init, browser_draw, browser_handle_event
-$space %export browser_navigate, browser_status_set
+$space %export browser_navigate, browser_status_set, browser_load_poll
 $space %export browser_history_push, browser_history_back, browser_history_forward
 
 */
@@ -48,6 +51,14 @@ browser_status_set(browser_state_t *st, const char *msg)
 	if (st == NULL || msg == NULL) {
 		return;
 	}
+	/*
+	 * Compared before storing: the loader re-derives its status text on every
+	 * step, and marking the bar dirty each time would repaint the window as
+	 * fast as the event loop spins for the whole duration of a load.
+	 */
+	if (strcmp(st->status_msg, msg) == 0) {
+		return;
+	}
 	strncpy(st->status_msg, msg, sizeof(st->status_msg) - 1);
 	st->status_msg[sizeof(st->status_msg) - 1] = '\0';
 	st->dirty_flags |= BROWSER_DIRTY_STATUS;
@@ -57,6 +68,21 @@ void
 browser_history_push(browser_state_t *st, const char *url, const char *title)
 {
 	if (st == NULL || url == NULL) {
+		return;
+	}
+	/*
+	 * Reload and back/forward re-enter here with the URL already at the
+	 * cursor.  Pushing it again would truncate the forward list and make Back
+	 * appear to do nothing, so the entry is only refreshed in place.
+	 */
+	if (st->history_pos >= 0 && st->history_pos < st->history_count &&
+	    strcmp(st->history[st->history_pos].url, url) == 0) {
+		if (title != NULL) {
+			strncpy(st->history[st->history_pos].title, title,
+			    sizeof(st->history[0].title) - 1);
+			st->history[st->history_pos].title[
+			    sizeof(st->history[0].title) - 1] = '\0';
+		}
 		return;
 	}
 	if (st->history_pos + 1 < BROWSER_HISTORY_MAX) {
@@ -70,10 +96,17 @@ browser_history_push(browser_state_t *st, const char *url, const char *title)
 	strncpy(st->history[st->history_pos].url, url, BROWSER_MAX_URL - 1);
 	st->history[st->history_pos].url[BROWSER_MAX_URL - 1] = '\0';
 	if (title != NULL) {
-		strncpy(st->history[st->history_pos].title, title, sizeof(st->history[0].title) - 1);
+		strncpy(st->history[st->history_pos].title, title,
+		    sizeof(st->history[0].title) - 1);
 	} else {
 		st->history[st->history_pos].title[0] = '\0';
 	}
+	/*
+	 * strncpy leaves no terminator when the title fills the field, and the
+	 * shift above copies entries by value, so the truncated tail would travel
+	 * with the entry and later be printed as the window title.
+	 */
+	st->history[st->history_pos].title[sizeof(st->history[0].title) - 1] = '\0';
 	st->history_count = st->history_pos + 1;
 }
 
@@ -97,45 +130,88 @@ browser_history_forward(browser_state_t *st)
 	browser_navigate(st, st->history[st->history_pos].url);
 }
 
+/*
+ * Queues a navigation instead of performing it.  Every caller reaches this from
+ * inside browser_draw() - a link click, a toolbar button, a submitted URL - and
+ * fetching there is what froze the window for the whole duration of a load.  The
+ * main loop picks the request up after the frame is presented.
+ */
 int
 browser_navigate(browser_state_t *st, const char *url)
 {
-	char	final_url[BROWSER_MAX_URL];
-	char	*body = NULL;
-	size_t	len = 0;
-	int	ret;
+	char	full_url[BROWSER_MAX_URL];
+	char	status[BROWSER_MAX_URL + 64];
 
 	if (st == NULL || url == NULL || url[0] == '\0') {
 		return (-1);
 	}
 
-	char full_url[BROWSER_MAX_URL];
-	if (url[0] == '/' && st->current_url[0] != '\0') {
-		char proto[16], host[256];
-		if (sscanf(st->current_url, "%15[^:]://%255[^/]", proto, host) == 2) {
-			snprintf(full_url, sizeof(full_url), "%s://%s%s", proto, host, url);
-		} else {
-			strncpy(full_url, url, sizeof(full_url) - 1);
-		}
+	/*
+	 * Resolved against the current page here rather than in the loader: by
+	 * the time the queued request runs, a redirect may already have moved
+	 * current_url, and a relative href must bind to the page it came from.
+	 */
+	if (st->current_url[0] != '\0' &&
+	    strncasecmp(url, "http://", 7) != 0 &&
+	    strncasecmp(url, "https://", 8) != 0) {
+		browser_url_resolve(st->current_url, url, full_url,
+		    sizeof(full_url));
 	} else {
-		strncpy(full_url, url, sizeof(full_url) - 1);
+		browser_url_normalize(url, full_url, sizeof(full_url));
 	}
-	full_url[sizeof(full_url) - 1] = '\0';
-
-	char status[256];
-	snprintf(status, sizeof(status), "Connecting to %s...", full_url);
-	browser_status_set(st, status);
-
-	st->is_loading = 1;
-	ret = browser_fetch_url(full_url, &body, &len, final_url, sizeof(final_url));
-	st->is_loading = 0;
-
-	if (ret != 0 || body == NULL) {
-		snprintf(status, sizeof(status), "Error loading %s", full_url);
-		browser_status_set(st, status);
+	if (full_url[0] == '\0') {
 		return (-1);
 	}
 
+	strncpy(st->pending_url, full_url, sizeof(st->pending_url) - 1);
+	st->pending_url[sizeof(st->pending_url) - 1] = '\0';
+	st->pending_nav = 1;
+
+	snprintf(status, sizeof(status), "Looking up %s...", full_url);
+	browser_status_set(st, status);
+	return (0);
+}
+
+/*
+ * Iterative rather than recursive, with a node ceiling: a deeply nested document
+ * would otherwise put an unbounded frame count on the stack just to fill in a
+ * counter in the status area.
+ */
+static int
+browser_count_images(const html_node_t *root)
+{
+	const html_node_t	*node;
+	int			count, visited;
+
+	count = 0;
+	visited = 0;
+	node = root;
+	while (node != NULL && visited < BROWSER_MAX_NODES) {
+		visited++;
+		if (node->tag == HTML_TAG_IMG) {
+			count++;
+		}
+		if (node->first_child != NULL) {
+			node = node->first_child;
+			continue;
+		}
+		while (node != NULL && node->next_sibling == NULL) {
+			node = node->parent;
+			if (node == root) {
+				return (count);
+			}
+		}
+		if (node == NULL) {
+			break;
+		}
+		node = node->next_sibling;
+	}
+	return (count);
+}
+
+static void
+browser_load_drop(browser_state_t *st)
+{
 	if (st->layout != NULL) {
 		html_layout_free(st->layout);
 		st->layout = NULL;
@@ -144,47 +220,190 @@ browser_navigate(browser_state_t *st, const char *url)
 		html_doc_free(st->doc);
 		st->doc = NULL;
 	}
-	if (st->raw_html != NULL) {
-		free(st->raw_html);
-	}
+	free(st->raw_html);
+	st->raw_html = NULL;
+	st->raw_html_len = 0;
+}
 
-	st->raw_html = body;
-	st->raw_html_len = len;
-	st->page_size_bytes = len;
-	strncpy(st->current_url, final_url, sizeof(st->current_url) - 1);
+/*
+ * Takes ownership of the loader's response buffer and turns it into the shown
+ * document.  The body is moved to the front of that same allocation rather than
+ * copied out: pages run to megabytes and a second buffer would double the peak.
+ */
+static void
+browser_load_apply(browser_state_t *st)
+{
+	browser_loader_t	*ld;
+	char			win_title[256];
+	char			status[128];
+	const char		*title;
+	size_t			off, body_len;
+	int32_t			viewport_w, view_h;
+
+	ld = &st->loader;
+	off = browser_http_body_offset(ld->response, ld->response_len);
+	if (off > ld->response_len) {
+		off = ld->response_len;
+	}
+	body_len = ld->response_len - off;
+
+	browser_load_drop(st);
+
+	if (off != 0) {
+		memmove(ld->response, ld->response + off, body_len);
+	}
+	ld->response[body_len] = '\0';
+
+	st->raw_html = ld->response;
+	st->raw_html_len = body_len;
+	st->page_size_bytes = body_len;
+
+	/* Ownership moved; cleared so browser_loader_reset does not free it. */
+	ld->response = NULL;
+	ld->response_len = 0;
+	ld->response_cap = 0;
+
+	strncpy(st->current_url, ld->url, sizeof(st->current_url) - 1);
 	st->current_url[sizeof(st->current_url) - 1] = '\0';
-	strncpy(st->input_url, final_url, sizeof(st->input_url) - 1);
+	strncpy(st->input_url, ld->url, sizeof(st->input_url) - 1);
 	st->input_url[sizeof(st->input_url) - 1] = '\0';
 
-	st->doc = html_parse(body, len);
-	int32_t viewport_w = (int32_t)st->width - SCROLLBAR_W;
-	if (viewport_w < 100) viewport_w = 600;
+	st->doc = html_parse(st->raw_html, st->raw_html_len);
+	st->images_count = (st->doc != NULL) ?
+	    browser_count_images(st->doc->root) : 0;
+	st->images_loaded = 0;
+	viewport_w = (int32_t)st->width - SCROLLBAR_W;
+	if (viewport_w < 100) {
+		viewport_w = 600;
+	}
 	st->layout = html_layout_create(st->doc, viewport_w);
 
 	st->scroll_y = 0;
-	int32_t view_h = (int32_t)st->height - HEADER_TOTAL_H - STATUS_BAR_H;
+	view_h = (int32_t)st->height - HEADER_TOTAL_H - STATUS_BAR_H;
 	if (st->layout != NULL && st->layout->content_height > view_h) {
 		st->max_scroll_y = st->layout->content_height - view_h;
 	} else {
 		st->max_scroll_y = 0;
 	}
 
-	char win_title[256];
-	if (st->doc != NULL && st->doc->title != NULL && st->doc->title[0] != '\0') {
-		snprintf(win_title, sizeof(win_title), "Dillo: %s", st->doc->title);
-		browser_history_push(st, final_url, st->doc->title);
-	} else {
-		snprintf(win_title, sizeof(win_title), "Dillo: %s", final_url);
-		browser_history_push(st, final_url, final_url);
+	title = NULL;
+	if (st->doc != NULL && st->doc->title != NULL &&
+	    st->doc->title[0] != '\0') {
+		title = st->doc->title;
 	}
+	snprintf(win_title, sizeof(win_title), "Dillo: %s",
+	    (title != NULL) ? title : st->current_url);
+	browser_history_push(st, st->current_url,
+	    (title != NULL) ? title : st->current_url);
 	if (st->surface != NULL) {
 		sprot_set_title(st->surface, win_title);
 	}
 
-	snprintf(status, sizeof(status), "Loaded %u bytes", (unsigned int)len);
+	snprintf(status, sizeof(status), "Loaded %u bytes",
+	    (unsigned int)body_len);
 	browser_status_set(st, status);
 	st->dirty_flags = BROWSER_DIRTY_ALL;
-	return (0);
+}
+
+/*
+ * Progress text for an in-flight load.  Byte counts are reported in KB so the
+ * string only changes about once per kilobyte; formatting the raw count would
+ * mark the status bar dirty on every single packet.
+ */
+static void
+browser_load_progress(browser_state_t *st)
+{
+	const browser_loader_t	*ld;
+	char			status[BROWSER_MAX_HOST + 64];
+	size_t			kb;
+
+	ld = &st->loader;
+	kb = ld->response_len / 1024u;
+	if (kb != st->progress_kb) {
+		st->progress_kb = kb;
+		st->dirty_flags |= BROWSER_DIRTY_HEADER;
+	}
+
+	switch (ld->state) {
+	case BROWSER_LOAD_DNS:
+		snprintf(status, sizeof(status), "Looking up %s...", ld->host);
+		break;
+	case BROWSER_LOAD_CONNECT:
+		snprintf(status, sizeof(status), "Connecting to %s:%d...",
+		    ld->host, ld->port);
+		break;
+	case BROWSER_LOAD_SEND:
+		snprintf(status, sizeof(status), "Requesting %s...", ld->path);
+		break;
+	case BROWSER_LOAD_RECV:
+		snprintf(status, sizeof(status), "Receiving from %s (%u KB)...",
+		    ld->host, (unsigned int)(ld->response_len / 1024u));
+		break;
+	default:
+		return;
+	}
+	browser_status_set(st, status);
+}
+
+/*
+ * Called once per pass of the main loop: starts whatever navigation the draw
+ * pass queued, advances the in-flight load, and commits it when it finishes.
+ */
+void
+browser_load_poll(browser_state_t *st)
+{
+	browser_loader_t	*ld;
+	char			status[BROWSER_MAX_URL + 64];
+	char			url[BROWSER_MAX_URL];
+
+	if (st == NULL) {
+		return;
+	}
+	ld = &st->loader;
+
+	if (st->pending_nav) {
+		st->pending_nav = 0;
+		/*
+		 * Copied out first: the loader's own redirect handling writes
+		 * through browser_loader_start, and pending_url may be reused by
+		 * a click that lands while this load is running.
+		 */
+		strncpy(url, st->pending_url, sizeof(url) - 1);
+		url[sizeof(url) - 1] = '\0';
+		st->pending_url[0] = '\0';
+
+		browser_loader_reset(ld);
+		st->is_loading = 1;
+		st->page_size_bytes = 0;
+		st->progress_kb = 0;
+		st->dirty_flags |= BROWSER_DIRTY_HEADER;
+		(void)browser_loader_start(ld, url);
+	}
+
+	if (ld->state == BROWSER_LOAD_IDLE) {
+		return;
+	}
+
+	(void)browser_loader_step(ld);
+
+	switch (ld->state) {
+	case BROWSER_LOAD_DONE:
+		st->is_loading = 0;
+		browser_load_apply(st);
+		browser_loader_reset(ld);
+		break;
+	case BROWSER_LOAD_ERROR:
+		st->is_loading = 0;
+		snprintf(status, sizeof(status), "%s: %s",
+		    (ld->error[0] != '\0') ? ld->error : "Load failed",
+		    ld->url);
+		browser_status_set(st, status);
+		browser_loader_reset(ld);
+		break;
+	default:
+		browser_load_progress(st);
+		break;
+	}
 }
 
 void
@@ -203,8 +422,11 @@ browser_ui_init(browser_state_t *st)
 	st->images_count = 0;
 	st->images_loaded = 0;
 	st->page_size_bytes = 0;
+	st->progress_kb = 0;
 	st->history_count = 0;
 	st->history_pos = -1;
+	st->pending_url[0] = '\0';
+	st->pending_nav = 0;
 	st->dirty_flags = BROWSER_DIRTY_ALL;
 	st->last_hot_id = 0;
 }
@@ -310,6 +532,15 @@ draw_toolbar(browser_state_t *st)
 	/* Stop */
 	rect.x = x; rect.y = y; rect.width = 54; rect.height = btn_h;
 	if (libgButton(st->ui, ID_STOP, rect, "Stop") & LIBG_WIDGET_CLICKED) {
+		/*
+		 * Also clears a queued navigation: a click that arrives in the
+		 * same frame as Stop would otherwise start the load Stop meant
+		 * to cancel.
+		 */
+		st->pending_nav = 0;
+		st->pending_url[0] = '\0';
+		browser_loader_abort(&st->loader);
+		st->is_loading = 0;
 		browser_status_set(st, "Stopped");
 	}
 
@@ -326,12 +557,22 @@ draw_toolbar(browser_state_t *st)
 	libgFillRect(st->ui, box2, 0xFFE0DDD9);
 	libgLine(st->ui, rect.x + 71, rect.y, rect.x + 71, rect.y + 28, 0xFF9E9A94);
 
+	char img_str[32];
+	snprintf(img_str, sizeof(img_str), "%d of %d", st->images_loaded,
+	    st->images_count);
 	libgTextScale(st->ui, box1.x + 6, box1.y + 2, "Images", 0xFF666666, 1);
-	libgTextScale(st->ui, box1.x + 10, box1.y + 13, "0 of 0", 0xFF333333, 1);
+	libgTextScale(st->ui, box1.x + 10, box1.y + 13, img_str, 0xFF333333, 1);
 
+	/*
+	 * While a load runs this shows what has arrived so far, which is the only
+	 * visible sign that a slow transfer is still making progress.
+	 */
 	char page_str[32];
-	double kb = (double)st->page_size_bytes / 1024.0;
-	snprintf(page_str, sizeof(page_str), "%.1f KB", kb);
+	size_t shown = st->is_loading ? st->loader.response_len :
+	    st->page_size_bytes;
+	snprintf(page_str, sizeof(page_str), "%u.%u KB",
+	    (unsigned int)(shown / 1024u),
+	    (unsigned int)((shown % 1024u) * 10u / 1024u));
 	libgTextScale(st->ui, box2.x + 14, box2.y + 2, "Page", 0xFF666666, 1);
 	libgTextScale(st->ui, box2.x + 6, box2.y + 13, page_str, 0xFF333333, 1);
 }

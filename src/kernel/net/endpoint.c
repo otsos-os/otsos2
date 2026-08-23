@@ -58,6 +58,7 @@ $define %func net_endpoint_send as function with args net_endpoint_t *, const u8
 $define %func net_endpoint_recv as function with args net_endpoint_t *, u8 *, u32, net_endpoint_addr_t *, u32, u32 *
 $define %func net_endpoint_get_local as procedure with args net_endpoint_t *, net_endpoint_addr_t *
 $define %func net_endpoint_get_peer as function with args net_endpoint_t *, net_endpoint_addr_t *
+$define %func net_endpoint_get_state as function with args net_endpoint_t *, u32 *, u32 *
 $define %func net_endpoint_readable as function with args net_endpoint_t *
 $define %func net_endpoint_writable as function with args net_endpoint_t *
 $define %func net_endpoint_pending_bytes as function with args net_endpoint_t *
@@ -83,6 +84,7 @@ $space %export net_endpoint_bind, net_endpoint_connect
 $space %export net_endpoint_listen, net_endpoint_accept
 $space %export net_endpoint_send, net_endpoint_recv
 $space %export net_endpoint_get_local, net_endpoint_get_peer
+$space %export net_endpoint_get_state
 $space %export net_endpoint_readable, net_endpoint_writable
 $space %export net_endpoint_pending_bytes, net_endpoint_write_space
 $space %export net_endpoint_udp_input
@@ -391,6 +393,11 @@ net_endpoint_free(net_endpoint_t *ep)
 	}
 	proc_wakeup((void *)ep);
 	event_notify_net_change(ep);
+	/*
+	 * Heap-backed TCP state has to go back before the slot is wiped,
+	 * otherwise the pointers are gone and the heap leaks per connection.
+	 */
+	net_endpoint_tcp_release(ep);
 	memset(ep, 0, sizeof(*ep));
 }
 
@@ -754,6 +761,75 @@ net_endpoint_get_peer(net_endpoint_t *ep, net_endpoint_addr_t *addr)
 	addr->port = ep->peer_port;
 	addr->family = NET_ENDPOINT_ADDR_IP4;
 	addr->ifindex = ep->peer_ifindex;
+	return (0);
+}
+
+/*
+ * Reports connection progress and drains the latched error, which is what a
+ * nonblocking connect() needs to finish: send() alone cannot distinguish a
+ * handshake still in flight from one the peer refused - both leave it failing.
+ * Reading clears tcp_error so the condition is reported exactly once, the same
+ * contract as SO_ERROR.
+ */
+int
+net_endpoint_get_state(net_endpoint_t *ep, u32 *out_state, u32 *out_error)
+{
+	u32	state;
+
+	if (!ep || !ep->used) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+
+	if (ep->proto != NET_ENDPOINT_PROTO_TCP) {
+		/*
+		 * Datagram sockets have no handshake; "connected" here only
+		 * means a default peer has been set by connect().
+		 */
+		state = (ep->peer_ip != 0 && ep->peer_port != 0) ?
+		    NET_ENDPOINT_STATE_CONNECTED : NET_ENDPOINT_STATE_CLOSED;
+		if (out_state) {
+			*out_state = state;
+		}
+		if (out_error) {
+			*out_error = 0;
+		}
+		return (0);
+	}
+
+	switch (ep->tcp_state) {
+	case TCP_STATE_LISTEN:
+		state = NET_ENDPOINT_STATE_LISTEN;
+		break;
+	case TCP_STATE_SYN_SENT:
+	case TCP_STATE_SYN_RECEIVED:
+		state = NET_ENDPOINT_STATE_CONNECTING;
+		break;
+	case TCP_STATE_ESTABLISHED:
+		state = NET_ENDPOINT_STATE_CONNECTED;
+		break;
+	case TCP_STATE_CLOSE_WAIT:
+		state = NET_ENDPOINT_STATE_PEER_CLOSED;
+		break;
+	case TCP_STATE_FIN_WAIT_1:
+	case TCP_STATE_FIN_WAIT_2:
+	case TCP_STATE_CLOSING:
+	case TCP_STATE_LAST_ACK:
+	case TCP_STATE_TIME_WAIT:
+		state = NET_ENDPOINT_STATE_CLOSING;
+		break;
+	case TCP_STATE_CLOSED:
+	default:
+		state = NET_ENDPOINT_STATE_CLOSED;
+		break;
+	}
+
+	if (out_state) {
+		*out_state = state;
+	}
+	if (out_error) {
+		*out_error = (u32)ep->tcp_error;
+	}
+	ep->tcp_error = 0;
 	return (0);
 }
 

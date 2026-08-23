@@ -5,6 +5,7 @@ $define %type api_kmeminfo as struct with native kernel memory data
 $define %type api_fs_stat as struct with native file metadata
 $define %type api_net_addr as native IPv4 endpoint address
 $define %type api_net_iface as native interface snapshot
+$define %type api_net_state as native connection state snapshot
 $define %type api_net_msg as native network message descriptor
 $define %type api_reg_value as native registry value IO descriptor
 $define %type api_reg_entry as native registry enumeration entry
@@ -378,6 +379,15 @@ struct api_winsize {
 #define API_NET_CTL_GET_LOCAL	(API_NET_CTL_COMMON_BASE + 1)
 #define API_NET_CTL_GET_PEER	(API_NET_CTL_COMMON_BASE + 2)
 #define API_NET_CTL_GET_IFACE	(API_NET_CTL_COMMON_BASE + 3)
+#define API_NET_CTL_GET_STATE	(API_NET_CTL_COMMON_BASE + 4)
+
+/* Connection progress reported by API_NET_CTL_GET_STATE. */
+#define API_NET_STATE_CLOSED		0
+#define API_NET_STATE_LISTEN		1
+#define API_NET_STATE_CONNECTING	2
+#define API_NET_STATE_CONNECTED		3
+#define API_NET_STATE_PEER_CLOSED	4
+#define API_NET_STATE_CLOSING		5
 
 #define API_REG_OPEN_READ	API_OPEN_READ
 #define API_REG_OPEN_WRITE	API_OPEN_WRITE
@@ -1003,6 +1013,19 @@ struct api_net_msg {
 	struct api_net_addr	*addr;
 	uint32_t		length;
 	uint32_t		flags;
+};
+
+/*
+ * Filled by netCtl(fd, API_NET_CTL_GET_STATE, &st).  `error` is the pending
+ * errno latched on the socket and is cleared by the read, so a nonblocking
+ * connect can tell a completed handshake from a refused one - send() alone
+ * cannot, it fails either way.
+ */
+struct api_net_state {
+	uint32_t	state;
+	uint32_t	error;
+	uint32_t	readable;
+	uint32_t	writable;
 };
 
 struct api_reg_value {

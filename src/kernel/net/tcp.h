@@ -34,13 +34,16 @@ $define %type tcp_header_t as packed struct with TCP wire fields
 
 $define %func tcp_input as function with args net_iface_t *, u32, u32, const u8 *, u16
 $define %func tcp_output as function with args net_iface_t *, u32, u16, u16, u32, u32, u16, u16, const u8 *, u16
+$define %func tcp_output_opt as function with args net_iface_t *, u32, u16, u16, u32, u32, u16, u16, const u8 *, u16, const u8 *, u16
 $define %func tcp_checksum as function with args u32, u32, const u8 *, u16
+$define %func tcp_opt_get_mss as function with args const u8 *, u16, u16 *
 
 */
 
 /* !SPACE!
 
-$space %export tcp_input, tcp_output, tcp_checksum
+$space %export tcp_input, tcp_output, tcp_output_opt, tcp_checksum
+$space %export tcp_opt_get_mss
 
 */
 
@@ -52,6 +55,27 @@ $space %export tcp_input, tcp_output, tcp_checksum
 
 #define	TCP_HEADER_LEN		20
 #define	TCP_DATA_OFFSET_MIN	5
+
+/*
+ * Option area is capped at 40 bytes by the 4-bit data offset field
+ * (15 words * 4 - 20).  We only ever emit MSS + padding, but the input
+ * parser must tolerate anything a peer sends up to that ceiling.
+ */
+#define	TCP_OPT_MAX_LEN		40
+
+#define	TCP_OPT_END		0
+#define	TCP_OPT_NOP		1
+#define	TCP_OPT_MSS		2
+#define	TCP_OPT_MSS_LEN		4
+
+/*
+ * RFC 1122 4.2.2.6: a peer that sends no MSS option must be assumed to
+ * accept 536 bytes of payload.  Anything smaller than TCP_MSS_MIN is a
+ * broken announcement and is clamped, otherwise a hostile or buggy peer
+ * could force us into one-byte segments.
+ */
+#define	TCP_MSS_DEFAULT		536
+#define	TCP_MSS_MIN		88
 
 #define	TCP_FLAG_FIN		0x001
 #define	TCP_FLAG_SYN		0x002
@@ -75,7 +99,11 @@ int	tcp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
 int	tcp_output(net_iface_t *iface, u32 dst_ip, u16 src_port,
     u16 dst_port, u32 seq, u32 ack, u16 flags, u16 window,
     const u8 *data, u16 len);
+int	tcp_output_opt(net_iface_t *iface, u32 dst_ip, u16 src_port,
+    u16 dst_port, u32 seq, u32 ack, u16 flags, u16 window,
+    const u8 *opts, u16 opt_len, const u8 *data, u16 len);
 u16	tcp_checksum(u32 src_ip, u32 dst_ip, const u8 *segment,
     u16 len);
+int	tcp_opt_get_mss(const u8 *opts, u16 opt_len, u16 *out_mss);
 
 #endif

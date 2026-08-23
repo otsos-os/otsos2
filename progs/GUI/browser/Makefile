@@ -35,7 +35,7 @@ NATIVE_DYN_LDFLAGS = -m elf_x86_64 -pie --oformat=elf64-x86-64 \
                      --export-dynamic
 
 BIN = browser
-SRC = src/main.c src/net.c src/ui.c
+SRC = src/main.c src/net.c src/ui.c src/loader.c
 OBJ = $(SRC:src/%.c=build/%.o)
 
 .PHONY: all clean

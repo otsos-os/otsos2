@@ -45,12 +45,13 @@ $define %func net_endpoint_send as function with args net_endpoint_t *, const u8
 $define %func net_endpoint_recv as function with args net_endpoint_t *, u8 *, u32, net_endpoint_addr_t *, u32, u32 *
 $define %func net_endpoint_get_local as procedure with args net_endpoint_t *, net_endpoint_addr_t *
 $define %func net_endpoint_get_peer as function with args net_endpoint_t *, net_endpoint_addr_t *
+$define %func net_endpoint_get_state as function with args net_endpoint_t *, u32 *, u32 *
 $define %func net_endpoint_readable as function with args net_endpoint_t *
 $define %func net_endpoint_writable as function with args net_endpoint_t *
 $define %func net_endpoint_pending_bytes as function with args net_endpoint_t *
 $define %func net_endpoint_write_space as function with args net_endpoint_t *
 $define %func net_endpoint_udp_input as function with args net_iface_t *, u32, u32, u16, u16, const u8 *, u16
-$define %func net_endpoint_tcp_input as function with args net_iface_t *, u32, u32, u16, u16, u32, u32, u16, u16, const u8 *, u16
+$define %func net_endpoint_tcp_input as function with args net_iface_t *, u32, u32, u16, u16, u32, u32, u16, u16, const u8 *, u16, const u8 *, u16
 $define %func net_endpoint_tick as procedure with args void
 
 */
@@ -63,6 +64,7 @@ $space %export net_endpoint_bind, net_endpoint_connect
 $space %export net_endpoint_listen, net_endpoint_accept
 $space %export net_endpoint_send, net_endpoint_recv
 $space %export net_endpoint_get_local, net_endpoint_get_peer
+$space %export net_endpoint_get_state
 $space %export net_endpoint_readable, net_endpoint_writable
 $space %export net_endpoint_pending_bytes, net_endpoint_write_space
 $space %export net_endpoint_udp_input, net_endpoint_tcp_input
@@ -85,6 +87,19 @@ $space %export net_endpoint_tick
 #define	NET_ENDPOINT_MSG_NONBLOCK	0x00000001
 #define	NET_ENDPOINT_MSG_TRUNC		0x00000002
 #define	NET_ENDPOINT_IF_AUTO		(-1)
+
+/*
+ * Abstract connection state reported by net_endpoint_get_state().  Kept here
+ * rather than reusing the API_NET_STATE_* values so the net layer does not have
+ * to include api.h; api/net.c maps between them and must be updated in step
+ * with this list.
+ */
+#define	NET_ENDPOINT_STATE_CLOSED	0
+#define	NET_ENDPOINT_STATE_LISTEN	1
+#define	NET_ENDPOINT_STATE_CONNECTING	2
+#define	NET_ENDPOINT_STATE_CONNECTED	3
+#define	NET_ENDPOINT_STATE_PEER_CLOSED	4
+#define	NET_ENDPOINT_STATE_CLOSING	5
 
 typedef struct net_endpoint net_endpoint_t;
 
@@ -114,6 +129,8 @@ void	net_endpoint_get_local(net_endpoint_t *ep,
     net_endpoint_addr_t *addr);
 int	net_endpoint_get_peer(net_endpoint_t *ep,
     net_endpoint_addr_t *addr);
+int	net_endpoint_get_state(net_endpoint_t *ep, u32 *out_state,
+    u32 *out_error);
 int	net_endpoint_readable(net_endpoint_t *ep);
 int	net_endpoint_writable(net_endpoint_t *ep);
 u32	net_endpoint_pending_bytes(net_endpoint_t *ep);
@@ -122,7 +139,7 @@ int	net_endpoint_udp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
     u16 src_port, u16 dst_port, const u8 *data, u16 len);
 int	net_endpoint_tcp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
     u16 src_port, u16 dst_port, u32 seq, u32 ack, u16 flags,
-    u16 window, const u8 *data, u16 len);
+    u16 window, const u8 *opts, u16 opt_len, const u8 *data, u16 len);
 void	net_endpoint_tick(void);
 
 #endif

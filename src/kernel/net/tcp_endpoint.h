@@ -44,8 +44,10 @@ $define %func net_endpoint_tcp_pending_bytes as function with args net_endpoint_
 $define %func net_endpoint_tcp_write_space as function with args net_endpoint_t *
 $define %func net_endpoint_tcp_begin_close as function with args net_endpoint_t *
 $define %func net_endpoint_tcp_drop_children as procedure with args net_endpoint_t *
-$define %func net_endpoint_tcp_input as function with args net_iface_t *, u32, u32, u16, u16, u32, u32, u16, u16, const u8 *, u16
+$define %func net_endpoint_tcp_input as function with args net_iface_t *, u32, u32, u16, u16, u32, u32, u16, u16, const u8 *, u16, const u8 *, u16
 $define %func net_endpoint_tcp_tick as procedure with args void
+$define %func net_endpoint_tcp_alloc_buffers as function with args net_endpoint_t *
+$define %func net_endpoint_tcp_release as procedure with args net_endpoint_t *
 
 */
 
@@ -60,6 +62,7 @@ $space %export net_endpoint_tcp_write_space
 $space %export net_endpoint_tcp_begin_close
 $space %export net_endpoint_tcp_drop_children
 $space %export net_endpoint_tcp_input, net_endpoint_tcp_tick
+$space %export net_endpoint_tcp_alloc_buffers, net_endpoint_tcp_release
 
 */
 
@@ -87,7 +90,9 @@ int	net_endpoint_tcp_begin_close(net_endpoint_t *ep);
 void	net_endpoint_tcp_drop_children(net_endpoint_t *parent);
 int	net_endpoint_tcp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
     u16 src_port, u16 dst_port, u32 seq, u32 ack, u16 flags,
-    u16 window, const u8 *data, u16 len);
+    u16 window, const u8 *opts, u16 opt_len, const u8 *data, u16 len);
 void	net_endpoint_tcp_tick(void);
+int	net_endpoint_tcp_alloc_buffers(net_endpoint_t *ep);
+void	net_endpoint_tcp_release(net_endpoint_t *ep);
 
 #endif

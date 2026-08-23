@@ -34,6 +34,7 @@ $define %type int as 32 bit signed
 $define %type entity_id as 64 bit packed archetype/generation/index
 $define %type api_net_addr as native userspace network address
 $define %type api_net_iface as native userspace interface snapshot
+$define %type api_net_state as native userspace connection state snapshot
 $define %type api_net_msg as native userspace network message descriptor
 $define %type net_endpoint as native network endpoint state
 $define %type net_endpoint_addr as endpoint IPv4 address tuple
@@ -45,6 +46,8 @@ $define %func api_net_install_endpoint as function with args net_endpoint *
 $define %func api_net_from_user_addr as function with args api_net_addr *, addr
 $define %func api_net_to_user_addr as function with args api_net_addr *, addr
 $define %func api_net_iface_to_user as function with args api_net_iface *
+$define %func api_net_state_value as function with args u32
+$define %func api_net_state_to_user as function with args api_net_state *, net_endpoint *
 $define %func api_net_ctl_privileged as function with args int
 $define %func api_net_open as function with args int, int, u32
 $define %func api_net_bind as function with args int, api_net_addr *
@@ -62,6 +65,7 @@ $define %func api_net_ctl as function with args int, int, void *
 $space %internal api_net_get_endpoint, api_net_install_endpoint
 $space %internal api_net_from_user_addr, api_net_to_user_addr
 $space %internal api_net_iface_to_user, api_net_ctl_privileged
+$space %internal api_net_state_value, api_net_state_to_user
 $space %export api_net_open, api_net_bind, api_net_connect
 $space %export api_net_listen, api_net_accept
 $space %export api_net_send, api_net_recv, api_net_ctl
@@ -235,6 +239,65 @@ api_net_iface_to_user(struct api_net_iface *uiface)
 	}
 	memcpy(tmp.name, iface->name, sizeof(tmp.name) - 1);
 	memcpy(uiface, &tmp, sizeof(tmp));
+	return (0);
+}
+
+/*
+ * NET_ENDPOINT_STATE_* is the net layer's own enumeration; this is the only
+ * place that knows both.  A state the net layer grows but this table does not
+ * surfaces as CLOSED, which fails closed rather than reporting a connection
+ * that is not there.
+ */
+static u32
+api_net_state_value(u32 state)
+{
+	switch (state) {
+	case NET_ENDPOINT_STATE_LISTEN:
+		return (API_NET_STATE_LISTEN);
+	case NET_ENDPOINT_STATE_CONNECTING:
+		return (API_NET_STATE_CONNECTING);
+	case NET_ENDPOINT_STATE_CONNECTED:
+		return (API_NET_STATE_CONNECTED);
+	case NET_ENDPOINT_STATE_PEER_CLOSED:
+		return (API_NET_STATE_PEER_CLOSED);
+	case NET_ENDPOINT_STATE_CLOSING:
+		return (API_NET_STATE_CLOSING);
+	case NET_ENDPOINT_STATE_CLOSED:
+	default:
+		return (API_NET_STATE_CLOSED);
+	}
+}
+
+/*
+ * Snapshot of connection progress plus the latched error.  Filled into a local
+ * first and copied out once: net_endpoint_get_state clears the error as a side
+ * effect, so a fault partway through a field-by-field copy would lose it.
+ */
+static int
+api_net_state_to_user(struct api_net_state *ustate, net_endpoint_t *ep)
+{
+	struct api_net_state	tmp;
+	u32			state, error;
+	int			ret;
+
+	if (!ustate || !is_user_address(ustate, sizeof(*ustate)) ||
+	    !user_range_fault_in(ustate, sizeof(*ustate), 1)) {
+		return (-API_ERR_BAD_ADDR);
+	}
+
+	state = NET_ENDPOINT_STATE_CLOSED;
+	error = 0;
+	ret = net_endpoint_get_state(ep, &state, &error);
+	if (ret != 0) {
+		return (ret);
+	}
+
+	memset(&tmp, 0, sizeof(tmp));
+	tmp.state = api_net_state_value(state);
+	tmp.error = error;
+	tmp.readable = net_endpoint_readable(ep) ? 1u : 0u;
+	tmp.writable = net_endpoint_writable(ep) ? 1u : 0u;
+	memcpy(ustate, &tmp, sizeof(tmp));
 	return (0);
 }
 
@@ -472,6 +535,9 @@ api_net_ctl(int handle, int op, void *arg)
 		    (struct api_net_addr *)arg, &addr));
 	case API_NET_CTL_GET_IFACE:
 		return (api_net_iface_to_user((struct api_net_iface *)arg));
+	case API_NET_CTL_GET_STATE:
+		return (api_net_state_to_user(
+		    (struct api_net_state *)arg, ep));
 	default:
 		return (-API_ERR_NOT_SUPPORTED);
 	}

@@ -46,6 +46,12 @@ $define %func net_endpoint_tcp_send_pending as function with args net_endpoint_t
 $define %func net_endpoint_tcp_ack_tx as procedure with args net_endpoint_t *, u32
 $define %func net_endpoint_tcp_rx_push as function with args net_endpoint_t *, const u8 *, u16
 $define %func net_endpoint_tcp_rx_pop as function with args net_endpoint_t *, u8 *, u32
+$define %func net_endpoint_tcp_iface_mss as function with args net_iface_t *
+$define %func net_endpoint_tcp_note_window as procedure with args net_endpoint_t *
+$define %func net_endpoint_tcp_window_update as procedure with args net_endpoint_t *
+$define %func net_endpoint_tcp_ooo_store as function with args net_endpoint_t *, u32, const u8 *, u16
+$define %func net_endpoint_tcp_ooo_drain as function with args net_endpoint_t *
+$define %func net_endpoint_tcp_ooo_reset as procedure with args net_endpoint_t *
 $define %func net_endpoint_tcp_find as function with args net_iface_t *, u32, u32, u16, u16
 $define %func net_endpoint_tcp_find_listener as function with args net_iface_t *, u32, u16
 $define %func net_endpoint_tcp_child as function with args net_endpoint_t *, net_iface_t *, u32, u32, u16, u16, u32, u16
@@ -77,6 +83,10 @@ $space %internal net_endpoint_tcp_can_send, net_endpoint_tcp_window
 $space %internal net_endpoint_tcp_send, net_endpoint_tcp_send_ack
 $space %internal net_endpoint_tcp_send_pending, net_endpoint_tcp_ack_tx
 $space %internal net_endpoint_tcp_rx_push, net_endpoint_tcp_rx_pop
+$space %internal net_endpoint_tcp_iface_mss, net_endpoint_tcp_note_window
+$space %internal net_endpoint_tcp_window_update
+$space %internal net_endpoint_tcp_ooo_store, net_endpoint_tcp_ooo_drain
+$space %internal net_endpoint_tcp_ooo_reset
 $space %internal net_endpoint_tcp_find, net_endpoint_tcp_find_listener
 $space %internal net_endpoint_tcp_child, net_endpoint_tcp_queue_accept
 $space %internal net_endpoint_tcp_drop, net_endpoint_tcp_free
@@ -89,6 +99,7 @@ $space %export net_endpoint_tcp_write_space
 $space %export net_endpoint_tcp_begin_close
 $space %export net_endpoint_tcp_drop_children
 $space %export net_endpoint_tcp_input, net_endpoint_tcp_tick
+$space %export net_endpoint_tcp_alloc_buffers, net_endpoint_tcp_release
 
 */
 
@@ -99,6 +110,7 @@ $space %export net_endpoint_tcp_input, net_endpoint_tcp_tick
 #include <kernel/net/tcp.h>
 #include <kernel/net/tcp_endpoint.h>
 #include <mlibc/mlibc.h>
+#include <mm/kmem.h>
 
 static u32	g_tcp_next_isn = 0x10203040;
 
@@ -121,6 +133,96 @@ net_endpoint_tcp_ticks(void)
 		return (1);
 	}
 	return (timer_get_ticks());
+}
+
+int
+net_endpoint_tcp_alloc_buffers(net_endpoint_t *ep)
+{
+	u8	*buf;
+
+	if (!ep || ep->proto != NET_ENDPOINT_PROTO_TCP) {
+		return (0);
+	}
+	if (ep->tcp_rx) {
+		return (0);
+	}
+
+	buf = (u8 *)kmem_alloc(NET_ENDPOINT_TCP_RX_SIZE);
+	if (buf) {
+		ep->tcp_rx = buf;
+		ep->tcp_rx_size = NET_ENDPOINT_TCP_RX_SIZE;
+	} else {
+		/*
+		 * Degrade to a small window rather than refusing the
+		 * connection: a slow socket beats an unopenable one.
+		 */
+		buf = (u8 *)kmem_alloc(NET_ENDPOINT_TCP_RX_MIN);
+		if (!buf) {
+			return (-1);
+		}
+		ep->tcp_rx = buf;
+		ep->tcp_rx_size = NET_ENDPOINT_TCP_RX_MIN;
+	}
+
+	ep->tcp_rx_head = 0;
+	ep->tcp_rx_tail = 0;
+	ep->tcp_rx_count = 0;
+	ep->tcp_last_adv_win = 0;
+	return (0);
+}
+
+static void
+net_endpoint_tcp_ooo_reset(net_endpoint_t *ep)
+{
+	if (!ep || !ep->tcp_ooo) {
+		return;
+	}
+	memset(ep->tcp_ooo, 0, sizeof(*ep->tcp_ooo));
+}
+
+void
+net_endpoint_tcp_release(net_endpoint_t *ep)
+{
+	if (!ep) {
+		return;
+	}
+	/*
+	 * Must run before the endpoint slot is memset by net_endpoint_free,
+	 * otherwise both pointers are lost and the heap leaks per connection.
+	 */
+	if (ep->tcp_rx) {
+		kmem_free(ep->tcp_rx);
+		ep->tcp_rx = NULL;
+	}
+	if (ep->tcp_ooo) {
+		kmem_free(ep->tcp_ooo);
+		ep->tcp_ooo = NULL;
+	}
+	ep->tcp_rx_size = 0;
+	ep->tcp_rx_head = 0;
+	ep->tcp_rx_tail = 0;
+	ep->tcp_rx_count = 0;
+	ep->tcp_last_adv_win = 0;
+}
+
+static u16
+net_endpoint_tcp_iface_mss(net_iface_t *iface)
+{
+	u32	mtu;
+
+	/*
+	 * Announce what actually fits one un-fragmented frame: ipv4_input
+	 * drops fragments outright, so an over-large MSS would silently
+	 * black-hole every full segment.
+	 */
+	mtu = ETHERNET_MTU;
+	if (iface && iface->ndev && iface->ndev->mtu != 0) {
+		mtu = iface->ndev->mtu;
+	}
+	if (mtu <= sizeof(ipv4_header_t) + TCP_HEADER_LEN + TCP_MSS_MIN) {
+		return (TCP_MSS_MIN);
+	}
+	return ((u16)(mtu - sizeof(ipv4_header_t) - TCP_HEADER_LEN));
 }
 
 static void
@@ -163,11 +265,29 @@ net_endpoint_tcp_window(net_endpoint_t *ep)
 	if (!ep || ep->proto != NET_ENDPOINT_PROTO_TCP) {
 		return (0);
 	}
-	space = NET_ENDPOINT_TCP_RX_SIZE - ep->tcp_rx_count;
+	if (!ep->tcp_rx || ep->tcp_rx_size == 0) {
+		return (0);
+	}
+	space = ep->tcp_rx_size - ep->tcp_rx_count;
+	/* No window scaling yet, so the wire field saturates at 64K-1. */
 	if (space > 65535) {
 		space = 65535;
 	}
 	return ((u16)space);
+}
+
+/*
+ * Record what the segment we are about to emit advertises, so the reopen
+ * check in net_endpoint_tcp_window_update() can tell a shrinking window
+ * from one that has genuinely recovered.
+ */
+static void
+net_endpoint_tcp_note_window(net_endpoint_t *ep)
+{
+	if (!ep) {
+		return;
+	}
+	ep->tcp_last_adv_win = net_endpoint_tcp_window(ep);
 }
 
 static int
@@ -175,7 +295,9 @@ net_endpoint_tcp_send(net_endpoint_t *ep, u16 flags,
     const u8 *data, u16 len)
 {
 	net_iface_t	*iface;
-	int		ifindex;
+	u8		opts[TCP_OPT_MSS_LEN];
+	u16		opt_len, mss;
+	int		ifindex, ret;
 
 	if (!ep || ep->proto != NET_ENDPOINT_PROTO_TCP ||
 	    ep->peer_ip == 0 || ep->peer_port == 0) {
@@ -197,9 +319,29 @@ net_endpoint_tcp_send(net_endpoint_t *ep, u16 flags,
 		ep->ifindex = iface->index;
 	}
 
-	return (tcp_output(iface, ep->peer_ip, ep->local_port,
+	/*
+	 * MSS is only legal on SYN.  Without it the peer falls back to the
+	 * RFC 1122 default of 536 and sends ~3x the segments for the same
+	 * page, which multiplies every receive-window stall.
+	 */
+	opt_len = 0;
+	if (flags & TCP_FLAG_SYN) {
+		mss = net_endpoint_tcp_iface_mss(iface);
+		opts[0] = TCP_OPT_MSS;
+		opts[1] = TCP_OPT_MSS_LEN;
+		opts[2] = (u8)(mss >> 8);
+		opts[3] = (u8)(mss & 0xFF);
+		opt_len = TCP_OPT_MSS_LEN;
+	}
+
+	ret = tcp_output_opt(iface, ep->peer_ip, ep->local_port,
 	    ep->peer_port, ep->tcp_tx_seq, ep->tcp_rcv_nxt, flags,
-	    net_endpoint_tcp_window(ep), data, len));
+	    net_endpoint_tcp_window(ep), opt_len ? opts : NULL, opt_len,
+	    data, len);
+	if (ret == 0 || ret == NET_TX_PENDING) {
+		net_endpoint_tcp_note_window(ep);
+	}
+	return (ret);
 }
 
 static int
@@ -244,6 +386,58 @@ net_endpoint_tcp_send_ack(net_endpoint_t *ep)
 	ret = net_endpoint_tcp_send(ep, TCP_FLAG_ACK, NULL, 0);
 	ep->tcp_tx_seq = seq;
 	return (ret);
+}
+
+/*
+ * Announce a receive window that has reopened.
+ *
+ * This is the fix for the "large page hangs forever" failure: the ring is
+ * filled by the RX poll far faster than userspace drains it, so the window
+ * closes and the peer parks in persist.  Draining the ring alone puts
+ * nothing on the wire, so the peer only ever learns about the space again
+ * from its own zero-window probe, whose timer backs off exponentially.
+ *
+ * Hysteresis follows RFC 1122 4.2.3.3 (silly window avoidance): only speak
+ * up once the freed space is worth a segment or two, otherwise every small
+ * read would emit an ACK.
+ */
+static void
+net_endpoint_tcp_window_update(net_endpoint_t *ep)
+{
+	u32	win, threshold, mss;
+
+	if (!ep || ep->proto != NET_ENDPOINT_PROTO_TCP) {
+		return;
+	}
+	if (ep->tcp_state != TCP_STATE_ESTABLISHED &&
+	    ep->tcp_state != TCP_STATE_FIN_WAIT_1 &&
+	    ep->tcp_state != TCP_STATE_FIN_WAIT_2) {
+		return;
+	}
+
+	win = net_endpoint_tcp_window(ep);
+	if (win == 0 || win <= ep->tcp_last_adv_win) {
+		return;
+	}
+
+	mss = ep->tcp_peer_mss ? ep->tcp_peer_mss : TCP_MSS_DEFAULT;
+	threshold = 2 * mss;
+	if (threshold > ep->tcp_rx_size / 2) {
+		threshold = ep->tcp_rx_size / 2;
+	}
+	if (threshold == 0) {
+		threshold = 1;
+	}
+
+	/*
+	 * Send when the peer is effectively stalled (it believes the window
+	 * is closed or nearly so) and we now have real room.  The first
+	 * clause is what actually breaks the persist deadlock.
+	 */
+	if (ep->tcp_last_adv_win < mss || win - ep->tcp_last_adv_win >=
+	    threshold) {
+		net_endpoint_tcp_send_ack(ep);
+	}
 }
 
 int
@@ -366,12 +560,15 @@ net_endpoint_tcp_rx_push(net_endpoint_t *ep, const u8 *data, u16 len)
 	if (!ep || !data || len == 0) {
 		return (0);
 	}
-	space = NET_ENDPOINT_TCP_RX_SIZE - ep->tcp_rx_count;
+	if (!ep->tcp_rx || ep->tcp_rx_size == 0) {
+		return (0);
+	}
+	space = ep->tcp_rx_size - ep->tcp_rx_count;
 	if (len > space) {
 		return (0);
 	}
 
-	first = NET_ENDPOINT_TCP_RX_SIZE - ep->tcp_rx_tail;
+	first = ep->tcp_rx_size - ep->tcp_rx_tail;
 	if (first > len) {
 		first = len;
 	}
@@ -379,8 +576,7 @@ net_endpoint_tcp_rx_push(net_endpoint_t *ep, const u8 *data, u16 len)
 	if (len > first) {
 		memcpy(ep->tcp_rx, data + first, len - first);
 	}
-	ep->tcp_rx_tail = (ep->tcp_rx_tail + len) %
-	    NET_ENDPOINT_TCP_RX_SIZE;
+	ep->tcp_rx_tail = (ep->tcp_rx_tail + len) % ep->tcp_rx_size;
 	ep->tcp_rx_count += len;
 	proc_wakeup((void *)ep);
 	event_notify_net_change(ep);
@@ -395,12 +591,15 @@ net_endpoint_tcp_rx_pop(net_endpoint_t *ep, u8 *buf, u32 len)
 	if (!ep || !buf || len == 0 || ep->tcp_rx_count == 0) {
 		return (0);
 	}
+	if (!ep->tcp_rx || ep->tcp_rx_size == 0) {
+		return (0);
+	}
 	to_copy = ep->tcp_rx_count;
 	if (to_copy > len) {
 		to_copy = len;
 	}
 
-	first = NET_ENDPOINT_TCP_RX_SIZE - ep->tcp_rx_head;
+	first = ep->tcp_rx_size - ep->tcp_rx_head;
 	if (first > to_copy) {
 		first = to_copy;
 	}
@@ -408,11 +607,140 @@ net_endpoint_tcp_rx_pop(net_endpoint_t *ep, u8 *buf, u32 len)
 	if (to_copy > first) {
 		memcpy(buf + first, ep->tcp_rx, to_copy - first);
 	}
-	ep->tcp_rx_head = (ep->tcp_rx_head + to_copy) %
-	    NET_ENDPOINT_TCP_RX_SIZE;
+	ep->tcp_rx_head = (ep->tcp_rx_head + to_copy) % ep->tcp_rx_size;
 	ep->tcp_rx_count -= to_copy;
+	/*
+	 * Space just came free — tell the peer.  Without this the sender
+	 * never learns the window reopened and the transfer stalls.
+	 */
+	net_endpoint_tcp_window_update(ep);
 	event_notify_net_change(ep);
 	return ((int)to_copy);
+}
+
+/*
+ * Park a segment that arrived ahead of rcv_nxt.  Returns 1 when the
+ * segment is held, 0 when it was dropped (no room, too large, or a
+ * duplicate) — a dropped segment costs one peer retransmit, never
+ * corruption, because rcv_nxt is untouched either way.
+ */
+static int
+net_endpoint_tcp_ooo_store(net_endpoint_t *ep, u32 seq, const u8 *data,
+    u16 len)
+{
+	int	i, free_slot;
+
+	if (!ep || !data || len == 0 ||
+	    len > NET_ENDPOINT_TCP_OOO_SEG_SIZE) {
+		return (0);
+	}
+	/*
+	 * Refuse to hold more than the receive ring could ever absorb;
+	 * otherwise a peer streaming past a permanent hole would pin
+	 * memory indefinitely.
+	 */
+	if (ep->tcp_rx_size == 0 ||
+	    (u32)(seq - ep->tcp_rcv_nxt) >= ep->tcp_rx_size) {
+		return (0);
+	}
+
+	if (!ep->tcp_ooo) {
+		ep->tcp_ooo = (net_endpoint_tcp_ooo_t *)
+		    kmem_alloc(sizeof(*ep->tcp_ooo));
+		if (!ep->tcp_ooo) {
+			return (0);
+		}
+		memset(ep->tcp_ooo, 0, sizeof(*ep->tcp_ooo));
+	}
+
+	free_slot = -1;
+	for (i = 0; i < NET_ENDPOINT_TCP_OOO_SEGS; i++) {
+		if (!ep->tcp_ooo->seg[i].used) {
+			if (free_slot < 0) {
+				free_slot = i;
+			}
+			continue;
+		}
+		/* Already holding this range: keep the first copy. */
+		if (ep->tcp_ooo->seg[i].seq == seq &&
+		    ep->tcp_ooo->seg[i].len >= len) {
+			return (1);
+		}
+	}
+	if (free_slot < 0) {
+		return (0);
+	}
+
+	memcpy(ep->tcp_ooo->seg[free_slot].data, data, len);
+	ep->tcp_ooo->seg[free_slot].seq = seq;
+	ep->tcp_ooo->seg[free_slot].len = len;
+	ep->tcp_ooo->seg[free_slot].used = 1;
+	ep->tcp_ooo->count++;
+	return (1);
+}
+
+/*
+ * Feed held segments into the ring for as long as they are contiguous with
+ * rcv_nxt.  Returns the number of bytes handed over so the caller knows
+ * rcv_nxt moved.
+ */
+static u32
+net_endpoint_tcp_ooo_drain(net_endpoint_t *ep)
+{
+	net_endpoint_tcp_ooo_seg_t	*seg;
+	u32				advanced, skip, seq_off;
+	int				i, progress;
+
+	if (!ep || !ep->tcp_ooo || ep->tcp_ooo->count == 0) {
+		return (0);
+	}
+
+	advanced = 0;
+	do {
+		progress = 0;
+		for (i = 0; i < NET_ENDPOINT_TCP_OOO_SEGS; i++) {
+			seg = &ep->tcp_ooo->seg[i];
+			if (!seg->used) {
+				continue;
+			}
+			/* Fully below the window: stale duplicate. */
+			if (net_endpoint_seq_after_eq(ep->tcp_rcv_nxt,
+			    seg->seq + seg->len)) {
+				seg->used = 0;
+				ep->tcp_ooo->count--;
+				progress = 1;
+				continue;
+			}
+			if (net_endpoint_seq_after(seg->seq,
+			    ep->tcp_rcv_nxt)) {
+				continue;
+			}
+			/*
+			 * Overlaps rcv_nxt: drop the part already consumed
+			 * and push only what is new.
+			 */
+			seq_off = ep->tcp_rcv_nxt - seg->seq;
+			skip = seq_off;
+			if (skip >= seg->len) {
+				seg->used = 0;
+				ep->tcp_ooo->count--;
+				progress = 1;
+				continue;
+			}
+			if (!net_endpoint_tcp_rx_push(ep, seg->data + skip,
+			    (u16)(seg->len - skip))) {
+				/* Ring full — retry after userspace reads. */
+				continue;
+			}
+			ep->tcp_rcv_nxt += seg->len - skip;
+			advanced += seg->len - skip;
+			seg->used = 0;
+			ep->tcp_ooo->count--;
+			progress = 1;
+		}
+	} while (progress && ep->tcp_ooo->count > 0);
+
+	return (advanced);
 }
 
 static net_endpoint_t *
@@ -477,9 +805,10 @@ net_endpoint_tcp_find_listener(net_iface_t *iface, u32 dst_ip, u16 dst_port)
 static int
 net_endpoint_tcp_child(net_endpoint_t *listener, net_iface_t *iface,
     u32 src_ip, u32 dst_ip, u16 src_port, u16 dst_port, u32 seq,
-    u16 window)
+    u16 window, const u8 *opts, u16 opt_len)
 {
 	net_endpoint_t	*child;
+	u16		peer_mss;
 	int		i;
 
 	if (!listener || !iface ||
@@ -521,7 +850,21 @@ net_endpoint_tcp_child(net_endpoint_t *listener, net_iface_t *iface,
 	child->tcp_tx_seq = child->tcp_iss;
 	child->tcp_tx_flags = TCP_FLAG_SYN | TCP_FLAG_ACK;
 
+	peer_mss = TCP_MSS_DEFAULT;
+	(void)tcp_opt_get_mss(opts, opt_len, &peer_mss);
+	child->tcp_peer_mss = peer_mss;
+
+	/*
+	 * The ring must exist before the SYN-ACK goes out, because that
+	 * segment already carries our advertised window.
+	 */
+	if (net_endpoint_tcp_alloc_buffers(child) != 0) {
+		memset(child, 0, sizeof(*child));
+		return (-1);
+	}
+
 	if (net_endpoint_tcp_send_pending(child) != 0) {
+		net_endpoint_tcp_release(child);
 		memset(child, 0, sizeof(*child));
 		return (-1);
 	}
@@ -657,11 +1000,21 @@ net_endpoint_tcp_connect(net_endpoint_t *ep,
 		return (-API_ERR_BUSY);
 	}
 
+	/*
+	 * Allocate before the SYN: that segment advertises our window, and
+	 * a zero window in the handshake makes the peer open in persist.
+	 */
+	if (net_endpoint_tcp_alloc_buffers(ep) != 0) {
+		return (-API_ERR_NO_MEMORY);
+	}
+
 	ep->peer_ip = addr->ip;
 	ep->peer_port = addr->port;
 	ep->peer_ifindex = iface->index;
 	ep->tcp_state = TCP_STATE_SYN_SENT;
 	ep->tcp_error = 0;
+	/* Assume the RFC default until the peer's SYN-ACK says otherwise. */
+	ep->tcp_peer_mss = TCP_MSS_DEFAULT;
 	ep->tcp_iss = g_tcp_next_isn;
 	g_tcp_next_isn += 0x10101;
 	ep->tcp_snd_una = ep->tcp_iss;
@@ -817,6 +1170,24 @@ net_endpoint_tcp_send_user(net_endpoint_t *ep, const u8 *data,
 	if (to_send > NET_ENDPOINT_TCP_TX_SIZE) {
 		to_send = NET_ENDPOINT_TCP_TX_SIZE;
 	}
+	/*
+	 * Never exceed what the peer said it can reassemble; a segment over
+	 * its MSS invites fragmentation, and ipv4_input drops fragments.
+	 */
+	if (ep->tcp_peer_mss != 0 && to_send > ep->tcp_peer_mss) {
+		to_send = ep->tcp_peer_mss;
+	}
+	/*
+	 * Respect the peer's advertised window when it is open.  A zero
+	 * window is handled by falling through with a single segment, which
+	 * doubles as the zero-window probe the retransmit timer will repeat.
+	 */
+	if (ep->tcp_peer_win != 0 && to_send > ep->tcp_peer_win) {
+		to_send = ep->tcp_peer_win;
+	}
+	if (to_send == 0) {
+		to_send = 1;
+	}
 	memcpy(ep->tcp_tx, data, to_send);
 	ep->tcp_tx_seq = ep->tcp_snd_nxt;
 	ep->tcp_tx_len = to_send;
@@ -920,11 +1291,12 @@ net_endpoint_tcp_write_space(net_endpoint_t *ep)
 int
 net_endpoint_tcp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
     u16 src_port, u16 dst_port, u32 seq, u32 ack, u16 flags,
-    u16 window, const u8 *data, u16 len)
+    u16 window, const u8 *opts, u16 opt_len, const u8 *data, u16 len)
 {
 	net_endpoint_t	*ep;
 	net_endpoint_t	*listener;
-	u32		consume, end_seq;
+	u32		consume, seg_end;
+	u16		peer_mss;
 
 	ep = net_endpoint_tcp_find(iface, src_ip, dst_ip, src_port,
 	    dst_port);
@@ -935,7 +1307,7 @@ net_endpoint_tcp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
 		    !(flags & TCP_FLAG_RST)) {
 			return (net_endpoint_tcp_child(listener, iface,
 			    src_ip, dst_ip, src_port, dst_port, seq,
-			    window) == 0);
+			    window, opts, opt_len) == 0);
 		}
 		if (!(flags & TCP_FLAG_RST)) {
 			consume = len;
@@ -960,6 +1332,8 @@ net_endpoint_tcp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
 	if (flags & TCP_FLAG_RST) {
 		ep->tcp_error = API_ERR_IO;
 		net_endpoint_tcp_set_state(ep, TCP_STATE_CLOSED);
+		/* Held segments can never be delivered now. */
+		net_endpoint_tcp_ooo_reset(ep);
 		if (ep->tcp_orphan) {
 			net_endpoint_tcp_free(ep);
 			return (1);
@@ -975,6 +1349,14 @@ net_endpoint_tcp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
 		if ((flags & (TCP_FLAG_SYN | TCP_FLAG_ACK)) ==
 		    (TCP_FLAG_SYN | TCP_FLAG_ACK) &&
 		    ack == ep->tcp_snd_nxt) {
+			/*
+			 * MSS rides only on the SYN-ACK; miss it here and we
+			 * are stuck at the 536-byte default for the whole
+			 * connection.
+			 */
+			peer_mss = TCP_MSS_DEFAULT;
+			(void)tcp_opt_get_mss(opts, opt_len, &peer_mss);
+			ep->tcp_peer_mss = peer_mss;
 			ep->tcp_irs = seq;
 			ep->tcp_rcv_nxt = seq + 1;
 			ep->tcp_snd_una = ack;
@@ -1027,22 +1409,40 @@ net_endpoint_tcp_input(net_iface_t *iface, u32 src_ip, u32 dst_ip,
 		return (1);
 	}
 
-	end_seq = seq;
-	if (len != 0 && seq == ep->tcp_rcv_nxt) {
-		if (ep->tcp_orphan) {
-			ep->tcp_rcv_nxt += len;
-			end_seq = ep->tcp_rcv_nxt;
-		} else if (net_endpoint_tcp_rx_push(ep, data, len)) {
-			ep->tcp_rcv_nxt += len;
-			end_seq = ep->tcp_rcv_nxt;
-		}
-	}
 	if (len != 0) {
+		if (seq == ep->tcp_rcv_nxt) {
+			if (ep->tcp_orphan) {
+				/* No reader left; account for it and drop. */
+				ep->tcp_rcv_nxt += len;
+			} else if (net_endpoint_tcp_rx_push(ep, data, len)) {
+				ep->tcp_rcv_nxt += len;
+				/* This may have closed an earlier hole. */
+				(void)net_endpoint_tcp_ooo_drain(ep);
+			}
+		} else if (net_endpoint_seq_after(seq, ep->tcp_rcv_nxt) &&
+		    !ep->tcp_orphan) {
+			/*
+			 * Ahead of the window: hold it instead of dropping,
+			 * so one lost segment costs a fast retransmit rather
+			 * than the peer's whole RTO.
+			 */
+			(void)net_endpoint_tcp_ooo_store(ep, seq, data, len);
+		}
 		net_endpoint_tcp_send_ack(ep);
 	}
 
-	if ((flags & TCP_FLAG_FIN) && end_seq == ep->tcp_rcv_nxt) {
+	/*
+	 * Consume the FIN only when the byte after this segment is exactly
+	 * what we are waiting for.  The old test compared against a value
+	 * that still matched when rx_push had failed, so a FIN arriving on a
+	 * full ring advanced rcv_nxt past data the reader never got — the
+	 * peer saw it acknowledged and the stream was silently truncated.
+	 */
+	seg_end = seq + len;
+	if ((flags & TCP_FLAG_FIN) && seg_end == ep->tcp_rcv_nxt) {
 		ep->tcp_rcv_nxt++;
+		/* Anything still held would sit past the FIN: bogus. */
+		net_endpoint_tcp_ooo_reset(ep);
 		if (ep->tcp_state == TCP_STATE_ESTABLISHED) {
 			net_endpoint_tcp_set_state(ep, TCP_STATE_CLOSE_WAIT);
 		} else if (ep->tcp_state == TCP_STATE_FIN_WAIT_1) {

@@ -32,6 +32,8 @@ $define %type u64 as 64 bit unsigned
 $define %type int as 32 bit signed
 $define %type net_endpoint_t as native network endpoint state
 $define %type net_endpoint_rx_t as queued UDP datagram
+$define %type net_endpoint_tcp_ooo_seg_t as held out-of-order TCP segment
+$define %type net_endpoint_tcp_ooo_t as TCP reassembly holding area
 $define %type net_endpoint_addr_t as endpoint IPv4 address tuple
 $define %type net_iface_t as struct with logical network interface state
 
@@ -45,6 +47,7 @@ $define %func net_endpoint_free as procedure with args net_endpoint_t *
 /* !SPACE!
 
 $space %export net_endpoint_t, net_endpoint_rx_t
+$space %export net_endpoint_tcp_ooo_seg_t, net_endpoint_tcp_ooo_t
 $space %export net_endpoint_route
 $space %export net_endpoint_bind_conflict, net_endpoint_alloc_port
 $space %export net_endpoint_free
@@ -65,11 +68,31 @@ $space %export net_endpoint_free
 #define	NET_ENDPOINT_RX_QUEUE		8
 #define	NET_ENDPOINT_DGRAM_MAX		\
 	(ETHERNET_MTU - sizeof(ipv4_header_t) - UDP_HEADER_LEN)
-#define	NET_ENDPOINT_TCP_RX_SIZE		8192
+/*
+ * The receive ring is heap-allocated per connected TCP endpoint instead of
+ * living in the static endpoint pool: 32 endpoints * 32KB of BSS would be
+ * 1MB that UDP and listening sockets never touch.  NET_ENDPOINT_TCP_RX_MIN
+ * is the fallback when the heap cannot satisfy the preferred size — a small
+ * window is slow, an unopenable socket is broken.
+ *
+ * Window size directly bounds in-flight bytes: 8KB was small enough that a
+ * page like google.com's stalled on a zero window between every userspace
+ * read.  Raise this and the sender keeps the pipe full.
+ */
+#define	NET_ENDPOINT_TCP_RX_SIZE		(32 * 1024)
+#define	NET_ENDPOINT_TCP_RX_MIN			4096
 #define	NET_ENDPOINT_TCP_TX_SIZE		\
 	(ETHERNET_MTU - sizeof(ipv4_header_t) - TCP_HEADER_LEN)
 #define	NET_ENDPOINT_TCP_ACCEPT_QUEUE	8
 #define	NET_ENDPOINT_TCP_MAX_RETRIES	6
+
+/*
+ * Out-of-order segments used to be dropped outright, which turned every
+ * reorder or single loss into a peer-side RTO.  Hold a bounded number of
+ * them instead; the queue is allocated only once a hole actually appears.
+ */
+#define	NET_ENDPOINT_TCP_OOO_SEGS	8
+#define	NET_ENDPOINT_TCP_OOO_SEG_SIZE	NET_ENDPOINT_TCP_TX_SIZE
 #define	NET_ENDPOINT_EPHEMERAL_FIRST	49152
 #define	NET_ENDPOINT_EPHEMERAL_LAST	65535
 
@@ -95,10 +118,23 @@ typedef struct {
 	int	ifindex;
 } net_endpoint_rx_t;
 
+typedef struct {
+	u8	data[NET_ENDPOINT_TCP_OOO_SEG_SIZE];
+	u32	seq;
+	u16	len;
+	int	used;
+} net_endpoint_tcp_ooo_seg_t;
+
+typedef struct {
+	net_endpoint_tcp_ooo_seg_t	seg[NET_ENDPOINT_TCP_OOO_SEGS];
+	int				count;
+} net_endpoint_tcp_ooo_t;
+
 struct net_endpoint {
 	net_endpoint_rx_t	rx[NET_ENDPOINT_RX_QUEUE];
-	u8			tcp_rx[NET_ENDPOINT_TCP_RX_SIZE];
 	u8			tcp_tx[NET_ENDPOINT_TCP_TX_SIZE];
+	u8			*tcp_rx;
+	net_endpoint_tcp_ooo_t	*tcp_ooo;
 	int			tcp_accept_queue[NET_ENDPOINT_TCP_ACCEPT_QUEUE];
 	u64			tcp_last_tx;
 	u64			tcp_deadline;
@@ -111,9 +147,16 @@ struct net_endpoint {
 	u32			tcp_snd_nxt;
 	u32			tcp_rcv_nxt;
 	u32			tcp_peer_win;
+	u32			tcp_rx_size;
 	u32			tcp_rx_head;
 	u32			tcp_rx_tail;
 	u32			tcp_rx_count;
+	/*
+	 * Last window value put on the wire.  A window that reopens from
+	 * near zero has to be announced explicitly, otherwise the peer sits
+	 * in persist waiting for an update that never comes.
+	 */
+	u32			tcp_last_adv_win;
 	u32			tcp_tx_seq;
 	u32			tcp_tx_len;
 	u32			rx_head;
@@ -123,6 +166,7 @@ struct net_endpoint {
 	u32			rx_drops;
 	u16			local_port;
 	u16			peer_port;
+	u16			tcp_peer_mss;
 	u16			tcp_tx_flags;
 	u16			tcp_accept_head;
 	u16			tcp_accept_tail;

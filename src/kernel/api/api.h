@@ -314,12 +314,39 @@ struct api_kmeminfo {
 #define	API_NET_CTL_GET_LOCAL		(API_NET_CTL_COMMON_BASE + 1)
 #define	API_NET_CTL_GET_PEER		(API_NET_CTL_COMMON_BASE + 2)
 #define	API_NET_CTL_GET_IFACE		(API_NET_CTL_COMMON_BASE + 3)
+#define	API_NET_CTL_GET_STATE		(API_NET_CTL_COMMON_BASE + 4)
+
+/*
+ * Connection state, as reported by API_NET_CTL_GET_STATE.  Deliberately a
+ * small abstract set rather than the raw TCP state: userspace only needs to
+ * tell "still connecting" from "connected" from "dead", and datagram sockets
+ * have to answer the same question.
+ */
+#define	API_NET_STATE_CLOSED		0
+#define	API_NET_STATE_LISTEN		1
+#define	API_NET_STATE_CONNECTING	2
+#define	API_NET_STATE_CONNECTED		3
+#define	API_NET_STATE_PEER_CLOSED	4
+#define	API_NET_STATE_CLOSING		5
 
 struct api_net_addr {
 	u32	family;
 	u32	port;
 	u32	ip;
 	u32	ifindex;
+};
+
+/*
+ * The missing piece of nonblocking connect: without a pending-error readout a
+ * caller cannot tell a completed handshake from a refused one, because both
+ * leave send() failing.  `error` is the API_ERR_* value latched on the
+ * endpoint, cleared by this read, so it behaves like SO_ERROR.
+ */
+struct api_net_state {
+	u32	state;
+	u32	error;
+	u32	readable;
+	u32	writable;
 };
 
 struct api_net_iface {

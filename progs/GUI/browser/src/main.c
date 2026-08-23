@@ -131,6 +131,15 @@ main(int argc, char **argv, char **envp)
 	}
 
 	browser_ui_init(&st);
+	st.kq = eventKqueue();
+	if (st.kq < 0) {
+		termPrint("browser: cannot open kqueue\n");
+		libgDestroy(st.ui);
+		sprot_destroy_surface(st.surface);
+		sprot_disconnect(st.conn);
+		return (1);
+	}
+	browser_loader_init(&st.loader, st.kq);
 	browser_navigate(&st, start_url);
 	browser_draw(&st);
 
@@ -150,6 +159,12 @@ main(int argc, char **argv, char **envp)
 		}
 		burst = 0;
 
+		/*
+		 * Advance the in-flight load once per pass; it arms the
+		 * dirty flags itself whenever its status changes.
+		 */
+		browser_load_poll(&st);
+
 		if (st.dirty_flags != 0) {
 			browser_draw(&st);
 		}
@@ -163,6 +178,10 @@ main(int argc, char **argv, char **envp)
 	}
 	if (st.raw_html != NULL) {
 		free(st.raw_html);
+	}
+	browser_loader_reset(&st.loader);
+	if (st.kq >= 0) {
+		eventClose(st.kq);
 	}
 	if (st.ui != NULL) {
 		libgDestroy(st.ui);
