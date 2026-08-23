@@ -632,10 +632,12 @@ libgBegin(libg_context_t *ctx, uint32_t clear_color)
 	if (!ctx) {
 		return (LIBG_ERR_INVAL);
 	}
-	libg_frame_reset(ctx);
-	ret = libg_poll_input(ctx);
-	if (ret != LIBG_OK) {
-		return (ret);
+	ctx->hot_id = 0;
+	if (ctx->device != NULL) {
+		ret = libg_poll_input(ctx);
+		if (ret != LIBG_OK) {
+			return (ret);
+		}
 	}
 
 	rect.x = 0;
@@ -652,7 +654,7 @@ libgBeginOverlay(libg_context_t *ctx)
 	if (ctx == NULL || ctx->pixels == NULL) {
 		return (LIBG_ERR_INVAL);
 	}
-	libg_frame_reset(ctx);
+	ctx->hot_id = 0;
 	return (LIBG_OK);
 }
 
@@ -676,6 +678,9 @@ libgPresent(libg_context_t *ctx)
 		region_ptr = &region;
 	}
 	ctx->dirty_valid = 0;
+
+	/* Reset one-shot input impulses after widgets have processed the frame */
+	libg_frame_reset(ctx);
 
 	if (ctx->present != NULL) {
 		return (libg_from_srapi(ctx->present(ctx->present_userdata,

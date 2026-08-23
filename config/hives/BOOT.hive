@@ -105,6 +105,10 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 		string Dest = "/bin/term"
 	}
 
+	key Modules.browser {
+		string Dest = "/bin/browser"
+	}
+
 	key Modules.udp_echo {
 		string Dest = "/bin/udp_echo"
 	}
