@@ -39,6 +39,8 @@ int	vprintf(const char *fmt, va_list ap);
 int	vfprintf(FILE *stream, const char *fmt, va_list ap);
 int	snprintf(char *buf, size_t size, const char *fmt, ...);
 int	vsnprintf(char *buf, size_t size, const char *fmt, va_list ap);
+int	sscanf(const char *str, const char *fmt, ...);
+int	vsscanf(const char *str, const char *fmt, va_list ap);
 int	putchar(int c);
 int	puts(const char *s);
 FILE	*fopen(const char *path, const char *mode);
@@ -54,5 +56,7 @@ long	ftell(FILE *stream);
 int	feof(FILE *stream);
 int	ferror(FILE *stream);
 void	clearerr(FILE *stream);
+int	remove(const char *pathname);
+int	rename(const char *oldpath, const char *newpath);
 
 #endif

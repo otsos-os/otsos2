@@ -14,15 +14,23 @@ CPYTHON_BIN = cpython/cpython/python
 CPYTHON_DIR = cpython/cpython
 CPYTHON_SETUP = cpython/setup.sh
 CPYTHON_SETUP_LOCAL = cpython/Setup.local
+DOOM_BIN = doom/doom
+DOOM_DIR = doom
+DOOM_SETUP = doom/setup.sh
 LIBC_ENABLED ?= true
 CPYTHON_ENABLED ?= true
+DOOM_ENABLED ?= $(shell sh ../tools/toml_get.sh ../src/config.toml doom enabled true)
 
 ifeq ($(CPYTHON_ENABLED),false)
 CPYTHON_BIN =
 endif
 
+ifeq ($(DOOM_ENABLED),false)
+DOOM_BIN =
+endif
+
 ifeq ($(LIBC_ENABLED),true)
-ALL_TARGETS = $(LUA_BIN) $(CPYTHON_BIN) $(LDSO_BIN)
+ALL_TARGETS = $(LUA_BIN) $(CPYTHON_BIN) $(DOOM_BIN) $(LDSO_BIN)
 else
 ALL_TARGETS =
 endif
@@ -60,9 +68,21 @@ $(CPYTHON_BIN): $(MUSL_SCRT1) $(MUSL_LDSO) $(CPYTHON_SETUP) \
 	@$(MAKE) -C $(CPYTHON_DIR)
 endif
 
+.PHONY: doom
+doom: $(DOOM_BIN)
+
+ifneq ($(DOOM_BIN),)
+$(DOOM_BIN): $(MUSL_SCRT1) $(MUSL_LDSO) $(DOOM_SETUP)
+	@echo "  SETUP   ports/doom"
+	@$(SHELL) $(DOOM_SETUP)
+	@echo "  MAKE    ports/doom"
+	@$(MAKE) -C $(DOOM_DIR)
+endif
+
 clean:
 	rm -f $(LDSO_BIN)
 	$(MAKE) -C $(LUA_DIR) clean
 	-$(MAKE) -C $(CPYTHON_DIR) clean 2>/dev/null || true
+	-$(MAKE) -C $(DOOM_DIR) clean 2>/dev/null || true
 
-.PHONY: all clean lua cpython
+.PHONY: all clean lua cpython doom

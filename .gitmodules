@@ -6,3 +6,8 @@
 	path = ports/cpython/cpython
 	url = https://github.com/python/cpython.git
 	branch = 3.14
+
+[submodule "ports/doom/doomgeneric"]
+	path = ports/doom/doomgeneric
+	url = https://github.com/ozkl/doomgeneric.git
+

@@ -10,12 +10,14 @@ $define %func memcpy as function with args void *, const void *, size_t
 
 $space %export strlen, strnlen, strcmp, strncmp, strcpy, strncpy
 $space %export strcat, strchr, strrchr, strstr, memcpy, memmove, memset
-$space %export memcmp
+$space %export memcmp, strdup, strndup, strcasecmp, strncasecmp
 
 */
 
 #include <stddef.h>
 #include <string.h>
+#include <stdlib.h>
+#include <ctype.h>
 
 size_t
 strlen(const char *s)
@@ -224,3 +226,57 @@ memcmp(const void *a, const void *b, size_t n)
 	}
 	return (0);
 }
+
+char *
+strdup(const char *s)
+{
+	size_t	len;
+	char	*p;
+
+	len = strlen(s) + 1;
+	p = (char *)malloc(len);
+	if (p != NULL) {
+		memcpy(p, s, len);
+	}
+	return (p);
+}
+
+char *
+strndup(const char *s, size_t n)
+{
+	size_t	len;
+	char	*p;
+
+	len = strnlen(s, n);
+	p = (char *)malloc(len + 1);
+	if (p != NULL) {
+		memcpy(p, s, len);
+		p[len] = '\0';
+	}
+	return (p);
+}
+
+int
+strcasecmp(const char *a, const char *b)
+{
+	while (*a != '\0' && tolower((unsigned char)*a) == tolower((unsigned char)*b)) {
+		a++;
+		b++;
+	}
+	return (tolower((unsigned char)*a) - tolower((unsigned char)*b));
+}
+
+int
+strncasecmp(const char *a, const char *b, size_t n)
+{
+	while (n > 0 && *a != '\0' && tolower((unsigned char)*a) == tolower((unsigned char)*b)) {
+		a++;
+		b++;
+		n--;
+	}
+	if (n == 0) {
+		return (0);
+	}
+	return (tolower((unsigned char)*a) - tolower((unsigned char)*b));
+}
+

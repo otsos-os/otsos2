@@ -28,9 +28,18 @@ void	free(void *ptr);
 void	*calloc(size_t nmemb, size_t size);
 void	*realloc(void *ptr, size_t size);
 int	atoi(const char *s);
+double	atof(const char *nptr);
 long	strtol(const char *s, char **endptr, int base);
 unsigned long strtoul(const char *s, char **endptr, int base);
+double	strtod(const char *nptr, char **endptr);
 char	*getenv(const char *name);
+int	abs(int j);
+long	labs(long j);
+int	rand(void);
+void	srand(unsigned int seed);
+void	qsort(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *));
+int	system(const char *command);
+int	atexit(void (*function)(void));
 void	exit(int code) __attribute__((noreturn));
 void	abort(void) __attribute__((noreturn));
 

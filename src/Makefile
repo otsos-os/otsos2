@@ -61,6 +61,8 @@ LUA_BIN = $(PORTS_DIR)/lua/lua/lua
 CPYTHON_DIR = $(PORTS_DIR)/cpython/cpython
 CPYTHON_BIN = $(PORTS_DIR)/cpython/cpython/python
 CPYTHON_STDLIB_ZIP = ../bin/python314.zip
+DOOM_BIN = $(PORTS_DIR)/doom/doom
+DOOM_WAD = $(PORTS_DIR)/doom/doom1.wad
 MUSL_LDSO = $(MUSL_DIR)/lib/libc.so
 LDSO_BIN = $(PORTS_DIR)/ld-musl-x86_64.so.1
 NATIVE_LIBC = $(NATIVE_DIR)/lib/libc.a
@@ -83,6 +85,7 @@ KOFO_MODULE_CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fno-pic \
 HIVE_SOURCES := $(sort $(wildcard ../config/hives/*.hive))
 LIBC_ENABLED := $(shell sh ../tools/toml_get.sh config.toml libc enabled true)
 MULTIBOOT_MODULES := $(shell $(PYTHON) ../tools/hivec.py --list-boot-modules $(BOOT_HIVE))
+DOOM_ENABLED := $(shell sh ../tools/toml_get.sh config.toml doom enabled true)
 CPYTHON_ENABLED := $(if $(filter python,$(MULTIBOOT_MODULES)),true,false)
 DRLD_ENABLED := $(if $(filter drld,$(MULTIBOOT_MODULES)),true,false)
 NATIVE_SO_ENABLED := $(if $(filter native-so,$(MULTIBOOT_MODULES)),true,false)
@@ -90,6 +93,10 @@ YABOX_MODULES := $(filter $(YABOX_TOOLS),$(MULTIBOOT_MODULES))
 YABOX_BINS := $(YABOX_MODULES:%=$(YABOX_DIR)/%)
 ifeq ($(CPYTHON_ENABLED),false)
 CPYTHON_BIN =
+endif
+ifeq ($(DOOM_ENABLED),false)
+DOOM_BIN =
+DOOM_WAD =
 endif
 
 BIOS_BUILD_DIR = ../bin/bootloader/bios
@@ -158,6 +165,11 @@ ifeq ($(NATIVE_SO_ENABLED),true)
 ISO_NATIVE_SO_DEP = $(NATIVE_SO)
 else
 ISO_NATIVE_SO_DEP =
+endif
+ifeq ($(DOOM_ENABLED),true)
+ISO_DOOM_DEP = $(DOOM_BIN) $(DOOM_WAD)
+else
+ISO_DOOM_DEP =
 endif
 
 # object files
@@ -624,6 +636,14 @@ $(CPYTHON_BIN): $(LIBC_DEPS)
 	@$(MAKE) -C $(PORTS_DIR) cpython LIBC_ENABLED=$(LIBC_ENABLED) CPYTHON_ENABLED=$(CPYTHON_ENABLED)
 endif
 
+ifneq ($(DOOM_BIN),)
+.PHONY: $(DOOM_BIN) $(DOOM_WAD)
+$(DOOM_BIN) $(DOOM_WAD): $(LIBC_DEPS)
+	@echo "  MAKE    ports/doom"
+	@$(MAKE) -C $(PORTS_DIR) doom LIBC_ENABLED=$(LIBC_ENABLED) DOOM_ENABLED=$(DOOM_ENABLED)
+endif
+
+
 $(CPYTHON_STDLIB_ZIP): $(CPYTHON_BIN) Makefile
 	@echo "  ZIP     python stdlib"
 	@mkdir -p $(dir $@)
@@ -737,7 +757,7 @@ $(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BU
 		exit 1; \
 	fi
 
-$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(REGEDIT_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SWM_BIN) $(DE_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(HELLO_DRIVER_KOFO) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
+$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(REGEDIT_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SWM_BIN) $(DE_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(HELLO_DRIVER_KOFO) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_DOOM_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
 	@rm -rf $(BIOS_PAYLOAD_DIR)
 	@mkdir -p $(BIOS_PAYLOAD_DIR)
 	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
@@ -772,6 +792,8 @@ $(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $
 			lua) src=$(LUA_BIN);; \
 			python) src=$(CPYTHON_BIN);; \
 			python-stdlib) src=$(CPYTHON_STDLIB_ZIP);; \
+			doom) src=$(DOOM_BIN);; \
+			doom-wad) src=$(DOOM_WAD);; \
 			ld-musl) src=$(LDSO_BIN);; \
 			drld) src=$(DLD_BIN);; \
 			native-so) src=$(NATIVE_SO);; \

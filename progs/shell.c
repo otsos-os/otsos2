@@ -1230,11 +1230,22 @@ main(int argc, char **argv, char **envp)
 	char	*pargv[MAX_ARGS];
 	int	i, len, pargc, rc;
 
-	(void)argc;
-	(void)argv;
-
 	personality(0);
 	g_envp = envp;
+
+	if (argc >= 3 && strcmp(argv[1], "-c") == 0) {
+		strncpy(line, argv[2], sizeof(line) - 1);
+		line[sizeof(line) - 1] = '\0';
+		for (i = 0; i < MAX_ARGS; i++) {
+			pargv[i] = NULL;
+		}
+		pargc = parse_line(line, pargv, MAX_ARGS);
+		if (pargc > 0) {
+			rc = exec_line(pargc, pargv);
+			return (rc);
+		}
+		return (0);
+	}
 
 	println("otsos2 shell (sh) - type 'help' for commands");
 

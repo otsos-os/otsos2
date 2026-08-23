@@ -176,4 +176,13 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 	key Modules.hello-driver {
 		string Dest = "/lib/modules/hello-driver.kofo"
 	}
+
+	key Modules.doom {
+		string Dest = "/bin/doom"
+	}
+
+	key Modules.doom-wad {
+		string Dest = "/usr/share/games/doom/doom1.wad"
+	}
 }
+

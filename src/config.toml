@@ -28,3 +28,7 @@ enabled = true
 
 [kshell.commands.exit]
 enabled = true
+
+[doom]
+enabled = true
+
