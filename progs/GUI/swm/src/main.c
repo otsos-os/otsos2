@@ -176,16 +176,18 @@ swm_deliver_frames(swm_state_t *swm)
 	struct swm_frame_delivery result;
 	sprot_body_frame_t body;
 	swm_surface_t *surface;
+	uint32_t now;
 	uint32_t i;
 
 	memset(&result, 0, sizeof(result));
+	now = swm_now_ms(swm);
 	for (i = 0; i < SWM_MAX_SURFACES; i++) {
 		surface = &swm->surfaces[i];
 		if (!surface->in_use || !surface->wants_frame ||
 		    surface->owner == NULL) {
 			continue;
 		}
-		body.time_ms = swm_now_ms(swm);
+		body.time_ms = now;
 		body.serial = (uint32_t)swm->frame_count;
 		if (swm_protocol_send_event_nb(swm, surface->owner->peer,
 		    SPROT_EVT_SURFACE_FRAME, surface->id, body.serial, &body,

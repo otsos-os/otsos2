@@ -29,37 +29,27 @@
 $define %type api_key_event as native keyboard event
 $define %type rt_state as regedit tui global state
 
-$define %func rt_usage as procedure with args void
 $define %func rt_start_path as function with args rt_state *, const char *
 $define %func rt_run as procedure with args rt_state *
-$define %func main as start with args int, char **, char **
+$define %func rt_main as function with args const char *
 
 */
 
 /* !SPACE!
 
-$space %internal rt_usage, rt_start_path, rt_run
-$space %export main
+$space %internal rt_start_path, rt_run
+$space %export rt_main
 
 */
 
 #include <errno.h>
 #include <native.h>
+#include <regedit/frontend.h>
 #include <regedit/regedit.h>
-#include <stdio.h>
 #include <string.h>
 #include "tui.h"
 
 static rt_state_t	rt_state;
-
-static void
-rt_usage(void)
-{
-	printf("usage: regedit [tui] [hive[.key]]\n");
-	printf("       regedit -h\n");
-	printf("modes: tui (default). gui is not built yet.\n");
-	printf("path separators: '.', '/' and '\\\\' are accepted.\n");
-}
 
 static int
 rt_start_path(rt_state_t *st, const char *text)
@@ -103,42 +93,13 @@ rt_run(rt_state_t *st)
 }
 
 int
-main(int argc, char **argv, char **envp)
+rt_main(const char *path)
 {
-	const char	*path;
-	int		i;
-
-	(void)envp;
-	path = NULL;
-	for (i = 1; i < argc; i++) {
-		if (!argv[i]) {
-			continue;
-		}
-		if (strcmp(argv[i], "-h") == 0 ||
-		    strcmp(argv[i], "--help") == 0) {
-			rt_usage();
-			return (0);
-		}
-		if (strcmp(argv[i], "gui") == 0) {
-			fprintf(stderr, "regedit: gui frontend is not "
-			    "built; only tui is available\n");
-			return (1);
-		}
-		if (strcmp(argv[i], "tui") == 0) {
-			continue;
-		}
-		if (path) {
-			rt_usage();
-			return (1);
-		}
-		path = argv[i];
-	}
-
 	memset(&rt_state, 0, sizeof(rt_state));
 	rt_state.rows = RT_ROWS_MIN;
 	rt_state.cols = RT_COLS_MIN;
 	inputFlush();
 	(void)rt_start_path(&rt_state, path);
 	rt_run(&rt_state);
-	return (0);
+	return (RG_OK);
 }

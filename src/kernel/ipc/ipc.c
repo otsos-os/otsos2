@@ -248,40 +248,48 @@ static int
 ipc_queue_pop(ipc_endpoint_t *endpoint, ipc_message_t *message,
     u64 reply_to, u32 flags)
 {
-	ipc_message_t	found_message;
-	ipc_message_t	tmp[IPC_QUEUE_MESSAGES];
-	u32		count, i, keep;
-	int		found, nonblock;
+	u32	count, i, slot, next;
+	int	found, nonblock;
 
 	nonblock = (flags & IPC_MSG_NONBLOCK) != 0 ||
 	    (endpoint->flags & IPC_OPEN_NONBLOCK) != 0;
 	for (;;) {
 		found = 0;
-		keep = 0;
 		count = endpoint->queue_count;
 		for (i = 0; i < count; i++) {
-			*message = endpoint->queue[endpoint->queue_head];
-			endpoint->queue_head = (endpoint->queue_head + 1) %
-			    IPC_QUEUE_MESSAGES;
-			endpoint->queue_count--;
-			endpoint->queue_bytes -= message->length;
-			if (!found && (reply_to == 0 ||
-			    message->reply_to == reply_to)) {
-				found_message = *message;
-				found = 1;
+			slot = (endpoint->queue_head + i) % IPC_QUEUE_MESSAGES;
+			if (reply_to != 0 &&
+			    endpoint->queue[slot].reply_to != reply_to) {
 				continue;
 			}
-			tmp[keep++] = *message;
-		}
-		for (i = 0; i < keep; i++) {
-			endpoint->queue[endpoint->queue_tail] = tmp[i];
-			endpoint->queue_tail = (endpoint->queue_tail + 1) %
-			    IPC_QUEUE_MESSAGES;
-			endpoint->queue_count++;
-			endpoint->queue_bytes += tmp[i].length;
+			*message = endpoint->queue[slot];
+			found = 1;
+			break;
 		}
 		if (found) {
-			*message = found_message;
+			if (i == 0) {
+				endpoint->queue_head =
+				    (endpoint->queue_head + 1) %
+				    IPC_QUEUE_MESSAGES;
+			} else {
+				for (; i + 1 < count; i++) {
+					slot = (endpoint->queue_head + i) %
+					    IPC_QUEUE_MESSAGES;
+					next = (slot + 1) %
+					    IPC_QUEUE_MESSAGES;
+					endpoint->queue[slot] =
+					    endpoint->queue[next];
+				}
+				endpoint->queue_tail = (endpoint->queue_tail +
+				    IPC_QUEUE_MESSAGES - 1) %
+				    IPC_QUEUE_MESSAGES;
+			}
+			endpoint->queue_count--;
+			if (endpoint->queue_bytes >= message->length) {
+				endpoint->queue_bytes -= message->length;
+			} else {
+				endpoint->queue_bytes = 0;
+			}
 			proc_wakeup(endpoint);
 			event_notify_ipc_change(endpoint);
 			return (0);

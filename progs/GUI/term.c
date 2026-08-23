@@ -191,6 +191,10 @@ struct terminal_app {
 	int			cursor_visible;
 	int			cursor_blink_state;
 	uint64_t		last_blink_time;
+	int			cursor_only;
+	int			prev_cursor_x;
+	int			prev_cursor_y;
+	int			prev_cursor_drawn;
 	uint32_t		cur_fg;
 	uint32_t		cur_bg;
 	uint8_t			cur_flags;
@@ -616,6 +620,7 @@ term_process_output(struct terminal_app *app, const char *buf, size_t len)
 	for (i = 0; i < len; i++) {
 		term_process_byte(app, (unsigned char)buf[i]);
 	}
+	app->cursor_only = 0;
 	app->dirty = 1;
 }
 
@@ -776,14 +781,97 @@ term_translate_key(uint32_t key, uint32_t mods, char *out, size_t max_len)
 }
 
 static void
+term_draw_cell(struct terminal_app *app, uint32_t r, uint32_t c)
+{
+	struct term_cell	*cell;
+	libg_rect_t		rect;
+	char			str[2];
+	uint32_t		fg, bg;
+	int32_t			px, py;
+
+	if (r >= app->rows || c >= app->cols) {
+		return;
+	}
+	cell = &app->cells[r][c];
+	px = (int32_t)(TERM_PAD_X + c * TERM_CELL_W);
+	py = (int32_t)(TERM_PAD_Y + r * TERM_CELL_H);
+
+	fg = cell->fg;
+	bg = cell->bg;
+	if ((cell->flags & TERM_FLAG_INVERSE) != 0) {
+		fg = cell->bg;
+		bg = cell->fg;
+	}
+
+	rect.x = px;
+	rect.y = py;
+	rect.width = TERM_CELL_W;
+	rect.height = TERM_CELL_H;
+	libgFillRect(app->ui, rect, bg);
+
+	if (cell->ch > ' ' && cell->ch < 127) {
+		str[0] = (char)cell->ch;
+		str[1] = '\0';
+		libgText(app->ui, px + 1, py + 4, str, fg);
+	}
+	if ((cell->flags & TERM_FLAG_UNDERLINE) != 0) {
+		libgLine(app->ui, px, py + TERM_CELL_H - 2,
+		    px + TERM_CELL_W - 1, py + TERM_CELL_H - 2, fg);
+	}
+}
+
+static void
+term_draw_cursor(struct terminal_app *app)
+{
+	libg_rect_t	cursor_rect;
+	libg_rect_t	bar;
+
+	if (!app->cursor_visible || !app->cursor_blink_state ||
+	    app->cursor_y < 0 || app->cursor_y >= (int)app->rows ||
+	    app->cursor_x < 0 || app->cursor_x >= (int)app->cols) {
+		return;
+	}
+	cursor_rect.x = (int32_t)(TERM_PAD_X + app->cursor_x * TERM_CELL_W);
+	cursor_rect.y = (int32_t)(TERM_PAD_Y + app->cursor_y * TERM_CELL_H);
+	cursor_rect.width = TERM_CELL_W;
+	cursor_rect.height = TERM_CELL_H;
+
+	if (app->focused) {
+		bar.x = cursor_rect.x;
+		bar.y = cursor_rect.y + TERM_CELL_H - 3;
+		bar.width = TERM_CELL_W;
+		bar.height = 2;
+		libgFillRect(app->ui, bar, app->default_fg);
+	} else {
+		libgStrokeRect(app->ui, cursor_rect, app->palette[8]);
+	}
+}
+
+static void
 term_render(struct terminal_app *app)
 {
 	char			str[2];
-	libg_rect_t		rect, cursor_rect;
+	libg_rect_t		rect;
 	struct term_cell	*cell;
 	uint32_t		fg, bg;
 	int32_t			px, py;
 	uint32_t		r, c;
+
+	if (app->cursor_only) {
+		app->cursor_only = 0;
+		if (app->prev_cursor_drawn) {
+			term_draw_cell(app, (uint32_t)app->prev_cursor_y,
+			    (uint32_t)app->prev_cursor_x);
+		}
+		term_draw_cell(app, (uint32_t)app->cursor_y,
+		    (uint32_t)app->cursor_x);
+		term_draw_cursor(app);
+		app->prev_cursor_x = app->cursor_x;
+		app->prev_cursor_y = app->cursor_y;
+		app->prev_cursor_drawn = 1;
+		(void)libgPresent(app->ui);
+		return;
+	}
 
 	rect.x = 0;
 	rect.y = 0;
@@ -826,26 +914,10 @@ term_render(struct terminal_app *app)
 		}
 	}
 
-	if (app->cursor_visible && app->cursor_blink_state &&
-	    app->cursor_y >= 0 && app->cursor_y < (int)app->rows &&
-	    app->cursor_x >= 0 && app->cursor_x < (int)app->cols) {
-		cursor_rect.x = (int32_t)(TERM_PAD_X +
-		    app->cursor_x * TERM_CELL_W);
-		cursor_rect.y = (int32_t)(TERM_PAD_Y +
-		    app->cursor_y * TERM_CELL_H);
-		cursor_rect.width = TERM_CELL_W;
-		cursor_rect.height = TERM_CELL_H;
-
-		if (app->focused) {
-			libgFillRect(app->ui, (libg_rect_t){
-			    cursor_rect.x,
-			    cursor_rect.y + TERM_CELL_H - 3,
-			    TERM_CELL_W, 2 }, app->default_fg);
-		} else {
-			libgStrokeRect(app->ui, cursor_rect,
-			    app->palette[8]);
-		}
-	}
+	term_draw_cursor(app);
+	app->prev_cursor_x = app->cursor_x;
+	app->prev_cursor_y = app->cursor_y;
+	app->prev_cursor_drawn = 1;
 
 	(void)libgPresent(app->ui);
 }
@@ -907,6 +979,8 @@ term_resize(struct terminal_app *app, uint32_t width, uint32_t height)
 		(void)entityIoctl(app->master_fd, API_TIOCSWINSZ, &ws);
 	}
 	term_clear_screen(app, 2);
+	app->cursor_only = 0;
+	app->prev_cursor_drawn = 0;
 	app->dirty = 1;
 }
 
@@ -931,6 +1005,7 @@ term_handle_event(struct terminal_app *app, const sprot_event_t *event)
 			term_resize(app, event->u.configure.width,
 			    event->u.configure.height);
 		}
+		app->cursor_only = 0;
 		app->dirty = 1;
 		return (1);
 	}
@@ -1089,6 +1164,9 @@ main(void)
 			if (now_ms - app.last_blink_time >= TERM_BLINK_INTERVAL) {
 				app.cursor_blink_state = !app.cursor_blink_state;
 				app.last_blink_time = now_ms;
+				if (!app.dirty) {
+					app.cursor_only = 1;
+				}
 				app.dirty = 1;
 			}
 		}
