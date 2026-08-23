@@ -1706,8 +1706,18 @@ terminal_read_idx(int idx, void *buf, u32 count, int nonblock, u32 flags)
 	} else {
 		while (n < (int)count) {
 			terminal_pump_keyboard(flags);
-			if (terminal_input_get(idx, &c) == 0) {
-				out[n++] = c;
+			if (term->input_count > 0) {
+				int chunk = 1024 - term->input_tail;
+				if (chunk > term->input_count) {
+					chunk = term->input_count;
+				}
+				if (chunk > (int)count - n) {
+					chunk = (int)count - n;
+				}
+				memcpy(out + n, term->input_buf + term->input_tail, (size_t)chunk);
+				term->input_tail = (term->input_tail + chunk) % 1024;
+				term->input_count -= chunk;
+				n += chunk;
 			} else if (nonblock) {
 				if (n == 0) {
 					ret = -POSIX_EAGAIN;

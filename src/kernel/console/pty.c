@@ -489,8 +489,7 @@ pty_master_read(vnode_t *vn, void *buf, u32 count, int nonblock)
 	struct process	*proc;
 	pty_pair_t	*p;
 	char		*out;
-	char		 c;
-	int		 n;
+	int		 n, chunk;
 
 	p = (pty_pair_t *)vn->data;
 	if (!p || p->id == 0) {
@@ -499,8 +498,20 @@ pty_master_read(vnode_t *vn, void *buf, u32 count, int nonblock)
 	out = (char *)buf;
 	n = 0;
 	while (n < (int)count) {
-		if (pty_to_master_get(p, &c) == 0) {
-			out[n++] = c;
+		if (p->to_master_count > 0) {
+			chunk = PTY_BUF_SIZE - p->to_master_tail;
+			if (chunk > p->to_master_count) {
+				chunk = p->to_master_count;
+			}
+			if (chunk > (int)count - n) {
+				chunk = (int)count - n;
+			}
+			memcpy(out + n, p->to_master + p->to_master_tail, (size_t)chunk);
+			p->to_master_tail = (p->to_master_tail + chunk) % PTY_BUF_SIZE;
+			p->to_master_count -= chunk;
+			n += chunk;
+			proc_wakeup(&p->to_master_count);
+			posix_poll_notify();
 		} else if (!p->open_slave && p->to_master_count == 0) {
 			break;
 		} else if (n > 0 || nonblock) {
@@ -705,7 +716,7 @@ pty_slave_read(vnode_t *vn, void *buf, u32 count, int nonblock)
 	pty_pair_t	*p;
 	char		*out;
 	char		 c;
-	int		 n;
+	int		 n, chunk;
 
 	p = (pty_pair_t *)vn->data;
 	if (!p || p->id == 0) {
@@ -714,12 +725,29 @@ pty_slave_read(vnode_t *vn, void *buf, u32 count, int nonblock)
 	out = (char *)buf;
 	n = 0;
 	while (n < (int)count) {
-		if (pty_to_slave_get(p, &c) == 0) {
-			out[n++] = c;
-			if ((p->term.c_lflag & ICANON) != 0 &&
-			    (c == '\n' || c == p->term.c_cc[VEOL] ||
-			    c == p->term.c_cc[VEOL2])) {
-				break;
+		if (p->to_slave_count > 0) {
+			if ((p->term.c_lflag & ICANON) == 0) {
+				chunk = PTY_BUF_SIZE - p->to_slave_tail;
+				if (chunk > p->to_slave_count) {
+					chunk = p->to_slave_count;
+				}
+				if (chunk > (int)count - n) {
+					chunk = (int)count - n;
+				}
+				memcpy(out + n, p->to_slave + p->to_slave_tail, (size_t)chunk);
+				p->to_slave_tail = (p->to_slave_tail + chunk) % PTY_BUF_SIZE;
+				p->to_slave_count -= chunk;
+				n += chunk;
+				proc_wakeup(&p->to_slave_count);
+				posix_poll_notify();
+			} else {
+				if (pty_to_slave_get(p, &c) == 0) {
+					out[n++] = c;
+					if (c == '\n' || c == p->term.c_cc[VEOL] ||
+					    c == p->term.c_cc[VEOL2]) {
+						break;
+					}
+				}
 			}
 		} else if (!p->open_master) {
 			break;
@@ -749,7 +777,7 @@ pty_slave_write(vnode_t *vn, const void *buf, u32 count, int nonblock)
 	struct process	*proc;
 	pty_pair_t	*p;
 	const char	*data;
-	int		 i;
+	int		 i, chunk, space;
 
 	p = (pty_pair_t *)vn->data;
 	if (!p || p->id == 0) {
@@ -759,6 +787,45 @@ pty_slave_write(vnode_t *vn, const void *buf, u32 count, int nonblock)
 		return (-POSIX_EPIPE);
 	}
 	data = (const char *)buf;
+	if ((p->term.c_oflag & (OPOST | ONLCR)) != (OPOST | ONLCR)) {
+		i = 0;
+		while (i < (int)count) {
+			if (!p->open_master) {
+				return (i > 0 ? i : -POSIX_EPIPE);
+			}
+			space = (PTY_BUF_SIZE - 1) - p->to_master_count;
+			if (space > 0) {
+				chunk = PTY_BUF_SIZE - p->to_master_head;
+				if (chunk > space) {
+					chunk = space;
+				}
+				if (chunk > (int)count - i) {
+					chunk = (int)count - i;
+				}
+				memcpy(p->to_master + p->to_master_head, data + i, (size_t)chunk);
+				p->to_master_head = (p->to_master_head + chunk) % PTY_BUF_SIZE;
+				p->to_master_count += chunk;
+				i += chunk;
+				proc_wakeup(&p->to_master_count);
+				knote_notify_all(EVFILT_READ, 0, 0, 1);
+				posix_poll_notify();
+			} else {
+				if (nonblock) {
+					return (i > 0 ? i : -POSIX_EAGAIN);
+				}
+				proc = process_current();
+				if (proc && (proc->sigpending & ~proc->sigmask)) {
+					return (i > 0 ? i : -POSIX_EINTR);
+				}
+				proc_sleep(&p->to_master_count);
+				proc = process_current();
+				if (proc && (proc->sigpending & ~proc->sigmask)) {
+					return (i > 0 ? i : -POSIX_EINTR);
+				}
+			}
+		}
+		return ((int)count);
+	}
 	for (i = 0; i < (int)count; i++) {
 		if (!p->open_master) {
 			if (i == 0) {
@@ -766,8 +833,7 @@ pty_slave_write(vnode_t *vn, const void *buf, u32 count, int nonblock)
 			}
 			return (i);
 		}
-		if ((p->term.c_oflag & (OPOST | ONLCR)) == (OPOST | ONLCR) &&
-		    data[i] == '\n') {
+		if (data[i] == '\n') {
 			while (pty_to_master_put(p, '\r') != 0) {
 				if (!p->open_master) {
 					return (i > 0 ? i : -POSIX_EPIPE);

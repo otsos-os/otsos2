@@ -177,7 +177,7 @@ static int read_file_into_buffer(const char *path, u8 **out_buf,
 
   printk("[SPAWN] exec file '%s' size=%u\n", path, size);
 
-  buf = (u8 *)kmem_calloc(size, 1);
+  buf = (u8 *)kmem_alloc(size);
   if (!buf) {
     vnode_release(vn);
     return -API_ERR_NO_MEMORY;

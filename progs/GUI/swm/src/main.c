@@ -178,8 +178,20 @@ swm_deliver_frames(swm_state_t *swm)
 	swm_surface_t *surface;
 	uint32_t now;
 	uint32_t i;
+	int has_wants;
 
 	memset(&result, 0, sizeof(result));
+	has_wants = 0;
+	for (i = 0; i < SWM_MAX_SURFACES; i++) {
+		if (swm->surfaces[i].in_use && swm->surfaces[i].wants_frame &&
+		    swm->surfaces[i].owner != NULL) {
+			has_wants = 1;
+			break;
+		}
+	}
+	if (!has_wants) {
+		return (result);
+	}
 	now = swm_now_ms(swm);
 	for (i = 0; i < SWM_MAX_SURFACES; i++) {
 		surface = &swm->surfaces[i];
@@ -247,9 +259,9 @@ swm_run(swm_state_t *swm)
 				return (-1);
 			}
 			swm->frame_count++;
+			delivery = swm_deliver_frames(swm);
+			(void)delivery;
 		}
-		delivery = swm_deliver_frames(swm);
-		(void)delivery;
 		changed = 0;
 	}
 	return (0);

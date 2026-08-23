@@ -336,7 +336,7 @@ execve_read_file(const char *path, u8 **out_buf, u32 *out_size)
 	}
 
 	size = (u32)st.st_size;
-	buf = (u8 *)kmem_calloc(size, 1);
+	buf = (u8 *)kmem_alloc(size);
 	if (!buf) {
 		vnode_release(vn);
 		return (-POSIX_ENOMEM);
@@ -945,7 +945,7 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 	}
 
 	elf_size = (u32)st.st_size;
-	elf_buf = (u8 *)kmem_calloc(elf_size, 1);
+	elf_buf = (u8 *)kmem_alloc(elf_size);
 	if (!elf_buf) {
 		vnode_release(vn);
 		free_string_array(kargv);

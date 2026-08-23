@@ -89,6 +89,7 @@ $space %export event_notify_net_change, event_notify_ipc_change
 #include <kernel/event/event.h>
 #include <kernel/api/api.h>
 #include <kernel/ipc/ipc.h>
+#include <kernel/interrupts/irq.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
@@ -170,7 +171,10 @@ proc_sleep(void *channel)
 
 	__asm__ volatile("sti");
 	while (td->wait_channel != NULL) {
-		__asm__ volatile("hlt");
+		__asm__ volatile("int %0" :: "i"(IRQ_VECTOR_YIELD) : "memory");
+		if (td->wait_channel != NULL) {
+			__asm__ volatile("hlt");
+		}
 	}
 	__asm__ volatile("cli");
 
