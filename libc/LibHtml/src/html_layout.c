@@ -2,6 +2,7 @@
 
 $define %type html_layout_ctx as layout builder context
 $define %func html_layout_create as function with args html_doc *, int32_t, int32_t
+$define %func html_layout_create_ex as function with args html_doc *, int32_t, int32_t, html_image_size_fn, void *
 $define %func html_layout_free as procedure with args html_layout *
 $define %func html_layout_ctrl_at as function with args const html_layout *, int32_t, int32_t
 $define %func html_node_form as function with args const html_node *
@@ -19,13 +20,16 @@ $space %internal html_layout_table_cells, html_layout_list_marker
 $space %internal html_layout_table, html_layout_table_row, html_layout_table_cols
 $space %internal html_layout_children, html_layout_center_range
 $space %internal html_layout_control, html_layout_span_attr
+$space %internal html_layout_svg_box, html_layout_img_box
+$space %internal html_layout_len_attr
 $space %internal css_iface_tag, css_iface_attr, css_iface_parent, html_css_iface
 $space %internal css_iface_prev
 $space %internal html_layout_apply_css, html_layout_apply_css_block
 $space %internal html_layout_add_ctrl, html_ctrl_classify
 $space %internal html_form_encode, html_form_field_included
 $space %internal html_form_field_value
-$space %export html_layout_create, html_layout_free, html_layout_ctrl_at
+$space %export html_layout_create, html_layout_create_ex
+$space %export html_layout_free, html_layout_ctrl_at
 $space %export html_node_form, html_form_submit_url
 
 */
@@ -144,8 +148,10 @@ typedef struct html_style_state {
 } html_style_state_t;
 
 typedef struct html_layout_ctx {
-	html_layout_t	*layout;
-	const void	*css_sheet;
+	html_layout_t		*layout;
+	const void		*css_sheet;
+	html_image_size_fn	 image_size;
+	void			*image_size_user;
 	/* Ordered-list state, one entry per nesting level. */
 	int32_t		list_index[HTML_LIST_MAX_DEPTH];
 	int		list_ordered[HTML_LIST_MAX_DEPTH];
@@ -1407,6 +1413,117 @@ html_layout_svg_box(html_layout_ctx_t *ctx, const html_node_t *node,
 	ctx->owed_space = 0;
 	html_layout_block_space(ctx, 6);
 }
+#define HTML_IMG_DEF_W		64
+#define HTML_IMG_DEF_H		64
+#define HTML_IMG_GAP		2
+
+static void
+html_layout_img_box(html_layout_ctx_t *ctx, const html_node_t *node,
+    const html_style_state_t *style)
+{
+	html_layout_box_t	*box;
+	const char		*src;
+	const char		*alt;
+	int32_t			 nat_w, nat_h;
+	int32_t			 avail;
+	int32_t			 w, h;
+	int32_t			 sp;
+	int			 have_nat;
+
+	src = html_node_get_attr(node, "src");
+	if (src == NULL || src[0] == '\0') {
+		alt = html_node_get_attr(node, "alt");
+		if (alt != NULL && alt[0] != '\0') {
+			html_style_state_t	alt_style;
+
+			alt_style = *style;
+			alt_style.color = HTML_COLOR_MUTED;
+			html_layout_format_text(ctx, alt, &alt_style);
+		}
+		return;
+	}
+
+	w = html_layout_len_attr(html_node_get_attr(node, "width"));
+	h = html_layout_len_attr(html_node_get_attr(node, "height"));
+
+	nat_w = 0;
+	nat_h = 0;
+	have_nat = 0;
+	if (ctx->image_size != NULL && (w == 0 || h == 0)) {
+		have_nat = (ctx->image_size(ctx->image_size_user, src,
+		    &nat_w, &nat_h) == 0 && nat_w > 0 && nat_h > 0);
+	}
+
+	if (!have_nat && (w == 0 || h == 0)) {
+		ctx->layout->images_estimated++;
+	}
+
+	if (w == 0 && h == 0) {
+		if (have_nat) {
+			w = nat_w;
+			h = nat_h;
+		} else {
+			w = HTML_IMG_DEF_W;
+			h = HTML_IMG_DEF_H;
+		}
+	} else if (w == 0) {
+		w = have_nat ? (int32_t)(((int64_t)h * nat_w) / nat_h) : h;
+	} else if (h == 0) {
+		h = have_nat ? (int32_t)(((int64_t)w * nat_h) / nat_w) : w;
+	}
+	if (w <= 0) {
+		w = HTML_IMG_DEF_W;
+	}
+	if (h <= 0) {
+		h = HTML_IMG_DEF_H;
+	}
+
+	avail = ctx->max_width - style->indent_x;
+	if (avail < HTML_IMG_GAP + 1) {
+		avail = HTML_IMG_GAP + 1;
+	}
+	if (w > avail) {
+		h = (int32_t)(((int64_t)h * avail) / w);
+		w = avail;
+		if (h <= 0) {
+			h = 1;
+		}
+	}
+	if (w > HTML_SVG_MAX_DIM) {
+		w = HTML_SVG_MAX_DIM;
+	}
+	if (h > HTML_SVG_MAX_DIM) {
+		h = HTML_SVG_MAX_DIM;
+	}
+
+	sp = (ctx->owed_space != 0 && ctx->at_line_start == 0) ?
+	    (int32_t)style->scale * HTML_GLYPH_ADVANCE : 0;
+	if (ctx->at_line_start == 0 && ctx->cursor_x + sp + w >
+	    ctx->max_width) {
+		html_layout_new_line(ctx, ctx->line_h);
+		sp = 0;
+	}
+	ctx->cursor_x += sp;
+	ctx->owed_space = 0;
+	html_layout_flush_space(ctx);
+
+	box = html_layout_add_box(ctx, ctx->cursor_x, ctx->cursor_y, w, h,
+	    HTML_COLOR_MUTED, HTML_BOX_IMAGE);
+	if (box != NULL) {
+		box->ref = strdup(src);
+	}
+
+	if (style->href != NULL) {
+		html_layout_add_link(ctx, style->href, ctx->cursor_x,
+		    ctx->cursor_y, w, h);
+	}
+
+	ctx->cursor_x += w + HTML_GLYPH_ADVANCE;
+	ctx->at_line_start = 0;
+	if (h + HTML_IMG_GAP > ctx->line_h) {
+		ctx->line_h = h + HTML_IMG_GAP;
+	}
+}
 
 static const char *
 css_iface_tag(const void *n)
@@ -1505,9 +1622,11 @@ html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
 	html_layout_line_t	*mark_line;
 	html_link_box_t		*mark_link;
 	html_ctrl_box_t		*mark_ctrl;
+	html_layout_box_t	*bg_box;
 	const char		*attr;
 	css_computed_t		cc;
 	int32_t			space_before, space_after, quote_top;
+	int32_t			box_w, box_h, saved_max_width;
 	uint32_t		css_bg_color;
 	int			have_css;
 	int			css_bg;
@@ -1597,17 +1716,8 @@ html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
 		return;
 
 	case HTML_TAG_IMG:
-		/*
-		 * No decoders here - LibHtml is markup only.  alt text keeps
-		 * the surrounding sentence readable; src is the last resort so
-		 * a broken image still shows as something.
-		 */
-		attr = html_node_get_attr(node, "alt");
-		if (attr == NULL || attr[0] == '\0') {
-			attr = "[image]";
-		}
-		style.color = HTML_COLOR_MUTED;
-		html_layout_format_text(ctx, attr, &style);
+	
+		html_layout_img_box(ctx, node, &style);
 		return;
 
 	case HTML_TAG_SVG:
@@ -1849,6 +1959,26 @@ html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
 		css_bg_color = cc.bgcolor | 0xff000000u;
 	}
 
+	box_w = 0;
+	box_h = 0;
+	if (have_css != 0) {
+		if ((cc.set & CSS_PROP_WIDTH) != 0 && cc.width > 0) {
+			box_w = cc.width_pct ?
+			    (ctx->max_width - style.indent_x) * cc.width / 100 :
+			    cc.width;
+		}
+		if ((cc.set & CSS_PROP_HEIGHT) != 0 && cc.height > 0 &&
+		    cc.height_pct == 0) {
+			box_h = cc.height;
+		}
+		if (box_w > HTML_SVG_MAX_DIM) {
+			box_w = HTML_SVG_MAX_DIM;
+		}
+		if (box_h > HTML_SVG_MAX_DIM) {
+			box_h = HTML_SVG_MAX_DIM;
+		}
+	}
+
 	if (is_table) {
 		html_layout_block_space(ctx, space_before);
 		ctx->depth++;
@@ -1873,12 +2003,9 @@ html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
 		}
 	}
 
-	/*
-	 * Both deferred effects need the position after pending space is
-	 * applied, so flush now: the quote bar would otherwise start above its
-	 * first line, and centering keys on line y values.
-	 */
-	if (centered || node->tag == HTML_TAG_BLOCKQUOTE) {
+
+	if (centered || node->tag == HTML_TAG_BLOCKQUOTE || css_bg != 0 ||
+	    box_h > 0) {
 		html_layout_flush_space(ctx);
 	}
 	quote_top = ctx->cursor_y;
@@ -1886,21 +2013,51 @@ html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
 	mark_link = ctx->layout->links_tail;
 	mark_ctrl = ctx->layout->ctrls_tail;
 
+	bg_box = NULL;
+	if (css_bg != 0) {
+		int32_t	bw = (box_w > 0) ? box_w :
+			    ctx->max_width - style.indent_x;
+
+		if (bw > 0) {
+			bg_box = html_layout_add_box(ctx, style.indent_x,
+			    quote_top, bw, 0, css_bg_color, HTML_BOX_FILL);
+		}
+	}
+
+
+	saved_max_width = ctx->max_width;
+	if (box_w > 0 && style.indent_x + box_w < ctx->max_width) {
+		ctx->max_width = style.indent_x + box_w;
+	}
+
 	ctx->depth++;
 	html_layout_children(ctx, node, style);
 	ctx->depth--;
+
+	ctx->max_width = saved_max_width;
 
 	if (is_block && !ctx->at_line_start) {
 		html_layout_new_line(ctx, 0);
 	}
 
-	if (css_bg != 0 && ctx->cursor_y > quote_top) {
-		int32_t	bw = ctx->max_width - style.indent_x;
 
-		if (bw > 0) {
-			html_layout_add_box(ctx, style.indent_x, quote_top,
-			    bw, ctx->cursor_y - quote_top, css_bg_color,
-			    HTML_BOX_FILL);
+	if (box_h > 0) {
+		ctx->cursor_y = quote_top + box_h;
+		ctx->at_line_start = 1;
+		ctx->line_h = 0;
+		if (ctx->cursor_y > ctx->layout->content_height) {
+			ctx->layout->content_height = ctx->cursor_y;
+		}
+	}
+
+	if (bg_box != NULL) {
+		bg_box->rect.height = (box_h > 0) ? box_h :
+		    ctx->cursor_y - quote_top;
+
+		if (bg_box->rect.y + bg_box->rect.height >
+		    ctx->layout->content_height) {
+			ctx->layout->content_height = bg_box->rect.y +
+			    bg_box->rect.height;
 		}
 	}
 
@@ -1938,6 +2095,14 @@ html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
 html_layout_t *
 html_layout_create(html_doc_t *doc, int32_t viewport_w, int32_t viewport_h)
 {
+	return (html_layout_create_ex(doc, viewport_w, viewport_h, NULL,
+	    NULL));
+}
+
+html_layout_t *
+html_layout_create_ex(html_doc_t *doc, int32_t viewport_w, int32_t viewport_h,
+    html_image_size_fn size, void *size_user)
+{
 	html_layout_t		*layout;
 	html_layout_ctx_t	ctx;
 	html_style_state_t	initial_style;
@@ -1963,6 +2128,8 @@ html_layout_create(html_doc_t *doc, int32_t viewport_w, int32_t viewport_h)
 
 	memset(&ctx, 0, sizeof(ctx));
 	ctx.layout = layout;
+	ctx.image_size = size;
+	ctx.image_size_user = size_user;
 	ctx.max_width = max_width - HTML_MARGIN_LEFT / 2;
 	ctx.cursor_x = HTML_MARGIN_LEFT;
 	ctx.cursor_y = HTML_MARGIN_LEFT;

@@ -40,6 +40,10 @@
 /* Ceiling on a document walk, so a malformed tree cannot spin the UI. */
 #define BROWSER_MAX_NODES 200000
 #define BROWSER_SVG_CACHE_MAX 16
+#define BROWSER_SCROLL_STEP 40
+#define BROWSER_IMAGE_CACHE_MAX 16
+#define BROWSER_MAX_IMAGES 16
+#define BROWSER_MAX_IMAGE_BYTES (4u * 1024u * 1024u)
 
 /*
  * External stylesheets fetched per page.  Sheets are pulled one at a time
@@ -78,6 +82,12 @@ typedef struct browser_svg_entry {
 	char		*ref;
 	svg_doc_t	*doc;
 } browser_svg_entry_t;
+
+typedef struct browser_image_entry {
+	char		*url;
+	libg_image_t	*image;
+	int		failed;
+} browser_image_entry_t;
 
 typedef enum browser_load_state {
 	BROWSER_LOAD_IDLE = 0,
@@ -185,6 +195,9 @@ typedef struct browser_state {
 	int			css_next;
 	int			css_fetching;
 	int			css_applied;
+	int			img_next;
+	int			img_fetching;
+	char			img_url[BROWSER_MAX_URL];
 
 	/*
 	 * Caret blink state for a focused page control.  Kept here and not in
@@ -204,10 +217,7 @@ typedef struct browser_state {
 	char			pending_url[BROWSER_MAX_URL];
 	int			pending_nav;
 
-	/* Scrollbar dragging */
 	int			dragging_scrollbar;
-	int32_t			drag_start_y;
-	int32_t			drag_start_scroll;
 
 	/* Stats */
 	int			images_count;
@@ -221,6 +231,8 @@ typedef struct browser_state {
 	size_t			progress_kb;
 	browser_svg_entry_t	svg_cache[BROWSER_SVG_CACHE_MAX];
 	int			svg_count;
+	browser_image_entry_t	image_cache[BROWSER_IMAGE_CACHE_MAX];
+	int			image_count;
 } browser_state_t;
 
 /* URL and HTTP helpers (pure, no I/O) */
@@ -239,6 +251,8 @@ uint32_t browser_ip_literal(const char *host);
 int	browser_http_request(char *out, size_t max_out, const char *host,
 	    int port, const char *path);
 int	browser_http_status(const char *resp, size_t len);
+int	browser_http_header(const char *resp, size_t len, const char *name,
+	    char *out, size_t max_out);
 int	browser_http_location(const char *resp, size_t len, char *out,
 	    size_t max_out);
 size_t	browser_http_body_offset(const char *resp, size_t len);
@@ -253,6 +267,19 @@ int	browser_loader_timeout(const browser_loader_t *ld);
 
 void	browser_svg_cache_free(browser_state_t *st);
 int	browser_svg_draw(void *userdata, libg_context_t *ctx,
+	    libg_rect_t rect, const char *ref);
+
+void	browser_image_cache_free(browser_state_t *st);
+void	browser_image_note(browser_state_t *st, const char *url,
+	    libg_image_t *img);
+int	browser_image_cached(const browser_state_t *st, const char *url);
+char	*browser_image_document(browser_state_t *st, const void *data,
+	    size_t len);
+void	browser_image_key(const browser_state_t *st, const char *ref,
+	    char *out, size_t max_out);
+int	browser_image_size(void *userdata, const char *ref, int32_t *out_w,
+	    int32_t *out_h);
+int	browser_image_draw(void *userdata, libg_context_t *ctx,
 	    libg_rect_t rect, const char *ref);
 
 /* Navigation */

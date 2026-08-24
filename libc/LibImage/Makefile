@@ -4,19 +4,16 @@ AR ?= llvm-ar
 
 ROOT = ../..
 NATIVE_DIR = $(ROOT)/libc/native
-LIBSVG_DIR = $(ROOT)/libc/LibSVG
-LIBSRAPI_DIR = $(ROOT)/libc/LibSRAPI
-LIBIMAGE_DIR = $(ROOT)/libc/LibImage
+LIBARCHIVE_DIR = $(ROOT)/libc/LibArchive
 TARGET_CFLAGS ?= --target=$(TARGET)
 CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fPIE -fno-stack-protector \
 	-nostdlib -nostdinc -fno-builtin -O2 -Wall -Wextra \
-	-Iinclude -I$(LIBSVG_DIR)/include -I$(NATIVE_DIR)/include \
-	-I$(LIBSRAPI_DIR)/include -I$(LIBIMAGE_DIR)/include
+	-Iinclude -I$(NATIVE_DIR)/include -I$(LIBARCHIVE_DIR)/include
 
-LIB = lib/libg.a
-SRC = src/libg.c src/image.c src/scroll.c
+LIB = lib/libimage.a
+SRC = src/png.c
 OBJ = $(SRC:src/%.c=build/%.o)
-HDR = include/libg.h include/font.h src/libg_int.h
+HDR = include/libimage.h $(LIBARCHIVE_DIR)/include/libarchive.h
 
 .PHONY: all clean
 

@@ -66,6 +66,8 @@ LIBHTML_DIR = ../libc/LibHtml
 LIBG_DIR = ../libc/LibG
 LIBSVG_DIR = ../libc/LibSVG
 LIBCSS_DIR = ../libc/LibCSS
+LIBIMAGE_DIR = ../libc/LibImage
+LIBARCHIVE_DIR = ../libc/LibArchive
 LIBELF_DIR = ../libc/LibELF
 LIBEMIT_DIR = ../libc/LibEmit
 LIBSSH_DIR = ../libc/LibSSH
@@ -82,6 +84,8 @@ LIBSRAPI = $(LIBSRAPI_DIR)/lib/libsrapi.a
 LIBG = $(LIBG_DIR)/lib/libg.a
 LIBSVG = $(LIBSVG_DIR)/lib/libsvg.a
 LIBCSS = $(LIBCSS_DIR)/lib/libcss.a
+LIBIMAGE = $(LIBIMAGE_DIR)/lib/libimage.a
+LIBARCHIVE = $(LIBARCHIVE_DIR)/lib/libarchive.a
 LIBHTML = $(LIBHTML_DIR)/lib/libhtml.a
 LIBAS = $(TOOLCHAIN_AS_DIR)/lib/libas.a
 LIBELF = $(LIBELF_DIR)/lib/libelf.a
@@ -136,7 +140,15 @@ $(LIBCSS): FORCE
 	@echo "  MAKE    LibCSS"
 	@$(MAKE) -C $(LIBCSS_DIR)
 
-$(LIBG): $(LIBSRAPI) $(LIBSVG) FORCE
+$(LIBARCHIVE): FORCE
+	@echo "  MAKE    LibArchive"
+	@$(MAKE) -C $(LIBARCHIVE_DIR)
+
+$(LIBIMAGE): $(LIBARCHIVE) FORCE
+	@echo "  MAKE    LibImage"
+	@$(MAKE) -C $(LIBIMAGE_DIR)
+
+$(LIBG): $(LIBSRAPI) $(LIBSVG) $(LIBIMAGE) FORCE
 	@echo "  MAKE    LibG"
 	@$(MAKE) -C $(LIBG_DIR)
 
@@ -367,7 +379,7 @@ $(TERM_BIN): $(NATIVE_CRT0) $(TERM_OBJS) $(LIBG) $(LIBSVG) $(LIBSPROT) $(LIBSRAP
 	@echo "  SIZE    $@"
 	@$(SIZE) $@
 
-$(BROWSER_BIN): $(LIBHTML) $(LIBCSS) $(LIBG) $(LIBSVG) $(LIBSPROT) $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO) $(NATIVE_CRT0) FORCE
+$(BROWSER_BIN): $(LIBHTML) $(LIBCSS) $(LIBG) $(LIBSVG) $(LIBIMAGE) $(LIBARCHIVE) $(LIBSPROT) $(LIBSRAPI) $(LIBAS) $(LIBELF) $(LIBEMIT) $(NATIVE_SO) $(NATIVE_CRT0) FORCE
 	@echo "  MAKE    browser"
 	@$(MAKE) -C $(BROWSER_DIR)
 
@@ -386,6 +398,8 @@ clean:
 	$(MAKE) -C $(LIBSRAPI_DIR) clean
 	$(MAKE) -C $(LIBSVG_DIR) clean
 	$(MAKE) -C $(LIBCSS_DIR) clean
+	$(MAKE) -C $(LIBIMAGE_DIR) clean
+	$(MAKE) -C $(LIBARCHIVE_DIR) clean
 	$(MAKE) -C $(LIBG_DIR) clean
 	$(MAKE) -C $(LIBHTML_DIR) clean
 	$(MAKE) -C $(SWM_DIR) clean

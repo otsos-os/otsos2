@@ -43,8 +43,7 @@ $define %func libgBlendColor as function with args color1, color2, alpha
 /* !SPACE!
 
 $space %internal libg_from_srapi, libg_image_present, libg_abs_i32
-$space %internal libg_clamp_i32
-$space %internal libg_rect_contains, libg_blend, libg_put_pixel
+$space %internal libg_put_pixel
 $space %internal libg_update_mouse, libg_poll_input, libg_draw_text_cell
 $space %internal libg_circle_points, libg_draw_centered_text
 $space %internal libg_svg_point_t, libg_svg_cross_t
@@ -62,6 +61,8 @@ $space %export libgSetClip, libgClearClip
 $space %export libgText, libgTextScale, libgMeasureText
 $space %export libgPanel, libgButton, libgTextField, libgSlider
 $space %export libgAnimStart, libgAnimUpdate, libgLerp, libgBlendColor
+$space %export libg_mark_dirty, libg_blend
+$space %export libg_clamp_i32, libg_rect_contains
 
 */
 
@@ -75,44 +76,13 @@ $space %export libgAnimStart, libgAnimUpdate, libgLerp, libgBlendColor
 #include <stdio.h>
 #include <string.h>
 
+#include "libg_int.h"
+
 #define LIBG_INPUT_BATCH		32
-#define LIBG_TEXT_INPUT_MAX		32
-#define LIBG_MOUSE_LEFT		SRAPI_MOUSE_LEFT
 #define LIBG_KEY_ENTER		0x0028
 #define LIBG_KEY_BACKSPACE		0x002a
 
-struct libg_context {
-	srapi_device_t		*device;
-	libg_present_fn		present;
-	void			*present_userdata;
-	srapi_surface_t		*surface;
-	srapi_cmd_buffer_t	*cmd;
-	libg_style_t		style;
-	uint8_t			*pixels;
-	uint32_t		width;
-	uint32_t		height;
-	uint32_t		pitch;
-	int32_t			mouse_x;
-	int32_t			mouse_y;
-	int32_t			raw_mouse_x;
-	int32_t			raw_mouse_y;
-	uint32_t		mouse_buttons;
-	int			mouse_pressed;
-	int			mouse_released;
-	int			have_raw_mouse;
-	uint32_t		hot_id;
-	uint32_t		active_id;
-	uint32_t		focus_id;
-	char			text_input[LIBG_TEXT_INPUT_MAX];
-	uint32_t		text_count;
-	uint32_t		backspace_count;
-	int			submit_pressed;
-	int32_t			dirty_x1, dirty_y1, dirty_x2, dirty_y2;
-	int			dirty_valid;
-	int32_t			clip_x0, clip_y0, clip_x1, clip_y1;
-	int			clip_valid;
-};
-static void
+void
 libg_mark_dirty(libg_context_t *ctx, int32_t x, int32_t y,
     int32_t w, int32_t h)
 {
@@ -198,7 +168,7 @@ libg_abs_i32(int32_t value)
 	return (value < 0 ? -value : value);
 }
 
-static int32_t
+int32_t
 libg_clamp_i32(int32_t value, int32_t min, int32_t max)
 {
 	if (value < min) {
@@ -210,7 +180,7 @@ libg_clamp_i32(int32_t value, int32_t min, int32_t max)
 	return (value);
 }
 
-static int
+int
 libg_rect_contains(libg_rect_t rect, int32_t x, int32_t y)
 {
 	if (rect.width <= 0 || rect.height <= 0) {
@@ -220,7 +190,7 @@ libg_rect_contains(libg_rect_t rect, int32_t x, int32_t y)
 	    x < rect.x + rect.width && y < rect.y + rect.height);
 }
 
-static uint32_t
+uint32_t
 libg_blend(uint32_t dst, uint32_t src)
 {
 	uint32_t	a, inv;
@@ -355,7 +325,9 @@ libgHandleInput(libg_context_t *ctx, const struct srapi_input_event *event)
 		if (ret != LIBG_OK) {
 			return (ret);
 		}
-		ctx->mouse_buttons = event->buttons;
+		if ((event->flags & SRAPI_MOUSE_BUTTON) != 0) {
+			ctx->mouse_buttons = event->buttons;
+		}
 		if ((ctx->mouse_buttons & LIBG_MOUSE_LEFT) != 0 &&
 		    (old_buttons & LIBG_MOUSE_LEFT) == 0) {
 			ctx->mouse_pressed = 1;
@@ -562,6 +534,7 @@ libgCreate(srapi_device_t *device, const libg_style_t *style,
 	ctx->height = info.height;
 	ctx->mouse_x = (int32_t)(info.width / 2);
 	ctx->mouse_y = (int32_t)(info.height / 2);
+	ctx->drag_grab = LIBG_DRAG_NONE;
 	libgDefaultStyle(&ctx->style);
 	if (style) {
 		ctx->style = *style;
@@ -636,6 +609,7 @@ libgCreateForTarget(void *pixels, uint32_t width, uint32_t height,
 	ctx->present_userdata = userdata;
 	ctx->mouse_x = (int32_t)(width / 2);
 	ctx->mouse_y = (int32_t)(height / 2);
+	ctx->drag_grab = LIBG_DRAG_NONE;
 	libgDefaultStyle(&ctx->style);
 	if (style != NULL) {
 		ctx->style = *style;

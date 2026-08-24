@@ -9,6 +9,8 @@ $define %func html_doc_free as procedure with args html_doc *
 $define %func html_node_find as function with args const html_node *, html_tag
 $define %func html_node_text as function with args const html_node *
 $define %func html_layout_create as function with args const html_doc *, int32_t
+$define %func html_layout_create_ex as function with args const html_doc *, int32_t, int32_t, html_image_size_fn, void *
+$define %type html_image_size_fn as host callback answering intrinsic image size
 $define %func html_layout_free as procedure with args html_layout *
 $define %type html_box_kind as enum of non-text box kinds
 $define %func html_layout_render as procedure with args libg_context *, const html_layout *, int32_t, int32_t, int32_t, int32_t, int32_t, html_image_draw_fn, void *
@@ -29,10 +31,11 @@ $define %func html_doc_stylesheet_link as function with args const html_doc *, i
 $space %export html_tag_t, html_attr_t, html_node_t, html_doc_t
 $space %export html_link_box_t, html_layout_line_t, html_layout_t
 $space %export html_box_kind_t, html_layout_box_t, html_image_draw_fn
+$space %export html_image_size_fn
 $space %export html_ctrl_kind_t, html_ctrl_box_t
 $space %export html_parse, html_doc_free, html_node_get_attr
 $space %export html_node_find, html_node_text, html_node_set_attr
-$space %export html_layout_create, html_layout_free
+$space %export html_layout_create, html_layout_create_ex, html_layout_free
 $space %export html_layout_render, html_layout_hit_test
 $space %export html_layout_ctrl_at, html_node_form, html_form_submit_url
 $space %export html_doc_append_css, html_doc_stylesheet_link
@@ -281,6 +284,7 @@ typedef struct html_layout {
 	html_ctrl_box_t		*focus;
 	size_t			caret;
 	int			caret_on;
+	int			images_estimated;
 } html_layout_t;
 
 html_doc_t	*html_parse(const char *source, size_t len);
@@ -322,6 +326,9 @@ const html_node_t *html_node_form(const html_node_t *node);
 int		html_form_submit_url(const html_node_t *form,
 		    const html_node_t *submitter, char *out, size_t max_out);
 
+typedef int (*html_image_size_fn)(void *userdata, const char *ref,
+	    int32_t *out_w, int32_t *out_h);
+
 /*
  * viewport_w is the wrap width; viewport_h is only used to answer @media
  * height queries.  `doc` is not const because a text field's value attribute
@@ -329,6 +336,9 @@ int		html_form_submit_url(const html_node_t *form,
  */
 html_layout_t	*html_layout_create(html_doc_t *doc, int32_t viewport_w,
 		    int32_t viewport_h);
+html_layout_t	*html_layout_create_ex(html_doc_t *doc, int32_t viewport_w,
+		    int32_t viewport_h, html_image_size_fn size,
+		    void *size_user);
 void		html_layout_free(html_layout_t *layout);
 typedef int (*html_image_draw_fn)(void *userdata, libg_context_t *ctx,
 	    libg_rect_t rect, const char *ref);

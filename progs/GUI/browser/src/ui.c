@@ -13,7 +13,11 @@ $define %func browser_load_poll as procedure with args browser_state *
 $space %internal draw_top_bar, draw_toolbar, draw_viewport, draw_status_bar, draw_scrollbar
 $space %internal translate_key_to_char, get_header_widget_id
 $space %internal browser_load_apply, browser_load_progress, browser_load_drop
-$space %internal browser_count_images
+$space %internal browser_count_images, browser_relayout
+$space %internal browser_css_fetch_next, browser_css_apply, browser_css_done
+$space %internal browser_img_src_at, browser_image_fetch_next
+$space %internal browser_image_apply, browser_image_done
+$space %internal browser_next_resource, browser_caret_tick
 $space %export browser_ui_init, browser_draw, browser_handle_event
 $space %export browser_navigate, browser_status_set, browser_load_poll
 $space %export browser_history_push, browser_history_back, browser_history_forward
@@ -32,7 +36,12 @@ $space %export browser_history_push, browser_history_back, browser_history_forwa
 #define TOOLBAR_H 36
 #define STATUS_BAR_H 24
 #define HEADER_TOTAL_H (TOP_BAR_H + TOOLBAR_H)
-#define SCROLLBAR_W 16
+/*
+ * Asked of LibG rather than hardcoded: the viewport width is derived from it in
+ * several places, and a bar that widened in LibG while this stayed 16 would let
+ * the page paint under the gutter and put every hit test one column off.
+ */
+#define SCROLLBAR_W (libgScrollbarThickness())
 
 #define ID_LOCATION 101
 #define ID_GO 102
@@ -42,8 +51,8 @@ $space %export browser_history_push, browser_history_back, browser_history_forwa
 #define ID_HOME 106
 #define ID_RELOAD 107
 #define ID_STOP 108
-#define ID_SCROLL_UP 109
-#define ID_SCROLL_DOWN 110
+/* One id for the whole bar; libgScrollbar derives its own for the arrows. */
+#define ID_SCROLLBAR 109
 
 void
 browser_status_set(browser_state_t *st, const char *msg)
@@ -212,6 +221,7 @@ browser_count_images(const html_node_t *root)
 static void
 browser_load_drop(browser_state_t *st)
 {
+	browser_image_cache_free(st);
 	if (st->layout != NULL) {
 		html_layout_free(st->layout);
 		st->layout = NULL;
@@ -234,11 +244,14 @@ static void
 browser_load_apply(browser_state_t *st)
 {
 	browser_loader_t	*ld;
+	char			*synth;
 	char			win_title[256];
 	char			status[128];
+	char			ctype[128];
 	const char		*title;
 	size_t			off, body_len;
 	int32_t			viewport_w, view_h;
+	int			is_image, is_image_doc;
 
 	ld = &st->loader;
 	off = browser_http_body_offset(ld->response, ld->response_len);
@@ -246,6 +259,17 @@ browser_load_apply(browser_state_t *st)
 		off = ld->response_len;
 	}
 	body_len = ld->response_len - off;
+
+	is_image = 0;
+	if (body_len != 0) {
+		if (browser_http_header(ld->response, ld->response_len,
+		    "Content-Type:", ctype, sizeof(ctype)) == 0 &&
+		    strncasecmp(ctype, "image/", 6) == 0) {
+			is_image = 1;
+		} else if (libgImageProbe(ld->response + off, body_len)) {
+			is_image = 1;
+		}
+	}
 
 	browser_load_drop(st);
 
@@ -268,10 +292,33 @@ browser_load_apply(browser_state_t *st)
 	strncpy(st->input_url, ld->url, sizeof(st->input_url) - 1);
 	st->input_url[sizeof(st->input_url) - 1] = '\0';
 
+
+	is_image_doc = 0;
+	if (is_image) {
+		synth = browser_image_document(st, st->raw_html,
+		    st->raw_html_len);
+		if (synth != NULL) {
+			free(st->raw_html);
+			st->raw_html = synth;
+			st->raw_html_len = strlen(synth);
+			is_image_doc = 1;
+		} else {
+			synth = strdup("<html><head><title>Image</title>"
+			    "</head><body><p>This image could not be "
+			    "decoded.</p></body></html>");
+			if (synth != NULL) {
+				free(st->raw_html);
+				st->raw_html = synth;
+				st->raw_html_len = strlen(synth);
+			}
+		}
+	}
+
 	st->doc = html_parse(st->raw_html, st->raw_html_len);
 	st->images_count = (st->doc != NULL) ?
 	    browser_count_images(st->doc->root) : 0;
-	st->images_loaded = 0;
+
+	st->images_loaded = (is_image_doc != 0) ? 1 : 0;
 	viewport_w = (int32_t)st->width - SCROLLBAR_W;
 	if (viewport_w < 100) {
 		viewport_w = 600;
@@ -280,7 +327,8 @@ browser_load_apply(browser_state_t *st)
 	if (view_h < 50) {
 		view_h = 400;
 	}
-	st->layout = html_layout_create(st->doc, viewport_w, view_h);
+	st->layout = html_layout_create_ex(st->doc, viewport_w, view_h,
+	    browser_image_size, st);
 
 	st->scroll_y = 0;
 	if (st->layout != NULL && st->layout->content_height > view_h) {
@@ -314,20 +362,20 @@ browser_load_apply(browser_state_t *st)
 	 */
 	st->css_next = 0;
 	st->css_applied = 0;
+	st->img_next = 0;
+	st->img_fetching = 0;
+	st->img_url[0] = '\0';
 }
 
-/*
- * Rebuilds the layout from the document already in hand.
- *
- * Used after an external stylesheet lands: nothing about the DOM changed, only
- * the sheet it is styled by, so re-parsing the HTML would be wasted work.  The
- * scroll position is clamped rather than reset, because the styled layout is
- * usually a different height and the old offset can now be past the end.
- */
+
 static void
 browser_relayout(browser_state_t *st)
 {
-	int32_t	viewport_w, view_h;
+	html_ctrl_box_t		*ctrl;
+	const html_node_t	*focus_node;
+	size_t			 caret;
+	int32_t			 viewport_w, view_h;
+	int			 caret_on;
 
 	if (st == NULL || st->doc == NULL) {
 		return;
@@ -342,10 +390,31 @@ browser_relayout(browser_state_t *st)
 		view_h = 400;
 	}
 
+	focus_node = NULL;
+	caret = 0;
+	caret_on = 0;
 	if (st->layout != NULL) {
+		if (st->layout->focus != NULL) {
+			focus_node = st->layout->focus->node;
+			caret = st->layout->caret;
+			caret_on = st->layout->caret_on;
+		}
 		html_layout_free(st->layout);
 	}
-	st->layout = html_layout_create(st->doc, viewport_w, view_h);
+	st->layout = html_layout_create_ex(st->doc, viewport_w, view_h,
+	    browser_image_size, st);
+
+	if (st->layout != NULL && focus_node != NULL) {
+		for (ctrl = st->layout->ctrls; ctrl != NULL;
+		    ctrl = ctrl->next) {
+			if (ctrl->node == focus_node) {
+				st->layout->focus = ctrl;
+				st->layout->caret = caret;
+				st->layout->caret_on = caret_on;
+				break;
+			}
+		}
+	}
 
 	if (st->layout != NULL && st->layout->content_height > view_h) {
 		st->max_scroll_y = st->layout->content_height - view_h;
@@ -471,6 +540,183 @@ browser_css_apply(browser_state_t *st)
 	}
 }
 
+static const char *
+browser_img_src_at(const html_node_t *root, int index)
+{
+	const html_node_t	*node;
+	const char		*src;
+	int			 seen, visited;
+
+	seen = 0;
+	visited = 0;
+	node = root;
+	while (node != NULL && visited < BROWSER_MAX_NODES) {
+		visited++;
+		if (node->tag == HTML_TAG_IMG) {
+			src = html_node_get_attr(node, "src");
+			if (src != NULL && src[0] != '\0') {
+				if (seen == index) {
+					return (src);
+				}
+				seen++;
+			}
+		}
+		if (node->first_child != NULL) {
+			node = node->first_child;
+			continue;
+		}
+		while (node != NULL && node->next_sibling == NULL) {
+			node = node->parent;
+			if (node == root) {
+				return (NULL);
+			}
+		}
+		if (node == NULL) {
+			break;
+		}
+		node = node->next_sibling;
+	}
+	return (NULL);
+}
+
+
+static int
+browser_image_fetch_next(browser_state_t *st)
+{
+	char		url[BROWSER_MAX_URL];
+	char		status[BROWSER_MAX_HOST + 64];
+	char		host[BROWSER_MAX_HOST];
+	char		path[BROWSER_MAX_PATH];
+	const char	*src;
+	int		is_https, port;
+
+	if (st->doc == NULL || st->doc->root == NULL) {
+		return (0);
+	}
+
+	while (st->img_next < BROWSER_MAX_IMAGES) {
+		int	idx = st->img_next++;
+
+		src = browser_img_src_at(st->doc->root, idx);
+		if (src == NULL) {
+			return (0);	/* no more images */
+		}
+
+		browser_image_key(st, src, url, sizeof(url));
+		if (url[0] == '\0') {
+			continue;
+		}
+
+
+		if (browser_image_cached(st, url)) {
+			continue;
+		}
+
+
+		if (browser_url_parse(url, host, sizeof(host), &port, path,
+		    sizeof(path), &is_https) != 0 || is_https != 0) {
+			continue;
+		}
+
+		browser_loader_reset(&st->loader);
+		if (browser_loader_start(&st->loader, url) != 0) {
+			continue;
+		}
+		strncpy(st->img_url, url, sizeof(st->img_url) - 1);
+		st->img_url[sizeof(st->img_url) - 1] = '\0';
+		st->img_fetching = 1;
+		st->is_loading = 1;
+		snprintf(status, sizeof(status), "Fetching image from %s...",
+		    host);
+		browser_status_set(st, status);
+		return (1);
+	}
+	return (0);
+}
+
+static int
+browser_image_apply(browser_state_t *st)
+{
+	browser_loader_t	*ld;
+	libg_image_t		*img;
+	size_t			 off, len;
+	int			 status;
+
+	ld = &st->loader;
+	img = NULL;
+
+	status = browser_http_status(ld->response, ld->response_len);
+	if (status < 200 || status >= 300) {
+		browser_image_note(st, st->img_url, NULL);
+		return (0);
+	}
+
+	off = browser_http_body_offset(ld->response, ld->response_len);
+	if (off > ld->response_len) {
+		browser_image_note(st, st->img_url, NULL);
+		return (0);
+	}
+	len = ld->response_len - off;
+	if (len == 0 || len > BROWSER_MAX_IMAGE_BYTES) {
+		browser_image_note(st, st->img_url, NULL);
+		return (0);
+	}
+
+
+	if (libgImageLoad(ld->response + off, len, &img) != LIBG_OK) {
+		browser_image_note(st, st->img_url, NULL);
+		return (0);
+	}
+
+	browser_image_note(st, st->img_url, img);
+	st->images_loaded++;
+	return (1);
+}
+
+static int
+browser_next_resource(browser_state_t *st)
+{
+	if (browser_css_fetch_next(st) != 0) {
+		return (1);
+	}
+	return (browser_image_fetch_next(st));
+}
+
+
+static void
+browser_css_done(browser_state_t *st)
+{
+	char	status[128];
+
+	if (st->css_applied > 0) {
+		browser_relayout(st);
+		snprintf(status, sizeof(status),
+		    "Loaded, %d stylesheet%s applied", st->css_applied,
+		    (st->css_applied == 1) ? "" : "s");
+		browser_status_set(st, status);
+	}
+	if (browser_image_fetch_next(st) == 0) {
+		st->is_loading = 0;
+	}
+}
+
+
+static void
+browser_image_done(browser_state_t *st)
+{
+	char	status[128];
+
+	st->is_loading = 0;
+	if (st->images_count <= 0) {
+		return;
+	}
+	snprintf(status, sizeof(status), "Loaded, %d of %d image%s",
+	    st->images_loaded, st->images_count,
+	    (st->images_count == 1) ? "" : "s");
+	browser_status_set(st, status);
+	st->dirty_flags |= BROWSER_DIRTY_HEADER;
+}
+
 /*
  * Progress text for an in-flight load.  Byte counts are reported in KB so the
  * string only changes about once per kilobyte; formatting the raw count would
@@ -570,13 +816,11 @@ browser_load_poll(browser_state_t *st)
 		st->pending_url[0] = '\0';
 
 		browser_loader_reset(ld);
-		/*
-		 * A navigation cancels an in-flight stylesheet fetch.  Without
-		 * this the sheet's response would arrive after the new
-		 * document's and be appended to it.
-		 */
 		st->css_fetching = 0;
 		st->css_next = BROWSER_MAX_CSS_LINKS;
+		st->img_fetching = 0;
+		st->img_next = BROWSER_MAX_IMAGES;
+		st->img_url[0] = '\0';
 		st->is_loading = 1;
 		st->page_size_bytes = 0;
 		st->progress_kb = 0;
@@ -592,31 +836,50 @@ browser_load_poll(browser_state_t *st)
 
 	switch (ld->state) {
 	case BROWSER_LOAD_DONE:
+		if (st->img_fetching != 0) {
+			st->img_fetching = 0;
+
+			if (browser_image_apply(st) != 0) {
+				if (st->layout != NULL &&
+				    st->layout->images_estimated > 0) {
+					browser_relayout(st);
+				} else {
+					st->dirty_flags |=
+					    BROWSER_DIRTY_VIEWPORT;
+				}
+			}
+			browser_loader_reset(ld);
+			if (browser_image_fetch_next(st) == 0) {
+				browser_image_done(st);
+			}
+			break;
+		}
 		if (st->css_fetching != 0) {
 			st->css_fetching = 0;
 			browser_css_apply(st);
 			browser_loader_reset(ld);
 			if (browser_css_fetch_next(st) == 0) {
-				st->is_loading = 0;
-				if (st->css_applied > 0) {
-					browser_relayout(st);
-					snprintf(status, sizeof(status),
-					    "Loaded, %d stylesheet%s applied",
-					    st->css_applied,
-					    (st->css_applied == 1) ? "" : "s");
-					browser_status_set(st, status);
-				}
+				browser_css_done(st);
 			}
 			break;
 		}
 		st->is_loading = 0;
 		browser_load_apply(st);
 		browser_loader_reset(ld);
-		if (browser_css_fetch_next(st) != 0) {
+		if (browser_next_resource(st) != 0) {
 			st->dirty_flags |= BROWSER_DIRTY_HEADER;
 		}
 		break;
 	case BROWSER_LOAD_ERROR:
+		if (st->img_fetching != 0) {
+			st->img_fetching = 0;
+			browser_image_note(st, st->img_url, NULL);
+			browser_loader_reset(ld);
+			if (browser_image_fetch_next(st) == 0) {
+				browser_image_done(st);
+			}
+			break;
+		}
 		if (st->css_fetching != 0) {
 			/*
 			 * A sheet that will not load is skipped, not surfaced:
@@ -627,10 +890,7 @@ browser_load_poll(browser_state_t *st)
 			st->css_fetching = 0;
 			browser_loader_reset(ld);
 			if (browser_css_fetch_next(st) == 0) {
-				st->is_loading = 0;
-				if (st->css_applied > 0) {
-					browser_relayout(st);
-				}
+				browser_css_done(st);
 			}
 			break;
 		}
@@ -677,6 +937,11 @@ browser_ui_init(browser_state_t *st)
 	st->css_next = BROWSER_MAX_CSS_LINKS;
 	st->css_fetching = 0;
 	st->css_applied = 0;
+	/* Same reason: no document yet, so no image to attach a fetch to. */
+	st->img_next = BROWSER_MAX_IMAGES;
+	st->img_fetching = 0;
+	st->img_url[0] = '\0';
+	st->image_count = 0;
 	st->caret_next_ms = 0;
 }
 
@@ -829,54 +1094,31 @@ draw_toolbar(browser_state_t *st)
 static void
 draw_scrollbar(browser_state_t *st, int32_t vx, int32_t vy, int32_t vw, int32_t vh)
 {
+	libg_rect_t	rect;
+	uint32_t	res;
+	int32_t		content, before;
+
 	(void)vx;
 	(void)vw;
-	libg_rect_t rect;
-	int32_t sb_x = (int32_t)st->width - SCROLLBAR_W;
-	int32_t sb_y = vy;
-	int32_t sb_h = vh;
 
-	/* Track */
-	rect.x = sb_x;
-	rect.y = sb_y;
+	rect.x = (int32_t)st->width - SCROLLBAR_W;
+	rect.y = vy;
 	rect.width = SCROLLBAR_W;
-	rect.height = sb_h;
-	libgFillRect(st->ui, rect, 0xFFEBE8E4);
-	libgLine(st->ui, sb_x, sb_y, sb_x, sb_y + sb_h, 0xFFB0ACA6);
+	rect.height = vh;
+	content = vh;
+	if (st->layout != NULL && st->layout->content_height > content) {
+		content = st->layout->content_height;
+	}
 
-	/* Up button */
-	rect.height = 16;
-	if (libgButton(st->ui, ID_SCROLL_UP, rect, "^") & LIBG_WIDGET_CLICKED) {
-		st->scroll_y -= 40;
-		if (st->scroll_y < 0) st->scroll_y = 0;
+	before = st->scroll_y;
+	res = libgScrollbar(st->ui, ID_SCROLLBAR, rect, LIBG_SCROLL_VERTICAL,
+	    vh, content, BROWSER_SCROLL_STEP, &st->scroll_y);
+
+
+	if ((res & LIBG_WIDGET_CHANGED) != 0 || st->scroll_y != before) {
 		st->dirty_flags |= BROWSER_DIRTY_VIEWPORT;
 	}
-
-	/* Down button */
-	rect.y = sb_y + sb_h - 16;
-	rect.height = 16;
-	if (libgButton(st->ui, ID_SCROLL_DOWN, rect, "v") & LIBG_WIDGET_CLICKED) {
-		st->scroll_y += 40;
-		if (st->scroll_y > st->max_scroll_y) st->scroll_y = st->max_scroll_y;
-		st->dirty_flags |= BROWSER_DIRTY_VIEWPORT;
-	}
-
-	/* Thumb */
-	int32_t track_h = sb_h - 32;
-	if (track_h > 20 && st->layout != NULL && st->layout->content_height > 0) {
-		int32_t thumb_h = (track_h * vh) / st->layout->content_height;
-		if (thumb_h < 16) thumb_h = 16;
-		if (thumb_h > track_h) thumb_h = track_h;
-
-		int32_t thumb_y = sb_y + 16;
-		if (st->max_scroll_y > 0) {
-			thumb_y += (st->scroll_y * (track_h - thumb_h)) / st->max_scroll_y;
-		}
-
-		libg_rect_t thumb = { sb_x + 1, thumb_y, SCROLLBAR_W - 2, thumb_h };
-		libgFillRect(st->ui, thumb, 0xFFC8C4BE);
-		libgStrokeRect(st->ui, thumb, 0xFF8A8680);
-	}
+	st->dragging_scrollbar = ((res & LIBG_WIDGET_ACTIVE) != 0);
 }
 
 static void
@@ -905,7 +1147,7 @@ draw_viewport(browser_state_t *st)
 
 	if (st->layout != NULL) {
 		html_layout_render(st->ui, st->layout, vx, vy, vw, vh,
-		    st->scroll_y, browser_svg_draw, st);
+		    st->scroll_y, browser_image_draw, st);
 	}
 	libgClearClip(st->ui);
 
@@ -1378,10 +1620,17 @@ browser_handle_event(browser_state_t *st, const sprot_event_t *event)
 		srapi_ev.flags = SRAPI_MOUSE_MOVE | SRAPI_MOUSE_ABSOLUTE;
 		srapi_ev.x = mx;
 		srapi_ev.y = my;
+		srapi_ev.buttons = st->mouse_buttons;
 		libgHandleInput(st->ui, &srapi_ev);
 
 		int32_t vy = HEADER_TOTAL_H;
 		int32_t vh = (int32_t)st->height - HEADER_TOTAL_H - STATUS_BAR_H;
+
+		if (st->dragging_scrollbar != 0) {
+			st->dirty_flags |= BROWSER_DIRTY_VIEWPORT;
+			return;
+		}
+
 		if (my >= vy && my < vy + vh && mx < (int32_t)st->width - SCROLLBAR_W) {
 			int32_t doc_x = mx;
 			int32_t doc_y = my - vy + st->scroll_y;
@@ -1421,7 +1670,10 @@ browser_handle_event(browser_state_t *st, const sprot_event_t *event)
 		srapi_ev.flags = SRAPI_MOUSE_BUTTON;
 		srapi_ev.x = mx;
 		srapi_ev.y = my;
-		srapi_ev.buttons = pressed ? 1 : 0;
+		if (event->u.pointer_button.button == SRAPI_MOUSE_LEFT) {
+			st->mouse_buttons = pressed ? SRAPI_MOUSE_LEFT : 0;
+		}
+		srapi_ev.buttons = st->mouse_buttons;
 		libgHandleInput(st->ui, &srapi_ev);
 
 		int32_t vy = HEADER_TOTAL_H;

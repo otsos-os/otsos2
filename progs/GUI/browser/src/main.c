@@ -180,6 +180,7 @@ main(int argc, char **argv, char **envp)
 		free(st.raw_html);
 	}
 	browser_svg_cache_free(&st);
+	browser_image_cache_free(&st);
 	browser_loader_reset(&st.loader);
 	if (st.kq >= 0) {
 		eventClose(st.kq);

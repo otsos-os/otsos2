@@ -3,11 +3,14 @@
 $define %type la_zip as open zip archive state
 $define %type la_eocd as end of central directory data
 $define %type la_zip_entry as central directory file entry
+$define %type la_inflate_io as streaming state for one deflated entry
 $define %func rd16 as function with args const unsigned char *
 $define %func rd32 as function with args const unsigned char *
 $define %func la_fail as function with args int
-$define %func la_crc_init as procedure with args void
-$define %func la_crc_update as function with args uint32_t, const void *, size_t
+$define %func la_inflate_errno as function with args int
+$define %func la_entry_read as function with args arg, buf, len
+$define %func la_entry_write as function with args arg, buf, len
+$define %func la_inflate_entry as function with args zip, out, entry
 $define %func la_read_full as function with args int, void *, size_t
 $define %func la_seek as function with args int, uint64_t
 $define %func la_is_dir_path as function with args const char *
@@ -30,12 +33,15 @@ $define %func la_zip_extract as function with args zip path, options
 
 /* !SPACE!
 
-$space %internal rd16, rd32, la_fail, la_crc_init, la_crc_update
+$space %internal rd16, rd32, la_fail, la_inflate_errno
+$space %internal la_inflate_io_t, la_entry_read, la_entry_write
+$space %internal la_inflate_entry
 $space %internal la_read_full, la_seek, la_is_dir_path, la_mkdir_one
 $space %internal la_mkdirs, la_parent_dirs, la_join_path, la_part_ok
 $space %internal la_name_ok, la_name_is_dir, la_find_eocd, la_read_entry
 $space %internal la_open_entry_data, la_copy_entry, la_extract_entry
 $space %internal la_extract_all
+$space %internal la_inflate_state, la_inflate_window
 $space %export la_zip_extract
 
 */
@@ -77,6 +83,7 @@ $space %export la_zip_extract
 #define LA_ZIP_CENTRAL_SIG	0x02014b50U
 #define LA_ZIP_EOCD_SIG		0x06054b50U
 #define LA_ZIP_METHOD_STORE	0
+#define LA_ZIP_METHOD_DEFLATE	8
 #define LA_ZIP_GP_ENCRYPTED	0x0001
 #define LA_ZIP_GP_STRONG	0x0040
 #define LA_ZIP_GP_PATCHED	0x0020
@@ -111,9 +118,9 @@ struct la_zip_entry {
 	uint16_t	method;
 };
 
-static uint32_t	la_crc_table[256];
 static unsigned char	la_eocd_buf[LA_ZIP_EOCD_WINDOW];
-static int	la_crc_ready;
+static la_inflate_t	la_inflate_state;
+static unsigned char	la_inflate_window[LA_INF_WINDOW];
 
 static uint16_t
 rd16(const unsigned char *p)
@@ -135,40 +142,21 @@ la_fail(int code)
 	return (-1);
 }
 
-static void
-la_crc_init(void)
+static int
+la_inflate_errno(int err)
 {
-	uint32_t	c, i, j;
-
-	if (la_crc_ready) {
-		return;
+	switch (err) {
+	case LA_INF_UNSUPPORTED:
+		return (ENOTSUP);
+	case LA_INF_TOO_LARGE:
+		return (EFBIG);
+	case LA_INF_INVAL:
+		return (EINVAL);
+	case LA_INF_IO:
+	case LA_INF_CORRUPT:
+	default:
+		return (EIO);
 	}
-	for (i = 0; i < 256; i++) {
-		c = i;
-		for (j = 0; j < 8; j++) {
-			if (c & 1) {
-				c = 0xedb88320U ^ (c >> 1);
-			} else {
-				c = c >> 1;
-			}
-		}
-		la_crc_table[i] = c;
-	}
-	la_crc_ready = 1;
-}
-
-static uint32_t
-la_crc_update(uint32_t crc, const void *data, size_t size)
-{
-	const unsigned char	*p;
-	size_t			 i;
-
-	la_crc_init();
-	p = (const unsigned char *)data;
-	for (i = 0; i < size; i++) {
-		crc = la_crc_table[(crc ^ p[i]) & 0xff] ^ (crc >> 8);
-	}
-	return (crc);
 }
 
 static int
@@ -485,10 +473,11 @@ la_read_entry(struct la_zip *zip, uint64_t offset, struct la_zip_entry *entry)
 	    LA_ZIP_GP_PATCHED)) != 0) {
 		return (la_fail(ENOTSUP));
 	}
-	if (method != LA_ZIP_METHOD_STORE) {
+	if (method != LA_ZIP_METHOD_STORE &&
+	    method != LA_ZIP_METHOD_DEFLATE) {
 		return (la_fail(ENOTSUP));
 	}
-	if (comp_size != uncomp_size) {
+	if (method == LA_ZIP_METHOD_STORE && comp_size != uncomp_size) {
 		return (la_fail(EINVAL));
 	}
 	if ((uint64_t)local_offset + 30 > zip->size) {
@@ -589,7 +578,7 @@ la_copy_entry(struct la_zip *zip, int out, const struct la_zip_entry *entry)
 		if (dataWriteFull(out, buf, chunk) < 0) {
 			return (-1);
 		}
-		crc = la_crc_update(crc, buf, chunk);
+		crc = la_crc32_update(crc, buf, chunk);
 		left -= chunk;
 	}
 	crc = crc ^ 0xffffffffU;
@@ -599,11 +588,90 @@ la_copy_entry(struct la_zip *zip, int out, const struct la_zip_entry *entry)
 	return (0);
 }
 
+typedef struct la_inflate_io {
+	struct la_zip	*zip;
+	int		 out;
+	uint64_t	 left;
+	uint32_t	 crc;
+	int		 err;
+} la_inflate_io_t;
+
+static long
+la_entry_read(void *arg, void *buf, size_t len)
+{
+	la_inflate_io_t	*io;
+	long		 got;
+
+	io = (la_inflate_io_t *)arg;
+	if (io->left == 0) {
+		return (0);
+	}
+	if ((uint64_t)len > io->left) {
+		len = (size_t)io->left;
+	}
+	got = dataRead(io->zip->fd, buf, len);
+	if (got < 0) {
+		io->err = errno;
+		return (-1);
+	}
+	if (got == 0) {
+		io->err = EIO;
+		return (-1);
+	}
+	io->left -= (uint64_t)got;
+	return (got);
+}
+
+static int
+la_entry_write(void *arg, const void *buf, size_t len)
+{
+	la_inflate_io_t	*io;
+
+	io = (la_inflate_io_t *)arg;
+	if (dataWriteFull(io->out, buf, len) < 0) {
+		io->err = errno;
+		return (-1);
+	}
+	io->crc = la_crc32_update(io->crc, buf, len);
+	return (0);
+}
+
+static int
+la_inflate_entry(struct la_zip *zip, int out,
+    const struct la_zip_entry *entry)
+{
+	la_inflate_io_t	io;
+	uint64_t	produced;
+	int		ret;
+
+	io.zip = zip;
+	io.out = out;
+	io.left = entry->comp_size;
+	io.crc = 0xffffffffU;
+	io.err = 0;
+
+	produced = 0;
+	ret = la_inflate_stream(&la_inflate_state, la_inflate_window,
+	    sizeof(la_inflate_window), la_entry_read, &io, la_entry_write, &io,
+	    &produced);
+	if (ret != LA_INF_OK) {
+		return (la_fail((ret == LA_INF_IO && io.err != 0) ? io.err :
+		    la_inflate_errno(ret)));
+	}
+	if (produced != entry->uncomp_size) {
+		return (la_fail(EIO));
+	}
+	if ((io.crc ^ 0xffffffffU) != entry->crc32) {
+		return (la_fail(EIO));
+	}
+	return (0);
+}
+
 static int
 la_extract_entry(struct la_zip *zip, const struct la_zip_entry *entry)
 {
 	char	path[LA_PATH_MAX];
-	int	out, code;
+	int	out, code, ret;
 
 	if (la_join_path(path, sizeof(path), zip->dest_dir, entry->name) < 0) {
 		return (-1);
@@ -634,7 +702,12 @@ la_extract_entry(struct la_zip *zip, const struct la_zip_entry *entry)
 		errno = code;
 		return (-1);
 	}
-	if (la_copy_entry(zip, out, entry) < 0) {
+	if (entry->method == LA_ZIP_METHOD_DEFLATE) {
+		ret = la_inflate_entry(zip, out, entry);
+	} else {
+		ret = la_copy_entry(zip, out, entry);
+	}
+	if (ret < 0) {
 		code = errno;
 		dataClose(out);
 		errno = code;

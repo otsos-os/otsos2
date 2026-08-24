@@ -10,8 +10,9 @@ CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fPIE -fno-stack-protector \
 	-Iinclude -I$(NATIVE_DIR)/include
 
 LIB = lib/libarchive.a
-SRC = src/zip.c
+SRC = src/inflate.c src/zip.c
 OBJ = $(SRC:src/%.c=build/%.o)
+HDR = include/libarchive.h
 
 .PHONY: all clean
 
@@ -23,8 +24,8 @@ $(LIB): $(OBJ)
 	@rm -f $@
 	@$(AR) rcs $@ $(OBJ)
 
-build/%.o: src/%.c include/libarchive.h
-	@mkdir -p build
+build/%.o: src/%.c $(HDR)
+	@mkdir -p $(dir $@)
 	@echo "  CC       $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

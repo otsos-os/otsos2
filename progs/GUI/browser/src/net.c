@@ -11,6 +11,7 @@ $define %func browser_dns_server as function with args int
 $define %func browser_ip_literal as function with args const char *
 $define %func browser_http_request as function with args char *, size_t, const char *, int, const char *
 $define %func browser_http_status as function with args const char *, size_t
+$define %func browser_http_header as function with args const char *, size_t, const char *, char *, size_t
 $define %func browser_http_location as function with args const char *, size_t, char *, size_t
 $define %func browser_http_body_offset as function with args const char *, size_t
 
@@ -23,7 +24,8 @@ $space %export browser_url_normalize, browser_url_parse, browser_url_resolve
 $space %export browser_now_ms, browser_dns_build, browser_dns_parse
 $space %export browser_dns_server, browser_ip_literal
 $space %export browser_http_request, browser_http_status
-$space %export browser_http_location, browser_http_body_offset
+$space %export browser_http_header, browser_http_location
+$space %export browser_http_body_offset
 
 */
 
@@ -534,25 +536,30 @@ browser_http_status(const char *resp, size_t len)
 }
 
 int
-browser_http_location(const char *resp, size_t len, char *out, size_t max_out)
+browser_http_header(const char *resp, size_t len, const char *name, char *out,
+    size_t max_out)
 {
-	size_t	hdr, i, start, n;
+	size_t	hdr, i, start, n, name_len;
 
-	if (resp == NULL || out == NULL || max_out == 0) {
+	if (resp == NULL || name == NULL || out == NULL || max_out == 0) {
 		return (-1);
 	}
 	out[0] = '\0';
+	name_len = strlen(name);
+	if (name_len == 0) {
+		return (-1);
+	}
 	hdr = http_header_len(resp, len);
 
-	for (i = 0; i + 9 < hdr; i++) {
+	for (i = 0; i + name_len < hdr; i++) {
 		/* Header names are case-insensitive; only match line starts. */
 		if (i != 0 && resp[i - 1] != '\n') {
 			continue;
 		}
-		if (strncasecmp(resp + i, "Location:", 9) != 0) {
+		if (strncasecmp(resp + i, name, name_len) != 0) {
 			continue;
 		}
-		start = i + 9;
+		start = i + name_len;
 		while (start < hdr && (resp[start] == ' ' ||
 		    resp[start] == '\t')) {
 			start++;
@@ -570,6 +577,12 @@ browser_http_location(const char *resp, size_t len, char *out, size_t max_out)
 		return (0);
 	}
 	return (-1);
+}
+
+int
+browser_http_location(const char *resp, size_t len, char *out, size_t max_out)
+{
+	return (browser_http_header(resp, len, "Location:", out, max_out));
 }
 
 size_t

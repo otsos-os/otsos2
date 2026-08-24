@@ -35,12 +35,24 @@ $define %func libgPanel as procedure with args context, rect
 $define %func libgButton as function with args context, id, rect, label
 $define %func libgTextField as function with args context, id, rect, buffer
 $define %func libgSlider as function with args context, id, rect, value
+$define %func libgScrollbar as function with args context, id, rect, axis, visible, total, step, value
+$define %func libgScrollbarThickness as function with args void
 
 $define %type libg_anim as animation state structure
 $define %func libgAnimStart as procedure with args anim, from, to, duration, easing, now
 $define %func libgAnimUpdate as function with args anim, now, out_value
 $define %func libgLerp as function with args a, b, progress
 $define %func libgBlendColor as function with args color1, color2, alpha
+$define %type libg_image as opaque decoded raster image
+$define %func libgImageProbe as function with args bytes, length
+$define %func libgImageLoad as function with args bytes, length, out
+$define %func libgImageLoadFile as function with args path, out
+$define %func libgImageFree as procedure with args image
+$define %func libgImageWidth as function with args image
+$define %func libgImageHeight as function with args image
+$define %func libgImageDraw as procedure with args context, image, x, y
+$define %func libgImageDrawScaled as procedure with args context, image, rect
+$define %func libgImageStrerror as function with args error code
 
 */
 
@@ -58,7 +70,12 @@ $space %export libgSvgShape, libgSvgDoc
 $space %export libgSetClip, libgClearClip
 $space %export libgText, libgTextScale, libgMeasureText
 $space %export libgPanel, libgButton, libgTextField, libgSlider
+$space %export libgScrollbar, libgScrollbarThickness
 $space %export libgAnimStart, libgAnimUpdate, libgLerp, libgBlendColor
+$space %export libg_image_t, libgImageProbe, libgImageLoad
+$space %export libgImageLoadFile
+$space %export libgImageFree, libgImageWidth, libgImageHeight
+$space %export libgImageDraw, libgImageDrawScaled, libgImageStrerror
 
 */
 
@@ -87,12 +104,17 @@ $space %export libgAnimStart, libgAnimUpdate, libgLerp, libgBlendColor
 #define LIBG_WIDGET_CHANGED	0x00000002U
 #define LIBG_WIDGET_SUBMIT	0x00000004U
 #define LIBG_WIDGET_HOT		0x00000008U
+#define LIBG_WIDGET_ACTIVE	0x00000010U
+#define LIBG_SCROLL_VERTICAL	0
+#define LIBG_SCROLL_HORIZONTAL	1
 #define LIBG_EASE_LINEAR	0
 #define LIBG_EASE_IN		1
 #define LIBG_EASE_OUT		2
 #define LIBG_EASE_IN_OUT	3
 
 typedef struct libg_context libg_context_t;
+typedef struct libg_image libg_image_t;
+
 typedef int (*libg_present_fn)(void *userdata,
     const struct srapi_region *region);
 
@@ -182,10 +204,26 @@ uint32_t	libgTextField(libg_context_t *ctx, uint32_t id,
 uint32_t	libgSlider(libg_context_t *ctx, uint32_t id,
 	    libg_rect_t rect, int32_t min, int32_t max, int32_t *value);
 
+uint32_t	libgScrollbar(libg_context_t *ctx, uint32_t id,
+	    libg_rect_t rect, int axis, int32_t visible, int32_t total,
+	    int32_t step, int32_t *value);
+int32_t		libgScrollbarThickness(void);
+
 void	libgAnimStart(libg_anim_t *anim, int32_t from, int32_t to,
 	    uint32_t duration_ms, uint32_t easing, uint64_t now_ms);
 int	libgAnimUpdate(libg_anim_t *anim, uint64_t now_ms, int32_t *out_val);
 int32_t	libgLerp(int32_t a, int32_t b, int32_t progress_256);
 uint32_t libgBlendColor(uint32_t c1, uint32_t c2, int32_t alpha_256);
+int	libgImageProbe(const void *data, size_t len);
+int	libgImageLoad(const void *data, size_t len, libg_image_t **out);
+int	libgImageLoadFile(const char *path, libg_image_t **out);
+void	libgImageFree(libg_image_t *img);
+int32_t	libgImageWidth(const libg_image_t *img);
+int32_t	libgImageHeight(const libg_image_t *img);
+void	libgImageDraw(libg_context_t *ctx, const libg_image_t *img,
+	    int32_t x, int32_t y);
+void	libgImageDrawScaled(libg_context_t *ctx, const libg_image_t *img,
+	    libg_rect_t rect);
+const char	*libgImageStrerror(int err);
 
 #endif
