@@ -49,6 +49,9 @@ $define %func smp_current_thread as function with args void
 $define %func smp_set_current_thread as procedure with args thread_t *
 $define %func smp_ap_started as function with args u8
 $define %func smp_ap_target_index as function with args void
+$define %func smp_is_bsp as function with args void
+$define %func smp_sched_cpu_count as function with args void
+$define %func smp_ap_scheduling_enabled as function with args void
 $define %func ap_main as start with args u8
 
 $define %const SMP_MAX_CPUS as 32
@@ -63,6 +66,8 @@ $space %export smp_cpu_id, smp_cpu_index, smp_cpu_count
 $space %export smp_tss_current, smp_tss_register
 $space %export smp_current_thread, smp_set_current_thread
 $space %export smp_ap_started, smp_ap_target_index
+$space %export smp_is_bsp, smp_sched_cpu_count
+$space %export smp_ap_scheduling_enabled
 $space %export ap_main
 $space %export smp_tss_by_lapic, smp_cpu_map
 $space %export smp_bsp_lapic_id, smp_ap_cpu_index
@@ -85,11 +90,13 @@ struct spinlock {
 typedef struct spinlock	spinlock_t;
 
 struct smp_cpu {
+	u64	stack_top;
+	thread_t	*current_thread;
+	tss_t		*tss;
 	u8	lapic_id;
 	u8	present;
 	u8	cpu_index;
-	thread_t	*current_thread;
-	tss_t	*tss;
+	u8	online;
 };
 
 void	smp_init(void);
@@ -106,6 +113,9 @@ thread_t *smp_current_thread(void);
 void	smp_set_current_thread(thread_t *td);
 int	smp_ap_started(u8 cpu_index);
 u8	smp_ap_target_index(void);
+int	smp_is_bsp(void);
+int	smp_sched_cpu_count(void);
+int	smp_ap_scheduling_enabled(void);
 void	ap_main(u8 cpu_index);
 extern tss_t	*smp_tss_by_lapic[256];
 extern struct smp_cpu	smp_cpu_map[SMP_MAX_CPUS];

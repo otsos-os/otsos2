@@ -117,7 +117,7 @@ scheduler_least_loaded_cpu(void)
 {
 	int	cpu, cpus, best_cpu, best_load, load;
 
-	cpus = smp_cpu_count();
+	cpus = smp_sched_cpu_count();
 	if (cpus <= 0) {
 		return (0);
 	}
@@ -193,7 +193,7 @@ scheduler_assign_process(process_t *proc)
 	if (!proc) {
 		return;
 	}
-	cpus = smp_cpu_count();
+	cpus = smp_sched_cpu_count();
 	if (cpus <= 0) {
 		cpus = 1;
 	}

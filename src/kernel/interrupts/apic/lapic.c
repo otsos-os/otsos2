@@ -151,6 +151,8 @@ lapic_enable(void)
 	svr = lapic_read(LAPIC_SVR);
 	lapic_write(LAPIC_SVR, (svr & ~0xFFU) | 0xFF |
 	    LAPIC_SVR_ENABLE);
+	lapic_write(LAPIC_LVT_TIMER, LAPIC_LVT_MASK | APIC_TIMER_VECTOR);
+	lapic_write(LAPIC_TIMER_ICR, 0);
 	if (!lapic_enabled) {
 		lapic_enabled = 1;
 	}

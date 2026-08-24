@@ -53,6 +53,9 @@ $define %func smp_current_thread as function with args void
 $define %func smp_set_current_thread as procedure with args thread_t *
 $define %func smp_ap_started as function with args u8
 $define %func smp_ap_target_index as function with args void
+$define %func smp_is_bsp as function with args void
+$define %func smp_sched_cpu_count as function with args void
+$define %func smp_ap_scheduling_enabled as function with args void
 $define %func smp_cpu_index_from_lapic as function with args u8
 $define %func smp_ap_count_cb as procedure with args acpi_madt_entry_header_t *, void *
 $define %func smp_ap_list_cb as procedure with args acpi_madt_entry_header_t *, void *
@@ -60,8 +63,10 @@ $define %func ap_main as start with args u8
 $define %func smp_send_init as procedure with args u8
 $define %func smp_send_sipi as procedure with args u8, u8
 $define %func smp_wait_us as procedure with args u32
+$define %func smp_wait_ticks as procedure with args u32
 $define %func smp_trampoline_setup as procedure with args u64, u64, u8
 $define %func smp_ap_ready_clear as procedure with args void
+$define %func smp_ap_park as start with args void
 
 */
 
@@ -69,17 +74,20 @@ $define %func smp_ap_ready_clear as procedure with args void
 
 $space %internal smp_init_bsp, smp_start_ap, smp_cpu_index_from_lapic
 $space %internal smp_ap_count_cb, smp_ap_list_cb
-$space %internal smp_send_init, smp_send_sipi, smp_wait_us
-$space %internal smp_trampoline_setup, smp_ap_ready_clear
+$space %internal smp_send_init, smp_send_sipi, smp_wait_us, smp_wait_ticks
+$space %internal smp_trampoline_setup, smp_ap_ready_clear, smp_ap_park
 $space %export smp_init, smp_init_single_cpu, smp_lock, smp_unlock, smp_lock_held
 $space %export smp_cpu_id, smp_cpu_index, smp_cpu_count_var
 $space %export smp_tss_current, smp_tss_register
 $space %export smp_current_thread, smp_set_current_thread
 $space %export smp_ap_started, smp_ap_target_index
+$space %export smp_is_bsp, smp_sched_cpu_count
+$space %export smp_ap_scheduling_enabled
 $space %export ap_main
 
 */
 
+#include <kernel/cm/cm.h>
 #include <kernel/drivers/acpi/acpi.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/gdt.h>
@@ -103,9 +111,12 @@ u8		smp_ap_cpu_index;
 static volatile u8	smp_ap_ready[SMP_MAX_CPUS];
 static int	smp_cpu_count_var;
 static int	smp_initialized;
+static int	smp_bsp_known;
+static int	smp_ap_sched;		/* SYSTEM.Scheduler.ApScheduling */
 extern char	ap_trampoline_start[];
 extern char	ap_trampoline_end[];
 extern void	pit_delay_us(u32 us);
+extern int	pit_delay_us_checked(u32 us);
 #define	TRAMPOLINE_BASE	0x8000
 #define	TRAMPOLINE_VADDR	TRAMPOLINE_BASE
 #define	OFF_CR3		0x100
@@ -153,6 +164,41 @@ smp_cpu_id(void)
 		return (smp_bsp_lapic_id);
 	}
 	return (lapic_get_id());
+}
+
+int
+smp_is_bsp(void)
+{
+	if (!smp_bsp_known) {
+		return (1);
+	}
+	return (smp_cpu_id() == smp_bsp_lapic_id);
+}
+
+int
+smp_ap_scheduling_enabled(void)
+{
+	return (smp_ap_sched);
+}
+
+int
+smp_sched_cpu_count(void)
+{
+	int	count, i;
+
+	if (!smp_ap_sched) {
+		return (1);
+	}
+	count = 0;
+	for (i = 0; i < SMP_MAX_CPUS && i < smp_cpu_count_var; i++) {
+		if (smp_cpu_map[i].present && smp_cpu_map[i].online) {
+			count++;
+		}
+	}
+	if (count < 1) {
+		count = 1;
+	}
+	return (count);
 }
 
 int
@@ -207,15 +253,18 @@ smp_init_single_cpu(void)
 	memset(smp_cpu_map, 0, sizeof(smp_cpu_map));
 	memset(smp_tss_by_lapic, 0, sizeof(smp_tss_by_lapic));
 	smp_ap_ready_clear();
-	smp_bsp_lapic_id = 0;
+	smp_bsp_lapic_id = lapic_is_enabled() ? lapic_get_id() : 0;
+	smp_bsp_known = 1;
 	smp_ap_cpu_index = 0;
 	smp_cpu_count_var = 1;
-	smp_cpu_map[0].lapic_id = 0;
+	smp_cpu_map[0].lapic_id = smp_bsp_lapic_id;
 	smp_cpu_map[0].present = 1;
+	smp_cpu_map[0].online = 1;
 	smp_cpu_map[0].cpu_index = 0;
 	smp_cpu_map[0].current_thread = NULL;
+	smp_cpu_map[0].stack_top = gdt_get_tss() ? gdt_get_tss()->rsp0 : 0;
 	smp_cpu_map[0].tss = gdt_get_tss();
-	smp_tss_register(0, smp_cpu_map[0].tss);
+	smp_tss_register(smp_bsp_lapic_id, smp_cpu_map[0].tss);
 	smp_ap_ready[0] = 1;
 	printk("[SMP] single CPU fallback initialized\n");
 }
@@ -303,9 +352,42 @@ smp_lock_held(void)
 }
 
 static void
+smp_wait_ticks(u32 us)
+{
+	u64	start, deadline;
+	u32	hz, ticks;
+
+	hz = timer_get_frequency();
+	if (!timer_is_initialized() || hz == 0) {
+		for (ticks = 0; ticks < 100000; ticks++) {
+			__asm__ volatile("pause");
+		}
+		return;
+	}
+	ticks = (u32)(((u64)us * hz + 999999ULL) / 1000000ULL);
+	if (ticks == 0) {
+		ticks = 1;
+	}
+	start = timer_get_ticks();
+	deadline = start + ticks;
+	while (timer_get_ticks() < deadline) {
+		__asm__ volatile("pause");
+	}
+}
+
+static void
 smp_wait_us(u32 us)
 {
-	pit_delay_us(us);
+	static int	pit_ch2_broken;
+
+	if (!pit_ch2_broken) {
+		if (pit_delay_us_checked(us) == 0) {
+			return;
+		}
+		pit_ch2_broken = 1;
+		printk("[SMP] PIT channel 2 unusable, using tick delays\n");
+	}
+	smp_wait_ticks(us);
 }
 
 static void
@@ -389,6 +471,7 @@ smp_start_ap(u8 apic_id, u8 cpu_index)
 		return;
 	}
 	stack_top = (u64)stack + KERNEL_STACK_SIZE;
+	smp_cpu_map[cpu_index].stack_top = stack_top;
 	smp_ap_cpu_index = cpu_index;
 	smp_ap_ready[cpu_index] = 0;
 	smp_trampoline_setup(cr3, stack_top, cpu_index);
@@ -412,9 +495,8 @@ smp_start_ap(u8 apic_id, u8 cpu_index)
 			smp_wait_us(100);
 		}
 	}
-
-	printk("[SMP] AP %u failed to start\n", (u32)cpu_index);
-	kmem_free(stack);
+	printk("[SMP] AP %u failed to start (stack %p leaked on purpose)\n",
+	    (u32)cpu_index, (void *)stack_top);
 }
 
 static void
@@ -455,8 +537,10 @@ smp_ap_list_cb(acpi_madt_entry_header_t *entry, void *ctx)
 	}
 	smp_cpu_map[idx].lapic_id = apic_id;
 	smp_cpu_map[idx].present = 1;
+	smp_cpu_map[idx].online = (idx == 0) ? 1 : 0;
 	smp_cpu_map[idx].cpu_index = idx;
 	smp_cpu_map[idx].current_thread = NULL;
+	smp_cpu_map[idx].stack_top = 0;
 	smp_cpu_map[idx].tss = NULL;
 }
 
@@ -469,6 +553,7 @@ smp_init_bsp(void)
 
 	bsp_id = lapic_get_id();
 	smp_bsp_lapic_id = bsp_id;
+	smp_bsp_known = 1;
 	memset(smp_cpu_map, 0, sizeof(smp_cpu_map));
 	memset(smp_tss_by_lapic, 0, sizeof(smp_tss_by_lapic));
 	smp_ap_ready_clear();
@@ -477,8 +562,10 @@ smp_init_bsp(void)
 
 	smp_cpu_map[0].lapic_id = bsp_id;
 	smp_cpu_map[0].present = 1;
+	smp_cpu_map[0].online = 1;
 	smp_cpu_map[0].cpu_index = 0;
 	smp_cpu_map[0].current_thread = NULL;
+	smp_cpu_map[0].stack_top = gdt_get_tss() ? gdt_get_tss()->rsp0 : 0;
 	smp_cpu_map[0].tss = gdt_get_tss();
 	smp_tss_register(bsp_id, gdt_get_tss());
 
@@ -488,6 +575,12 @@ smp_init_bsp(void)
 	if (ap_count <= 1) {
 		printk("[SMP] only one CPU detected\n");
 		return;
+	}
+
+	if (ap_count > SMP_MAX_CPUS) {
+		printk("[SMP] %d CPUs reported, tracking only %d\n",
+		    ap_count, SMP_MAX_CPUS);
+		ap_count = SMP_MAX_CPUS;
 	}
 
 	next_index = 1;
@@ -524,23 +617,37 @@ smp_init(void)
 		return;
 	}
 
+	smp_ap_sched = cm_get_bool_default("SYSTEM", "Scheduler",
+	    "ApScheduling", 0);
+
 	smp_init_bsp();
 
-	for (idx = 1; idx < smp_cpu_count_var; idx++) {
+	for (idx = 1; idx < smp_cpu_count_var && idx < SMP_MAX_CPUS; idx++) {
 		if (!smp_cpu_map[idx].present) {
 			continue;
 		}
 		smp_start_ap(smp_cpu_map[idx].lapic_id, idx);
+	}
+	printk("[SMP] %d cpu(s) present, %d scheduling (ap_sched=%d)\n",
+	    smp_cpu_count_var, smp_sched_cpu_count(), smp_ap_sched);
+}
+
+static void
+smp_ap_park(void)
+{
+	for (;;) {
+		__asm__ volatile("cli; hlt");
 	}
 }
 
 void
 ap_main(u8 cpu_index)
 {
-	u8	lapic_id;
+	u64	stack_top;
 	tss_t	*tss;
 	gdt_entry_t	*gdt;
 	gdt_ptr_t	gdt_ptr;
+	u8	lapic_id;
 	lapic_enable();
 	pmap_init();
 	lapic_id = lapic_get_id();
@@ -548,6 +655,7 @@ ap_main(u8 cpu_index)
 		panic("[SMP]with ap cpu_index %u out of range\n",
 		    (u32)cpu_index);
 	}
+	stack_top = smp_cpu_map[cpu_index].stack_top;
 	if (smp_cpu_map[cpu_index].lapic_id != lapic_id) {
 		smp_cpu_map[cpu_index].lapic_id = lapic_id;
 		smp_cpu_map[cpu_index].present = 1;
@@ -563,6 +671,9 @@ ap_main(u8 cpu_index)
 	memset(tss, 0, sizeof(tss_t));
 	memset(gdt, 0, sizeof(gdt_entry_t) * 7);
 	gdt_init_cpu(cpu_index, tss, gdt);
+	if (stack_top != 0) {
+		tss->rsp0 = stack_top;
+	}
 	gdt_ptr.limit = sizeof(gdt_entry_t) * 7 - 1;
 	gdt_ptr.base = (u64)gdt;
 	gdt_flush((u64)&gdt_ptr);
@@ -572,8 +683,19 @@ ap_main(u8 cpu_index)
 	smp_cpu_map[cpu_index].tss = tss;
 	smp_tss_register(lapic_id, tss);
 	trace_cpu_online();
+
+	if (!smp_ap_scheduling_enabled()) {
+		smp_cpu_map[cpu_index].online = 0;
+		__atomic_store_n(&smp_ap_ready[cpu_index], 1,
+		    __ATOMIC_RELEASE);
+		printk("[SMP] ap %u lapic %u parked (ap scheduling off)\n",
+		    (u32)cpu_index, (u32)lapic_id);
+		smp_ap_park();
+	}
+
 	lapic_timer_init_ap();
-	smp_ap_ready[cpu_index] = 1;
+	smp_cpu_map[cpu_index].online = 1;
+	__atomic_store_n(&smp_ap_ready[cpu_index], 1, __ATOMIC_RELEASE);
 	printk("[SMP] with ap  %u %u init succesful ,tss at %p\n",
 	    (u32)cpu_index, (u32)lapic_id, (void *)tss);
 

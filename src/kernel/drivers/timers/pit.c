@@ -33,8 +33,9 @@ $define %type int as 32 bit signed
 
 $define %func pit_init as procedure with args void
 $define %func pit_irq_disable as procedure with args void
-$define %func pit_ch2_wait as procedure with args u16
+$define %func pit_ch2_wait as function with args u16
 $define %func pit_delay_us as procedure with args u32
+$define %func pit_delay_us_checked as function with args u32
 $define %func pit_stop as function with args struct eventtimer *
 
 $define %const PIT_FREQUENCY as 1193182
@@ -48,6 +49,7 @@ $define %const PIT_MAX_DIVISOR as 65535
 
 $space %internal pit_ch2_wait, pit_stop
 $space %export pit_init, pit_irq_disable, pit_delay_us
+$space %export pit_delay_us_checked
 
 */
 
@@ -88,11 +90,12 @@ pit_irq_disable(void)
 }
 
 
-static void
+static int
 pit_ch2_wait(u16 count)
 {
 	u8	ctrl;
 	u32	guard;
+	int	ok;
 
 	ctrl = inb(PIT_NMI_CTRL);
 	outb(PIT_NMI_CTRL, (u8)((ctrl & ~(PIT_NMI_GATE2 |
@@ -105,19 +108,22 @@ pit_ch2_wait(u16 count)
 	outb(PIT_NMI_CTRL, (u8)(((ctrl & ~PIT_NMI_SPKR2) |
 	    PIT_NMI_GATE2)));
 
+	ok = 0;
 	guard = (u32)count * 2U + 4096U;
 	while ((inb(PIT_NMI_CTRL) & PIT_NMI_OUT2) == 0) {
 		if (guard-- == 0) {
+			ok = -1;
 			break;
 		}
 	}
 
 	outb(PIT_NMI_CTRL, (u8)(ctrl & ~(PIT_NMI_GATE2 |
 	    PIT_NMI_SPKR2)));
+	return (ok);
 }
 
-void
-pit_delay_us(u32 us)
+int
+pit_delay_us_checked(u32 us)
 {
 	u32	chunk;
 	u64	count;
@@ -130,9 +136,18 @@ pit_delay_us(u32 us)
 			count = 1;
 		else if (count > PIT_MAX_DIVISOR)
 			count = PIT_MAX_DIVISOR;
-		pit_ch2_wait((u16)count);
+		if (pit_ch2_wait((u16)count) != 0) {
+			return (-1);
+		}
 		us -= chunk;
 	}
+	return (0);
+}
+
+void
+pit_delay_us(u32 us)
+{
+	(void)pit_delay_us_checked(us);
 }
 
 static u64

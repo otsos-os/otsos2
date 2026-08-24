@@ -463,6 +463,7 @@ User need to test, dont run test manually, ask user.
   modeled yet.
 - `src/config.toml` is build-time only. Runtime kernel settings must go through
   `kernel/cm/` and the registry hives.
+- Scheduler policy lives under `SYSTEM.Scheduler`
 - Console policy lives under `SYSTEM.Console`: `DefaultTty` and
   `KernelLogTty` are terminal indices 0-9, `DefaultColor` is a VGA attribute,
   and `MouseBlinkMs` is validated to 50-5000 milliseconds. The console

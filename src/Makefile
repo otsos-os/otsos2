@@ -931,7 +931,7 @@ $(IRQ_O): kernel/interrupts/irq.c kernel/interrupts/irq.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(HANDLERS_O): kernel/interrupts/handlers.c kernel/mm/vm/vm_map.h kernel/interrupts/apic/lapic.h kernel/trace/trace.h
+$(HANDLERS_O): kernel/interrupts/handlers.c kernel/mm/vm/vm_map.h kernel/interrupts/apic/lapic.h kernel/trace/trace.h kernel/smp/smp.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1274,7 +1274,7 @@ $(USERADDR_O): kernel/useraddr.c kernel/useraddr.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(SCHEDULER_O): kernel/scheduler.c kernel/scheduler.h kernel/process.h kernel/mm/vm/pmap.h kernel/gdt.h kernel/interrupts/idt.h kernel/trace/trace.h kernel/cm/cm.h
+$(SCHEDULER_O): kernel/scheduler.c kernel/scheduler.h kernel/process.h kernel/mm/vm/pmap.h kernel/gdt.h kernel/interrupts/idt.h kernel/trace/trace.h kernel/cm/cm.h kernel/smp/smp.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1310,7 +1310,7 @@ $(ACPI_TABLES_O): kernel/drivers/acpi/tables.c kernel/drivers/acpi/acpi.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(SMP_O): kernel/smp/smp.c kernel/smp/smp.h kernel/gdt.h kernel/interrupts/apic/lapic.h kernel/trace/trace.h
+$(SMP_O): kernel/smp/smp.c kernel/smp/smp.h kernel/gdt.h kernel/interrupts/apic/lapic.h kernel/trace/trace.h kernel/cm/cm.h kernel/drivers/timer.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

@@ -97,6 +97,9 @@ irq_result_t
 irq_system_tick(registers_t *regs, void *arg)
 {
   (void)arg;
+  if (!smp_ap_scheduling_enabled() && !smp_is_bsp()) {
+    return (IRQ_HANDLED);
+  }
   eventtimer_dispatch();
   trace_sample_tick(regs);
   event_timer_tick();

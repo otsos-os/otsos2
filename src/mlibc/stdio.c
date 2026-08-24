@@ -27,6 +27,7 @@
 #include <kernel/drivers/uart/uart.h>
 #include <evr/evr.h>
 #include <mlibc/stdio.h>
+extern u8	smp_cpu_id(void);
 
 #define	STDIO_EARLY_LOG_SIZE	16384
 
@@ -103,13 +104,55 @@ stdio_set_terminal_mirror(void (*callback)(char))
 	terminal_mirror = callback;
 }
 
+#define	LOG_LOCK_SPINS	2000000U
+
+static volatile u32	log_lock;
+static volatile u32	log_lock_cpu = 0xFFFFFFFFU;
+
+static int
+log_lock_acquire(u64 *flags_out)
+{
+	u32	me;
+	u32	spins;
+	u64	flags;
+
+	__asm__ volatile("pushfq; pop %0; cli" : "=r"(flags));
+	*flags_out = flags;
+	me = (u32)smp_cpu_id();
+	if (log_lock != 0 && log_lock_cpu == me) {
+		return (0);
+	}
+	spins = LOG_LOCK_SPINS;
+	while (__atomic_exchange_n(&log_lock, 1, __ATOMIC_ACQUIRE) != 0) {
+		if (spins-- == 0) {
+			return (0);
+		}
+		__asm__ volatile("pause");
+	}
+	log_lock_cpu = me;
+	return (1);
+}
+
+static void
+log_lock_release(int owned, u64 flags)
+{
+	if (owned) {
+		log_lock_cpu = 0xFFFFFFFFU;
+		__atomic_store_n(&log_lock, 0, __ATOMIC_RELEASE);
+	}
+	__asm__ volatile("push %0; popfq" : : "r"(flags));
+}
+
 static void
 log_emit_format(const char *fmt, __builtin_va_list args)
 {
 	char	buffer[512];
+	u64	flags;
+	int	owned;
 	int	i;
 
 	vsnprintf(buffer, sizeof(buffer), fmt, args);
+	owned = log_lock_acquire(&flags);
 	uart_write_string(buffer);
 	stdio_evr_emit(buffer);
 	if (terminal_mirror) {
@@ -117,6 +160,7 @@ log_emit_format(const char *fmt, __builtin_va_list args)
 			terminal_mirror(buffer[i]);
 		}
 	}
+	log_lock_release(owned, flags);
 }
 
 void
