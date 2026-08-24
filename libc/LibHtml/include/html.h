@@ -13,6 +13,14 @@ $define %func html_layout_free as procedure with args html_layout *
 $define %type html_box_kind as enum of non-text box kinds
 $define %func html_layout_render as procedure with args libg_context *, const html_layout *, int32_t, int32_t, int32_t, int32_t, int32_t, html_image_draw_fn, void *
 $define %func html_layout_hit_test as function with args const html_layout *, int32_t, int32_t
+$define %type html_ctrl_kind as enum of form control kinds
+$define %type html_ctrl_box as one laid-out form control
+$define %func html_layout_ctrl_at as function with args const html_layout *, int32_t, int32_t
+$define %func html_node_set_attr as function with args html_node *, const char *, const char *
+$define %func html_node_form as function with args const html_node *
+$define %func html_form_submit_url as function with args const html_node *, const html_node *, char *, size_t
+$define %func html_doc_append_css as function with args html_doc *, const char *, size_t
+$define %func html_doc_stylesheet_link as function with args const html_doc *, int, char *, size_t
 
 */
 
@@ -21,10 +29,13 @@ $define %func html_layout_hit_test as function with args const html_layout *, in
 $space %export html_tag_t, html_attr_t, html_node_t, html_doc_t
 $space %export html_link_box_t, html_layout_line_t, html_layout_t
 $space %export html_box_kind_t, html_layout_box_t, html_image_draw_fn
+$space %export html_ctrl_kind_t, html_ctrl_box_t
 $space %export html_parse, html_doc_free, html_node_get_attr
-$space %export html_node_find, html_node_text
+$space %export html_node_find, html_node_text, html_node_set_attr
 $space %export html_layout_create, html_layout_free
 $space %export html_layout_render, html_layout_hit_test
+$space %export html_layout_ctrl_at, html_node_form, html_form_submit_url
+$space %export html_doc_append_css, html_doc_stylesheet_link
 
 */
 
@@ -202,10 +213,51 @@ typedef struct html_layout_box {
 	struct html_layout_box	*next;
 } html_layout_box_t;
 
+/*
+ * What a control does when it is clicked or typed into.  Derived once at
+ * layout time from the tag plus type= attribute so the renderer and the event
+ * path never re-parse it.
+ */
+typedef enum html_ctrl_kind {
+	HTML_CTRL_TEXT = 0,	/* text/search/email/url/tel/number/password */
+	HTML_CTRL_BUTTON,	/* button, input type=button/reset */
+	HTML_CTRL_SUBMIT,	/* input type=submit, button type=submit */
+	HTML_CTRL_CHECKBOX,
+	HTML_CTRL_RADIO,
+	HTML_CTRL_SELECT,
+	HTML_CTRL_TEXTAREA
+} html_ctrl_kind_t;
+
+/*
+ * One interactive control.  Its own list rather than a box kind, because it
+ * carries the DOM node: the text a field shows is read from that node's value
+ * attribute at paint time, so typing a character does not force a relayout.
+ *
+ * `node` points into the html_doc_t the layout was built from, and is only
+ * valid while that document is alive - html_layout_free() does not own it.
+ */
+typedef struct html_ctrl_box {
+	libg_rect_t		rect;
+	html_node_t		*node;
+	char			*label;		/* button face, NULL for fields */
+	uint32_t		bg;		/* alpha 0 = do not fill */
+	uint32_t		fg;
+	uint32_t		border;		/* alpha 0 = no frame */
+	int32_t			border_width;
+	int32_t			pad_left;
+	int32_t			pad_top;
+	uint32_t		scale;
+	html_ctrl_kind_t	kind;
+	int			disabled;
+	int			password;
+	struct html_ctrl_box	*next;
+} html_ctrl_box_t;
+
 typedef struct html_layout {
 	html_layout_line_t	*lines;
 	html_link_box_t		*links;
 	html_layout_box_t	*boxes;
+	html_ctrl_box_t		*ctrls;
 	/*
 	 * Tail pointers exist because appending by walking from the head is
 	 * O(n) per word: a page with a few thousand words made layout the
@@ -214,20 +266,69 @@ typedef struct html_layout {
 	html_layout_line_t	*lines_tail;
 	html_link_box_t		*links_tail;
 	html_layout_box_t	*boxes_tail;
+	html_ctrl_box_t		*ctrls_tail;
 	int32_t			content_width;
 	int32_t			content_height;
 	uint32_t		page_bg;
 	int			has_page_bg;
 	void			*css_sheet;
+	/*
+	 * Keyboard focus, owned here rather than by the embedder so
+	 * html_layout_render() keeps its signature.  Points at a control in
+	 * the list above, never at a freed node: navigation frees the layout
+	 * and the focus with it.
+	 */
+	html_ctrl_box_t		*focus;
+	size_t			caret;
+	int			caret_on;
 } html_layout_t;
 
 html_doc_t	*html_parse(const char *source, size_t len);
 void		html_doc_free(html_doc_t *doc);
 const char	*html_node_get_attr(const html_node_t *node, const char *key);
+int		html_node_set_attr(html_node_t *node, const char *key,
+		    const char *value);
 const html_node_t *html_node_find(const html_node_t *root, html_tag_t tag);
 char		*html_node_text(const html_node_t *node);
 
-html_layout_t	*html_layout_create(const html_doc_t *doc, int32_t max_width);
+/*
+ * Appends `len` bytes of CSS to doc->stylesheet, growing it.  Used to fold an
+ * external <link rel=stylesheet> into the sheet the next layout parses.
+ * Returns 0 on success, -1 if the combined text would exceed the cap.
+ */
+int		html_doc_append_css(html_doc_t *doc, const char *text,
+		    size_t len);
+
+/*
+ * Copies the href of the `index`th <link rel=stylesheet> into `out`.  Returns
+ * 0 on success, -1 when there is no such link, which is how a caller
+ * enumerates: index 0, 1, 2, ... until it fails.
+ */
+int		html_doc_stylesheet_link(const html_doc_t *doc, int index,
+		    char *out, size_t max_out);
+
+/* Nearest <form> ancestor, or NULL for a control outside any form. */
+const html_node_t *html_node_form(const html_node_t *node);
+
+/*
+ * Builds the URL a form submission navigates to: the form's action with a
+ * query string assembled from every named control under it, percent-encoded.
+ * `submitter` may be NULL, or the clicked submit control, whose own name=value
+ * pair is then included as browsers do.
+ *
+ * Only GET is buildable.  Returns 0 on success, -1 when the form declares
+ * method=post (nothing here can send a body) or the result would not fit.
+ */
+int		html_form_submit_url(const html_node_t *form,
+		    const html_node_t *submitter, char *out, size_t max_out);
+
+/*
+ * viewport_w is the wrap width; viewport_h is only used to answer @media
+ * height queries.  `doc` is not const because a text field's value attribute
+ * is mutated in place as the user types.
+ */
+html_layout_t	*html_layout_create(html_doc_t *doc, int32_t viewport_w,
+		    int32_t viewport_h);
 void		html_layout_free(html_layout_t *layout);
 typedef int (*html_image_draw_fn)(void *userdata, libg_context_t *ctx,
 	    libg_rect_t rect, const char *ref);
@@ -237,5 +338,13 @@ void		html_layout_render(libg_context_t *ctx, const html_layout_t *layout,
 		    int32_t view_h, int32_t scroll_y,
 		    html_image_draw_fn draw, void *draw_user);
 const char	*html_layout_hit_test(const html_layout_t *layout, int32_t doc_x, int32_t doc_y);
+
+/*
+ * Control under a document-space point, or NULL.  Must be consulted before
+ * html_layout_hit_test(): a control inside an <a> would otherwise navigate
+ * instead of taking focus.
+ */
+html_ctrl_box_t	*html_layout_ctrl_at(const html_layout_t *layout,
+		    int32_t doc_x, int32_t doc_y);
 
 #endif

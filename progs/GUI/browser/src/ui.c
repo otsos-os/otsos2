@@ -276,10 +276,13 @@ browser_load_apply(browser_state_t *st)
 	if (viewport_w < 100) {
 		viewport_w = 600;
 	}
-	st->layout = html_layout_create(st->doc, viewport_w);
+	view_h = (int32_t)st->height - HEADER_TOTAL_H - STATUS_BAR_H;
+	if (view_h < 50) {
+		view_h = 400;
+	}
+	st->layout = html_layout_create(st->doc, viewport_w, view_h);
 
 	st->scroll_y = 0;
-	view_h = (int32_t)st->height - HEADER_TOTAL_H - STATUS_BAR_H;
 	if (st->layout != NULL && st->layout->content_height > view_h) {
 		st->max_scroll_y = st->layout->content_height - view_h;
 	} else {
@@ -303,6 +306,169 @@ browser_load_apply(browser_state_t *st)
 	    (unsigned int)body_len);
 	browser_status_set(st, status);
 	st->dirty_flags = BROWSER_DIRTY_ALL;
+
+	/*
+	 * The page is shown unstyled first, then restyled as each sheet lands.
+	 * Waiting for the sheets before the first paint would leave the window
+	 * blank for the length of another round of DNS and connects.
+	 */
+	st->css_next = 0;
+	st->css_applied = 0;
+}
+
+/*
+ * Rebuilds the layout from the document already in hand.
+ *
+ * Used after an external stylesheet lands: nothing about the DOM changed, only
+ * the sheet it is styled by, so re-parsing the HTML would be wasted work.  The
+ * scroll position is clamped rather than reset, because the styled layout is
+ * usually a different height and the old offset can now be past the end.
+ */
+static void
+browser_relayout(browser_state_t *st)
+{
+	int32_t	viewport_w, view_h;
+
+	if (st == NULL || st->doc == NULL) {
+		return;
+	}
+
+	viewport_w = (int32_t)st->width - SCROLLBAR_W;
+	if (viewport_w < 100) {
+		viewport_w = 600;
+	}
+	view_h = (int32_t)st->height - HEADER_TOTAL_H - STATUS_BAR_H;
+	if (view_h < 50) {
+		view_h = 400;
+	}
+
+	if (st->layout != NULL) {
+		html_layout_free(st->layout);
+	}
+	st->layout = html_layout_create(st->doc, viewport_w, view_h);
+
+	if (st->layout != NULL && st->layout->content_height > view_h) {
+		st->max_scroll_y = st->layout->content_height - view_h;
+	} else {
+		st->max_scroll_y = 0;
+	}
+	if (st->scroll_y > st->max_scroll_y) {
+		st->scroll_y = st->max_scroll_y;
+	}
+	st->dirty_flags |= BROWSER_DIRTY_VIEWPORT;
+}
+
+/*
+ * Starts fetching the next <link rel=stylesheet>, or returns 0 when there are
+ * no more to fetch.
+ *
+ * Sheets are pulled one at a time on the single loader the document came in
+ * on.  That is slower than fetching them in parallel, but the loader holds one
+ * socket and one response buffer, and giving each sheet its own would multiply
+ * the browser's peak memory by the number of links on the page.
+ */
+static int
+browser_css_fetch_next(browser_state_t *st)
+{
+	char	href[BROWSER_MAX_URL];
+	char	url[BROWSER_MAX_URL];
+	char	status[BROWSER_MAX_URL + 64];
+	int	is_https, port;
+	char	host[BROWSER_MAX_HOST];
+	char	path[BROWSER_MAX_PATH];
+
+	if (st->doc == NULL) {
+		return (0);
+	}
+
+	while (st->css_next < BROWSER_MAX_CSS_LINKS) {
+		int	idx = st->css_next++;
+
+		if (html_doc_stylesheet_link(st->doc, idx, href,
+		    sizeof(href)) != 0) {
+			return (0);	/* no more links */
+		}
+
+		/*
+		 * Resolved against current_url, not the pending URL: by now the
+		 * document's own load has finished and current_url is the page
+		 * these hrefs are relative to, redirects included.
+		 */
+		if (strncasecmp(href, "http://", 7) != 0 &&
+		    strncasecmp(href, "https://", 8) != 0) {
+			browser_url_resolve(st->current_url, href, url,
+			    sizeof(url));
+		} else {
+			browser_url_normalize(href, url, sizeof(url));
+		}
+		if (url[0] == '\0') {
+			continue;
+		}
+
+		/*
+		 * An https sheet is skipped quietly rather than failing the
+		 * page.  There is no TLS in this tree, and most sites serve
+		 * their stylesheets from an https CDN; treating that as an
+		 * error would put a scary message on every otherwise fine load.
+		 */
+		if (browser_url_parse(url, host, sizeof(host), &port, path,
+		    sizeof(path), &is_https) != 0 || is_https != 0) {
+			continue;
+		}
+
+		browser_loader_reset(&st->loader);
+		if (browser_loader_start(&st->loader, url) != 0) {
+			continue;
+		}
+		st->css_fetching = 1;
+		st->is_loading = 1;
+		snprintf(status, sizeof(status), "Fetching stylesheet %s...",
+		    host);
+		browser_status_set(st, status);
+		return (1);
+	}
+	return (0);
+}
+
+/*
+ * Folds a fetched stylesheet into the document.
+ *
+ * The bytes are copied out rather than adopted: unlike the document body, this
+ * response buffer stays owned by the loader and is freed by the next
+ * browser_loader_reset().  Getting that wrong is a use-after-free that only
+ * shows up on the second page with a stylesheet.
+ */
+static void
+browser_css_apply(browser_state_t *st)
+{
+	browser_loader_t	*ld;
+	size_t			off, len;
+	int			status;
+
+	ld = &st->loader;
+	status = browser_http_status(ld->response, ld->response_len);
+
+	/*
+	 * Only 2xx carries a stylesheet.  A 404 body is HTML, and feeding an
+	 * error page to the CSS parser produces rules from whatever happens to
+	 * look like a selector in it.
+	 */
+	if (status < 200 || status >= 300) {
+		return;
+	}
+
+	off = browser_http_body_offset(ld->response, ld->response_len);
+	if (off > ld->response_len) {
+		return;
+	}
+	len = ld->response_len - off;
+	if (len == 0 || len > BROWSER_MAX_CSS_BYTES) {
+		return;
+	}
+
+	if (html_doc_append_css(st->doc, ld->response + off, len) == 0) {
+		st->css_applied++;
+	}
 }
 
 /*
@@ -346,6 +512,36 @@ browser_load_progress(browser_state_t *st)
 }
 
 /*
+ * Advances the caret blink.
+ *
+ * Driven off the load poll rather than its own timer because the main loop
+ * already wakes every 20 ms, and the blink only needs to mark the viewport
+ * dirty - which it does only on the frames where the phase actually flips, or
+ * the window would repaint fifty times a second for nothing.
+ */
+static void
+browser_caret_tick(browser_state_t *st)
+{
+	uint64_t	now;
+
+	if (st->layout == NULL || st->layout->focus == NULL) {
+		return;
+	}
+	now = browser_now_ms();
+	if (st->caret_next_ms == 0) {
+		st->caret_next_ms = now + BROWSER_CARET_MS;
+		st->layout->caret_on = 1;
+		return;
+	}
+	if (now < st->caret_next_ms) {
+		return;
+	}
+	st->caret_next_ms = now + BROWSER_CARET_MS;
+	st->layout->caret_on = (st->layout->caret_on == 0);
+	st->dirty_flags |= BROWSER_DIRTY_VIEWPORT;
+}
+
+/*
  * Called once per pass of the main loop: starts whatever navigation the draw
  * pass queued, advances the in-flight load, and commits it when it finishes.
  */
@@ -359,6 +555,7 @@ browser_load_poll(browser_state_t *st)
 	if (st == NULL) {
 		return;
 	}
+	browser_caret_tick(st);
 	ld = &st->loader;
 
 	if (st->pending_nav) {
@@ -373,6 +570,13 @@ browser_load_poll(browser_state_t *st)
 		st->pending_url[0] = '\0';
 
 		browser_loader_reset(ld);
+		/*
+		 * A navigation cancels an in-flight stylesheet fetch.  Without
+		 * this the sheet's response would arrive after the new
+		 * document's and be appended to it.
+		 */
+		st->css_fetching = 0;
+		st->css_next = BROWSER_MAX_CSS_LINKS;
 		st->is_loading = 1;
 		st->page_size_bytes = 0;
 		st->progress_kb = 0;
@@ -388,11 +592,48 @@ browser_load_poll(browser_state_t *st)
 
 	switch (ld->state) {
 	case BROWSER_LOAD_DONE:
+		if (st->css_fetching != 0) {
+			st->css_fetching = 0;
+			browser_css_apply(st);
+			browser_loader_reset(ld);
+			if (browser_css_fetch_next(st) == 0) {
+				st->is_loading = 0;
+				if (st->css_applied > 0) {
+					browser_relayout(st);
+					snprintf(status, sizeof(status),
+					    "Loaded, %d stylesheet%s applied",
+					    st->css_applied,
+					    (st->css_applied == 1) ? "" : "s");
+					browser_status_set(st, status);
+				}
+			}
+			break;
+		}
 		st->is_loading = 0;
 		browser_load_apply(st);
 		browser_loader_reset(ld);
+		if (browser_css_fetch_next(st) != 0) {
+			st->dirty_flags |= BROWSER_DIRTY_HEADER;
+		}
 		break;
 	case BROWSER_LOAD_ERROR:
+		if (st->css_fetching != 0) {
+			/*
+			 * A sheet that will not load is skipped, not surfaced:
+			 * the page is already on screen and readable, and
+			 * replacing "Loaded" with a stylesheet error would say
+			 * the page failed when it did not.
+			 */
+			st->css_fetching = 0;
+			browser_loader_reset(ld);
+			if (browser_css_fetch_next(st) == 0) {
+				st->is_loading = 0;
+				if (st->css_applied > 0) {
+					browser_relayout(st);
+				}
+			}
+			break;
+		}
 		st->is_loading = 0;
 		snprintf(status, sizeof(status), "%s: %s",
 		    (ld->error[0] != '\0') ? ld->error : "Load failed",
@@ -429,6 +670,14 @@ browser_ui_init(browser_state_t *st)
 	st->pending_nav = 0;
 	st->dirty_flags = BROWSER_DIRTY_ALL;
 	st->last_hot_id = 0;
+	/*
+	 * Starts past the end so an early poll cannot begin a stylesheet fetch
+	 * before there is a document to attach one to.
+	 */
+	st->css_next = BROWSER_MAX_CSS_LINKS;
+	st->css_fetching = 0;
+	st->css_applied = 0;
+	st->caret_next_ms = 0;
 }
 
 static void
@@ -782,6 +1031,329 @@ translate_key_to_char(uint32_t scancode, uint32_t mods)
 	}
 }
 
+/*
+ * USB HID usage codes for the editing keys.  Named because the numbers appear
+ * nowhere else in this file and a bare 0x4c in a switch is unreadable.
+ */
+#define KEY_ESCAPE	0x29
+#define KEY_TAB		0x2b
+#define KEY_HOME	0x4a
+#define KEY_DELETE	0x4c
+#define KEY_END		0x4d
+#define KEY_RIGHT	0x4f
+#define KEY_LEFT	0x50
+#define KEY_ENTER	0x28
+#define KEY_KP_ENTER	0x58
+#define KEY_BACKSPACE	0x2a
+
+/*
+ * Rewrites the focused field's value attribute with one character inserted at
+ * the caret, or one removed.
+ *
+ * The value lives in the DOM, not in the layout, so this survives a relayout
+ * and the renderer reads it straight back.  `ins` is 0 for a deletion, in which
+ * case `at` is the index of the byte to remove.
+ */
+static void
+browser_ctrl_edit(browser_state_t *st, html_ctrl_box_t *c, size_t at, char ins)
+{
+	char		buf[BROWSER_CTRL_VALUE_MAX];
+	const char	*old;
+	size_t		len;
+
+	old = html_node_get_attr(c->node, "value");
+	if (old == NULL) {
+		old = "";
+	}
+	len = strlen(old);
+	if (at > len) {
+		at = len;
+	}
+
+	if (ins != '\0') {
+		if (len + 2 > sizeof(buf)) {
+			return;	/* field full: drop the keystroke, keep the text */
+		}
+		memcpy(buf, old, at);
+		buf[at] = ins;
+		memcpy(buf + at + 1, old + at, len - at);
+		buf[len + 1] = '\0';
+		if (html_node_set_attr(c->node, "value", buf) == 0) {
+			st->layout->caret = at + 1;
+		}
+	} else {
+		if (at >= len || len + 1 > sizeof(buf)) {
+			return;
+		}
+		memcpy(buf, old, at);
+		memcpy(buf + at, old + at + 1, len - at - 1);
+		buf[len - 1] = '\0';
+		if (html_node_set_attr(c->node, "value", buf) == 0) {
+			st->layout->caret = at;
+		}
+	}
+
+	/* Any edit restarts the blink on, so the caret is visible while typing. */
+	st->layout->caret_on = 1;
+	st->caret_next_ms = browser_now_ms() + BROWSER_CARET_MS;
+	st->dirty_flags |= BROWSER_DIRTY_VIEWPORT;
+}
+
+/*
+ * Submits the form `c` belongs to.
+ *
+ * A control outside any form, or a form this cannot express as a GET, produces
+ * a status message rather than silence: from the user's side a button that does
+ * nothing is indistinguishable from one that is broken.
+ */
+static void
+browser_ctrl_submit(browser_state_t *st, html_ctrl_box_t *c)
+{
+	const html_node_t	*form;
+	char			url[BROWSER_MAX_URL];
+
+	form = html_node_form(c->node);
+	if (form == NULL) {
+		browser_status_set(st, "Control is not inside a form");
+		return;
+	}
+
+	if (html_form_submit_url(form, c->node, url, sizeof(url)) != 0) {
+		const char	*m = html_node_get_attr(form, "method");
+
+		browser_status_set(st, (m != NULL && strcasecmp(m, "get") != 0) ?
+		    "Cannot submit: POST forms are not supported" :
+		    "Cannot submit: form is too large");
+		return;
+	}
+
+	/*
+	 * An empty action means "this page", which browser_navigate resolves
+	 * against current_url.  A bare "?query" would resolve to the wrong
+	 * thing, so the current path is put back in front of it.
+	 */
+	if (url[0] == '?' || url[0] == '\0') {
+		char	combined[BROWSER_MAX_URL];
+		size_t	n = 0;
+
+		while (st->current_url[n] != '\0' && st->current_url[n] != '?' &&
+		    st->current_url[n] != '#' && n + 1 < sizeof(combined)) {
+			combined[n] = st->current_url[n];
+			n++;
+		}
+		combined[n] = '\0';
+		if (n + strlen(url) + 1 < sizeof(combined)) {
+			memcpy(combined + n, url, strlen(url) + 1);
+			(void)browser_navigate(st, combined);
+			return;
+		}
+	}
+
+	(void)browser_navigate(st, url);
+}
+
+/* True when the key was consumed by a focused page control. */
+static int
+browser_ctrl_key(browser_state_t *st, uint32_t scancode, uint32_t mods)
+{
+	html_ctrl_box_t	*c;
+	const char	*val;
+	uint32_t	ch;
+	size_t		len;
+
+	if (st->layout == NULL || st->layout->focus == NULL) {
+		return (0);
+	}
+	c = st->layout->focus;
+	if (c->kind != HTML_CTRL_TEXT && c->kind != HTML_CTRL_TEXTAREA) {
+		return (0);
+	}
+
+	val = html_node_get_attr(c->node, "value");
+	len = (val != NULL) ? strlen(val) : 0;
+	if (st->layout->caret > len) {
+		st->layout->caret = len;
+	}
+
+	switch (scancode) {
+	case KEY_LEFT:
+		if (st->layout->caret > 0) {
+			st->layout->caret--;
+		}
+		st->dirty_flags |= BROWSER_DIRTY_VIEWPORT;
+		return (1);
+	case KEY_RIGHT:
+		if (st->layout->caret < len) {
+			st->layout->caret++;
+		}
+		st->dirty_flags |= BROWSER_DIRTY_VIEWPORT;
+		return (1);
+	case KEY_HOME:
+		st->layout->caret = 0;
+		st->dirty_flags |= BROWSER_DIRTY_VIEWPORT;
+		return (1);
+	case KEY_END:
+		st->layout->caret = len;
+		st->dirty_flags |= BROWSER_DIRTY_VIEWPORT;
+		return (1);
+	case KEY_ESCAPE:
+	case KEY_TAB:
+		/*
+		 * Tab drops focus rather than advancing it: there is no focus
+		 * order here, and leaving focus put while the key does nothing
+		 * traps the user in the field.
+		 */
+		st->layout->focus = NULL;
+		st->dirty_flags |= BROWSER_DIRTY_VIEWPORT;
+		return (1);
+	case KEY_ENTER:
+	case KEY_KP_ENTER:
+		browser_ctrl_submit(st, c);
+		return (1);
+	case KEY_BACKSPACE:
+		if (st->layout->caret > 0) {
+			browser_ctrl_edit(st, c, st->layout->caret - 1, '\0');
+		}
+		return (1);
+	case KEY_DELETE:
+		browser_ctrl_edit(st, c, st->layout->caret, '\0');
+		return (1);
+	default:
+		break;
+	}
+
+	ch = translate_key_to_char(scancode, mods);
+	if (ch >= 0x20 && ch < 0x7f) {
+		browser_ctrl_edit(st, c, st->layout->caret, (char)ch);
+		return (1);
+	}
+
+	/*
+	 * Anything else is swallowed while a field has focus.  Letting it
+	 * through would scroll the page with the arrow keys the user is trying
+	 * to edit with, and feed characters into the URL bar behind the field.
+	 */
+	return (1);
+}
+
+/*
+ * Click on a control: focus a field, toggle a box, or submit.
+ *
+ * Returns 1 when the click was consumed.  Must be tried before link hit
+ * testing - a search box inside an <a> would otherwise navigate away the moment
+ * it was clicked.
+ */
+static int
+browser_ctrl_click(browser_state_t *st, int32_t doc_x, int32_t doc_y)
+{
+	html_ctrl_box_t	*c;
+
+	if (st->layout == NULL) {
+		return (0);
+	}
+	c = html_layout_ctrl_at(st->layout, doc_x, doc_y);
+	if (c == NULL) {
+		if (st->layout->focus != NULL) {
+			st->layout->focus = NULL;
+			st->dirty_flags |= BROWSER_DIRTY_VIEWPORT;
+		}
+		return (0);
+	}
+
+	if (c->disabled != 0) {
+		return (1);	/* consumed, but does nothing - as in a browser */
+	}
+
+	switch (c->kind) {
+	case HTML_CTRL_TEXT:
+	case HTML_CTRL_TEXTAREA: {
+		const char	*val = html_node_get_attr(c->node, "value");
+		size_t		len = (val != NULL) ? strlen(val) : 0;
+		int32_t		adv = (int32_t)c->scale * BROWSER_GLYPH_ADVANCE;
+		int32_t		off;
+
+		st->layout->focus = c;
+
+		/* Caret at the clicked column, clamped to the text length. */
+		off = doc_x - (c->rect.x + c->pad_left);
+		if (adv <= 0) {
+			adv = BROWSER_GLYPH_ADVANCE;
+		}
+		if (off < 0) {
+			off = 0;
+		}
+		st->layout->caret = (size_t)(off / adv);
+		if (st->layout->caret > len) {
+			st->layout->caret = len;
+		}
+		st->layout->caret_on = 1;
+		st->caret_next_ms = browser_now_ms() + BROWSER_CARET_MS;
+		st->dirty_flags |= BROWSER_DIRTY_VIEWPORT;
+		return (1);
+	}
+	case HTML_CTRL_CHECKBOX:
+		st->layout->focus = NULL;
+		if (html_node_get_attr(c->node, "checked") != NULL) {
+			(void)html_node_set_attr(c->node, "checked", NULL);
+		} else {
+			(void)html_node_set_attr(c->node, "checked", "checked");
+		}
+		st->dirty_flags |= BROWSER_DIRTY_VIEWPORT;
+		return (1);
+	case HTML_CTRL_RADIO: {
+		/*
+		 * Radios are exclusive by name within the form, so every
+		 * same-named sibling has to be cleared.  Done over the control
+		 * list rather than the DOM because that list is already the set
+		 * of radios the user can see and click.
+		 */
+		const char		*name = html_node_get_attr(c->node,
+					    "name");
+		const html_node_t	*form = html_node_form(c->node);
+		html_ctrl_box_t		*o;
+
+		st->layout->focus = NULL;
+		if (name != NULL) {
+			for (o = st->layout->ctrls; o != NULL; o = o->next) {
+				const char	*on;
+
+				if (o->kind != HTML_CTRL_RADIO) {
+					continue;
+				}
+				on = html_node_get_attr(o->node, "name");
+				if (on == NULL || strcmp(on, name) != 0) {
+					continue;
+				}
+				if (html_node_form(o->node) != form) {
+					continue;
+				}
+				(void)html_node_set_attr(o->node, "checked",
+				    NULL);
+			}
+		}
+		(void)html_node_set_attr(c->node, "checked", "checked");
+		st->dirty_flags |= BROWSER_DIRTY_VIEWPORT;
+		return (1);
+	}
+	case HTML_CTRL_SUBMIT:
+		st->layout->focus = NULL;
+		browser_ctrl_submit(st, c);
+		return (1);
+	case HTML_CTRL_BUTTON:
+	case HTML_CTRL_SELECT:
+	default:
+		/*
+		 * A plain button's behaviour is script, and a dropdown needs a
+		 * popup neither LibG nor this UI has.  Both take focus away and
+		 * are otherwise inert, which at least tells the user the click
+		 * landed.
+		 */
+		st->layout->focus = NULL;
+		st->dirty_flags |= BROWSER_DIRTY_VIEWPORT;
+		return (1);
+	}
+}
+
 void
 browser_handle_event(browser_state_t *st, const sprot_event_t *event)
 {
@@ -858,7 +1430,13 @@ browser_handle_event(browser_state_t *st, const sprot_event_t *event)
 		if (pressed && my >= vy && my < vy + vh && mx < (int32_t)st->width - SCROLLBAR_W) {
 			int32_t doc_x = mx;
 			int32_t doc_y = my - vy + st->scroll_y;
-			const char *link = html_layout_hit_test(st->layout, doc_x, doc_y);
+			const char *link;
+
+			/* Controls first: one inside an <a> must not navigate. */
+			if (browser_ctrl_click(st, doc_x, doc_y) != 0) {
+				return;
+			}
+			link = html_layout_hit_test(st->layout, doc_x, doc_y);
 			if (link != NULL) {
 				browser_navigate(st, link);
 				return;
@@ -887,6 +1465,17 @@ browser_handle_event(browser_state_t *st, const sprot_event_t *event)
 
 	if (event->kind == SPROT_EVENT_KEY) {
 		int pressed = (event->u.key.state == SPROT_KEY_STATE_PRESSED);
+
+		/*
+		 * A focused page field claims the keyboard before the scroll
+		 * keys and before LibG's URL bar.  Both would otherwise act on
+		 * the same keystroke: typing in a search box would scroll the
+		 * page and edit the location field at the same time.
+		 */
+		if (pressed && browser_ctrl_key(st, event->u.key.scancode,
+		    event->u.key.modifiers) != 0) {
+			return;
+		}
 		if (pressed) {
 			if (event->u.key.scancode == 0x51) { /* Down arrow */
 				st->scroll_y += 24;

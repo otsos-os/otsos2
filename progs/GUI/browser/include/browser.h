@@ -41,6 +41,39 @@
 #define BROWSER_MAX_NODES 200000
 #define BROWSER_SVG_CACHE_MAX 16
 
+/*
+ * External stylesheets fetched per page.  Sheets are pulled one at a time
+ * through the same loader as the document, so each one costs a full DNS +
+ * connect + read; past a handful the page would take visibly longer to appear
+ * for progressively less styling.  Sheets beyond the limit are ignored.
+ */
+#define BROWSER_MAX_CSS_LINKS 8
+
+/*
+ * A stylesheet larger than this is skipped rather than parsed.  The CSS engine
+ * caps its own text at 256 KB, and a sheet that big is a bundle full of rules
+ * this renderer cannot express anyway.
+ */
+#define BROWSER_MAX_CSS_BYTES (256u * 1024u)
+
+/* Caret blink half-period.  Long enough not to be a strobe, short enough to
+ * read as a cursor rather than a stuck pixel. */
+#define BROWSER_CARET_MS 500
+
+/*
+ * Longest value a page text field will hold.  A query string longer than this
+ * would not survive BROWSER_MAX_URL after percent-encoding anyway.
+ */
+#define BROWSER_CTRL_VALUE_MAX 512
+
+/*
+ * LibG's glyph advance at scale 1.  Duplicated from LibHtml's own copy on
+ * purpose: this one converts a click x into a caret index, and if the two ever
+ * disagree the symptom is the caret landing one character off from where the
+ * user clicked.
+ */
+#define BROWSER_GLYPH_ADVANCE 6
+
 typedef struct browser_svg_entry {
 	char		*ref;
 	svg_doc_t	*doc;
@@ -142,6 +175,23 @@ typedef struct browser_state {
 	int32_t			scroll_y;
 	int32_t			max_scroll_y;
 	int			is_loading;
+
+	/*
+	 * External stylesheet fetch phase.  css_next is the index of the <link>
+	 * being fetched; css_fetching says the loader currently holds a sheet
+	 * rather than a document, which is what tells browser_load_poll() not to
+	 * replace the page with the CSS it just received.
+	 */
+	int			css_next;
+	int			css_fetching;
+	int			css_applied;
+
+	/*
+	 * Caret blink state for a focused page control.  Kept here and not in
+	 * the layout so that rebuilding the layout does not reset the phase
+	 * mid-blink.
+	 */
+	uint64_t		caret_next_ms;
 
 	/* In-flight load */
 	int			kq;

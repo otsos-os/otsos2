@@ -12,8 +12,10 @@ $space %internal html_decode_entities, html_tag_lookup, html_is_void_tag
 $space %internal html_node_create, html_node_add_child, html_attr_add
 $space %internal html_is_raw_text, html_auto_closes, html_entity_named
 $space %internal html_put_utf8_fold, html_node_collect_text
+$space %internal HTML_LINK_SCAN_MAX
 $space %export html_parse, html_doc_free, html_node_get_attr
-$space %export html_node_find, html_node_text
+$space %export html_node_find, html_node_text, html_node_set_attr
+$space %export html_doc_append_css, html_doc_stylesheet_link
 
 */
 
@@ -32,6 +34,13 @@ $space %export html_node_find, html_node_text
 #define HTML_MAX_DEPTH		128
 #define HTML_TAG_NAME_MAX	64
 #define HTML_CSS_TEXT_MAX	(256u * 1024u)
+
+/*
+ * Node visits html_doc_stylesheet_link() will make before giving up.  Not a
+ * document-size limit - every real page finishes far inside it - but the stop
+ * for a tree whose sibling pointers form a cycle.
+ */
+#define HTML_LINK_SCAN_MAX	400000
 
 static html_tag_t
 html_tag_lookup(const char *name)
@@ -159,8 +168,13 @@ html_is_void_tag(html_tag_t tag)
 /*
  * Elements whose content is not markup.  Their bodies are consumed verbatim
  * up to the matching close tag, so a "<" inside them never opens an element.
- * STYLE and SCRIPT are here to be discarded -- LibHtml implements no CSS and
- * no scripting, and this is what keeps their text off the page.
+ * STYLE's text is kept and handed to LibCSS; SCRIPT's is discarded.
+ *
+ * NOSCRIPT is deliberately absent: this engine never runs scripts, so it is
+ * exactly the browser noscript content is written for, and that content is
+ * markup.  Treating it as raw text swallowed the whole subtree - on Google's
+ * search results the only visible element on the page lives inside a
+ * <noscript>, so the page rendered blank.
  */
 static int
 html_is_raw_text(html_tag_t tag)
@@ -170,7 +184,6 @@ html_is_raw_text(html_tag_t tag)
 	case HTML_TAG_SCRIPT:
 	case HTML_TAG_TEXTAREA:
 	case HTML_TAG_TEMPLATE:
-	case HTML_TAG_NOSCRIPT:
 		return (1);
 	default:
 		return (0);
@@ -629,6 +642,62 @@ html_node_get_attr(const html_node_t *node, const char *key)
 	return (NULL);
 }
 
+int
+html_node_set_attr(html_node_t *node, const char *key, const char *value)
+{
+	html_attr_t	*a, **link;
+	char		*dup;
+
+	if (node == NULL || key == NULL) {
+		return (-1);
+	}
+
+	/*
+	 * A NULL value removes the attribute outright rather than storing "".
+	 * That distinction is load bearing: a boolean attribute like `checked`
+	 * is written bare in the markup and therefore already has an empty
+	 * value, so every reader tests presence.  Encoding "unchecked" as an
+	 * empty string would read back as checked.
+	 */
+	if (value == NULL) {
+		link = &node->attrs;
+		while (*link != NULL) {
+			a = *link;
+			if (a->name != NULL && strcasecmp(a->name, key) == 0) {
+				*link = a->next;
+				free(a->name);
+				free(a->value);
+				free(a);
+				return (0);
+			}
+			link = &a->next;
+		}
+		return (0);	/* already absent */
+	}
+
+	/*
+	 * The copy is made before the old value is released.  Doing it the
+	 * other way round leaves the attribute holding a dangling pointer if
+	 * the allocation fails, and every reader here trusts a non-NULL value.
+	 */
+	dup = strdup(value);
+	if (dup == NULL) {
+		return (-1);
+	}
+
+	for (a = node->attrs; a != NULL; a = a->next) {
+		if (a->name != NULL && strcasecmp(a->name, key) == 0) {
+			free(a->value);
+			a->value = dup;
+			return (0);
+		}
+	}
+
+	free(dup);
+	html_attr_add(node, key, value);
+	return (html_node_get_attr(node, key) != NULL ? 0 : -1);
+}
+
 const html_node_t *
 html_node_find(const html_node_t *root, html_tag_t tag)
 {
@@ -833,6 +902,111 @@ html_doc_collect_stylesheet(html_doc_t *doc)
 		}
 	}
 	free(buf);
+}
+
+int
+html_doc_append_css(html_doc_t *doc, const char *text, size_t len)
+{
+	char	*grown;
+	size_t	used;
+
+	if (doc == NULL || text == NULL) {
+		return (-1);
+	}
+	if (len == 0) {
+		len = strlen(text);
+	}
+	if (len == 0) {
+		return (0);
+	}
+
+	used = (doc->stylesheet != NULL) ? strlen(doc->stylesheet) : 0;
+	if (used + len + 2 > HTML_CSS_TEXT_MAX) {
+		return (-1);
+	}
+
+	/*
+	 * realloc rather than appending into the fixed HTML_CSS_TEXT_MAX buffer
+	 * html_parse() may have allocated: this is also the path taken when
+	 * there was no inline <style> at all and stylesheet is still NULL.
+	 * Sizing to what is actually held keeps the common one-sheet page from
+	 * carrying a 256 KB buffer around.
+	 */
+	grown = (char *)realloc(doc->stylesheet, used + len + 2);
+	if (grown == NULL) {
+		return (-1);
+	}
+	doc->stylesheet = grown;
+
+	/* Separator, or an unterminated last rule would swallow the first
+	 * selector of the sheet being appended. */
+	if (used != 0) {
+		grown[used++] = '\n';
+	}
+	memcpy(grown + used, text, len);
+	grown[used + len] = '\0';
+	return (0);
+}
+
+int
+html_doc_stylesheet_link(const html_doc_t *doc, int index, char *out,
+    size_t max_out)
+{
+	const html_node_t	*node;
+	int			seen, guard;
+
+	if (doc == NULL || doc->root == NULL || out == NULL || max_out == 0 ||
+	    index < 0) {
+		return (-1);
+	}
+
+	/*
+	 * Walks the tree through its own parent/sibling pointers rather than a
+	 * stack or recursion: no depth bound to get wrong, no allocation, and
+	 * it visits in document order, which is what decides sheet precedence.
+	 * `guard` is the only ceiling, and it exists for a malformed tree with
+	 * a cycle, not for depth.
+	 */
+	seen = 0;
+	guard = HTML_LINK_SCAN_MAX;
+	node = doc->root;
+
+	while (node != NULL && guard-- > 0) {
+		if (node->tag == HTML_TAG_LINK) {
+			const char	*rel = html_node_get_attr(node, "rel");
+			const char	*href = html_node_get_attr(node, "href");
+
+			/*
+			 * rel is a token list: rel="alternate stylesheet" is an
+			 * author-selectable sheet nobody asked for, so only a
+			 * plain "stylesheet" counts.
+			 */
+			if (rel != NULL && href != NULL && href[0] != '\0' &&
+			    strcasecmp(rel, "stylesheet") == 0) {
+				if (seen++ == index) {
+					size_t	n = strlen(href);
+
+					if (n >= max_out) {
+						return (-1);
+					}
+					memcpy(out, href, n + 1);
+					return (0);
+				}
+			}
+		}
+
+		if (node->first_child != NULL) {
+			node = node->first_child;
+			continue;
+		}
+		while (node != NULL && node->next_sibling == NULL) {
+			node = node->parent;
+		}
+		if (node != NULL) {
+			node = node->next_sibling;
+		}
+	}
+	return (-1);
 }
 
 html_doc_t *
