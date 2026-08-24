@@ -25,6 +25,7 @@ $space %export irq_init, irq_source_isa, irq_source_gsi
 $space %export irq_source_local, irq_request, irq_release
 $space %export irq_dispatch, irq_ioapic_online, irq_stats_dump
 $space %export irq_vector_info, irq_vector_is_software
+$space %export irq_source_msi, irq_msi_ops_register, irq_msi_ops_unregister
 
 */
 
@@ -56,8 +57,16 @@ typedef enum irq_result {
 typedef enum irq_domain {
 	IRQ_DOMAIN_PIC = 0,
 	IRQ_DOMAIN_IOAPIC,
-	IRQ_DOMAIN_LOCAL
+	IRQ_DOMAIN_LOCAL,
+	IRQ_DOMAIN_MSI
 } irq_domain_t;
+
+typedef struct irq_msi_ops {
+	int	(*program)(void *arg, u8 vector, u8 apic_id);
+	void	(*mask)(void *arg, int masked);
+	void	(*disable)(void *arg);
+	void	*arg;
+} irq_msi_ops_t;
 
 typedef irq_result_t	(irq_handler_t)(registers_t *, void *);
 
@@ -72,6 +81,9 @@ void		irq_init(void);
 irq_source_t	irq_source_isa(u32 isa_irq);
 irq_source_t	irq_source_gsi(u32 gsi, u32 flags);
 irq_source_t	irq_source_local(u32 vector);
+irq_source_t	irq_source_msi(u32 msi_id);
+int		irq_msi_ops_register(const irq_msi_ops_t *ops);
+void		irq_msi_ops_unregister(u32 msi_id);
 int		irq_request(irq_source_t source, irq_handler_t *handler,
 		    void *arg, const char *name, void **cookiep);
 int		irq_release(void *cookie);

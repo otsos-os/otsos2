@@ -18,7 +18,8 @@ $define %func ohci_pci_register as function with args void
 
 /* !SPACE!
 
-$space %internal ohci_wait, ohci_transfer, ohci_poll
+$space %internal ohci_wait, ohci_transfer, ohci_transfer_locked, ohci_poll
+$space %internal ohci_sync_enter, ohci_sync_leave, ohci_intr_selftest
 $space %internal ohci_pci_probe, ohci_pci_remove
 $space %export ohci_pci_register
 
@@ -72,6 +73,7 @@ $space %export ohci_pci_register
 #define OHCI_INT_RHSC	0x00000040
 #define OHCI_INT_MIE	0x80000000
 #define OHCI_FI_DEFAULT	0x2edf
+#define OHCI_SF_SPIN	4000000U
 #define OHCI_PORT_CSC	0x00010000
 #define OHCI_PORT_PESC	0x00020000
 #define OHCI_PORT_OCIC	0x00040000
@@ -144,7 +146,11 @@ typedef struct {
 	ohci_request_t requests[OHCI_MAX_REQ];
 	usb_controller_t usb;
 	void *irq_cookie;
+	void *poll_cookie;
 	resource_t *irq_res;
+	volatile u32 sync_depth;
+	volatile u32 intr_count;
+	volatile u8 intr_deferred;
 	u8 ports;
 	u8 next_address;
 	u8 busy;
@@ -153,6 +159,10 @@ typedef struct {
 } ohci_state_t;
 
 static ohci_state_t *ohci_states[OHCI_MAX];
+
+static void ohci_sync_enter(ohci_state_t *st);
+static void ohci_sync_leave(ohci_state_t *st);
+static void ohci_poll(void *arg);
 
 static void
 ohci_periodic_rebuild(ohci_state_t *st)
@@ -186,7 +196,7 @@ ohci_wait(volatile u32 *reg, u32 mask, u32 value, u32 limit)
 }
 
 static int
-ohci_transfer(ohci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
+ohci_transfer_locked(ohci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
     const usb_setup_t *setup, void *data, u32 *length, u32 timeout)
 {
 	usb_dma_t dma, payload;
@@ -313,6 +323,18 @@ ohci_transfer(ohci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
 	return (cc == OHCI_CC_NOERROR ? 0 : -1);
 fail:
 	usb_dma_free(&payload); usb_dma_free(&dma); return (-1);
+}
+
+static int
+ohci_transfer(ohci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
+    const usb_setup_t *setup, void *data, u32 *length, u32 timeout)
+{
+	int result;
+
+	ohci_sync_enter(st);
+	result = ohci_transfer_locked(st, dev, ep, setup, data, length, timeout);
+	ohci_sync_leave(st);
+	return (result);
 }
 
 static int ohci_port_connected(void *arg, u8 port, u8 *speed)
@@ -459,14 +481,70 @@ static void ohci_poll(void *arg)
 	}
 	__atomic_store_n(&st->busy, 0, __ATOMIC_RELEASE);
 }
+static void ohci_sync_enter(ohci_state_t *st)
+{
+	__atomic_add_fetch(&st->sync_depth, 1, __ATOMIC_ACQ_REL);
+}
+
+static void ohci_sync_leave(ohci_state_t *st)
+{
+	if (__atomic_sub_fetch(&st->sync_depth, 1, __ATOMIC_ACQ_REL) != 0)
+		return;
+	if (__atomic_exchange_n(&st->intr_deferred, 0, __ATOMIC_ACQ_REL))
+		ohci_poll(st);
+}
+
 static int ohci_intr(void *arg)
 {
 	ohci_state_t *st = arg;
 	u32 status;
 	status = *(volatile u32 *)(st->regs + OHCI_INT_STATUS);
-	if ((status & (OHCI_INT_WDH | OHCI_INT_UE | OHCI_INT_RHSC)) == 0)
+	if ((status & (OHCI_INT_WDH | OHCI_INT_UE | OHCI_INT_RHSC |
+	    OHCI_INT_SF)) == 0)
 		return (-1);
+	__atomic_add_fetch(&st->intr_count, 1, __ATOMIC_ACQ_REL);
+	if (status & OHCI_INT_SF) {
+		*(volatile u32 *)(st->regs + OHCI_INT_STATUS) = OHCI_INT_SF;
+		status &= ~OHCI_INT_SF;
+		if (status == 0)
+			return (0);
+	}
+	if (__atomic_load_n(&st->sync_depth, __ATOMIC_ACQUIRE) != 0) {
+		*(volatile u32 *)(st->regs + OHCI_INT_STATUS) = status;
+		__atomic_store_n(&st->intr_deferred, 1, __ATOMIC_RELEASE);
+		return (0);
+	}
 	ohci_poll(st);
+	return (0);
+}
+
+static int ohci_intr_selftest(ohci_state_t *st)
+{
+	u32 before, i;
+
+	if ((*(volatile u32 *)(st->regs + OHCI_CONTROL) &
+	    OHCI_CTRL_OPERATIONAL) == 0) {
+		usb_log_printf("ohci: not operational, assuming no irq\n");
+		usb_log_flush();
+		return (-1);
+	}
+	before = __atomic_load_n(&st->intr_count, __ATOMIC_ACQUIRE);
+	*(volatile u32 *)(st->regs + OHCI_INT_ENABLE) = OHCI_INT_SF;
+	for (i = 0; i < OHCI_SF_SPIN; i++) {
+		if (__atomic_load_n(&st->intr_count, __ATOMIC_ACQUIRE) !=
+		    before)
+			break;
+		__asm__ volatile("pause");
+	}
+	*(volatile u32 *)(st->regs + OHCI_INT_DISABLE) = OHCI_INT_SF;
+	*(volatile u32 *)(st->regs + OHCI_INT_STATUS) = OHCI_INT_SF;
+	if (i == OHCI_SF_SPIN) {
+		usb_log_printf("ohci: no frame irq, falling back to polling\n");
+		usb_log_flush();
+		return (-1);
+	}
+	usb_log_printf("ohci: irq works, polling disabled\n");
+	usb_log_flush();
 	return (0);
 }
 static const usb_controller_ops_t ohci_ops = {
@@ -513,13 +591,38 @@ static int ohci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	    st->usb.bus_device,st->ports)!=0) goto fail;
 	st->usb_initialized = 1;
 	rid=0; st->irq_res=bus_alloc_resource_any(st->nb_dev,SYS_RES_IRQ,&rid,RF_ACTIVE);
-	if (st->irq_res==NULL || bus_setup_intr(st->nb_dev,st->irq_res,ohci_intr,st,
-	    &st->irq_cookie)!=0) goto fail;
+	if (st->irq_res!=NULL && bus_setup_intr(st->nb_dev,st->irq_res,ohci_intr,st,
+	    &st->irq_cookie)!=0) {
+		bus_release_resource(st->nb_dev, SYS_RES_IRQ,
+		    st->irq_res->rid, st->irq_res);
+		st->irq_res = NULL;
+		st->irq_cookie = NULL;
+	}
+	if (st->irq_res == NULL || ohci_intr_selftest(st) != 0) {
+		if (st->irq_cookie != NULL) {
+			bus_teardown_intr(st->nb_dev, st->irq_res,
+			    st->irq_cookie);
+			st->irq_cookie = NULL;
+		}
+		if (st->irq_res != NULL) {
+			bus_release_resource(st->nb_dev, SYS_RES_IRQ,
+			    st->irq_res->rid, st->irq_res);
+			st->irq_res = NULL;
+		}
+		usb_log_printf("ohci: no usable irq, polling only\n");
+		usb_log_flush();
+		if (bus_setup_poll(st->nb_dev, NB_POLL_TIMER, ohci_poll, st,
+		    &st->poll_cookie) != 0) goto fail;
+	}
+	ohci_poll(st);
 	pdev->driver_data=st; ohci_states[slot]=st; return (0);
 fail:
 	if (st->regs != NULL) {
 		*(volatile u32 *)(st->regs + OHCI_INT_DISABLE) = 0xFFFFFFFF;
 		*(volatile u32 *)(st->regs + OHCI_CONTROL) = 0;
+	}
+	if (st->poll_cookie != NULL) {
+		bus_teardown_poll(st->nb_dev, st->poll_cookie);
 	}
 	if (st->irq_cookie != NULL) {
 		bus_teardown_intr(st->nb_dev, st->irq_res, st->irq_cookie);
@@ -542,6 +645,7 @@ static void ohci_pci_remove(pci_device_t *pdev)
 {
 	ohci_state_t *st=pdev->driver_data; int i;
 	if (st==NULL) return; *(volatile u32 *)(st->regs+OHCI_INT_DISABLE)=0xFFFFFFFF;
+	if (st->poll_cookie) bus_teardown_poll(st->nb_dev,st->poll_cookie);
 	if (st->irq_cookie) bus_teardown_intr(st->nb_dev,st->irq_res,st->irq_cookie);
 	if (st->irq_res) bus_release_resource(st->nb_dev,SYS_RES_IRQ,
 	    st->irq_res->rid,st->irq_res);

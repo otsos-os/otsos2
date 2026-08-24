@@ -31,10 +31,14 @@ $define %type xhci_state_t as xHCI PCI controller state
 
 $define %func xhci_wait32 as function with args volatile u32 *, u32, u32, u32
 $define %func xhci_halt as function with args xhci_state_t *
+$define %func xhci_take_from_bios as procedure with args xhci_state_t *, u32
 $define %func xhci_reset as function with args xhci_state_t *
 $define %func xhci_setup_rings as function with args xhci_state_t *
 $define %func xhci_trylock as function with args xhci_state_t *
 $define %func xhci_unlock as procedure with args xhci_state_t *
+$define %func xhci_sync_enter as procedure with args xhci_state_t *
+$define %func xhci_sync_leave as procedure with args xhci_state_t *
+$define %func xhci_intr_selftest as function with args xhci_state_t *
 $define %func xhci_pci_probe as function with args pci_device_t *, match
 $define %func xhci_pci_remove as procedure with args pci_device_t *
 $define %func xhci_pci_register as function with args void
@@ -43,8 +47,10 @@ $define %func xhci_pci_register as function with args void
 
 /* !SPACE!
 
-$space %internal xhci_wait32, xhci_halt, xhci_reset, xhci_setup_rings
+$space %internal xhci_wait32, xhci_halt, xhci_take_from_bios
+$space %internal xhci_reset, xhci_setup_rings
 $space %internal xhci_trylock, xhci_unlock
+$space %internal xhci_sync_enter, xhci_sync_leave, xhci_intr_selftest
 $space %internal xhci_pci_probe, xhci_pci_remove
 $space %export xhci_pci_register
 
@@ -64,8 +70,16 @@ $space %export xhci_pci_register
 #define	XHCI_RING_TRBS		256
 #define	XHCI_CAP_LENGTH		0x00
 #define	XHCI_HCSPARAMS1		0x04
+#define	XHCI_HCCPARAMS1		0x10
 #define	XHCI_DBOFF			0x14
 #define	XHCI_RTSOFF			0x18
+#define	XHCI_ECP_ID_LEGACY		1
+#define	XHCI_LEGSUP_BIOS_OWNED		(1U << 16)
+#define	XHCI_LEGSUP_OS_OWNED		(1U << 24)
+#define	XHCI_LEGCTLSTS_OFFSET		4
+#define	XHCI_LEGCTLSTS_SMI_MASK		0x0000FFE0U
+#define	XHCI_LEGCTLSTS_SMI_ACK		0xE0000000U
+#define	XHCI_LEGSUP_SPIN		1000000
 #define	XHCI_USBCMD			0x00
 #define	XHCI_USBSTS			0x04
 #define	XHCI_CRCR			0x18
@@ -101,6 +115,7 @@ $space %export xhci_pci_register
 #define	XHCI_TRB_TYPE_TRANSFER_EVENT	32
 #define	XHCI_TRB_TYPE_COMMAND_EVENT	33
 #define	XHCI_TRB_TYPE_PORT_STATUS_EVENT	34
+#define	XHCI_TRB_TYPE_NOOP_CMD		23
 #define	XHCI_TRB_BSR			(1U << 9)
 #define	XHCI_TRB_IOC			(1U << 5)
 #define	XHCI_TRB_IDT			(1U << 6)
@@ -185,10 +200,13 @@ typedef struct {
 	u8		max_ports;
 	u8		scanned;
 	u8		busy;
+	volatile u32	sync_depth;
+	volatile u32	intr_count;
 	xhci_ring_t	command_ring;
 	xhci_device_t	*slots[256];
 	resource_t		*irq_res;
 	void			*irq_cookie;
+	void			*poll_cookie;
 	usb_controller_t	usb;
 } xhci_state_t;
 
@@ -224,6 +242,9 @@ static int	xhci_wait32(volatile u32 *reg, u32 mask, u32 value, u32 limit);
 static u64	xhci_phys(void *ptr);
 static int	xhci_trylock(xhci_state_t *state);
 static void	xhci_unlock(xhci_state_t *state);
+static void	xhci_sync_enter(xhci_state_t *state);
+static void	xhci_sync_leave(xhci_state_t *state);
+static int	xhci_intr_selftest(xhci_state_t *state);
 
 static const usb_controller_ops_t xhci_usb_ops = {
 	.port_connected = xhci_port_connected,
@@ -339,7 +360,7 @@ xhci_wait_event(xhci_state_t *state, u64 trb_phys, u8 type, u8 slot,
 }
 
 static int
-xhci_command(xhci_state_t *state, u64 parameter, u32 status, u32 control,
+xhci_command_locked(xhci_state_t *state, u64 parameter, u32 status, u32 control,
     u8 *slot)
 {
 	u64	trb;
@@ -373,6 +394,18 @@ xhci_command(xhci_state_t *state, u64 parameter, u32 status, u32 control,
 	usb_log_printf("xhci: command type=%u timed out\n",
 	    (control >> XHCI_TRB_TYPE_SHIFT) & 0x3F);
 	return (-1);
+}
+
+static int
+xhci_command(xhci_state_t *state, u64 parameter, u32 status, u32 control,
+    u8 *slot)
+{
+	int	result;
+
+	xhci_sync_enter(state);
+	result = xhci_command_locked(state, parameter, status, control, slot);
+	xhci_sync_leave(state);
+	return (result);
 }
 
 static u32 *
@@ -896,9 +929,13 @@ xhci_transfer_wait(xhci_state_t *state, xhci_endpoint_t *endpoint,
     u64 event_trb, u8 slot, u32 timeout, u32 *length)
 {
 	u32	residual;
+	int	failed;
 
-	if (xhci_wait_event(state, event_trb, XHCI_TRB_TYPE_TRANSFER_EVENT,
-	    slot, timeout == 0 ? 1000000 : timeout * 1000, &residual) != 0) {
+	xhci_sync_enter(state);
+	failed = xhci_wait_event(state, event_trb, XHCI_TRB_TYPE_TRANSFER_EVENT,
+	    slot, timeout == 0 ? 1000000 : timeout * 1000, &residual);
+	xhci_sync_leave(state);
+	if (failed != 0) {
 		return (-1);
 	}
 	if (length != NULL && residual <= *length) {
@@ -1171,6 +1208,10 @@ xhci_intr(void *arg)
 	if ((value & XHCI_IMAN_IP) != 0) {
 		*iman = value | XHCI_IMAN_IP | XHCI_IMAN_IE;
 	}
+	__atomic_add_fetch(&state->intr_count, 1, __ATOMIC_ACQ_REL);
+	if (__atomic_load_n(&state->sync_depth, __ATOMIC_ACQUIRE) != 0) {
+		return (0);
+	}
 	xhci_poll(state);
 	return (0);
 }
@@ -1192,6 +1233,18 @@ xhci_unlock(xhci_state_t *state)
 {
 	__asm__ volatile("" ::: "memory");
 	state->busy = 0;
+}
+
+static void
+xhci_sync_enter(xhci_state_t *state)
+{
+	__atomic_add_fetch(&state->sync_depth, 1, __ATOMIC_ACQ_REL);
+}
+
+static void
+xhci_sync_leave(xhci_state_t *state)
+{
+	__atomic_sub_fetch(&state->sync_depth, 1, __ATOMIC_ACQ_REL);
 }
 
 static int
@@ -1219,6 +1272,62 @@ xhci_halt(xhci_state_t *state)
 	*cmd &= ~XHCI_USBCMD_RUN;
 	return (xhci_wait32(status, XHCI_USBSTS_HCH, XHCI_USBSTS_HCH,
 	    1000000));
+}
+
+static void
+xhci_take_from_bios(xhci_state_t *state, u32 bar_size)
+{
+	volatile u32	*legsup;
+	volatile u32	*legctl;
+	u32		hcc;
+	u32		offset;
+	u32		value;
+	u32		guard;
+	u32		spins;
+
+	hcc = *(volatile u32 *)(state->cap + XHCI_HCCPARAMS1);
+	offset = (hcc >> 16) & 0xFFFF;
+	if (offset == 0) {
+		return;
+	}
+	offset <<= 2;
+	for (guard = 0; guard < 256; guard++) {
+		if (offset < 0x20 || offset + 8 > bar_size) {
+			return;
+		}
+		value = *(volatile u32 *)(state->cap + offset);
+		if ((value & 0xFF) == XHCI_ECP_ID_LEGACY) {
+			break;
+		}
+		if (((value >> 8) & 0xFF) == 0) {
+			return;
+		}
+		offset += ((value >> 8) & 0xFF) << 2;
+	}
+	if (guard == 256 || (value & 0xFF) != XHCI_ECP_ID_LEGACY) {
+		return;
+	}
+
+	legsup = (volatile u32 *)(state->cap + offset);
+	legctl = (volatile u32 *)(state->cap + offset +
+	    XHCI_LEGCTLSTS_OFFSET);
+	if ((*legsup & XHCI_LEGSUP_BIOS_OWNED) == 0) {
+		usb_log_printf("xhci: legsup=%x, bios not owning\n", *legsup);
+		usb_log_flush();
+		return;
+	}
+	*legsup = *legsup | XHCI_LEGSUP_OS_OWNED;
+	for (spins = 0; spins < XHCI_LEGSUP_SPIN; spins++) {
+		if ((*legsup & XHCI_LEGSUP_BIOS_OWNED) == 0) {
+			break;
+		}
+		__asm__ volatile("pause");
+	}
+	value = *legctl;
+	*legctl = (value & ~XHCI_LEGCTLSTS_SMI_MASK) | XHCI_LEGCTLSTS_SMI_ACK;
+	usb_log_printf("xhci: bios handoff %s (legsup=%x)\n",
+	    (*legsup & XHCI_LEGSUP_BIOS_OWNED) ? "timeout" : "ok", *legsup);
+	usb_log_flush();
 }
 
 static int
@@ -1353,6 +1462,29 @@ xhci_setup_rings(xhci_state_t *state)
 }
 
 static int
+xhci_intr_selftest(xhci_state_t *state)
+{
+	u32	before;
+
+	before = __atomic_load_n(&state->intr_count, __ATOMIC_ACQUIRE);
+	if (xhci_command(state, 0, 0,
+	    XHCI_TRB_TYPE_NOOP_CMD << XHCI_TRB_TYPE_SHIFT, NULL) != 0) {
+		usb_log_printf("xhci: noop command failed, assuming no irq\n");
+		usb_log_flush();
+		return (-1);
+	}
+	if (__atomic_load_n(&state->intr_count, __ATOMIC_ACQUIRE) == before) {
+		usb_log_printf("xhci: irq never fired on noop, falling back "
+		    "to polling\n");
+		usb_log_flush();
+		return (-1);
+	}
+	usb_log_printf("xhci: irq works (vector active), polling disabled\n");
+	usb_log_flush();
+	return (0);
+}
+
+static int
 xhci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 {
 	xhci_state_t	*state;
@@ -1404,8 +1536,12 @@ xhci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	state->runtime = state->cap + rtsoff;
 	if (state->max_slots == 0 || state->max_ports == 0 ||
 	    state->max_slots > 255 || state->max_ports > USB_MAX_PORTS ||
-	    dboff >= bar.size || rtsoff >= bar.size ||
-	    xhci_reset(state) != 0 || xhci_setup_rings(state) != 0) {
+	    dboff >= bar.size || rtsoff >= bar.size) {
+		kmem_free(state);
+		return (-1);
+	}
+	xhci_take_from_bios(state, (u32)bar.size);
+	if (xhci_reset(state) != 0 || xhci_setup_rings(state) != 0) {
 		kmem_free(state);
 		return (-1);
 	}
@@ -1419,18 +1555,33 @@ xhci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	rid = 0;
 	state->irq_res = bus_alloc_resource_any(state->nb_dev, SYS_RES_IRQ,
 	    &rid, RF_ACTIVE);
-	if (state->irq_res == NULL || bus_setup_intr(state->nb_dev,
+	if (state->irq_res != NULL && bus_setup_intr(state->nb_dev,
 	    state->irq_res, xhci_intr, state, &state->irq_cookie) != 0) {
+		bus_release_resource(state->nb_dev, SYS_RES_IRQ,
+		    state->irq_res->rid, state->irq_res);
+		state->irq_res = NULL;
+		state->irq_cookie = NULL;
+	}
+	if (state->irq_res == NULL || xhci_intr_selftest(state) != 0) {
+		if (state->irq_cookie != NULL) {
+			bus_teardown_intr(state->nb_dev, state->irq_res,
+			    state->irq_cookie);
+			state->irq_cookie = NULL;
+		}
 		if (state->irq_res != NULL) {
 			bus_release_resource(state->nb_dev, SYS_RES_IRQ,
 			    state->irq_res->rid, state->irq_res);
 			state->irq_res = NULL;
 		}
-		usb_controller_fini(&state->usb);
-		(void)xhci_halt(state);
-		xhci_state_destroy(state);
-		return (-1);
+		if (bus_setup_poll(state->nb_dev, NB_POLL_TIMER, xhci_poll,
+		    state, &state->poll_cookie) != 0) {
+			usb_controller_fini(&state->usb);
+			(void)xhci_halt(state);
+			xhci_state_destroy(state);
+			return (-1);
+		}
 	}
+	xhci_poll(state);
 	pdev->driver_data = state;
 	xhci_states[index] = state;
 	return (0);
@@ -1469,6 +1620,10 @@ xhci_pci_remove(pci_device_t *pdev)
 	state = (xhci_state_t *)pdev->driver_data;
 	if (state == NULL) {
 		return;
+	}
+	if (state->poll_cookie != NULL) {
+		bus_teardown_poll(state->nb_dev, state->poll_cookie);
+		state->poll_cookie = NULL;
 	}
 	if (state->irq_cookie != NULL) {
 		bus_teardown_intr(state->nb_dev, state->irq_res,

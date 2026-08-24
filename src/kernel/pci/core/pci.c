@@ -24,6 +24,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <kernel/cm/cm.h>
 #include <kernel/pci/pci.h>
 #include <kernel/pci/utils/bar.h>
 #include <kernel/pci/utils/io.h>
@@ -170,6 +171,34 @@ pci_newbus_probe(device_t dev, pci_driver_t *driver)
   }
   return (100);
 }
+static void
+pci_bus_prefer_msi(device_t child, pci_device_t *pdev)
+{
+  resource_t *existing;
+  int msi_id;
+
+  if (!cm_get_bool_default("SYSTEM", "Newbus", "MsiEnabled", 1)) {
+    return;
+  }
+  if (!pci_msi_supported(pdev)) {
+    return;
+  }
+  existing = bus_get_resource(child, SYS_RES_IRQ, 0);
+  if (existing != NULL && (existing->flags & (RF_BUSY | RF_ALLOCATED)) != 0) {
+    return;
+  }
+  msi_id = pci_msi_alloc(pdev);
+  if (msi_id < 0) {
+    return;
+  }
+  if (bus_set_resource(child, SYS_RES_IRQ, 0, (u64)msi_id, 1,
+      RF_IRQ_MSI) != 0) {
+    pci_msi_release(pdev);
+    return;
+  }
+  printk("[PCI] %02x:%02x.%u msi id=%d\n", pdev->bus, pdev->slot,
+      pdev->function, msi_id);
+}
 
 int
 pci_newbus_attach(device_t dev, pci_driver_t *driver)
@@ -188,7 +217,9 @@ pci_newbus_attach(device_t dev, pci_driver_t *driver)
   if (match == NULL) {
     return (-1);
   }
+  pci_bus_prefer_msi(dev, pdev);
   if (driver->probe != NULL && driver->probe(pdev, match) != 0) {
+    pci_msi_release(pdev);
     return (-1);
   }
   pdev->driver = driver;
@@ -214,6 +245,7 @@ pci_newbus_detach(device_t dev, pci_driver_t *driver)
   if (driver->remove != NULL) {
     driver->remove(pdev);
   }
+  pci_msi_release(pdev);
   pdev->driver = NULL;
   pdev->driver_data = NULL;
   return (0);

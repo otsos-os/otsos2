@@ -101,7 +101,10 @@ bus_setup_intr(device_t dev, resource_t *res,
 			irq_flags |= IRQF_LEVEL;
 		if (res->flags & RF_IRQ_ACTIVE_LOW)
 			irq_flags |= IRQF_ACTIVE_LOW;
-		if (res->flags & RF_IRQ_GSI) {
+		if (res->flags & RF_IRQ_MSI) {
+			newbus_intrs[i].source = irq_source_msi(
+			    (u32)res->start);
+		} else if (res->flags & RF_IRQ_GSI) {
 			newbus_intrs[i].source = irq_source_gsi(
 			    (u32)res->start, irq_flags);
 		} else {

@@ -165,6 +165,7 @@ $space %export newbus_interface_ioctl_entity, newbus_interface_stat_entity
 #define	RF_IRQ_ACTIVE_LOW	0x0020
 #define	RF_IRQ_ISA		0x0040
 #define	RF_IRQ_GSI		0x0080
+#define	RF_IRQ_MSI		0x0100
 
 #define	NB_POLL_TIMER		0x0001
 #define	NB_POLL_IDLE		0x0002

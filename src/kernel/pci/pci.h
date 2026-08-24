@@ -148,6 +148,11 @@ void pci_cfg_write32(u8 bus, u8 slot, u8 function, u8 offset, u32 value);
 void pci_cfg_write16(u8 bus, u8 slot, u8 function, u8 offset, u16 value);
 void pci_cfg_write8(u8 bus, u8 slot, u8 function, u8 offset, u8 value);
 
+u8 pci_find_capability(const pci_device_t *dev, u8 cap_id);
+int pci_msi_supported(const pci_device_t *dev);
+int pci_msi_alloc(pci_device_t *dev);
+void pci_msi_release(pci_device_t *dev);
+
 u16 pci_read_command(const pci_device_t *dev);
 void pci_write_command(const pci_device_t *dev, u16 command);
 void pci_enable_io_space(const pci_device_t *dev);

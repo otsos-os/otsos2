@@ -303,6 +303,7 @@ PCI_CORE_O = ../bin/pci_core.o
 PCI_SCAN_O = ../bin/pci_scan.o
 PCI_CONFIG_O = ../bin/pci_config.o
 PCI_DEVICE_O = ../bin/pci_device.o
+PCI_MSI_O = ../bin/pci_msi.o
 PCI_BAR_O = ../bin/pci_bar.o
 WATCHDOG_O = ../bin/watchdog.o
 WATCHDOG_I6300ESB_O = ../bin/watchdog_i6300esb.o
@@ -399,7 +400,8 @@ OBJ_NO_KSYMTAB = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UAR
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
       $(NEWBUS_DEVICE_O) $(NEWBUS_MODULE_O) $(NEWBUS_ROOT_O) $(NEWBUS_NEXUS_O) $(NEWBUS_PLATFORM_O) $(NEWBUS_CONFIG_O) $(NEWBUS_RESOURCE_O) $(NEWBUS_INTR_O) $(NEWBUS_POLL_O) $(NEWBUS_DEBUG_O) $(NEWBUS_INTERFACE_O) \
-      $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
+      $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) \
+      $(PCI_MSI_O) $(PCI_BAR_O) \
       $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O) \
       $(KSHELL_OBJ) \
       $(KUSR_O) $(KUSR_AUTH_O) $(CM_O) $(DRM_API_O) $(RESTRICT_O) \
@@ -1374,7 +1376,7 @@ $(NEWBUS_INTERFACE_O): kernel/drivers/newbus/interface.c kernel/drivers/newbus/n
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(PCI_CORE_O): kernel/pci/core/pci.c kernel/pci/pci.h
+$(PCI_CORE_O): kernel/pci/core/pci.c kernel/pci/pci.h kernel/cm/cm.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1387,6 +1389,10 @@ $(PCI_CONFIG_O): kernel/pci/core/config.c kernel/pci/pci.h kernel/pci/utils/io.h
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(PCI_DEVICE_O): kernel/pci/core/device.c kernel/pci/pci.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(PCI_MSI_O): kernel/pci/core/msi.c kernel/pci/pci.h kernel/interrupts/irq.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
