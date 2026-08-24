@@ -46,6 +46,7 @@ $space %export svg_parse, svg_doc_free, svg_view_transform
 #define SVG_FILL		0x00000001u
 #define SVG_STROKE		0x00000002u
 #define SVG_CLOSED		0x00000004u
+#define SVG_EVENODD		0x00000008u
 
 typedef struct svg_shape {
 	uint32_t	flags;

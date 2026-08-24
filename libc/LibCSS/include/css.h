@@ -46,10 +46,19 @@ $space %export css_parse, css_free, css_compute, css_apply_declarations
 #define CSS_PROP_UNDERLINE	0x00000008u
 #define CSS_PROP_STRIKE		0x00000010u
 #define CSS_PROP_DISPLAY_NONE	0x00000020u
+#define CSS_PROP_BGCOLOR	0x00000040u
+#define CSS_PROP_ALIGN_CENTER	0x00000080u
+#define CSS_PROP_MARGIN_TOP	0x00000100u
+#define CSS_PROP_MARGIN_BOTTOM	0x00000200u
+
 typedef struct css_computed {
 	uint32_t	set;
 	uint32_t	color;
+	uint32_t	bgcolor;
 	int32_t		font_scale;
+	int32_t		margin_top;
+	int32_t		margin_bottom;
+	int		align_center;
 	int		bold;
 	int		underline;
 	int		strike;

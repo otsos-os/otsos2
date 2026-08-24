@@ -258,6 +258,32 @@ clamp:
 	return (0);
 }
 
+static int
+css_value_px(const char *str, int32_t *out)
+{
+	const char	*p = str;
+	double		px;
+
+	px = css_num(&p);
+	if (px <= 0.0) {
+		*out = 0;
+		return (0);
+	}
+	while (*p == ' ') {
+		p++;
+	}
+	if (strcasecmp(p, "pt") == 0) {
+		px = px * 96.0 / 72.0;
+	} else if (*p == '%' || (*p != '\0' && strcasecmp(p, "px") != 0)) {
+		return (-1);
+	}
+	if (px > 500.0) {
+		px = 500.0;
+	}
+	*out = (int32_t)(px + 0.5);
+	return (0);
+}
+
 int
 css_apply_declarations(css_computed_t *out, const char *decl_text,
     int32_t base_scale)
@@ -306,11 +332,77 @@ css_apply_declarations(css_computed_t *out, const char *decl_text,
 
 			if (plen != 0 && vlen != 0) {
 				uint32_t	color;
+				int32_t		px;
 
 				if (strcasecmp(prop, "color") == 0 &&
 				    css_color_parse(value, &color) == 0) {
 					out->set |= CSS_PROP_COLOR;
 					out->color = color;
+				} else if (strcasecmp(prop,
+				    "background-color") == 0 &&
+				    css_color_parse(value, &color) == 0) {
+					out->set |= CSS_PROP_BGCOLOR;
+					out->bgcolor = color;
+				} else if (strcasecmp(prop,
+				    "text-align") == 0) {
+					out->set |= CSS_PROP_ALIGN_CENTER;
+					out->align_center =
+					    (strcasecmp(value,
+					    "center") == 0);
+				} else if (strcasecmp(prop,
+				    "margin-top") == 0 &&
+				    css_value_px(value, &px) == 0) {
+					out->set |= CSS_PROP_MARGIN_TOP;
+					out->margin_top = px;
+				} else if (strcasecmp(prop,
+				    "margin-bottom") == 0 &&
+				    css_value_px(value, &px) == 0) {
+					out->set |= CSS_PROP_MARGIN_BOTTOM;
+					out->margin_bottom = px;
+				} else if (strcasecmp(prop, "margin") == 0) {
+					char		tok[32];
+					const char	*t = value;
+					int32_t		m[4];
+					int		nm;
+
+					nm = 0;
+					while (nm < 4 && *t != '\0') {
+						const char	*sp2 = t;
+
+						while (*sp2 != '\0' &&
+						    *sp2 != ' ' &&
+						    *sp2 != '\t') {
+							sp2++;
+						}
+						if ((size_t)(sp2 - t) <
+						    sizeof(tok)) {
+							memcpy(tok, t,
+							    (size_t)(sp2 -
+							    t));
+							tok[sp2 - t] = '\0';
+							if (css_value_px(
+							    tok,
+							    &m[nm]) == 0) {
+								nm++;
+							}
+						}
+						while (*sp2 == ' ' ||
+						    *sp2 == '\t') {
+							sp2++;
+						}
+						t = sp2;
+					}
+					if (nm >= 1) {
+						out->set |=
+						    CSS_PROP_MARGIN_TOP |
+						    CSS_PROP_MARGIN_BOTTOM;
+						out->margin_top = m[0];
+						out->margin_bottom = m[0];
+						if (nm >= 3) {
+							out->margin_bottom =
+							    m[2];
+						}
+					}
 				} else if (strcasecmp(prop,
 				    "font-size") == 0 &&
 				    css_value_scale(value, base_scale,
@@ -606,6 +698,22 @@ css_compute(const css_sheet_t *sheet, const css_node_iface_t *iface,
 		}
 		if ((cur.set & CSS_PROP_SCALE) != 0) {
 			out->font_scale = cur.font_scale;
+		}
+		if ((cur.set & CSS_PROP_BGCOLOR) != 0) {
+			out->set |= CSS_PROP_BGCOLOR;
+			out->bgcolor = cur.bgcolor;
+		}
+		if ((cur.set & CSS_PROP_ALIGN_CENTER) != 0) {
+			out->set |= CSS_PROP_ALIGN_CENTER;
+			out->align_center = cur.align_center;
+		}
+		if ((cur.set & CSS_PROP_MARGIN_TOP) != 0) {
+			out->set |= CSS_PROP_MARGIN_TOP;
+			out->margin_top = cur.margin_top;
+		}
+		if ((cur.set & CSS_PROP_MARGIN_BOTTOM) != 0) {
+			out->set |= CSS_PROP_MARGIN_BOTTOM;
+			out->margin_bottom = cur.margin_bottom;
 		}
 		if ((cur.set & CSS_PROP_BOLD) != 0) {
 			out->bold = cur.bold;

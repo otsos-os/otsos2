@@ -643,12 +643,22 @@ draw_viewport(browser_state_t *st)
 	rect.y = vy;
 	rect.width = vw;
 	rect.height = vh;
-	libgFillRect(st->ui, rect, 0xFFFFFFFF);
+
+	libgSetClip(st->ui, rect);
+	{
+		uint32_t	bg = 0xFFFFFFFFu;
+
+		if (st->layout != NULL && st->layout->has_page_bg != 0) {
+			bg = st->layout->page_bg;
+		}
+		libgFillRect(st->ui, rect, bg);
+	}
 
 	if (st->layout != NULL) {
 		html_layout_render(st->ui, st->layout, vx, vy, vw, vh,
 		    st->scroll_y, browser_svg_draw, st);
 	}
+	libgClearClip(st->ui);
 
 	draw_scrollbar(st, vx, vy, vw, vh);
 }
@@ -688,16 +698,10 @@ browser_draw(browser_state_t *st)
 
 	libgBeginOverlay(st->ui);
 
-	if (st->dirty_flags & BROWSER_DIRTY_HEADER) {
-		draw_top_bar(st);
-		draw_toolbar(st);
-	}
-	if (st->dirty_flags & BROWSER_DIRTY_VIEWPORT) {
-		draw_viewport(st);
-	}
-	if (st->dirty_flags & BROWSER_DIRTY_STATUS) {
-		draw_status_bar(st);
-	}
+	draw_top_bar(st);
+	draw_toolbar(st);
+	draw_viewport(st);
+	draw_status_bar(st);
 
 	libgPresent(st->ui);
 	st->dirty_flags = 0;

@@ -1618,6 +1618,11 @@ svg_parse(const char *data, size_t len, svg_doc_t **out)
 
 			scale = svg_matrix_scale(&ctm);
 			paint.stroke_width *= scale;
+
+			v = svg_find_attr(attrs, nattrs, "fill-rule");
+			if (v != NULL && strcasecmp(v, "evenodd") == 0) {
+				extra |= SVG_EVENODD;
+			}
 			if (paint.stroke_width > SVG_STROKE_MAX) {
 				paint.stroke_width = SVG_STROKE_MAX;
 			}

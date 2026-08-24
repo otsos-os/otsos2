@@ -216,6 +216,8 @@ typedef struct html_layout {
 	html_layout_box_t	*boxes_tail;
 	int32_t			content_width;
 	int32_t			content_height;
+	uint32_t		page_bg;
+	int			has_page_bg;
 	void			*css_sheet;
 } html_layout_t;
 

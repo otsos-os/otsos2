@@ -17,6 +17,7 @@ $space %internal html_layout_table, html_layout_table_row, html_layout_table_col
 $space %internal html_layout_children, html_layout_center_range
 $space %internal html_layout_control, html_layout_span_attr
 $space %internal css_iface_tag, css_iface_attr, css_iface_parent, html_css_iface
+$space %internal html_layout_apply_css, html_layout_apply_css_block
 $space %export html_layout_create, html_layout_free
 
 */
@@ -1029,6 +1030,30 @@ html_layout_apply_css(html_style_state_t *style, const css_computed_t *cc)
 }
 
 static void
+html_layout_apply_css_block(html_layout_ctx_t *ctx, const html_node_t *node,
+    const css_computed_t *cc, int32_t *space_before,
+    int32_t *space_after, int *centered)
+{
+	if ((cc->set & CSS_PROP_BGCOLOR) != 0 &&
+	    ctx->layout->has_page_bg == 0 &&
+	    (node->tag == HTML_TAG_BODY || node->tag == HTML_TAG_HTML)) {
+		ctx->layout->page_bg = cc->bgcolor | 0xff000000u;
+		ctx->layout->has_page_bg = 1;
+	}
+	if ((cc->set & CSS_PROP_ALIGN_CENTER) != 0 && cc->align_center != 0) {
+		*centered = 1;
+	}
+	if ((cc->set & CSS_PROP_MARGIN_TOP) != 0 &&
+	    cc->margin_top > *space_before) {
+		*space_before = cc->margin_top;
+	}
+	if ((cc->set & CSS_PROP_MARGIN_BOTTOM) != 0 &&
+	    cc->margin_bottom > *space_after) {
+		*space_after = cc->margin_bottom;
+	}
+}
+
+static void
 html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
     html_style_state_t cur_style)
 {
@@ -1038,7 +1063,9 @@ html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
 	const char		*attr;
 	css_computed_t		cc;
 	int32_t			space_before, space_after, quote_top;
+	uint32_t		css_bg_color;
 	int			have_css;
+	int			css_bg;
 	int			is_block, is_table, centered, pushed_list;
 
 	if (node == NULL || ctx->depth >= HTML_LAYOUT_MAX_DEPTH) {
@@ -1051,6 +1078,8 @@ html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
 	}
 
 	have_css = 0;
+	css_bg = 0;
+	css_bg_color = 0;
 	if (ctx->css_sheet != NULL &&
 	    css_compute((const css_sheet_t *)ctx->css_sheet,
 	    &html_css_iface, node, &cc) == 0) {
@@ -1349,11 +1378,19 @@ html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
 
 	if (have_css != 0) {
 		html_layout_apply_css(&style, &cc);
+		html_layout_apply_css_block(ctx, node, &cc, &space_before,
+		    &space_after, &centered);
 	}
 
 	attr = html_node_get_attr(node, "align");
 	if (attr != NULL && strcasecmp(attr, "center") == 0) {
 		centered = 1;
+	}
+
+	if (have_css != 0 && (cc.set & CSS_PROP_BGCOLOR) != 0 &&
+	    node->tag != HTML_TAG_BODY && node->tag != HTML_TAG_HTML) {
+		css_bg = 1;
+		css_bg_color = cc.bgcolor | 0xff000000u;
 	}
 
 	if (is_table) {
@@ -1398,6 +1435,16 @@ html_layout_node(html_layout_ctx_t *ctx, const html_node_t *node,
 
 	if (is_block && !ctx->at_line_start) {
 		html_layout_new_line(ctx, 0);
+	}
+
+	if (css_bg != 0 && ctx->cursor_y > quote_top) {
+		int32_t	bw = ctx->max_width - style.indent_x;
+
+		if (bw > 0) {
+			html_layout_add_box(ctx, style.indent_x, quote_top,
+			    bw, ctx->cursor_y - quote_top, css_bg_color,
+			    HTML_BOX_FILL);
+		}
 	}
 
 	if (centered) {

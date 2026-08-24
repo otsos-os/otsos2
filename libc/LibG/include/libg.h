@@ -26,6 +26,8 @@ $define %func libgFillCircle as procedure with args context, center, radius
 $define %func libgStrokeCircle as procedure with args context, center, radius
 $define %func libgSvgShape as procedure with args context, svg_shape *, affine map
 $define %func libgSvgDoc as procedure with args context, svg_doc *, rect
+$define %func libgSetClip as procedure with args context, rect
+$define %func libgClearClip as procedure with args context
 $define %func libgText as procedure with args context, position, text, color
 $define %func libgTextScale as procedure with args context, position, text
 $define %func libgMeasureText as procedure with args text, scale, out size
@@ -53,6 +55,7 @@ $space %export libgSetStyle, libgGetStyle, libgMousePosition
 $space %export libgFillRect, libgStrokeRect, libgLine
 $space %export libgFillCircle, libgStrokeCircle
 $space %export libgSvgShape, libgSvgDoc
+$space %export libgSetClip, libgClearClip
 $space %export libgText, libgTextScale, libgMeasureText
 $space %export libgPanel, libgButton, libgTextField, libgSlider
 $space %export libgAnimStart, libgAnimUpdate, libgLerp, libgBlendColor
@@ -157,6 +160,8 @@ void	libgFillCircle(libg_context_t *ctx, int32_t cx, int32_t cy,
 	    int32_t radius, uint32_t color);
 void	libgStrokeCircle(libg_context_t *ctx, int32_t cx, int32_t cy,
 	    int32_t radius, uint32_t color);
+void	libgSetClip(libg_context_t *ctx, libg_rect_t rect);
+void	libgClearClip(libg_context_t *ctx);
 void	libgSvgShape(libg_context_t *ctx, const svg_shape_t *shape,
 	    const double m[6]);
 void	libgSvgDoc(libg_context_t *ctx, const svg_doc_t *doc,
