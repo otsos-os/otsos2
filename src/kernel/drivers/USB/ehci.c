@@ -18,8 +18,7 @@ $define %func ehci_pci_register as function with args void
 
 /* !SPACE!
 
-$space %internal ehci_wait, ehci_transfer, ehci_transfer_locked, ehci_poll
-$space %internal ehci_sync_enter, ehci_sync_leave, ehci_intr_selftest
+$space %internal ehci_wait, ehci_transfer, ehci_poll
 $space %internal ehci_pci_probe, ehci_pci_remove
 $space %export ehci_pci_register
 
@@ -52,13 +51,10 @@ $space %export ehci_pci_register
 #define EHCI_CMD_RESET		0x00000002
 #define EHCI_CMD_PSE		0x00000010
 #define EHCI_CMD_ASE		0x00000020
-#define EHCI_CMD_IAAD		0x00000040
 #define EHCI_STS_INT		0x00000001
 #define EHCI_STS_ERR		0x00000002
 #define EHCI_STS_PCD		0x00000004
 #define EHCI_STS_HSE		0x00000010
-#define EHCI_STS_IAA		0x00000020
-#define EHCI_IAAD_SPIN		2000000U
 #define EHCI_STS_HALT		0x00001000
 #define EHCI_LINK_TERM		0x00000001
 #define EHCI_LINK_QH		0x00000002
@@ -118,11 +114,7 @@ typedef struct {
 	ehci_request_t	requests[EHCI_MAX_REQUESTS];
 	usb_controller_t usb;
 	void		*irq_cookie;
-	void		*poll_cookie;
 	resource_t	*irq_res;
-	volatile u32	sync_depth;
-	volatile u32	intr_count;
-	volatile u8	intr_deferred;
 	u8		ports;
 	u8		next_address;
 	u8		busy;
@@ -133,9 +125,6 @@ static ehci_state_t *ehci_states[EHCI_MAX_CONTROLLERS];
 
 static int ehci_transfer(ehci_state_t *, usb_device_t *, usb_endpoint_t *,
     const usb_setup_t *, void *, u32 *, u32, int);
-static void ehci_sync_enter(ehci_state_t *);
-static void ehci_sync_leave(ehci_state_t *);
-static void ehci_poll(void *);
 
 static int
 ehci_wait(volatile u32 *reg, u32 mask, u32 value, u32 limit)
@@ -171,7 +160,7 @@ ehci_qtd_buffer(ehci_qtd_t *qtd, u64 phys, u32 length)
 }
 
 static int
-ehci_transfer_locked(ehci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
+ehci_transfer(ehci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
     const usb_setup_t *setup, void *data, u32 *length, u32 timeout,
     int periodic)
 {
@@ -278,20 +267,6 @@ ehci_transfer_locked(ehci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
 	usb_dma_free(&dma);
 	return ((token & (EHCI_QTD_ACTIVE | EHCI_QTD_HALTED | EHCI_QTD_DBE |
 	    EHCI_QTD_BABBLE | EHCI_QTD_XACT)) == 0 ? 0 : -1);
-}
-
-static int
-ehci_transfer(ehci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
-    const usb_setup_t *setup, void *data, u32 *length, u32 timeout,
-    int periodic)
-{
-	int result;
-
-	ehci_sync_enter(st);
-	result = ehci_transfer_locked(st, dev, ep, setup, data, length, timeout,
-	    periodic);
-	ehci_sync_leave(st);
-	return (result);
 }
 
 static int
@@ -415,21 +390,6 @@ ehci_poll(void *arg)
 	__atomic_store_n(&st->busy, 0, __ATOMIC_RELEASE);
 }
 
-static void
-ehci_sync_enter(ehci_state_t *st)
-{
-	__atomic_add_fetch(&st->sync_depth, 1, __ATOMIC_ACQ_REL);
-}
-
-static void
-ehci_sync_leave(ehci_state_t *st)
-{
-	if (__atomic_sub_fetch(&st->sync_depth, 1, __ATOMIC_ACQ_REL) != 0)
-		return;
-	if (__atomic_exchange_n(&st->intr_deferred, 0, __ATOMIC_ACQ_REL))
-		ehci_poll(st);
-}
-
 static int
 ehci_intr(void *arg)
 {
@@ -439,54 +399,11 @@ ehci_intr(void *arg)
 	st = arg;
 	status = *(volatile u32 *)(st->op + EHCI_USBSTS);
 	if ((status & (EHCI_STS_INT | EHCI_STS_ERR | EHCI_STS_PCD |
-	    EHCI_STS_HSE | EHCI_STS_IAA)) == 0) {
+	    EHCI_STS_HSE)) == 0) {
 		return (-1);
-	}
-	__atomic_add_fetch(&st->intr_count, 1, __ATOMIC_ACQ_REL);
-	if (status & EHCI_STS_IAA) {
-		*(volatile u32 *)(st->op + EHCI_USBSTS) = EHCI_STS_IAA;
-		status &= ~EHCI_STS_IAA;
-		if (status == 0)
-			return (0);
-	}
-	if (__atomic_load_n(&st->sync_depth, __ATOMIC_ACQUIRE) != 0) {
-		*(volatile u32 *)(st->op + EHCI_USBSTS) = status;
-		__atomic_store_n(&st->intr_deferred, 1, __ATOMIC_RELEASE);
-		return (0);
 	}
 	ehci_poll(st);
 	return (0);
-}
-
-static int
-ehci_intr_selftest(ehci_state_t *st)
-{
-	u32	before, command, i;
-
-	before = __atomic_load_n(&st->intr_count, __ATOMIC_ACQUIRE);
-	command = *(volatile u32 *)(st->op + EHCI_USBCMD);
-	if ((command & (EHCI_CMD_RUN | EHCI_CMD_ASE)) !=
-	    (EHCI_CMD_RUN | EHCI_CMD_ASE)) {
-		usb_log_printf("ehci: async schedule off, assuming no irq\n");
-		usb_log_flush();
-		return (-1);
-	}
-	*(volatile u32 *)(st->op + EHCI_USBCMD) = command | EHCI_CMD_IAAD;
-	for (i = 0; i < EHCI_IAAD_SPIN; i++) {
-		if (__atomic_load_n(&st->intr_count, __ATOMIC_ACQUIRE) !=
-		    before) {
-			usb_log_printf("ehci: irq works, polling disabled\n");
-			usb_log_flush();
-			return (0);
-		}
-		__asm__ volatile("pause");
-	}
-	*(volatile u32 *)(st->op + EHCI_USBCMD) =
-	    *(volatile u32 *)(st->op + EHCI_USBCMD) & ~EHCI_CMD_IAAD;
-	usb_log_printf("ehci: irq never fired on doorbell, falling back to "
-	    "polling\n");
-	usb_log_flush();
-	return (-1);
 }
 
 static const usb_controller_ops_t ehci_ops = {
@@ -547,7 +464,7 @@ ehci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	*(volatile u32 *)(st->op + EHCI_ASYNC) = (u32)st->async_dma.phys;
 	*(volatile u32 *)(st->op + EHCI_PERIODIC) = (u32)st->periodic_dma.phys;
 	*(volatile u32 *)(st->op + EHCI_USBINTR) = EHCI_STS_INT | EHCI_STS_ERR |
-	    EHCI_STS_PCD | EHCI_STS_HSE | EHCI_STS_IAA;
+	    EHCI_STS_PCD | EHCI_STS_HSE;
 	*(volatile u32 *)(st->op + EHCI_CONFIGFLAG) = 1;
 	*(volatile u32 *)(st->op + EHCI_USBCMD) = EHCI_CMD_RUN | EHCI_CMD_ASE;
 	st->next_address = 1;
@@ -558,30 +475,8 @@ ehci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	rid = 0;
 	st->irq_res = bus_alloc_resource_any(st->nb_dev, SYS_RES_IRQ, &rid,
 	    RF_ACTIVE);
-	if (st->irq_res != NULL && bus_setup_intr(st->nb_dev, st->irq_res,
-	    ehci_intr, st, &st->irq_cookie) != 0) {
-		bus_release_resource(st->nb_dev, SYS_RES_IRQ,
-		    st->irq_res->rid, st->irq_res);
-		st->irq_res = NULL;
-		st->irq_cookie = NULL;
-	}
-	if (st->irq_res == NULL || ehci_intr_selftest(st) != 0) {
-		if (st->irq_cookie != NULL) {
-			bus_teardown_intr(st->nb_dev, st->irq_res,
-			    st->irq_cookie);
-			st->irq_cookie = NULL;
-		}
-		if (st->irq_res != NULL) {
-			bus_release_resource(st->nb_dev, SYS_RES_IRQ,
-			    st->irq_res->rid, st->irq_res);
-			st->irq_res = NULL;
-		}
-		usb_log_printf("ehci: no usable irq, polling only\n");
-		usb_log_flush();
-		if (bus_setup_poll(st->nb_dev, NB_POLL_TIMER, ehci_poll, st,
-		    &st->poll_cookie) != 0) goto fail;
-	}
-	ehci_poll(st);
+	if (st->irq_res == NULL || bus_setup_intr(st->nb_dev, st->irq_res,
+	    ehci_intr, st, &st->irq_cookie) != 0) goto fail;
 	pdev->driver_data = st; ehci_states[index] = st;
 	return (0);
 fail:
@@ -590,9 +485,6 @@ fail:
 		*(volatile u32 *)(st->op + EHCI_USBCMD) = 0;
 		(void)ehci_wait((volatile u32 *)(st->op + EHCI_USBSTS),
 		    EHCI_STS_HALT, EHCI_STS_HALT, 1000000);
-	}
-	if (st->poll_cookie != NULL) {
-		bus_teardown_poll(st->nb_dev, st->poll_cookie);
 	}
 	if (st->irq_cookie != NULL) {
 		bus_teardown_intr(st->nb_dev, st->irq_res, st->irq_cookie);
@@ -620,7 +512,6 @@ ehci_pci_remove(pci_device_t *pdev)
 
 	st = pdev->driver_data; if (st == NULL) return;
 	*(volatile u32 *)(st->op + EHCI_USBINTR) = 0;
-	if (st->poll_cookie) bus_teardown_poll(st->nb_dev, st->poll_cookie);
 	if (st->irq_cookie) bus_teardown_intr(st->nb_dev, st->irq_res,
 	    st->irq_cookie);
 	if (st->irq_res) bus_release_resource(st->nb_dev, SYS_RES_IRQ,

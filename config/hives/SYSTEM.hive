@@ -21,7 +21,6 @@ hive SYSTEM @access(read=user, add=kusr, edit=kusr) {
 	key Newbus {
 		bool PolicyEnabled = true
 		bool Verbose = false
-		bool MsiEnabled = true
 	}
 
 	key Newbus.Drivers {

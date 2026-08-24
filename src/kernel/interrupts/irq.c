@@ -13,12 +13,6 @@ $define %func irq_dispatch as function with args u32, registers_t *
 $define %func irq_vector_is_software as function with args u32
 $define %func irq_eoi_source as procedure with args irq_source_t *
 $define %func irq_eoi_orphan as procedure with args u32
-$define %type irq_msi_ops_t as bus supplied message programming callbacks
-$define %func irq_msi_lookup as function with args u32
-$define %func irq_msi_ops_register as function with args const irq_msi_ops_t *
-$define %func irq_msi_ops_unregister as procedure with args u32
-$define %func irq_source_msi as function with args u32
-$define %func irq_unroute as procedure with args irq_desc_t *
 
 */
 
@@ -27,8 +21,6 @@ $define %func irq_unroute as procedure with args irq_desc_t *
 $space %internal irq_vector_alloc, irq_vector_free, irq_desc_find
 $space %internal irq_desc_alloc, irq_route, irq_mask, irq_unmask, irq_eoi
 $space %internal irq_eoi_source, irq_eoi_orphan
-$space %internal irq_msi_lookup, irq_unroute
-$space %export irq_source_msi, irq_msi_ops_register, irq_msi_ops_unregister
 $space %export irq_init, irq_source_isa, irq_source_gsi
 $space %export irq_source_local, irq_request, irq_release
 $space %export irq_dispatch, irq_ioapic_online, irq_stats_dump
@@ -49,7 +41,6 @@ $space %export irq_vector_is_software
 #define	IRQ_UNHANDLED_LOG_INTERVAL	1024
 #define	IRQ_PIC_VECTOR_BASE	32
 #define	IRQ_PIC_VECTOR_COUNT	16
-#define	IRQ_MAX_MSI		32
 
 extern void	pic_mask_irq(unsigned char irq);
 extern int	pic_is_spurious(unsigned char irq);
@@ -86,68 +77,6 @@ static u8		irq_vector_used[256];
 static irq_source_t	irq_vector_sources[256];
 static u8		irq_vector_source_valid[256];
 static int		irq_ioapic_ready;
-
-static irq_msi_ops_t	irq_msi_slots[IRQ_MAX_MSI];
-static u8		irq_msi_slot_used[IRQ_MAX_MSI];
-
-static irq_msi_ops_t *
-irq_msi_lookup(u32 msi_id)
-{
-	u32	slot;
-
-	if (msi_id == 0 || msi_id > IRQ_MAX_MSI) {
-		return (NULL);
-	}
-	slot = msi_id - 1;
-	if (!irq_msi_slot_used[slot]) {
-		return (NULL);
-	}
-	return (&irq_msi_slots[slot]);
-}
-
-int
-irq_msi_ops_register(const irq_msi_ops_t *ops)
-{
-	u32	slot;
-
-	if (ops == NULL || ops->program == NULL) {
-		return (-1);
-	}
-	for (slot = 0; slot < IRQ_MAX_MSI; slot++) {
-		if (irq_msi_slot_used[slot]) {
-			continue;
-		}
-		irq_msi_slots[slot] = *ops;
-		irq_msi_slot_used[slot] = 1;
-		return ((int)(slot + 1));
-	}
-	return (-1);
-}
-
-void
-irq_msi_ops_unregister(u32 msi_id)
-{
-	u32	slot;
-
-	if (msi_id == 0 || msi_id > IRQ_MAX_MSI) {
-		return;
-	}
-	slot = msi_id - 1;
-	memset(&irq_msi_slots[slot], 0, sizeof(irq_msi_slots[slot]));
-	irq_msi_slot_used[slot] = 0;
-}
-
-irq_source_t
-irq_source_msi(u32 msi_id)
-{
-	irq_source_t	source;
-
-	memset(&source, 0, sizeof(source));
-	source.domain = IRQ_DOMAIN_MSI;
-	source.hwirq = msi_id;
-	source.flags = 0;
-	return (source);
-}
 
 static int
 irq_vector_alloc(void)
@@ -229,7 +158,6 @@ static int
 irq_route(irq_desc_t *desc)
 {
 	irq_source_t	*source;
-	irq_msi_ops_t	*ops;
 
 	source = &desc->source;
 	if (source->domain == IRQ_DOMAIN_IOAPIC) {
@@ -237,61 +165,26 @@ irq_route(irq_desc_t *desc)
 		    lapic_get_id(), (source->flags & IRQF_LEVEL) != 0,
 		    (source->flags & IRQF_ACTIVE_LOW) != 0));
 	}
-	if (source->domain == IRQ_DOMAIN_MSI) {
-		ops = irq_msi_lookup(source->hwirq);
-		if (ops == NULL) {
-			return (-1);
-		}
-		return (ops->program(ops->arg, source->vector,
-		    lapic_get_id()));
-	}
 	return (0);
-}
-static void
-irq_unroute(irq_desc_t *desc)
-{
-	irq_msi_ops_t	*ops;
-
-	if (desc->source.domain != IRQ_DOMAIN_MSI) {
-		return;
-	}
-	ops = irq_msi_lookup(desc->source.hwirq);
-	if (ops != NULL && ops->disable != NULL) {
-		ops->disable(ops->arg);
-	}
 }
 
 static void
 irq_mask(irq_desc_t *desc)
 {
-	irq_msi_ops_t	*ops;
-
 	if (desc->source.domain == IRQ_DOMAIN_IOAPIC) {
 		(void)ioapic_mask_gsi(desc->source.hwirq);
 	} else if (desc->source.domain == IRQ_DOMAIN_PIC) {
 		pic_mask_irq((u8)desc->source.hwirq);
-	} else if (desc->source.domain == IRQ_DOMAIN_MSI) {
-		ops = irq_msi_lookup(desc->source.hwirq);
-		if (ops != NULL && ops->mask != NULL) {
-			ops->mask(ops->arg, 1);
-		}
 	}
 }
 
 static void
 irq_unmask(irq_desc_t *desc)
 {
-	irq_msi_ops_t	*ops;
-
 	if (desc->source.domain == IRQ_DOMAIN_IOAPIC) {
 		(void)ioapic_unmask_gsi(desc->source.hwirq);
 	} else if (desc->source.domain == IRQ_DOMAIN_PIC) {
 		pic_unmask_irq((u8)desc->source.hwirq);
-	} else if (desc->source.domain == IRQ_DOMAIN_MSI) {
-		ops = irq_msi_lookup(desc->source.hwirq);
-		if (ops != NULL && ops->mask != NULL) {
-			ops->mask(ops->arg, 0);
-		}
 	}
 }
 
@@ -299,8 +192,7 @@ static void
 irq_eoi_source(irq_source_t *source)
 {
 	if (source->domain == IRQ_DOMAIN_IOAPIC ||
-	    source->domain == IRQ_DOMAIN_LOCAL ||
-	    source->domain == IRQ_DOMAIN_MSI) {
+	    source->domain == IRQ_DOMAIN_LOCAL) {
 		lapic_eoi();
 	} else if (source->domain == IRQ_DOMAIN_PIC) {
 		pic_send_eoi((u8)source->hwirq);
@@ -451,7 +343,6 @@ irq_request(irq_source_t source, irq_handler_t *handler, void *arg,
 	if (action == NULL || desc->action_count >= IRQ_MAX_ACTIONS) {
 		if (desc->action_count == 0) {
 			irq_mask(desc);
-			irq_unroute(desc);
 			irq_vectors[desc->source.vector] = NULL;
 			irq_vector_source_valid[desc->source.vector] = 0;
 			irq_vector_free(desc->source.vector);
@@ -504,7 +395,6 @@ irq_release(void *cookie)
 	memset(action, 0, sizeof(*action));
 	if (desc->action_count == 0) {
 		irq_mask(desc);
-		irq_unroute(desc);
 		irq_vectors[desc->source.vector] = NULL;
 		irq_vector_source_valid[desc->source.vector] = 0;
 		irq_vector_free(desc->source.vector);
