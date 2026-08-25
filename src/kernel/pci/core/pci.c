@@ -106,7 +106,10 @@ pci_bus_add_resources(device_t child, pci_device_t *pdev)
   }
   if (pdev->irq_pin != 0 && pdev->irq_line != 0xFF) {
     bus_set_resource(child, SYS_RES_IRQ, 0, pdev->irq_line, 1,
-        RF_SHAREABLE | RF_IRQ_LEVEL | RF_IRQ_ACTIVE_LOW | RF_IRQ_ISA);
+        RF_SHAREABLE | RF_IRQ_LEVEL | RF_IRQ_ACTIVE_LOW | RF_IRQ_GSI);
+  }
+  if (pci_msi_supported(pdev) || pci_msix_supported(pdev)) {
+    bus_set_resource(child, SYS_RES_IRQ, PCI_MSI_RID, 0, 1, RF_IRQ_MSI);
   }
 }
 
@@ -130,6 +133,54 @@ pci_bus_probe(device_t dev)
 }
 
 static int
+pci_bus_msi_allowed(void)
+{
+  return (pci_msi_policy_enabled() || pci_msix_policy_enabled());
+}
+
+static int
+pci_bus_msi_program(device_t dev, u8 vector, u8 dest_apic_id)
+{
+  pci_device_t *pdev;
+
+  pdev = (pci_device_t *)device_get_ivars(dev);
+  if (pdev == NULL) {
+    return (-1);
+  }
+  if (pci_msix_policy_enabled() && pci_msix_supported(pdev) &&
+      pci_msix_enable(pdev, 0, vector, dest_apic_id) == 0) {
+    return (0);
+  }
+  if (!pci_msi_policy_enabled()) {
+    return (-1);
+  }
+  return (pci_msi_enable(pdev, vector, dest_apic_id));
+}
+
+static void
+pci_bus_msi_teardown(device_t dev)
+{
+  pci_device_t *pdev;
+
+  pdev = (pci_device_t *)device_get_ivars(dev);
+  if (pdev == NULL) {
+    return;
+  }
+  if (pci_msix_supported(pdev)) {
+    pci_msix_disable(pdev);
+  }
+  if (pci_msi_supported(pdev)) {
+    pci_msi_disable(pdev);
+  }
+}
+
+static const newbus_msi_ops_t pci_bus_msi_ops = {
+    .allowed = pci_bus_msi_allowed,
+    .program = pci_bus_msi_program,
+    .teardown = pci_bus_msi_teardown,
+};
+
+static int
 pci_bus_attach(device_t dev)
 {
   pci_device_t *pdev;
@@ -140,6 +191,7 @@ pci_bus_attach(device_t dev)
   if (!pci_config_present()) {
     return (-1);
   }
+  bus_msi_ops_register(&pci_bus_msi_ops);
   devices = pci_scan();
   printk("[PCI] scan complete: %d device(s)\n", devices);
   for (i = 0; i < devices; i++) {

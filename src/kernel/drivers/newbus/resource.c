@@ -139,19 +139,37 @@ bus_alloc_resource_any(device_t dev, int type, int *rid, u32 flags)
 	if (dev == NULL || rid == NULL) {
 		return (NULL);
 	}
-	for (i = 0; i < dev->resource_count; i++) {
-		res = &dev->resources[i];
-		if (res->type != type || (res->flags & RF_BUSY)) {
-			continue;
+	res = NULL;
+	if (type == SYS_RES_IRQ) {
+		for (i = 0; i < dev->resource_count; i++) {
+			if (dev->resources[i].type != type ||
+			    (dev->resources[i].flags & RF_BUSY) ||
+			    (dev->resources[i].flags & RF_IRQ_MSI) == 0) {
+				continue;
+			}
+			res = &dev->resources[i];
+			break;
 		}
-		*rid = res->rid;
-		res->flags |= RF_ALLOCATED | RF_BUSY | flags;
-		if (flags & RF_ACTIVE) {
-			bus_activate_resource(dev, res);
-		}
-		return (res);
 	}
-	return (NULL);
+	if (res == NULL) {
+		for (i = 0; i < dev->resource_count; i++) {
+			if (dev->resources[i].type != type ||
+			    (dev->resources[i].flags & RF_BUSY)) {
+				continue;
+			}
+			res = &dev->resources[i];
+			break;
+		}
+	}
+	if (res == NULL) {
+		return (NULL);
+	}
+	*rid = res->rid;
+	res->flags |= RF_ALLOCATED | RF_BUSY | flags;
+	if (flags & RF_ACTIVE) {
+		bus_activate_resource(dev, res);
+	}
+	return (res);
 }
 
 int

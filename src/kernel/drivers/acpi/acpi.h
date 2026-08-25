@@ -50,6 +50,7 @@ $define %type acpi_mcfg_t as packed struct with MCFG header
 $define %func acpi_init_from_rsdp as function with args void *
 $define %func acpi_init_from_multiboot2 as function with args void *
 $define %func acpi_find_table as function with args const char *
+$define %func acpi_table_foreach as function with args const char *, int (*)(acpi_sdt_header_t *, void *), void *
 $define %func acpi_get_fadt as function with args void
 $define %func acpi_get_madt as function with args void
 $define %func acpi_is_initialized as function with args void
@@ -68,7 +69,8 @@ $define %func acpi_dump_tables as procedure with args void
 /* !SPACE!
 
 $space %export acpi_init_from_rsdp, acpi_init_from_multiboot2
-$space %export acpi_find_table, acpi_get_fadt, acpi_get_madt
+$space %export acpi_find_table, acpi_table_foreach
+$space %export acpi_get_fadt, acpi_get_madt
 $space %export acpi_is_initialized, acpi_get_revision
 $space %export acpi_validate_checksum
 $space %export acpi_madt_foreach, acpi_get_cpu_count
@@ -275,6 +277,9 @@ typedef struct {
 int			acpi_init_from_rsdp(void *rsdp);
 int			acpi_init_from_multiboot2(void *mb2_info);
 acpi_sdt_header_t	*acpi_find_table(const char *signature);
+int			acpi_table_foreach(const char *signature,
+			    int (*callback)(acpi_sdt_header_t *, void *),
+			    void *ctx);
 acpi_fadt_t		*acpi_get_fadt(void);
 acpi_madt_t		*acpi_get_madt(void);
 int			acpi_is_initialized(void);

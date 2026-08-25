@@ -50,6 +50,7 @@ $define %func parse_xsdt as procedure with args acpi_xsdt_t *
 $define %func acpi_init_from_rsdp as function with args void *
 $define %func acpi_init_from_multiboot2 as function with args void *
 $define %func acpi_find_table as function with args const char *
+$define %func acpi_table_foreach as function with args const char *, int (*)(acpi_sdt_header_t *, void *), void *
 $define %func acpi_get_fadt as function with args void
 $define %func acpi_get_madt as function with args void
 $define %func acpi_is_initialized as function with args void
@@ -64,6 +65,7 @@ $space %internal scan_for_rsdp, find_rsdp_bios
 $space %internal parse_rsdt, parse_xsdt
 $space %export acpi_validate_checksum, acpi_init_from_rsdp
 $space %export acpi_init_from_multiboot2, acpi_find_table
+$space %export acpi_table_foreach
 $space %export acpi_get_fadt, acpi_get_madt
 $space %export acpi_is_initialized, acpi_get_revision
 
@@ -388,6 +390,48 @@ acpi_find_table(const char *signature)
 	}
 
 	return (NULL);
+}
+
+int
+acpi_table_foreach(const char *signature,
+    int (*callback)(acpi_sdt_header_t *, void *), void *ctx)
+{
+	u32			n, i;
+	int			count;
+	acpi_sdt_header_t	*sdt;
+
+	if (!g_acpi_initialized || !signature || !callback) {
+		return (-1);
+	}
+
+	count = 0;
+	if (g_xsdt) {
+		n = (g_xsdt->header.length -
+		    sizeof(acpi_sdt_header_t)) / 8;
+	} else if (g_rsdt) {
+		n = (g_rsdt->header.length -
+		    sizeof(acpi_sdt_header_t)) / 4;
+	} else {
+		return (-1);
+	}
+
+	for (i = 0; i < n; i++) {
+		if (g_xsdt) {
+			sdt = (acpi_sdt_header_t *)g_xsdt->entries[i];
+		} else {
+			sdt = (acpi_sdt_header_t *)
+			    (u64)g_rsdt->entries[i];
+		}
+		if (!sdt || !sig_match(sdt->signature, signature)) {
+			continue;
+		}
+		count++;
+		if (callback(sdt, ctx) != 0) {
+			break;
+		}
+	}
+
+	return (count);
 }
 
 acpi_fadt_t *

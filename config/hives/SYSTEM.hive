@@ -18,6 +18,10 @@ hive SYSTEM @access(read=user, add=kusr, edit=kusr) {
 		u32 ApicQuality = 1000
 	}
 
+	key IRQ {
+		bool MsiEnabled = true
+	}
+
 	key Newbus {
 		bool PolicyEnabled = true
 		bool Verbose = false

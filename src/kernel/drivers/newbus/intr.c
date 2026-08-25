@@ -32,18 +32,24 @@ $define %type int as 32 bit signed
 $define %func bus_setup_intr as function with args device_t, resource_t *, newbus_intr_handler_t *, void *, void **
 $define %func bus_teardown_intr as function with args device_t, resource_t *, void *
 $define %func newbus_intr_invoke as function with args void *
+$define %func bus_msi_ops_register as procedure with args const newbus_msi_ops_t *
+$define %func newbus_intr_find_intx as function with args device_t
+$define %func newbus_intr_setup_msi as function with args newbus_intr_entry_t *, device_t
 
 */
 
 /* !SPACE!
 
-$space %internal newbus_intr_invoke
-$space %export bus_setup_intr, bus_teardown_intr
+$space %internal newbus_intr_invoke, newbus_intr_find_intx
+$space %internal newbus_intr_setup_msi
+$space %export bus_setup_intr, bus_teardown_intr, bus_msi_ops_register
 
 */
 
 #include <kernel/drivers/newbus/newbus.h>
+#include <kernel/interrupts/apic/lapic.h>
 #include <kernel/interrupts/irq.h>
+#include <mlibc/mlibc.h>
 
 typedef struct newbus_intr_entry {
 	device_t			dev;
@@ -53,6 +59,7 @@ typedef struct newbus_intr_entry {
 	u8			irq;
 	void			*irq_cookie;
 	irq_source_t		source;
+	int			is_msi;
 	int			used;
 } newbus_intr_entry_t;
 
@@ -70,6 +77,66 @@ newbus_intr_invoke(registers_t *regs, void *arg)
 }
 
 static newbus_intr_entry_t	newbus_intrs[NEWBUS_MAX_INTR_HANDLERS];
+static const newbus_msi_ops_t	*newbus_msi_ops;
+
+void
+bus_msi_ops_register(const newbus_msi_ops_t *ops)
+{
+	newbus_msi_ops = ops;
+}
+
+static resource_t *
+newbus_intr_find_intx(device_t dev)
+{
+	resource_t	*res;
+	int		i, count;
+
+	count = dev->resource_count;
+	for (i = 0; i < count; i++) {
+		res = &dev->resources[i];
+		if (res->type != SYS_RES_IRQ ||
+		    (res->flags & RF_IRQ_MSI) != 0) {
+			continue;
+		}
+		res->flags |= RF_ALLOCATED | RF_BUSY | RF_ACTIVE;
+		return (res);
+	}
+	return (NULL);
+}
+
+static int
+newbus_intr_setup_msi(newbus_intr_entry_t *entry, device_t dev)
+{
+	irq_source_t	source;
+
+	if (newbus_msi_ops == NULL || newbus_msi_ops->program == NULL) {
+		return (-1);
+	}
+	if (newbus_msi_ops->allowed != NULL &&
+	    newbus_msi_ops->allowed() == 0) {
+		return (-1);
+	}
+	if (irq_source_msi(&source) != 0) {
+		return (-1);
+	}
+	if (newbus_msi_ops->program(dev, source.vector, lapic_get_id()) != 0) {
+		irq_source_msi_release(&source);
+		return (-1);
+	}
+	entry->source = source;
+	entry->irq = source.vector;
+	entry->is_msi = 1;
+	if (irq_request(source, newbus_intr_invoke, entry,
+	    device_get_nameunit(dev), &entry->irq_cookie) != 0) {
+		if (newbus_msi_ops->teardown != NULL) {
+			newbus_msi_ops->teardown(dev);
+		}
+		irq_source_msi_release(&source);
+		entry->is_msi = 0;
+		return (-1);
+	}
+	return (0);
+}
 
 int
 bus_setup_intr(device_t dev, resource_t *res,
@@ -94,6 +161,7 @@ bus_setup_intr(device_t dev, resource_t *res,
 		newbus_intrs[i].arg = arg;
 		newbus_intrs[i].irq = (u8)res->start;
 		newbus_intrs[i].used = 1;
+		newbus_intrs[i].is_msi = 0;
 		irq_flags = 0;
 		if (res->flags & RF_SHAREABLE)
 			irq_flags |= IRQF_SHARED;
@@ -101,6 +169,29 @@ bus_setup_intr(device_t dev, resource_t *res,
 			irq_flags |= IRQF_LEVEL;
 		if (res->flags & RF_IRQ_ACTIVE_LOW)
 			irq_flags |= IRQF_ACTIVE_LOW;
+		if ((res->flags & RF_IRQ_MSI) != 0) {
+			if (newbus_intr_setup_msi(&newbus_intrs[i], dev) == 0) {
+				if (cookiep != NULL) {
+					*cookiep = &newbus_intrs[i];
+				}
+				return (0);
+			}
+			res = newbus_intr_find_intx(dev);
+			if (res == NULL) {
+				memset(&newbus_intrs[i], 0,
+				    sizeof(newbus_intrs[i]));
+				return (-1);
+			}
+			newbus_intrs[i].res = res;
+			newbus_intrs[i].irq = (u8)res->start;
+			irq_flags = 0;
+			if (res->flags & RF_SHAREABLE)
+				irq_flags |= IRQF_SHARED;
+			if (res->flags & RF_IRQ_LEVEL)
+				irq_flags |= IRQF_LEVEL;
+			if (res->flags & RF_IRQ_ACTIVE_LOW)
+				irq_flags |= IRQF_ACTIVE_LOW;
+		}
 		if (res->flags & RF_IRQ_GSI) {
 			newbus_intrs[i].source = irq_source_gsi(
 			    (u32)res->start, irq_flags);
@@ -137,6 +228,13 @@ bus_teardown_intr(device_t dev, resource_t *res, void *cookie)
 	}
 	if (irq_release(entry->irq_cookie) != 0) {
 		return (-1);
+	}
+	if (entry->is_msi) {
+		if (newbus_msi_ops != NULL &&
+		    newbus_msi_ops->teardown != NULL) {
+			newbus_msi_ops->teardown(dev);
+		}
+		entry->is_msi = 0;
 	}
 	entry->used = 0;
 	entry->dev = NULL;

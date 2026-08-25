@@ -5,6 +5,8 @@ $define %type irq_desc_t as allocated logical interrupt descriptor
 $define %type irq_source_t as hardware interrupt identity
 
 $define %func irq_vector_alloc as function with args void
+$define %func irq_source_msi as function with args irq_source_t *
+$define %func irq_source_msi_release as procedure with args irq_source_t *
 $define %func irq_desc_find as function with args irq_source_t
 $define %func irq_desc_alloc as function with args irq_source_t
 $define %func irq_request as function with args irq_source_t, irq_handler_t *, void *, const char *, void **
@@ -23,6 +25,7 @@ $space %internal irq_desc_alloc, irq_route, irq_mask, irq_unmask, irq_eoi
 $space %internal irq_eoi_source, irq_eoi_orphan
 $space %export irq_init, irq_source_isa, irq_source_gsi
 $space %export irq_source_local, irq_request, irq_release
+$space %export irq_source_msi, irq_source_msi_release
 $space %export irq_dispatch, irq_ioapic_online, irq_stats_dump
 $space %export irq_vector_is_software
 
@@ -125,7 +128,13 @@ irq_desc_alloc(irq_source_t source)
 	u32		i;
 
 	vector = source.vector;
-	if ((source.flags & IRQF_FIXED_VECTOR) == 0) {
+	if ((source.flags & IRQF_PREALLOC_VECTOR) != 0) {
+		if (vector < IRQ_VECTOR_DYNAMIC_FIRST ||
+		    vector > IRQ_VECTOR_LAST || irq_vectors[vector] != NULL ||
+		    !irq_vector_used[vector]) {
+			return (NULL);
+		}
+	} else if ((source.flags & IRQF_FIXED_VECTOR) == 0) {
 		vector = irq_vector_alloc();
 	} else if (vector > IRQ_VECTOR_LAST || irq_vectors[vector] != NULL ||
 	    (irq_vector_used[vector] &&
@@ -192,7 +201,8 @@ static void
 irq_eoi_source(irq_source_t *source)
 {
 	if (source->domain == IRQ_DOMAIN_IOAPIC ||
-	    source->domain == IRQ_DOMAIN_LOCAL) {
+	    source->domain == IRQ_DOMAIN_LOCAL ||
+	    source->domain == IRQ_DOMAIN_MSI) {
 		lapic_eoi();
 	} else if (source->domain == IRQ_DOMAIN_PIC) {
 		pic_send_eoi((u8)source->hwirq);
@@ -298,6 +308,39 @@ irq_source_local(u32 vector)
 	source.vector = (u8)vector;
 	source.flags = IRQF_PERCPU | IRQF_FIXED_VECTOR;
 	return (source);
+}
+
+int
+irq_source_msi(irq_source_t *source)
+{
+	int	vector;
+
+	if (source == NULL || !lapic_is_enabled()) {
+		return (-1);
+	}
+	vector = irq_vector_alloc();
+	if (vector < 0) {
+		return (-1);
+	}
+	memset(source, 0, sizeof(*source));
+	source->domain = IRQ_DOMAIN_MSI;
+	source->hwirq = (u32)vector;
+	source->vector = (u8)vector;
+	source->flags = IRQF_PREALLOC_VECTOR;
+	return (0);
+}
+
+void
+irq_source_msi_release(irq_source_t *source)
+{
+	if (source == NULL || source->domain != IRQ_DOMAIN_MSI) {
+		return;
+	}
+	if (irq_vectors[source->vector] != NULL) {
+		return;
+	}
+	irq_vector_free(source->vector);
+	memset(source, 0, sizeof(*source));
 }
 
 int

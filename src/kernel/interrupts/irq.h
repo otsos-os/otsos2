@@ -9,6 +9,8 @@ $define %func irq_init as procedure with args void
 $define %func irq_source_isa as function with args u32
 $define %func irq_source_gsi as function with args u32, u32
 $define %func irq_source_local as function with args u32
+$define %func irq_source_msi as function with args irq_source_t *
+$define %func irq_source_msi_release as procedure with args irq_source_t *
 $define %func irq_request as function with args irq_source_t, irq_handler_t *, void *, const char *, void **
 $define %func irq_release as function with args void *
 $define %func irq_dispatch as function with args u32, registers_t *
@@ -23,6 +25,7 @@ $define %func irq_vector_info as function with args u32, u32 *, u32 *
 
 $space %export irq_init, irq_source_isa, irq_source_gsi
 $space %export irq_source_local, irq_request, irq_release
+$space %export irq_source_msi, irq_source_msi_release
 $space %export irq_dispatch, irq_ioapic_online, irq_stats_dump
 $space %export irq_vector_info, irq_vector_is_software
 
@@ -47,6 +50,7 @@ $space %export irq_vector_info, irq_vector_is_software
 #define	IRQF_ACTIVE_LOW		0x0004
 #define	IRQF_PERCPU		0x0008
 #define	IRQF_FIXED_VECTOR	0x0010
+#define	IRQF_PREALLOC_VECTOR	0x0020
 
 typedef enum irq_result {
 	IRQ_NONE = 0,
@@ -56,7 +60,8 @@ typedef enum irq_result {
 typedef enum irq_domain {
 	IRQ_DOMAIN_PIC = 0,
 	IRQ_DOMAIN_IOAPIC,
-	IRQ_DOMAIN_LOCAL
+	IRQ_DOMAIN_LOCAL,
+	IRQ_DOMAIN_MSI
 } irq_domain_t;
 
 typedef irq_result_t	(irq_handler_t)(registers_t *, void *);
@@ -72,6 +77,8 @@ void		irq_init(void);
 irq_source_t	irq_source_isa(u32 isa_irq);
 irq_source_t	irq_source_gsi(u32 gsi, u32 flags);
 irq_source_t	irq_source_local(u32 vector);
+int		irq_source_msi(irq_source_t *source);
+void		irq_source_msi_release(irq_source_t *source);
 int		irq_request(irq_source_t source, irq_handler_t *handler,
 		    void *arg, const char *name, void **cookiep);
 int		irq_release(void *cookie);

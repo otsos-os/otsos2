@@ -283,6 +283,17 @@ TRACE_PMU_O = ../bin/trace_pmu.o
 PMU_O = ../bin/pmu.o
 ACPI_O = ../bin/acpi.o
 ACPI_TABLES_O = ../bin/acpi_tables.o
+ACPI_PRT_O = ../bin/acpi_prt.o
+AML_O = ../bin/aml.o
+AML_BUS_O = ../bin/aml_bus.o
+AML_OBJECT_O = ../bin/aml_object.o
+AML_NAMESPACE_O = ../bin/aml_namespace.o
+AML_PARSE_O = ../bin/aml_parse.o
+AML_REGION_O = ../bin/aml_region.o
+AML_EXEC_O = ../bin/aml_exec.o
+AML_OP_O = ../bin/aml_op.o
+AML_NAMED_O = ../bin/aml_named.o
+AML_RESOURCE_O = ../bin/aml_resource.o
 SMP_O = ../bin/smp.o
 SMP_ASM_O = ../bin/smp_asm.o
 POWER_O = ../bin/power.o
@@ -303,6 +314,7 @@ PCI_CORE_O = ../bin/pci_core.o
 PCI_SCAN_O = ../bin/pci_scan.o
 PCI_CONFIG_O = ../bin/pci_config.o
 PCI_DEVICE_O = ../bin/pci_device.o
+PCI_MSI_O = ../bin/pci_msi.o
 PCI_BAR_O = ../bin/pci_bar.o
 WATCHDOG_O = ../bin/watchdog.o
 WATCHDOG_I6300ESB_O = ../bin/watchdog_i6300esb.o
@@ -397,9 +409,11 @@ OBJ_NO_KSYMTAB = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UAR
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(SESSION_O) $(THREAD_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(FS_META_O) $(MOUNT_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(TRACE_O) $(TRACE_PMU_O) $(PMU_O) \
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
-      $(ACPI_O) $(ACPI_TABLES_O) $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
+      $(ACPI_O) $(ACPI_TABLES_O) $(ACPI_PRT_O) \
+      $(AML_O) $(AML_BUS_O) $(AML_OBJECT_O) $(AML_NAMESPACE_O) $(AML_PARSE_O) $(AML_REGION_O) $(AML_EXEC_O) $(AML_OP_O) $(AML_NAMED_O) $(AML_RESOURCE_O) \
+      $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
       $(NEWBUS_DEVICE_O) $(NEWBUS_MODULE_O) $(NEWBUS_ROOT_O) $(NEWBUS_NEXUS_O) $(NEWBUS_PLATFORM_O) $(NEWBUS_CONFIG_O) $(NEWBUS_RESOURCE_O) $(NEWBUS_INTR_O) $(NEWBUS_POLL_O) $(NEWBUS_DEBUG_O) $(NEWBUS_INTERFACE_O) \
-      $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_BAR_O) \
+      $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_MSI_O) $(PCI_BAR_O) \
       $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O) \
       $(KSHELL_OBJ) \
       $(KUSR_O) $(KUSR_AUTH_O) $(CM_O) $(DRM_API_O) $(RESTRICT_O) \
@@ -1310,6 +1324,52 @@ $(ACPI_TABLES_O): kernel/drivers/acpi/tables.c kernel/drivers/acpi/acpi.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+AML_HEADERS = kernel/drivers/acpi/aml.h kernel/drivers/acpi/amlint.h
+
+$(AML_O): kernel/drivers/acpi/aml.c $(AML_HEADERS) kernel/drivers/acpi/acpi.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(AML_BUS_O): kernel/drivers/acpi/aml_bus.c kernel/drivers/acpi/aml.h kernel/drivers/acpi/prt.h kernel/drivers/acpi/acpi.h kernel/drivers/newbus/newbus.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(AML_OBJECT_O): kernel/drivers/acpi/aml_object.c $(AML_HEADERS)
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(AML_NAMESPACE_O): kernel/drivers/acpi/aml_namespace.c $(AML_HEADERS)
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(AML_PARSE_O): kernel/drivers/acpi/aml_parse.c $(AML_HEADERS)
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(AML_REGION_O): kernel/drivers/acpi/aml_region.c $(AML_HEADERS) kernel/pci/pci.h kernel/mm/vm/pmap.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(AML_EXEC_O): kernel/drivers/acpi/aml_exec.c $(AML_HEADERS)
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(AML_OP_O): kernel/drivers/acpi/aml_op.c $(AML_HEADERS)
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(AML_NAMED_O): kernel/drivers/acpi/aml_named.c $(AML_HEADERS) kernel/drivers/acpi/acpi.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(AML_RESOURCE_O): kernel/drivers/acpi/aml_resource.c $(AML_HEADERS)
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(ACPI_PRT_O): kernel/drivers/acpi/prt.c kernel/drivers/acpi/prt.h kernel/drivers/acpi/aml.h kernel/drivers/acpi/acpi.h kernel/pci/pci.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
 $(SMP_O): kernel/smp/smp.c kernel/smp/smp.h kernel/gdt.h kernel/interrupts/apic/lapic.h kernel/trace/trace.h kernel/cm/cm.h kernel/drivers/timer.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
@@ -1387,6 +1447,10 @@ $(PCI_CONFIG_O): kernel/pci/core/config.c kernel/pci/pci.h kernel/pci/utils/io.h
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(PCI_DEVICE_O): kernel/pci/core/device.c kernel/pci/pci.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(PCI_MSI_O): kernel/pci/core/msi.c kernel/pci/pci.h kernel/cm/cm.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

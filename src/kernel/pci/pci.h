@@ -56,6 +56,50 @@
 #define PCI_CFG_SUBSYSTEM_ID 0x2E
 #define PCI_CFG_IRQ_LINE 0x3C
 #define PCI_CFG_IRQ_PIN 0x3D
+#define PCI_CFG_CAP_PTR 0x34
+
+#define PCI_STATUS_CAP_LIST 0x0010
+
+#define PCI_CAP_ID_MSI 0x05
+#define PCI_CAP_ID_MSIX 0x11
+
+#define PCI_MSI_CTRL 0x02
+#define PCI_MSI_ADDR_LO 0x04
+#define PCI_MSI_ADDR_HI 0x08
+#define PCI_MSI_DATA_32 0x08
+#define PCI_MSI_DATA_64 0x0C
+
+#define PCI_MSI_CTRL_ENABLE 0x0001
+#define PCI_MSI_CTRL_MULTI_CAPABLE 0x000E
+#define PCI_MSI_CTRL_MULTI_ENABLE 0x0070
+#define PCI_MSI_CTRL_ADDR_64 0x0080
+#define PCI_MSI_CTRL_PER_VECTOR_MASK 0x0100
+
+#define PCI_MSI_ADDR_BASE 0xFEE00000U
+#define PCI_MSI_ADDR_DEST_SHIFT 12
+
+#define PCI_MSIX_CTRL 0x02
+#define PCI_MSIX_TABLE 0x04
+#define PCI_MSIX_PBA 0x08
+
+#define PCI_MSIX_CTRL_TABLE_SIZE 0x07FF
+#define PCI_MSIX_CTRL_FUNCTION_MASK 0x4000
+#define PCI_MSIX_CTRL_ENABLE 0x8000
+
+#define PCI_MSIX_BIR_MASK 0x00000007U
+#define PCI_MSIX_OFFSET_MASK 0xFFFFFFF8U
+
+#define PCI_MSIX_ENTRY_SIZE 16
+#define PCI_MSIX_ENTRY_ADDR_LO 0x00
+#define PCI_MSIX_ENTRY_ADDR_HI 0x04
+#define PCI_MSIX_ENTRY_DATA 0x08
+#define PCI_MSIX_ENTRY_VECTOR_CTRL 0x0C
+
+#define PCI_MSIX_VECTOR_CTRL_MASK 0x00000001U
+
+#define PCI_MSIX_MAX_VECTORS 2048
+
+#define PCI_MSI_RID 1
 
 #define PCI_HEADER_TYPE_MULTI_FUNCTION 0x80
 
@@ -65,6 +109,7 @@
 #define PCI_COMMAND_IO 0x1
 #define PCI_COMMAND_MEMORY 0x2
 #define PCI_COMMAND_BUS_MASTER 0x4
+#define PCI_COMMAND_INTX_DISABLE 0x400
 
 #define PCI_BAR_IO_SPACE 0x1
 #define PCI_BAR_MEM_TYPE_64 0x2
@@ -153,6 +198,21 @@ void pci_write_command(const pci_device_t *dev, u16 command);
 void pci_enable_io_space(const pci_device_t *dev);
 void pci_enable_memory_space(const pci_device_t *dev);
 void pci_enable_bus_mastering(const pci_device_t *dev);
+
+u8	pci_find_capability(const pci_device_t *dev, u8 cap_id);
+int	pci_msi_supported(const pci_device_t *dev);
+int	pci_msi_enable(const pci_device_t *dev, u8 vector, u8 dest_apic_id);
+void	pci_msi_disable(const pci_device_t *dev);
+int	pci_msi_policy_enabled(void);
+
+int	pci_msix_supported(const pci_device_t *dev);
+int	pci_msix_vector_count(const pci_device_t *dev);
+int	pci_msix_enable(const pci_device_t *dev, u16 entry, u8 vector,
+	    u8 dest_apic_id);
+int	pci_msix_mask(const pci_device_t *dev, u16 entry, int masked);
+void	pci_msix_disable(const pci_device_t *dev);
+int	pci_msix_policy_enabled(void);
+int	pci_intr_msi_supported(const pci_device_t *dev);
 
 #define	PCI_DRIVER_MODULE(modname, pcidrv, devclass, passv, orderv) \
 	static int modname##_newbus_probe(device_t dev) \

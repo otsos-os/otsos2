@@ -1433,6 +1433,10 @@ xhci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	}
 	pdev->driver_data = state;
 	xhci_states[index] = state;
+	usb_log_printf("xhci: initial port scan (slots=%u ports=%u)\n",
+	    state->max_slots, state->max_ports);
+	xhci_poll(state);
+	usb_log_flush();
 	return (0);
 }
 
