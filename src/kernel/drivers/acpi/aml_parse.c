@@ -38,22 +38,29 @@ $define %func aml_stream_u8 as function with args aml_stream_t *, u8 *
 $define %func aml_stream_u16 as function with args aml_stream_t *, u16 *
 $define %func aml_stream_u32 as function with args aml_stream_t *, u32 *
 $define %func aml_stream_u64 as function with args aml_stream_t *, u64 *
+$define %func aml_parse_pkglength_raw as function with args aml_stream_t *, u32 *, u32 *
 $define %func aml_parse_pkglength as function with args aml_stream_t *, u32 *
+$define %func aml_parse_field_length as function with args aml_stream_t *, u32 *
 $define %func aml_parse_namestring as function with args aml_stream_t *, char *, u32
 $define %func aml_parse_opcode as function with args aml_stream_t *, u16 *
+$define %func aml_name_lead_valid as function with args u8
+$define %func aml_name_char_valid as function with args u8
 
 */
 
 /* !SPACE!
 
-$space %internal aml_is_name_char, aml_is_lead_name_char
+$space %internal aml_parse_pkglength_raw
 $space %export aml_stream_init, aml_stream_remaining
 $space %export aml_stream_u8, aml_stream_u16, aml_stream_u32, aml_stream_u64
-$space %export aml_parse_pkglength, aml_parse_namestring, aml_parse_opcode
+$space %export aml_parse_pkglength, aml_parse_field_length
+$space %export aml_parse_namestring, aml_parse_opcode
+$space %export aml_name_lead_valid, aml_name_char_valid
 
 */
 
 #include <kernel/drivers/acpi/amlint.h>
+#include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 void
@@ -151,17 +158,18 @@ aml_parse_opcode(aml_stream_t *stream, u16 *opcode)
 	return (AML_OK);
 }
 
-int
-aml_parse_pkglength(aml_stream_t *stream, u32 *length)
+static int
+aml_parse_pkglength_raw(aml_stream_t *stream, u32 *value, u32 *consumed)
 {
 	u32	total;
-	u32	consumed;
 	u32	i;
 	u8	lead;
 	u8	extra;
 	u8	follow;
 
 	if (aml_stream_u8(stream, &lead) != AML_OK) {
+		drivers_log("aml: pkglength: no lead byte at +0x%x\n",
+		    stream->offset);
 		return (AML_ERR_BOUNDS);
 	}
 	follow = (u8)(lead >> 6);
@@ -171,33 +179,62 @@ aml_parse_pkglength(aml_stream_t *stream, u32 *length)
 		total = lead & 0x0F;
 		for (i = 0; i < follow; i++) {
 			if (aml_stream_u8(stream, &extra) != AML_OK) {
+				drivers_log("aml: pkglength: follow byte "
+				    "%u/%u missing at +0x%x (lead 0x%x)\n",
+				    i + 1, follow, stream->offset, lead);
 				return (AML_ERR_BOUNDS);
 			}
 			total |= (u32)extra << (4 + i * 8);
 		}
 	}
-	consumed = 1U + follow;
+	*value = total;
+	if (consumed != NULL) {
+		*consumed = 1U + follow;
+	}
+	return (AML_OK);
+}
+
+int
+aml_parse_pkglength(aml_stream_t *stream, u32 *length)
+{
+	u32	total;
+	u32	consumed;
+
+	if (aml_parse_pkglength_raw(stream, &total, &consumed) != AML_OK) {
+		return (AML_ERR_BOUNDS);
+	}
 	if (total < consumed) {
+		drivers_log("aml: pkglength: value %u < consumed %u at "
+		    "+0x%x\n", total, consumed, stream->offset);
 		return (AML_ERR_BOUNDS);
 	}
 	total -= consumed;
 	if (total > aml_stream_remaining(stream)) {
+		drivers_log("aml: pkglength: body %u > remaining %u at "
+		    "+0x%x\n", total, aml_stream_remaining(stream),
+		    stream->offset);
 		return (AML_ERR_BOUNDS);
 	}
 	*length = total;
 	return (AML_OK);
 }
 
-static int
-aml_is_lead_name_char(u8 c)
+int
+aml_parse_field_length(aml_stream_t *stream, u32 *bits)
+{
+	return (aml_parse_pkglength_raw(stream, bits, NULL));
+}
+
+int
+aml_name_lead_valid(u8 c)
 {
 	return ((c >= 'A' && c <= 'Z') || c == '_');
 }
 
-static int
-aml_is_name_char(u8 c)
+int
+aml_name_char_valid(u8 c)
 {
-	return (aml_is_lead_name_char(c) || (c >= '0' && c <= '9'));
+	return (aml_name_lead_valid(c) || (c >= '0' && c <= '9'));
 }
 
 int
@@ -249,7 +286,7 @@ aml_parse_namestring(aml_stream_t *stream, char *out, u32 size)
 		}
 		segments = count;
 	} else {
-		if (!aml_is_lead_name_char(byte)) {
+		if (!aml_name_lead_valid(byte)) {
 			return (AML_ERR);
 		}
 		stream->offset--;
@@ -268,10 +305,10 @@ aml_parse_namestring(aml_stream_t *stream, char *out, u32 size)
 		for (j = 0; j < AML_NAME_LENGTH; j++) {
 			byte = stream->base[stream->offset + j];
 			if (j == 0) {
-				if (!aml_is_lead_name_char(byte)) {
+				if (!aml_name_lead_valid(byte)) {
 					return (AML_ERR);
 				}
-			} else if (!aml_is_name_char(byte)) {
+			} else if (!aml_name_char_valid(byte)) {
 				return (AML_ERR);
 			}
 			out[used++] = (char)byte;

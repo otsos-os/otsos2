@@ -189,6 +189,9 @@ struct aml_object {
 			aml_node_t	*data;
 			u8		is_index;
 			u8		is_bank;
+			aml_node_t	*connection;
+			const u8	*connection_data;
+			u32		connection_length;
 		} field;
 		struct {
 			aml_object_t	*buffer;

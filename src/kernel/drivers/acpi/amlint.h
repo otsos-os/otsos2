@@ -35,6 +35,9 @@ $define %func aml_stream_u16 as function with args aml_stream_t *, u16 *
 $define %func aml_stream_u32 as function with args aml_stream_t *, u32 *
 $define %func aml_stream_u64 as function with args aml_stream_t *, u64 *
 $define %func aml_parse_pkglength as function with args aml_stream_t *, u32 *
+$define %func aml_parse_field_length as function with args aml_stream_t *, u32 *
+$define %func aml_name_lead_valid as function with args u8
+$define %func aml_name_char_valid as function with args u8
 $define %func aml_parse_namestring as function with args aml_stream_t *, char *, u32
 $define %func aml_node_create as function with args aml_node_t *, const char *
 $define %func aml_node_lookup as function with args aml_node_t *, const char *
@@ -62,7 +65,9 @@ $define %func aml_stall as procedure with args u64
 
 $space %internal aml_stream_init, aml_stream_remaining
 $space %internal aml_stream_u8, aml_stream_u16, aml_stream_u32, aml_stream_u64
-$space %internal aml_parse_pkglength, aml_parse_namestring
+$space %internal aml_parse_pkglength, aml_parse_field_length
+$space %internal aml_name_lead_valid, aml_name_char_valid
+$space %internal aml_parse_namestring
 $space %internal aml_node_create, aml_node_lookup, aml_node_attach
 $space %internal aml_object_create, aml_object_clone, aml_object_deref
 $space %internal aml_store, aml_load_table
@@ -228,8 +233,11 @@ int		aml_stream_u16(aml_stream_t *stream, u16 *value);
 int		aml_stream_u32(aml_stream_t *stream, u32 *value);
 int		aml_stream_u64(aml_stream_t *stream, u64 *value);
 int		aml_parse_pkglength(aml_stream_t *stream, u32 *length);
+int		aml_parse_field_length(aml_stream_t *stream, u32 *bits);
 int		aml_parse_namestring(aml_stream_t *stream, char *out, u32 size);
 int		aml_parse_opcode(aml_stream_t *stream, u16 *opcode);
+int		aml_name_lead_valid(u8 c);
+int		aml_name_char_valid(u8 c);
 
 int		aml_namespace_init(void);
 aml_node_t	*aml_node_create(aml_node_t *scope, const char *path);

@@ -33,6 +33,8 @@ $define %type int as 32 bit signed
 $define %type aml_state_t as AML method execution state
 $define %type aml_stream_t as AML bytecode cursor
 
+$define %func aml_field_connection as function with args aml_state_t *, aml_stream_t *, aml_field_config_t *
+$define %func aml_field_segment as function with args aml_stream_t *, char *
 $define %func aml_exec_named as function with args aml_state_t *, aml_stream_t *, u16
 $define %func aml_load_table as function with args const u8 *, u32
 
@@ -41,7 +43,8 @@ $define %func aml_load_table as function with args const u8 *, u32
 /* !SPACE!
 
 $space %internal aml_named_scope, aml_named_name, aml_named_method
-$space %internal aml_named_region, aml_named_field_list, aml_named_field
+$space %internal aml_named_region, aml_field_connection, aml_field_segment
+$space %internal aml_named_field_list, aml_named_field
 $space %internal aml_named_index_field, aml_named_bank_field
 $space %internal aml_named_simple, aml_named_create_field
 $space %export aml_exec_named, aml_load_table
@@ -302,12 +305,92 @@ typedef struct {
 	aml_node_t	*data;
 	aml_node_t	*bank;
 	u64		bank_value;
+	aml_node_t	*connection;
+	const u8	*connection_data;
+	u32		connection_length;
 	u8		access;
 	u8		update;
 	u8		lock;
 	u8		is_index;
 	u8		is_bank;
 } aml_field_config_t;
+
+#define	AML_FIELD_MAX_BITS	0x20000000U
+static int
+aml_field_connection(aml_state_t *state, aml_stream_t *list,
+    aml_field_config_t *config)
+{
+	char		path[AML_MAX_PATH];
+	aml_object_t	*size;
+	u32		package;
+	u32		initial;
+	u32		consumed;
+	int		status;
+
+	if (aml_stream_remaining(list) == 0) {
+		return (AML_ERR_BOUNDS);
+	}
+	if (list->base[list->offset] != AML_OP_BUFFER) {
+		if (aml_parse_namestring(list, path, sizeof(path)) != AML_OK) {
+			drivers_log("aml: field list: bad Connection name\n");
+			return (AML_ERR);
+		}
+		config->connection = aml_resolve(state->scope, path);
+		config->connection_data = NULL;
+		config->connection_length = 0;
+		return (AML_OK);
+	}
+	list->offset++;
+	if (aml_parse_pkglength(list, &package) != AML_OK) {
+		return (AML_ERR_BOUNDS);
+	}
+	initial = list->offset;
+	size = NULL;
+	status = aml_exec_term_arg(state, list, &size);
+	if (status != AML_OK) {
+		return (status);
+	}
+	aml_object_unref(size);
+	if (list->offset < initial) {
+		return (AML_ERR_BOUNDS);
+	}
+	consumed = list->offset - initial;
+	if (consumed > package) {
+		return (AML_ERR_BOUNDS);
+	}
+	config->connection = NULL;
+	config->connection_data = list->base + list->offset;
+	config->connection_length = package - consumed;
+	list->offset = initial + package;
+	return (AML_OK);
+}
+
+static int
+aml_field_segment(aml_stream_t *list, char *segment)
+{
+	u32	i;
+	u8	byte;
+
+	if (list->offset == 0 ||
+	    aml_stream_remaining(list) < AML_NAME_LENGTH) {
+		return (AML_ERR_BOUNDS);
+	}
+	list->offset--;
+	for (i = 0; i < AML_NAME_LENGTH; i++) {
+		byte = list->base[list->offset + i];
+		if (i == 0) {
+			if (!aml_name_lead_valid(byte)) {
+				return (AML_ERR);
+			}
+		} else if (!aml_name_char_valid(byte)) {
+			return (AML_ERR);
+		}
+		segment[i] = (char)byte;
+	}
+	segment[AML_NAME_LENGTH] = '\0';
+	list->offset += AML_NAME_LENGTH;
+	return (AML_OK);
+}
 
 static int
 aml_named_field_list(aml_state_t *state, aml_stream_t *stream, u32 length,
@@ -319,11 +402,11 @@ aml_named_field_list(aml_state_t *state, aml_stream_t *stream, u32 length,
 	aml_node_t	*node;
 	u32		bit_offset;
 	u32		width;
-	u32		i;
 	u8		lead;
 	u8		access;
 	u8		attribute;
 	u8		extra;
+	int		status;
 
 	if (length > aml_stream_remaining(stream)) {
 		return (AML_ERR_BOUNDS);
@@ -336,7 +419,13 @@ aml_named_field_list(aml_state_t *state, aml_stream_t *stream, u32 length,
 			return (AML_ERR_BOUNDS);
 		}
 		if (lead == 0x00) {
-			if (aml_parse_pkglength(&list, &width) != AML_OK) {
+			status = aml_parse_field_length(&list, &width);
+			if (status != AML_OK) {
+				return (AML_ERR_BOUNDS);
+			}
+			if (width > AML_FIELD_MAX_BITS - bit_offset) {
+				drivers_log("aml: field skip %u at bit "
+				    "%u out of range\n", width, bit_offset);
 				return (AML_ERR_BOUNDS);
 			}
 			bit_offset += width;
@@ -351,8 +440,10 @@ aml_named_field_list(aml_state_t *state, aml_stream_t *stream, u32 length,
 			continue;
 		}
 		if (lead == 0x02) {
-			if (aml_stream_u8(&list, &extra) != AML_OK) {
-				return (AML_ERR_BOUNDS);
+			status = aml_field_connection(state, &list,
+			    config);
+			if (status != AML_OK) {
+				return (status);
 			}
 			continue;
 		}
@@ -365,17 +456,19 @@ aml_named_field_list(aml_state_t *state, aml_stream_t *stream, u32 length,
 			config->access = (u8)(access & 0x0F);
 			continue;
 		}
-		if (list.offset == 0 ||
-		    aml_stream_remaining(&list) < AML_NAME_LENGTH - 1) {
+		status = aml_field_segment(&list, segment);
+		if (status != AML_OK) {
+			drivers_log("aml: field list: bad NameSeg at +0x%x "
+			    "(lead 0x%x)\n", list.offset, lead);
+			return (status);
+		}
+		status = aml_parse_field_length(&list, &width);
+		if (status != AML_OK) {
 			return (AML_ERR_BOUNDS);
 		}
-		list.offset--;
-		for (i = 0; i < AML_NAME_LENGTH; i++) {
-			segment[i] = (char)list.base[list.offset + i];
-		}
-		segment[AML_NAME_LENGTH] = '\0';
-		list.offset += AML_NAME_LENGTH;
-		if (aml_parse_pkglength(&list, &width) != AML_OK) {
+		if (width > AML_FIELD_MAX_BITS - bit_offset) {
+			drivers_log("aml: field %s at bit %u width %u "
+			    "out of range\n", segment, bit_offset, width);
 			return (AML_ERR_BOUNDS);
 		}
 		node = aml_node_create(state->scope, segment);
@@ -398,6 +491,9 @@ aml_named_field_list(aml_state_t *state, aml_stream_t *stream, u32 length,
 		field->u.field.bank_value = config->bank_value;
 		field->u.field.is_index = config->is_index;
 		field->u.field.is_bank = config->is_bank;
+		field->u.field.connection = config->connection;
+		field->u.field.connection_data = config->connection_data;
+		field->u.field.connection_length = config->connection_length;
 		aml_node_attach(node, field);
 		bit_offset += width;
 	}
