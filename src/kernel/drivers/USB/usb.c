@@ -45,6 +45,9 @@ $define %func usb_set_interface as function with args usb_device_t *, u8, u8
 $define %func usb_interface_get as function with args device_t
 $define %func usb_log_printf as function with args const char *, ...
 $define %func usb_log_flush as procedure with args void
+$define %func usb_logflush_identify as procedure with args driver_t *, device_t
+$define %func usb_logflush_attach as function with args device_t
+
 
 */
 
@@ -58,7 +61,7 @@ $space %export usb_bulk_submit
 $space %export usb_set_interface
 $space %export usb_interface_get
 $space %export usb_log_printf, usb_log_flush
-
+$space %internal usb_logflush_identify, usb_logflush_attach
 */
 
 #include <kernel/drivers/USB/usb.h>
@@ -123,6 +126,8 @@ usb_log_printf(const char *fmt, ...)
 		memcpy(usb_log_buf + usb_log_len, line, (u32)n);
 		usb_log_len += (u32)n;
 	}
+	(void)vfs_write_file(USB_LOG_PATH, (const u8 *)usb_log_buf,
+	    usb_log_len);
 	return (0);
 }
 
@@ -281,7 +286,7 @@ DRIVER_MODULE(usb_bus_ehci, ehci, usb_bus_ehci_driver, usb_bus_devclass,
     NEWBUS_PASS_STORAGE, NEWBUS_ORDER_MIDDLE);
 
 DRIVER_MODULE(usb_bus_ohci, ohci, usb_bus_ohci_driver, usb_bus_devclass,
-    NEWBUS_PASS_STORAGE, NEWBUS_ORDER_MIDDLE);
+	NEWBUS_PASS_STORAGE, NEWBUS_ORDER_MIDDLE);
 
 static int
 usb_ivars_belongs(device_t child, usb_device_t *dev)
@@ -729,3 +734,35 @@ usb_interface_get(device_t dev)
 	}
 	return ((usb_interface_t *)device_get_ivars(dev));
 }
+
+static void
+usb_logflush_identify(driver_t *driver, device_t parent)
+{
+	(void)driver;
+	if (device_find_child(parent, "usb_logflush", 0) == NULL) {
+		device_add_child(parent, "usb_logflush", 0);
+	}
+}
+
+static int
+usb_logflush_attach(device_t dev)
+{
+	(void)dev;
+	usb_log_flush();
+	return (0);
+}
+
+static devclass_t usb_logflush_devclass = {
+	.name		= "usb_logflush",
+	.maxunit	= 1,
+};
+
+static driver_t usb_logflush_driver = {
+	.name		= "usb_logflush",
+	.identify	= usb_logflush_identify,
+	.probe		= NULL,
+	.attach		= usb_logflush_attach,
+};
+
+PSEUDO_DRIVER_MODULE(usb_logflush, usb_logflush_driver, usb_logflush_devclass,
+    NEWBUS_PASS_LATE, NEWBUS_ORDER_LAST);
