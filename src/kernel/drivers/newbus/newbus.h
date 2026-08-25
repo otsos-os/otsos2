@@ -388,6 +388,7 @@ int		bus_setup_intr(device_t dev, resource_t *res,
 		    void **cookiep);
 int		bus_teardown_intr(device_t dev, resource_t *res,
 		    void *cookie);
+int		bus_intr_is_msi(void *cookie);
 
 void		bus_msi_ops_register(const newbus_msi_ops_t *ops);
 

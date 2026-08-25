@@ -31,6 +31,7 @@ $define %type int as 32 bit signed
 
 $define %func bus_setup_intr as function with args device_t, resource_t *, newbus_intr_handler_t *, void *, void **
 $define %func bus_teardown_intr as function with args device_t, resource_t *, void *
+$define %func bus_intr_is_msi as function with args void *
 $define %func newbus_intr_invoke as function with args void *
 $define %func bus_msi_ops_register as procedure with args const newbus_msi_ops_t *
 $define %func newbus_intr_find_intx as function with args device_t
@@ -42,7 +43,8 @@ $define %func newbus_intr_setup_msi as function with args newbus_intr_entry_t *,
 
 $space %internal newbus_intr_invoke, newbus_intr_find_intx
 $space %internal newbus_intr_setup_msi
-$space %export bus_setup_intr, bus_teardown_intr, bus_msi_ops_register
+$space %export bus_setup_intr, bus_teardown_intr, bus_intr_is_msi
+$space %export bus_msi_ops_register
 
 */
 
@@ -171,11 +173,17 @@ bus_setup_intr(device_t dev, resource_t *res,
 			irq_flags |= IRQF_ACTIVE_LOW;
 		if ((res->flags & RF_IRQ_MSI) != 0) {
 			if (newbus_intr_setup_msi(&newbus_intrs[i], dev) == 0) {
+				drivers_log("[IRQ] %s: msi vector=%u\n",
+				    device_get_nameunit(dev),
+				    newbus_intrs[i].source.vector);
 				if (cookiep != NULL) {
 					*cookiep = &newbus_intrs[i];
 				}
 				return (0);
 			}
+			drivers_log("[IRQ] %s: msi setup failed, "
+			    "falling back to intx\n",
+			    device_get_nameunit(dev));
 			res = newbus_intr_find_intx(dev);
 			if (res == NULL) {
 				memset(&newbus_intrs[i], 0,
@@ -206,12 +214,32 @@ bus_setup_intr(device_t dev, resource_t *res,
 			memset(&newbus_intrs[i], 0, sizeof(newbus_intrs[i]));
 			return (-1);
 		}
+		drivers_log("[IRQ] %s: intx start=%u vector=%u domain=%u "
+		    "gsi=%u flags=%x\n", device_get_nameunit(dev),
+		    (u32)res->start, newbus_intrs[i].source.vector,
+		    newbus_intrs[i].source.domain,
+		    (res->flags & RF_IRQ_GSI) != 0 ? 1U : 0U, irq_flags);
 		if (cookiep != NULL) {
 			*cookiep = &newbus_intrs[i];
 		}
 		return (0);
 	}
 	return (-1);
+}
+
+int
+bus_intr_is_msi(void *cookie)
+{
+	newbus_intr_entry_t	*entry;
+
+	if (cookie == NULL) {
+		return (0);
+	}
+	entry = (newbus_intr_entry_t *)cookie;
+	if (!entry->used) {
+		return (0);
+	}
+	return (entry->is_msi != 0);
 }
 
 int

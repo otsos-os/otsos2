@@ -33,8 +33,13 @@ $define %func xhci_wait32 as function with args volatile u32 *, u32, u32, u32
 $define %func xhci_halt as function with args xhci_state_t *
 $define %func xhci_reset as function with args xhci_state_t *
 $define %func xhci_setup_rings as function with args xhci_state_t *
-$define %func xhci_trylock as function with args xhci_state_t *
-$define %func xhci_unlock as procedure with args xhci_state_t *
+$define %func xhci_drain_enter as function with args xhci_state_t *, u64 *
+$define %func xhci_drain_exit as procedure with args xhci_state_t *, u64
+$define %func xhci_drain_ring as procedure with args xhci_state_t *
+$define %func xhci_command_locked as function with args xhci_state_t *, u64, u32, u32, u8 *
+$define %func xhci_control_locked as function with args xhci_state_t *, usb_device_t *, const usb_setup_t *, void *, u16, u32
+$define %func xhci_normal_transfer_locked as function with args xhci_state_t *, usb_device_t *, usb_endpoint_t *, void *, u32 *, u32
+$define %func xhci_interrupt_locked as function with args xhci_state_t *, usb_device_t *, usb_endpoint_t *, void *, u32, usb_complete_t, void *
 $define %func xhci_pci_probe as function with args pci_device_t *, match
 $define %func xhci_pci_remove as procedure with args pci_device_t *
 $define %func xhci_pci_register as function with args void
@@ -44,7 +49,9 @@ $define %func xhci_pci_register as function with args void
 /* !SPACE!
 
 $space %internal xhci_wait32, xhci_halt, xhci_reset, xhci_setup_rings
-$space %internal xhci_trylock, xhci_unlock
+$space %internal xhci_drain_enter, xhci_drain_exit, xhci_drain_ring
+$space %internal xhci_command_locked, xhci_control_locked
+$space %internal xhci_normal_transfer_locked, xhci_interrupt_locked
 $space %internal xhci_pci_probe, xhci_pci_remove
 $space %export xhci_pci_register
 
@@ -62,6 +69,8 @@ $space %export xhci_pci_register
 
 #define	XHCI_MAX_CONTROLLERS	8
 #define	XHCI_RING_TRBS		256
+/* RFLAGS.IF - saved and restored around the event ring guard. */
+#define	XHCI_RFLAGS_IF		(1ULL << 9)
 #define	XHCI_CAP_LENGTH		0x00
 #define	XHCI_HCSPARAMS1		0x04
 #define	XHCI_DBOFF			0x14
@@ -184,12 +193,14 @@ typedef struct {
 	u8		max_slots;
 	u8		max_ports;
 	u8		scanned;
-	u8		busy;
+	u8		drain_depth;
+	u8		rescan;
 	xhci_ring_t	command_ring;
 	xhci_device_t	*slots[256];
 	resource_t		*irq_res;
 	void			*irq_cookie;
 	usb_controller_t	usb;
+	u8			irq_msi;
 } xhci_state_t;
 
 static xhci_state_t	*xhci_states[XHCI_MAX_CONTROLLERS];
@@ -222,8 +233,9 @@ static void	xhci_poll(void *arg);
 static int	xhci_intr(void *arg);
 static int	xhci_wait32(volatile u32 *reg, u32 mask, u32 value, u32 limit);
 static u64	xhci_phys(void *ptr);
-static int	xhci_trylock(xhci_state_t *state);
-static void	xhci_unlock(xhci_state_t *state);
+static int	xhci_drain_enter(xhci_state_t *state, u64 *flags);
+static void	xhci_drain_exit(xhci_state_t *state, u64 flags);
+static void	xhci_drain_ring(xhci_state_t *state);
 
 static const usb_controller_ops_t xhci_usb_ops = {
 	.port_connected = xhci_port_connected,
@@ -282,6 +294,18 @@ xhci_ring_put(xhci_ring_t *ring, u64 parameter, u32 status, u32 control)
 	return (phys);
 }
 
+static void
+xhci_intr_ack(xhci_state_t *state)
+{
+	volatile u32	*iman;
+	u32		value;
+
+	*(volatile u32 *)(state->op + XHCI_USBSTS) = XHCI_USBSTS_EINT;
+	iman = (volatile u32 *)(state->runtime + XHCI_IMAN);
+	value = *iman;
+	*iman = value | XHCI_IMAN_IP | XHCI_IMAN_IE;
+}
+
 static int
 xhci_event_get(xhci_state_t *state, xhci_trb_t *event)
 {
@@ -291,6 +315,7 @@ xhci_event_get(xhci_state_t *state, xhci_trb_t *event)
 	if ((source->control & XHCI_TRB_CYCLE) != state->event_cycle) {
 		return (0);
 	}
+	xhci_intr_ack(state);
 	*event = *source;
 	__asm__ volatile("" ::: "memory");
 	state->event_index++;
@@ -339,7 +364,7 @@ xhci_wait_event(xhci_state_t *state, u64 trb_phys, u8 type, u8 slot,
 }
 
 static int
-xhci_command(xhci_state_t *state, u64 parameter, u32 status, u32 control,
+xhci_command_locked(xhci_state_t *state, u64 parameter, u32 status, u32 control,
     u8 *slot)
 {
 	u64	trb;
@@ -355,6 +380,10 @@ xhci_command(xhci_state_t *state, u64 parameter, u32 status, u32 control,
 		}
 		if (((event.control >> XHCI_TRB_TYPE_SHIFT) & 0x3F) !=
 		    XHCI_TRB_TYPE_COMMAND_EVENT || event.parameter != trb) {
+			if (((event.control >> XHCI_TRB_TYPE_SHIFT) & 0x3F) ==
+			    XHCI_TRB_TYPE_TRANSFER_EVENT) {
+				xhci_handle_transfer_event(state, &event);
+			}
 			continue;
 		}
 		if (((event.status >> 24) & 0xFF) != XHCI_CC_SUCCESS) {
@@ -373,6 +402,20 @@ xhci_command(xhci_state_t *state, u64 parameter, u32 status, u32 control,
 	usb_log_printf("xhci: command type=%u timed out\n",
 	    (control >> XHCI_TRB_TYPE_SHIFT) & 0x3F);
 	return (-1);
+}
+
+static int
+xhci_command(xhci_state_t *state, u64 parameter, u32 status, u32 control,
+    u8 *slot)
+{
+	u64	flags;
+	int	status_code;
+
+	(void)xhci_drain_enter(state, &flags);
+	status_code = xhci_command_locked(state, parameter, status, control,
+	    slot);
+	xhci_drain_exit(state, flags);
+	return (status_code);
 }
 
 static u32 *
@@ -909,7 +952,7 @@ xhci_transfer_wait(xhci_state_t *state, xhci_endpoint_t *endpoint,
 }
 
 static int
-xhci_normal_transfer(xhci_state_t *state, usb_device_t *dev,
+xhci_normal_transfer_locked(xhci_state_t *state, usb_device_t *dev,
     usb_endpoint_t *ep, void *data, u32 *length, u32 timeout)
 {
 	xhci_device_t	*device;
@@ -954,10 +997,26 @@ xhci_normal_transfer(xhci_state_t *state, usb_device_t *dev,
 }
 
 static int
-xhci_control(void *priv, usb_device_t *dev, const usb_setup_t *setup,
-    void *data, u16 length, u32 timeout)
+xhci_normal_transfer(xhci_state_t *state, usb_device_t *dev,
+    usb_endpoint_t *ep, void *data, u32 *length, u32 timeout)
 {
-	xhci_state_t	*state;
+	u64	flags;
+	int	status;
+
+	if (state == NULL) {
+		return (-1);
+	}
+	(void)xhci_drain_enter(state, &flags);
+	status = xhci_normal_transfer_locked(state, dev, ep, data, length,
+	    timeout);
+	xhci_drain_exit(state, flags);
+	return (status);
+}
+
+static int
+xhci_control_locked(xhci_state_t *state, usb_device_t *dev,
+    const usb_setup_t *setup, void *data, u16 length, u32 timeout)
+{
 	xhci_device_t	*device;
 	xhci_endpoint_t	*endpoint;
 	u64		phys;
@@ -965,8 +1024,7 @@ xhci_control(void *priv, usb_device_t *dev, const usb_setup_t *setup,
 	u32		control;
 	u32		done;
 
-	state = priv;
-	if (state == NULL || dev == NULL || setup == NULL || dev->slot_id == 0 ||
+	if (dev == NULL || setup == NULL || dev->slot_id == 0 ||
 	    (device = state->slots[dev->slot_id]) == NULL) {
 		return (-1);
 	}
@@ -1007,6 +1065,24 @@ xhci_control(void *priv, usb_device_t *dev, const usb_setup_t *setup,
 }
 
 static int
+xhci_control(void *priv, usb_device_t *dev, const usb_setup_t *setup,
+    void *data, u16 length, u32 timeout)
+{
+	xhci_state_t	*state;
+	u64		flags;
+	int		status;
+
+	state = priv;
+	if (state == NULL) {
+		return (-1);
+	}
+	(void)xhci_drain_enter(state, &flags);
+	status = xhci_control_locked(state, dev, setup, data, length, timeout);
+	xhci_drain_exit(state, flags);
+	return (status);
+}
+
+static int
 xhci_bulk(void *priv, usb_device_t *dev, usb_endpoint_t *ep, void *data,
     u32 *length, u32 timeout)
 {
@@ -1015,17 +1091,16 @@ xhci_bulk(void *priv, usb_device_t *dev, usb_endpoint_t *ep, void *data,
 }
 
 static int
-xhci_interrupt(void *priv, usb_device_t *dev, usb_endpoint_t *ep,
-    void *data, u32 length, usb_complete_t complete, void *arg)
+xhci_interrupt_locked(xhci_state_t *state, usb_device_t *dev,
+    usb_endpoint_t *ep, void *data, u32 length, usb_complete_t complete,
+    void *arg)
 {
-	xhci_state_t	*state;
 	xhci_device_t	*device;
 	xhci_endpoint_t	*endpoint;
 	u64		trb;
 	u8		ep_id;
 
-	state = priv;
-	if (state == NULL || dev == NULL || ep == NULL || data == NULL ||
+	if (dev == NULL || ep == NULL || data == NULL ||
 	    complete == NULL || dev->slot_id == 0 ||
 	    (device = state->slots[dev->slot_id]) == NULL ||
 	    (ep_id = xhci_endpoint_id(ep)) == 0 || ep_id >= 32) {
@@ -1048,6 +1123,25 @@ xhci_interrupt(void *priv, usb_device_t *dev, usb_endpoint_t *ep,
 	*(volatile u32 *)(state->doorbell + (u32)dev->slot_id * 4) =
 	    (u32)ep_id;
 	return (0);
+}
+
+static int
+xhci_interrupt(void *priv, usb_device_t *dev, usb_endpoint_t *ep,
+    void *data, u32 length, usb_complete_t complete, void *arg)
+{
+	xhci_state_t	*state;
+	u64		flags;
+	int		status;
+
+	state = priv;
+	if (state == NULL) {
+		return (-1);
+	}
+	(void)xhci_drain_enter(state, &flags);
+	status = xhci_interrupt_locked(state, dev, ep, data, length, complete,
+	    arg);
+	xhci_drain_exit(state, flags);
+	return (status);
 }
 
 static int
@@ -1089,7 +1183,7 @@ static void
 xhci_poll(void *arg)
 {
 	xhci_state_t	*state;
-	xhci_trb_t	event;
+	u64		flags;
 	u32		value;
 	u8		port;
 
@@ -1097,7 +1191,9 @@ xhci_poll(void *arg)
 	if (state == NULL) {
 		return;
 	}
-	if (xhci_trylock(state) != 0) {
+	if (!xhci_drain_enter(state, &flags)) {
+		state->rescan = 1;
+		xhci_drain_exit(state, flags);
 		return;
 	}
 	usb_controller_scan(&state->usb);
@@ -1116,6 +1212,53 @@ xhci_poll(void *arg)
 		    value;
 		usb_controller_scan(&state->usb);
 	}
+	xhci_drain_ring(state);
+	xhci_drain_exit(state, flags);
+}
+
+static int
+xhci_intr(void *arg)
+{
+	xhci_state_t	*state;
+	volatile u32	*status;
+
+	state = arg;
+	if (state == NULL) {
+		return (-1);
+	}
+	status = (volatile u32 *)(state->op + XHCI_USBSTS);
+	if ((*status & XHCI_USBSTS_EINT) == 0) {
+		if (state->irq_msi) {
+			return (0);
+		}
+		return (-1);
+	}
+	xhci_intr_ack(state);
+	xhci_poll(state);
+	return (0);
+}
+
+static int
+xhci_drain_enter(xhci_state_t *state, u64 *flags)
+{
+	int	outermost;
+
+	__asm__ volatile("pushfq; popq %0; cli" : "=r"(*flags) :: "memory");
+	outermost = (state->drain_depth == 0);
+	state->drain_depth++;
+	if ((*flags & XHCI_RFLAGS_IF) != 0) {
+		__asm__ volatile("sti" ::: "memory");
+	}
+	return (outermost);
+}
+
+static void
+xhci_drain_ring(xhci_state_t *state)
+{
+	xhci_trb_t	event;
+	u32		value;
+	u8		port;
+
 	while (xhci_event_get(state, &event)) {
 		switch ((event.control >> XHCI_TRB_TYPE_SHIFT) & 0x3F) {
 		case XHCI_TRB_TYPE_PORT_STATUS_EVENT:
@@ -1146,52 +1289,34 @@ xhci_poll(void *arg)
 			break;
 		}
 	}
-	xhci_unlock(state);
-}
-
-static int
-xhci_intr(void *arg)
-{
-	xhci_state_t	*state;
-	volatile u32	*status;
-	volatile u32	*iman;
-	u32		value;
-
-	state = arg;
-	if (state == NULL) {
-		return (-1);
-	}
-	status = (volatile u32 *)(state->op + XHCI_USBSTS);
-	if ((*status & XHCI_USBSTS_EINT) == 0) {
-		return (-1);
-	}
-	*status = XHCI_USBSTS_EINT;
-	iman = (volatile u32 *)(state->runtime + XHCI_IMAN);
-	value = *iman;
-	if ((value & XHCI_IMAN_IP) != 0) {
-		*iman = value | XHCI_IMAN_IP | XHCI_IMAN_IE;
-	}
-	xhci_poll(state);
-	return (0);
-}
-
-static int
-xhci_trylock(xhci_state_t *state)
-{
-	u8	old;
-
-	__asm__ volatile("xchgb %0, %1"
-	    : "=q"(old), "+m"(state->busy)
-	    : "0"(1)
-	    : "memory");
-	return (old == 0 ? 0 : -1);
 }
 
 static void
-xhci_unlock(xhci_state_t *state)
+xhci_drain_exit(xhci_state_t *state, u64 flags)
 {
-	__asm__ volatile("" ::: "memory");
-	state->busy = 0;
+	if (state->drain_depth > 1) {
+		__asm__ volatile("cli" ::: "memory");
+		state->drain_depth--;
+		if ((flags & XHCI_RFLAGS_IF) != 0) {
+			__asm__ volatile("sti" ::: "memory");
+		}
+		return;
+	}
+	for (;;) {
+		__asm__ volatile("cli" ::: "memory");
+		if (state->rescan == 0) {
+			break;
+		}
+		state->rescan = 0;
+		if ((flags & XHCI_RFLAGS_IF) != 0) {
+			__asm__ volatile("sti" ::: "memory");
+		}
+		xhci_drain_ring(state);
+	}
+	state->drain_depth = 0;
+	if ((flags & XHCI_RFLAGS_IF) != 0) {
+		__asm__ volatile("sti" ::: "memory");
+	}
 }
 
 static int
@@ -1255,7 +1380,6 @@ xhci_phys(void *ptr)
 static int
 xhci_setup_rings(xhci_state_t *state)
 {
-	volatile u32	*cmd;
 	volatile u32	*iman;
 	volatile u64	*reg64;
 	void		*buf;
@@ -1431,6 +1555,7 @@ xhci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 		xhci_state_destroy(state);
 		return (-1);
 	}
+	state->irq_msi = (u8)(bus_intr_is_msi(state->irq_cookie) != 0);
 	pdev->driver_data = state;
 	xhci_states[index] = state;
 	usb_log_printf("xhci: initial port scan (slots=%u ports=%u)\n",

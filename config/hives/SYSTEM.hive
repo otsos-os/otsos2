@@ -93,7 +93,7 @@ hive SYSTEM @access(read=user, add=kusr, edit=kusr) {
 	}
 
 	key Input.Keyboard {
-		string PreferredDriver = "auto"
+		string PreferredDriver = "ps2"
 	}
 
 	key Kshell.Commands.help {

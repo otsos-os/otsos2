@@ -312,6 +312,11 @@ acpi_prt_link_irq(aml_node_t *link, u32 index, u32 *gsi, u32 *flags)
 	method = aml_node_child(link, "_CRS");
 	if (method != NULL) {
 		resources = NULL;
+		/*
+		 * _CRS reports what the link is already set to.  A failure here
+		 * is not fatal - the _PRS/_SRS path below can still pick an
+		 * option and program it - so fall through rather than return.
+		 */
 		if (aml_evaluate(method, NULL, 0, &resources) == 0) {
 			count = aml_resource_irqs(resources, irqs,
 			    ACPI_PRT_MAX_IRQS);
@@ -384,7 +389,13 @@ acpi_prt_entry_match(aml_object_t *entry, u8 slot, u8 pin, u32 *gsi,
 	    &index) != 0) {
 		return (-1);
 	}
-	if (entry_pin != pin) {
+	/*
+	 * The pin field of a _PRT package is zero based (0 = INTA), while the
+	 * caller carries the PCI config Interrupt Pin register convention
+	 * where 1 = INTA.  Comparing them raw matched the next pin over, so
+	 * INTA devices picked up INTB's routing.
+	 */
+	if (entry_pin != (u64)(pin - 1)) {
 		return (-1);
 	}
 	if (((address >> 16) & 0xFFFF) != ACPI_PRT_ANY_DEVICE &&

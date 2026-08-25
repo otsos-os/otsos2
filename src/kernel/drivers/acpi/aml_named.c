@@ -316,6 +316,13 @@ typedef struct {
 } aml_field_config_t;
 
 #define	AML_FIELD_MAX_BITS	0x20000000U
+/*
+ * Ceiling on the index operand of the CreateXxxField operators.  Chosen so that
+ * index * 8 still fits a u32 with room for the field width on top; the real
+ * limit is the buffer length, checked separately once the offset is known.
+ */
+#define	AML_FIELD_INDEX_MAX	0x1FFFFFFFULL
+
 static int
 aml_field_connection(aml_state_t *state, aml_stream_t *list,
     aml_field_config_t *config)
@@ -743,25 +750,46 @@ aml_named_create_field(aml_state_t *state, aml_stream_t *stream, u16 opcode)
 		aml_object_unref(source);
 		return (AML_ERR);
 	}
+	/*
+	 * index arrives from a TermArg, so it is whatever the table says - and it
+	 * is about to be multiplied and narrowed to u32.  Gate it here: past this
+	 * ceiling the product wraps, the bounds check below sees a small offset
+	 * and the field ends up pointing outside the buffer.  No real buffer comes
+	 * anywhere near it, so this only ever rejects a broken table.
+	 */
+	if (index > AML_FIELD_INDEX_MAX) {
+		aml_object_unref(source);
+		return (AML_ERR_BOUNDS);
+	}
 	switch (opcode) {
 	case AML_OP_CREATE_BIT:
 		bit_offset = (u32)index;
 		bit_length = 1;
 		break;
+	/*
+	 * ACPI 6.4 19.6.16-19.6.19: the index operand of CreateByteField,
+	 * CreateWordField, CreateDWordField and CreateQWordField is a BYTE
+	 * offset into the buffer.  The opcode picks the field width, it does not
+	 * scale the offset - only CreateBitField below counts in bits.  Scaling
+	 * by the width overshoots and the bounds check below rejects a perfectly
+	 * legal field: QEMU's link _SRS does CreateDWordField(Arg1, 5, PRRI) on
+	 * an 11-byte IRQ template, which came out as 24 bytes and failed, so no
+	 * PCI interrupt could ever be programmed through a link device.
+	 */
 	case AML_OP_CREATE_BYTE:
 		bit_offset = (u32)(index * 8);
 		bit_length = 8;
 		break;
 	case AML_OP_CREATE_WORD:
-		bit_offset = (u32)(index * 16);
+		bit_offset = (u32)(index * 8);
 		bit_length = 16;
 		break;
 	case AML_OP_CREATE_DWORD:
-		bit_offset = (u32)(index * 32);
+		bit_offset = (u32)(index * 8);
 		bit_length = 32;
 		break;
 	case AML_OP_CREATE_QWORD:
-		bit_offset = (u32)(index * 64);
+		bit_offset = (u32)(index * 8);
 		bit_length = 64;
 		break;
 	case AML_OP_CREATE_FIELD:
@@ -772,8 +800,14 @@ aml_named_create_field(aml_state_t *state, aml_stream_t *stream, u16 opcode)
 		aml_object_unref(source);
 		return (AML_ERR);
 	}
-	if (bit_length == 0 ||
-	    bit_offset + bit_length > buffer->u.buffer.length * 8) {
+	/*
+	 * Compared in u64.  index comes from a TermArg, so a corrupt or hostile
+	 * table can hand over a value whose bit offset does not survive the cast
+	 * to u32 - it wraps to something small and sails through the check, and
+	 * the field then reads outside the buffer.  Reject before narrowing.
+	 */
+	if (bit_length == 0 || (u64)bit_offset + bit_length >
+	    (u64)buffer->u.buffer.length * 8) {
 		aml_object_unref(source);
 		return (AML_ERR_BOUNDS);
 	}
