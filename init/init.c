@@ -35,7 +35,9 @@ $define %type unsigned short as 16 bit unsigned
 $define %type unsigned int as 32 bit unsigned
 $define %type long long as 64 bit signed
 $define %type unsigned long long as 64 bit unsigned
-$define %type kevent as struct with event ident, filter, flags, fflags, data, udata
+$define %type api_input_event as struct mirroring the kernel input event ABI
+$define %type kevent as struct with event ident, filter, flags, fflags,
+    data, udata, input
 $define %type kevent_args as struct with kq_idx, changelist, nchanges, eventlist, nevents, timeout_ms
 
 $define %func _start as start with args void
@@ -45,6 +47,9 @@ $define %func termWrite as function with args const void *, unsigned long
 $define %func termRead as function with args void *, unsigned long
 $define %func procSpawnAbi as function with args const char *, char *const *, char *const *, unsigned int
 $define %func procWait as function with args int *
+$define %func procTryWait as function with args int *
+$define %func reap_orphans as function with args int
+$define %func scan_events as function with args struct kevent *, int, int
 $define %func kqueue_create as function with args void
 $define %func kqueue_close as function with args int
 $define %func kevent as function with args int, struct kevent *, int, struct kevent *, int, long long
@@ -60,7 +65,8 @@ $define %func trim_newline as procedure with args char *
 $space %export _start
 $space %internal syscall1, syscall3, termWrite, termRead
 $space %internal procSpawnAbi
-$space %internal procWait, kqueue_create, kqueue_close, kevent
+$space %internal procWait, procTryWait, reap_orphans, scan_events
+$space %internal kqueue_create, kqueue_close, kevent
 $space %internal strlen, print, print_long, trim_newline
 
 */
@@ -71,6 +77,7 @@ $space %internal strlen, print, print_long, trim_newline
 #define	CALL_PROC_SPAWN		0x402
 #define	CALL_PROC_WAIT		0x404
 #define	CALL_PROC_EXIT		0x403
+#define	CALL_PROC_TRYWAIT	0x414
 #define	CALL_EVENT_KQUEUE	0x700
 #define	CALL_EVENT_KEVENT	0x701
 #define	CALL_EVENT_CLOSE	0x702
@@ -90,7 +97,29 @@ $space %internal strlen, print, print_long, trim_newline
 #define	EV_EOF		0x8000
 
 #define	NOTE_EXIT	0x80000000U
+#define	NOTE_REAP	0x00000008U
+#define	INIT_PID	1
+#define	MAX_REAP_BURST	64
 #define	API_PROC_SPAWN_ABI_POSIX	0
+
+struct api_input_event {
+	unsigned long long	timestamp;
+	unsigned long long	seq;
+	unsigned int		type;
+	unsigned int		device;
+	unsigned int		flags;
+	unsigned int		lost;
+	int			x;
+	int			y;
+	int			dx;
+	int			dy;
+	int			dz;
+	unsigned int		buttons;
+	unsigned int		key;
+	unsigned int		raw;
+	unsigned int		mods;
+	unsigned int		ch;
+};
 
 struct kevent {
 	unsigned long long	ident;
@@ -99,6 +128,7 @@ struct kevent {
 	unsigned int		fflags;
 	long long		data;
 	unsigned long long	udata;
+	struct api_input_event	input;
 };
 
 struct kevent_args {
@@ -193,6 +223,54 @@ static long
 procWait(int *status)
 {
 	return (syscall1(CALL_PROC_WAIT, (long)status));
+}
+
+static long
+procTryWait(int *status)
+{
+	return (syscall1(CALL_PROC_TRYWAIT, (long)status));
+}
+
+static int
+reap_orphans(int fg)
+{
+	int	status, got, hit, i;
+
+	hit = 0;
+	for (i = 0; i < MAX_REAP_BURST; i++) {
+		status = 0;
+		got = (int)procTryWait(&status);
+		if (got < 0) {
+			break;
+		}
+		if (fg >= 0 && got == fg) {
+			hit = 1;
+		}
+	}
+	return (hit);
+}
+
+static int
+scan_events(struct kevent *events, int n, int fg)
+{
+	int	exited, i;
+
+	exited = 0;
+	for (i = 0; i < n; i++) {
+		if (events[i].filter != EVFILT_PROC) {
+			continue;
+		}
+		if (events[i].fflags & NOTE_REAP) {
+			if (reap_orphans(fg)) {
+				exited = 1;
+			}
+		}
+		if (events[i].ident == (unsigned long long)fg &&
+		    (events[i].fflags & NOTE_EXIT)) {
+			exited = 1;
+		}
+	}
+	return (exited);
 }
 
 static int
@@ -290,7 +368,7 @@ _start(void)
 	char		*argv[2];
 	char		path[128];
 	long		bytes, pid;
-	int		kq, child_pid, n, status, i;
+	int		kq, child_pid, n, status;
 
 	/* Wake the system terminal before using it.
 	 * The kernel boots with all TTYs suspended. */
@@ -304,6 +382,19 @@ _start(void)
 		print("init: kqueue_create failed, "
 		    "falling back to polling\n");
 		kq = -1;
+	}
+
+	if (kq >= 0) {
+		changes[0].ident = INIT_PID;
+		changes[0].filter = EVFILT_PROC;
+		changes[0].flags = EV_ADD | EV_CLEAR;
+		changes[0].fflags = NOTE_REAP;
+		changes[0].data = 0;
+		changes[0].udata = 0;
+		if (kevent(kq, changes, 1, 0, 0, -1) < 0) {
+			print("init: NOTE_REAP registration failed, "
+			    "orphans will accumulate\n");
+		}
 	}
 
 	child_pid = -1;
@@ -353,19 +444,11 @@ _start(void)
 			child_exited = 0;
 			while (!child_exited) {
 				n = kevent(kq, 0, 0, events, 8, -1);
-				if (n > 0) {
-					for (i = 0; i < n; i++) {
-						if (events[i].filter ==
-						    EVFILT_PROC &&
-						    events[i].ident ==
-						    (unsigned long long)child_pid &&
-						    (events[i].fflags & NOTE_EXIT)) {
-							child_exited = 1;
-							break;
-						}
-					}
-				} else if (n < 0) {
+				if (n < 0) {
 					break;
+				}
+				if (scan_events(events, n, child_pid)) {
+					child_exited = 1;
 				}
 			}
 		} else {
@@ -374,9 +457,7 @@ _start(void)
 			}
 		}
 
-		status = 0;
-		while (procWait(&status) > 0) {
-		}
+		(void)reap_orphans(-1);
 		child_pid = -1;
 	}
 }

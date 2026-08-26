@@ -156,6 +156,7 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_PROC_SETSID		0x411
 #define	CALL_PROC_GETSID		0x412
 #define	CALL_PROC_PERM		0x413
+#define	CALL_PROC_TRYWAIT	0x414
 #define	CALL_FUTEX_WAIT		0x40F
 #define	CALL_FUTEX_WAKE		0x410
 #define	CALL_SYS_RANDOM		0x503

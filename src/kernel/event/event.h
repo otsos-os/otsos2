@@ -57,6 +57,7 @@ $define %func event_cleanup_process as procedure with args struct process *
 $define %func event_fork_process as procedure with args struct process *, struct process *
 $define %func event_notify_proc_exit as procedure with args u32, int
 $define %func event_notify_proc_fork as procedure with args u32, u32
+$define %func event_notify_proc_reap as procedure with args u32
 $define %func event_notify_signal as procedure with args u32, int
 $define %func event_notify_pipe_change as procedure with args struct pipe *
 $define %func event_notify_net_change as procedure with args net_endpoint_t *
@@ -73,6 +74,7 @@ $space %export filter_register, filter_lookup
 $space %export event_timer_tick, event_cleanup_process
 $space %export event_fork_process
 $space %export event_notify_proc_exit, event_notify_proc_fork
+$space %export event_notify_proc_reap
 $space %export event_notify_signal, event_notify_pipe_change
 $space %export event_notify_net_change, event_notify_ipc_change
 
@@ -117,6 +119,7 @@ $space %export event_notify_net_change, event_notify_ipc_change
 #define	NOTE_TRACK	0x00000001
 #define	NOTE_CHILD	0x00000002
 #define	NOTE_TRACKERR	0x00000004
+#define	NOTE_REAP	0x00000008
 
 #define	NOTE_SECONDS	0x00000001
 #define	NOTE_MSECONDS	0x00000002
@@ -238,6 +241,7 @@ void	event_fork_process(struct process *parent,
 
 void	event_notify_proc_exit(u32 pid, int exit_code);
 void	event_notify_proc_fork(u32 parent_pid, u32 child_pid);
+void	event_notify_proc_reap(u32 parent_pid);
 void	event_notify_signal(u32 pid, int sig);
 void	event_notify_pipe_change(struct pipe *p);
 void	event_notify_net_change(struct net_endpoint *ep);

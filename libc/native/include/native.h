@@ -76,6 +76,7 @@ $space %export dataWriteFull, dataSeek, dataPipe, dataDir
 $space %export fsChdir, fsGetcwd, fsListdir, fsStat, fsRename, fsUnlink
 $space %export fsMnt, fsUmnt
 $space %export procSpawn, procSpawnAbi, procSpawnNative, procSpawnPty, procWait
+$space %export procTryWait
 $space %export procRun, procExit, procKill
 $space %export memMap, memUnmap, eventKqueue, eventWait, eventClose
 $space %export powerState
@@ -270,6 +271,7 @@ struct api_winsize {
 #define CALL_PROC_SETSID	0x411
 #define CALL_PROC_GETSID	0x412
 #define CALL_PROC_PERM		0x413
+#define CALL_PROC_TRYWAIT	0x414
 #define CALL_SYS_INFO		0x500
 #define CALL_SYS_MEMINFO	0x501
 #define CALL_SYS_KMEMINFO	0x502
@@ -662,6 +664,7 @@ struct api_entity_ioctl {
 #define EV_EOF			0x8000
 
 #define NOTE_EXIT		0x80000000U
+#define NOTE_REAP		0x00000008U
 #define NOTE_POWER_BUTTON	0x00000001U
 
 #define API_POWER_STATE_SHUTDOWN	1
@@ -1422,6 +1425,7 @@ int	procSpawnNative(const char *path, char *const argv[], char *const envp[]);
 int	procSpawnPty(const char *path, char *const argv[], char *const envp[],
 	    int pts_id, uint32_t abi);
 int	procWait(int *status);
+int	procTryWait(int *status);
 int	procRun(const char *path, char *const argv[], char *const envp[],
 	    int *status);
 void	procExit(int code) __attribute__((noreturn));

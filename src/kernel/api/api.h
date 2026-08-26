@@ -942,6 +942,7 @@ int api_data_open(const char *path, int flags);
 int api_data_close(int handle);
 long api_data_seek(int handle, long offset, int whence);
 int api_proc_wait(int *status);
+int api_proc_trywait(int *status);
 int api_data_pipe(int handles[2]);
 int api_data_dir(u32 op, const char *path, const char *newpath);
 long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs);

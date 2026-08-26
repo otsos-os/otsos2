@@ -296,6 +296,7 @@ process_exit(int code)
 	proc->mmap_base = MMAP_BASE;
 
 	event_notify_proc_exit(proc->pid, code);
+	event_notify_proc_reap(proc->ppid);
 	event_cleanup_process(proc);
 
 	if (proc->ppid > 0) {
@@ -318,6 +319,7 @@ process_exit(int code)
 				if (init_proc) {
 					proc_wakeup((void *)init_proc);
 				}
+				event_notify_proc_reap(1);
 			}
 		}
 	}
@@ -442,6 +444,7 @@ process_kill(u32 pid)
 	}
 	if (running) {
 		event_notify_proc_exit(proc->pid, proc->exit_code);
+		event_notify_proc_reap(proc->ppid);
 		if (proc->ppid > 0) {
 			process_t	*parent;
 
@@ -475,6 +478,7 @@ process_kill(u32 pid)
 	proc->mmap_base = MMAP_BASE;
 
 	event_notify_proc_exit(proc->pid, proc->exit_code);
+	event_notify_proc_reap(proc->ppid);
 	event_cleanup_process(proc);
 
 	if (proc->ppid > 0) {
@@ -497,6 +501,7 @@ process_kill(u32 pid)
 				if (init_proc) {
 					proc_wakeup((void *)init_proc);
 				}
+				event_notify_proc_reap(1);
 			}
 		}
 	}

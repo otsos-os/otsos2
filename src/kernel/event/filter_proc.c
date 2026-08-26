@@ -41,6 +41,7 @@ $define %func filt_proc_event as function with args knote_t *, u32
 $define %func filt_proc_touch as procedure with args knote_t *, struct kevent *
 $define %func event_notify_proc_exit as procedure with args u32, int
 $define %func event_notify_proc_fork as procedure with args u32, u32
+$define %func event_notify_proc_reap as procedure with args u32
 
 */
 
@@ -50,6 +51,7 @@ $space %internal filt_proc_attach, filt_proc_detach
 $space %internal filt_proc_event, filt_proc_touch
 $space %export filter_proc_ops
 $space %export event_notify_proc_exit, event_notify_proc_fork
+$space %export event_notify_proc_reap
 
 */
 
@@ -101,6 +103,10 @@ filt_proc_event(knote_t *kn, u32 nevents)
 
 	pid = (u32)kn->ident;
 
+	if ((kn->fflags & NOTE_REAP) && kn->pending) {
+		return (1);
+	}
+
 	proc = process_get(pid);
 	if (!proc) {
 		kn->fflags |= NOTE_EXIT;
@@ -138,6 +144,16 @@ event_notify_proc_fork(u32 parent_pid, u32 child_pid)
 {
 	knote_notify_all(EVFILT_PROC, (u64)parent_pid,
 	    NOTE_FORK, (s64)child_pid);
+}
+
+void
+event_notify_proc_reap(u32 parent_pid)
+{
+	if (parent_pid == 0) {
+		return;
+	}
+
+	knote_notify_all(EVFILT_PROC, (u64)parent_pid, NOTE_REAP, 0);
 }
 
 const filter_ops_t filter_proc_ops = {

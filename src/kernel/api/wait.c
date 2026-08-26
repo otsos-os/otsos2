@@ -37,21 +37,36 @@
 
 extern void pmap_destroy_page_tables_only(u64 cr3);
 
-int
-api_proc_wait(int *status)
+static void
+proc_wait_reclaim_tty(process_t *current)
+{
+	int	pty_num;
+
+	if (current->controlling_tty >= 0) {
+		terminal_set_pgrp(current->controlling_tty, current->pgid);
+	} else if (current->controlling_tty < -1) {
+		pty_num = -current->controlling_tty - 2;
+		pty_set_session_pgrp(pty_num, current->sid, current->pgid);
+	}
+}
+
+static int
+proc_wait_common(int *status, int block)
 {
 	process_t	*current;
 	process_t	*child;
 	thread_t	*child_td;
 	u64		old_cr3;
-	int		attempt, pid, i;
+	int		attempts, attempt, pid, i;
 
 	current = process_current();
 	if (!current) {
 		return (-API_ERR_NO_CHILD);
 	}
 
-	for (attempt = 0; attempt < 2; attempt++) {
+	attempts = block ? 2 : 1;
+
+	for (attempt = 0; attempt < attempts; attempt++) {
 		for (i = 0; i < MAX_PROCESSES; i++) {
 			child = &process_table[i];
 			if (child->pid == 0) {
@@ -72,13 +87,8 @@ api_proc_wait(int *status)
 
 			if (child_td->running_cpu >= 0) {
 				pid = (int)child->pid;
-				if (current->controlling_tty >= 0) {
-					terminal_set_pgrp(current->controlling_tty,
-					    current->pgid);
-				} else if (current->controlling_tty < -1) {
-					int pty_num = -current->controlling_tty - 2;
-					pty_set_session_pgrp(pty_num, current->sid,
-					    current->pgid);
+				if (block) {
+					proc_wait_reclaim_tty(current);
 				}
 				child->ppid = 0;
 				return (pid);
@@ -98,21 +108,28 @@ api_proc_wait(int *status)
 			thread_destroy(child_td);
 			pid = (int)child->pid;
 			memset(child, 0, sizeof(process_t));
-			if (current->controlling_tty >= 0) {
-				terminal_set_pgrp(current->controlling_tty,
-				    current->pgid);
-			} else if (current->controlling_tty < -1) {
-				int pty_num = -current->controlling_tty - 2;
-				pty_set_session_pgrp(pty_num, current->sid,
-				    current->pgid);
+			if (block) {
+				proc_wait_reclaim_tty(current);
 			}
 			return (pid);
 		}
 
-		if (attempt == 0) {
+		if (block && attempt == 0) {
 			proc_sleep((void *)current);
 		}
 	}
 
 	return (-API_ERR_NO_CHILD);
+}
+
+int
+api_proc_wait(int *status)
+{
+	return (proc_wait_common(status, 1));
+}
+
+int
+api_proc_trywait(int *status)
+{
+	return (proc_wait_common(status, 0));
 }

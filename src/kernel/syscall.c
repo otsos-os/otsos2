@@ -269,6 +269,9 @@ void syscall_handler(registers_t *regs) {
   case CALL_PROC_WAIT:
     regs->rax = (u64)api_proc_wait((int *)arg1);
     break;
+  case CALL_PROC_TRYWAIT:
+    regs->rax = (u64)api_proc_trywait((int *)arg1);
+    break;
 	case CALL_PROC_KILL:
 	    regs->rax = process_send_signal((u32)arg1, (int)arg2);
 	    break;

@@ -13,7 +13,7 @@ $define %func procExit as procedure with args int
 
 $space %export procClone, procCopy, procSpawn, procSpawnAbi, procSpawnNative
 $space %export procSpawnPty
-$space %export procWait, procRun, procExit
+$space %export procWait, procTryWait, procRun, procExit
 $space %export procKill, procList, procGetpid, procGetppid, procGettid
 $space %export procPerm
 $space %export threadExit, threadJoin, procExitGroup, procSetTidAddress
@@ -86,6 +86,12 @@ int
 procWait(int *status)
 {
 	return (__sysret_int(__syscall1(CALL_PROC_WAIT, (long)status)));
+}
+
+int
+procTryWait(int *status)
+{
+	return (__sysret_int(__syscall1(CALL_PROC_TRYWAIT, (long)status)));
 }
 
 int
