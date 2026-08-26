@@ -74,6 +74,8 @@ $space %internal usb_logflush_identify, usb_logflush_attach
 
 #define	USB_LOG_PATH		"/log.txt"
 #define	USB_LOG_SIZE		32768
+#define	USB_PORT_RETRY_PASSES	100
+#define	USB_PORT_FAIL_LIMIT	5
 
 static char		usb_log_buf[USB_LOG_SIZE];
 static u32		usb_log_len;
@@ -534,29 +536,32 @@ usb_controller_scan(usb_controller_t *controller)
 {
 	usb_device_t	*old;
 	device_t	child, next;
-	u8		port, speed;
+	u32		mask;
+	u8		port, speed, rescan;
 
 	if (controller == NULL) {
 		return;
 	}
 	for (port = 1; port <= controller->port_count; port++) {
 		speed = 0;
-		if (controller->retry_ticks[port - 1] != 0) {
+		mask = 1U << (port - 1);
+		rescan = (u8)((controller->rescan_mask & mask) != 0);
+		controller->rescan_mask &= ~mask;
+		if (controller->retry_ticks[port - 1] != 0 && !rescan) {
 			controller->retry_ticks[port - 1]--;
 			if (controller->retry_ticks[port - 1] == 0) {
-				controller->port_done &=
-				    ~(1U << (port - 1));
+				controller->port_done &= ~mask;
 			}
 			continue;
 		}
 		if (controller->ports[port - 1] != NULL) {
-			if ((controller->rescan_mask & (1U << (port - 1))) == 0 &&
+			if (!rescan &&
 			    controller->ops->port_connected(controller->priv,
 			    port, &speed) != 0) {
 				continue;
 			}
 			old = controller->ports[port - 1];
-			controller->rescan_mask &= ~(1U << (port - 1));
+			controller->ports[port - 1] = NULL;
 			usb_log_printf("usb: port %u: device "
 			    "re-enumerating\n", port);
 			for (child = device_get_child(controller->bus_device);
@@ -572,9 +577,10 @@ usb_controller_scan(usb_controller_t *controller)
 			    controller->priv,
 			    old);
 			kmem_free(old);
-			controller->ports[port - 1] = NULL;
+			controller->port_done &= ~mask;
+			speed = 0;
 		}
-		if ((controller->port_done & (1U << (port - 1))) != 0 ||
+		if ((controller->port_done & mask) != 0 ||
 		    controller->ops->port_connected(controller->priv, port,
 		    &speed) == 0) {
 			continue;
@@ -584,17 +590,19 @@ usb_controller_scan(usb_controller_t *controller)
 			if (controller->ops->port_connected(controller->priv,
 			    port, &speed) != 0 &&
 			    usb_enumerate_port(controller, port, speed) == 0) {
-				controller->port_done |= 1U << (port - 1);
+				controller->port_done |= mask;
 				controller->fail_count[port - 1] = 0;
 			} else {
-				controller->port_done |= 1U << (port - 1);
+				controller->port_done |= mask;
 				controller->fail_count[port - 1]++;
-				if (controller->fail_count[port - 1] < 5) {
-					controller->retry_ticks[port - 1] = 100;
+				if (controller->fail_count[port - 1] <
+				    USB_PORT_FAIL_LIMIT) {
+					controller->retry_ticks[port - 1] =
+					    USB_PORT_RETRY_PASSES;
 				}
 			}
 		} else {
-			controller->port_done |= 1U << (port - 1);
+			controller->port_done |= mask;
 		}
 		usb_log_flush();
 	}
@@ -635,6 +643,7 @@ usb_controller_port_retry(usb_controller_t *controller, u8 port)
 	controller->port_done &= ~(1U << (port - 1));
 	controller->rescan_mask |= 1U << (port - 1);
 	controller->fail_count[port - 1] = 0;
+	controller->retry_ticks[port - 1] = 0;
 }
 
 int

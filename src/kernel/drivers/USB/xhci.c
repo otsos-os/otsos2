@@ -36,6 +36,9 @@ $define %func xhci_setup_rings as function with args xhci_state_t *
 $define %func xhci_drain_enter as function with args xhci_state_t *, u64 *
 $define %func xhci_drain_exit as procedure with args xhci_state_t *, u64
 $define %func xhci_drain_ring as procedure with args xhci_state_t *
+$define %func xhci_event_foreign as procedure with args xhci_state_t *, const xhci_trb_t *
+$define %func xhci_portsc_write as procedure with args xhci_state_t *, u8, u32
+$define %func xhci_port_sweep as procedure with args xhci_state_t *
 $define %func xhci_command_locked as function with args xhci_state_t *, u64, u32, u32, u8 *
 $define %func xhci_control_locked as function with args xhci_state_t *, usb_device_t *, const usb_setup_t *, void *, u16, u32
 $define %func xhci_normal_transfer_locked as function with args xhci_state_t *, usb_device_t *, usb_endpoint_t *, void *, u32 *, u32
@@ -50,6 +53,7 @@ $define %func xhci_pci_register as function with args void
 
 $space %internal xhci_wait32, xhci_halt, xhci_reset, xhci_setup_rings
 $space %internal xhci_drain_enter, xhci_drain_exit, xhci_drain_ring
+$space %internal xhci_event_foreign, xhci_portsc_write, xhci_port_sweep
 $space %internal xhci_command_locked, xhci_control_locked
 $space %internal xhci_normal_transfer_locked, xhci_interrupt_locked
 $space %internal xhci_pci_probe, xhci_pci_remove
@@ -125,6 +129,7 @@ $space %export xhci_pci_register
 #define	XHCI_PORTSC_PR			(1U << 4)
 #define	XHCI_PORTSC_CSC		(1U << 17)
 #define	XHCI_PORTSC_SPEED_SHIFT	10
+#define	XHCI_PORTSC_PRESERVE	0x0E00C3E0U
 #define	XHCI_CTX_ENTRIES_SHIFT	27
 #define	XHCI_SLOT_SPEED_SHIFT	20
 #define	XHCI_SLOT_PORT_SHIFT		16
@@ -236,6 +241,7 @@ static u64	xhci_phys(void *ptr);
 static int	xhci_drain_enter(xhci_state_t *state, u64 *flags);
 static void	xhci_drain_exit(xhci_state_t *state, u64 flags);
 static void	xhci_drain_ring(xhci_state_t *state);
+static void	xhci_event_foreign(xhci_state_t *state, const xhci_trb_t *event);
 
 static const usb_controller_ops_t xhci_usb_ops = {
 	.port_connected = xhci_port_connected,
@@ -332,6 +338,21 @@ xhci_event_get(xhci_state_t *state, xhci_trb_t *event)
 	return (1);
 }
 
+static void
+xhci_event_foreign(xhci_state_t *state, const xhci_trb_t *event)
+{
+	switch ((event->control >> XHCI_TRB_TYPE_SHIFT) & 0x3F) {
+	case XHCI_TRB_TYPE_TRANSFER_EVENT:
+		xhci_handle_transfer_event(state, event);
+		break;
+	case XHCI_TRB_TYPE_PORT_STATUS_EVENT:
+		state->rescan = 1;
+		break;
+	default:
+		break;
+	}
+}
+
 static int
 xhci_wait_event(xhci_state_t *state, u64 trb_phys, u8 type, u8 slot,
     u32 limit, u32 *residual)
@@ -347,10 +368,7 @@ xhci_wait_event(xhci_state_t *state, u64 trb_phys, u8 type, u8 slot,
 		if (((event.control >> XHCI_TRB_TYPE_SHIFT) & 0x3F) != type ||
 		    (slot != 0 && (event.control >> XHCI_TRB_SLOT_SHIFT) != slot) ||
 		    (trb_phys != 0 && event.parameter != trb_phys)) {
-			if (((event.control >> XHCI_TRB_TYPE_SHIFT) & 0x3F) ==
-			    XHCI_TRB_TYPE_TRANSFER_EVENT) {
-				xhci_handle_transfer_event(state, &event);
-			}
+			xhci_event_foreign(state, &event);
 			continue;
 		}
 		if (residual != NULL) {
@@ -380,10 +398,7 @@ xhci_command_locked(xhci_state_t *state, u64 parameter, u32 status, u32 control,
 		}
 		if (((event.control >> XHCI_TRB_TYPE_SHIFT) & 0x3F) !=
 		    XHCI_TRB_TYPE_COMMAND_EVENT || event.parameter != trb) {
-			if (((event.control >> XHCI_TRB_TYPE_SHIFT) & 0x3F) ==
-			    XHCI_TRB_TYPE_TRANSFER_EVENT) {
-				xhci_handle_transfer_event(state, &event);
-			}
+			xhci_event_foreign(state, &event);
 			continue;
 		}
 		if (((event.status >> 24) & 0xFF) != XHCI_CC_SUCCESS) {
@@ -430,6 +445,39 @@ xhci_context_size(xhci_state_t *state)
 	return ((*(volatile u32 *)(state->cap + 0x10) & 4) ? 64 : 32);
 }
 
+static void
+xhci_portsc_write(xhci_state_t *state, u8 port, u32 bits)
+{
+	volatile u32	*reg;
+
+	reg = (volatile u32 *)(state->op + XHCI_PORTSC_BASE +
+	    (u32)(port - 1) * XHCI_PORTSC_STRIDE);
+	*reg = (*reg & XHCI_PORTSC_PRESERVE) | bits;
+}
+
+static void
+xhci_port_sweep(xhci_state_t *state)
+{
+	u32	value;
+	u8	port, found;
+
+	found = 0;
+	for (port = 1; port <= state->max_ports; port++) {
+		value = *(volatile u32 *)(state->op + XHCI_PORTSC_BASE +
+		    (u32)(port - 1) * XHCI_PORTSC_STRIDE);
+		if ((value & XHCI_PORTSC_CSC) == 0) {
+			continue;
+		}
+		usb_log_printf("xhci: port %u csc (portsc=%x)\n", port, value);
+		usb_controller_port_retry(&state->usb, port);
+		xhci_portsc_write(state, port, XHCI_PORTSC_CSC);
+		found = 1;
+	}
+	if (found) {
+		usb_controller_scan(&state->usb);
+	}
+}
+
 static int
 xhci_port_connected(void *priv, u8 port, u8 *speed)
 {
@@ -464,7 +512,7 @@ xhci_port_reset(void *priv, u8 port)
 	    (u32)(port - 1) * XHCI_PORTSC_STRIDE);
 	value = *reg;
 	usb_log_printf("xhci: port %u reset before=%x\n", port, value);
-	*reg = value | XHCI_PORTSC_PR;
+	xhci_portsc_write(state, port, XHCI_PORTSC_PR);
 	if (xhci_wait32(reg, XHCI_PORTSC_PR, 0, 1000000) != 0) {
 		usb_log_printf("xhci: port %u reset timed out\n", port);
 		return (-1);
@@ -1184,8 +1232,6 @@ xhci_poll(void *arg)
 {
 	xhci_state_t	*state;
 	u64		flags;
-	u32		value;
-	u8		port;
 
 	state = arg;
 	if (state == NULL) {
@@ -1197,21 +1243,7 @@ xhci_poll(void *arg)
 		return;
 	}
 	usb_controller_scan(&state->usb);
-	for (port = 1; port <= state->max_ports; port++) {
-		value = *(volatile u32 *)(state->op + XHCI_PORTSC_BASE +
-		    (u32)(port - 1) * XHCI_PORTSC_STRIDE);
-		if ((value & XHCI_PORTSC_CSC) == 0) {
-			continue;
-		}
-		usb_log_printf("xhci: port %u csc (portsc=%x)\n", port,
-		    value);
-		usb_controller_port_retry(&state->usb, port);
-		value |= XHCI_PORTSC_CSC;
-		*(volatile u32 *)(state->op + XHCI_PORTSC_BASE +
-		    (u32)(port - 1) * XHCI_PORTSC_STRIDE) =
-		    value;
-		usb_controller_scan(&state->usb);
-	}
+	xhci_port_sweep(state);
 	xhci_drain_ring(state);
 	xhci_drain_exit(state, flags);
 }
@@ -1256,30 +1288,11 @@ static void
 xhci_drain_ring(xhci_state_t *state)
 {
 	xhci_trb_t	event;
-	u32		value;
-	u8		port;
 
 	while (xhci_event_get(state, &event)) {
 		switch ((event.control >> XHCI_TRB_TYPE_SHIFT) & 0x3F) {
 		case XHCI_TRB_TYPE_PORT_STATUS_EVENT:
-			port = (u8)((event.control >> 24) & 0xFF);
-			if (port >= 1 && port <= state->max_ports) {
-				value = *(volatile u32 *)(state->op +
-				    XHCI_PORTSC_BASE + (u32)(port - 1) *
-				    XHCI_PORTSC_STRIDE);
-				if (value & XHCI_PORTSC_CSC) {
-					usb_log_printf("xhci: port %u csc "
-					    "evt (portsc=%x)\n", port, value);
-					usb_controller_port_retry(&state->usb,
-					    port);
-					value |= XHCI_PORTSC_CSC;
-					*(volatile u32 *)(state->op +
-					    XHCI_PORTSC_BASE +
-					    (u32)(port - 1) *
-					    XHCI_PORTSC_STRIDE) =
-					    value;
-				}
-			}
+			xhci_port_sweep(state);
 			usb_controller_scan(&state->usb);
 			break;
 		case XHCI_TRB_TYPE_TRANSFER_EVENT:
@@ -1312,6 +1325,7 @@ xhci_drain_exit(xhci_state_t *state, u64 flags)
 			__asm__ volatile("sti" ::: "memory");
 		}
 		xhci_drain_ring(state);
+		xhci_port_sweep(state);
 	}
 	state->drain_depth = 0;
 	if ((flags & XHCI_RFLAGS_IF) != 0) {

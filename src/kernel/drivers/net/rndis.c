@@ -37,6 +37,7 @@ $define %func rndis_detach as function with args device_t
 $space %internal rndis_control, rndis_query, rndis_set, rndis_initialize
 $space %internal rndis_rx_complete, rndis_transmit, rndis_poll, rndis_link
 $space %internal rndis_probe, rndis_attach, rndis_detach
+$space %internal rndis_buffers_free
 
 */
 
@@ -58,6 +59,8 @@ $space %internal rndis_probe, rndis_attach, rndis_detach
 #define	RNDIS_MSG_INITIALIZE_CMPLT	0x80000002
 #define	RNDIS_MSG_QUERY_CMPLT		0x80000004
 #define	RNDIS_MSG_SET_CMPLT		0x80000005
+#define	RNDIS_MSG_INDICATE_STATUS	0x00000007
+#define	RNDIS_MSG_KEEPALIVE		0x00000008
 #define	RNDIS_STATUS_SUCCESS		0x00000000
 #define	RNDIS_OID_CURRENT_ADDRESS	0x01010102
 #define	RNDIS_OID_PACKET_FILTER	0x0001010E
@@ -125,6 +128,7 @@ typedef struct {
 	u32	request_id;
 	u32	status;
 } __attribute__((packed)) rndis_set_complete_t;
+
 
 typedef struct {
 	u32	type;
@@ -318,6 +322,19 @@ rndis_set(rndis_state_t *state, u32 oid, const void *data, u32 data_len)
 		return (-1);
 	}
 	return (0);
+}
+
+static void
+rndis_buffers_free(rndis_state_t *state)
+{
+	if (state->rx_buffer != NULL) {
+		kmem_free(state->rx_buffer);
+		state->rx_buffer = NULL;
+	}
+	if (state->tx_buffer != NULL) {
+		kmem_free(state->tx_buffer);
+		state->tx_buffer = NULL;
+	}
 }
 
 static void
@@ -578,12 +595,7 @@ rndis_attach(device_t dev)
 		    "(in=%p out=%p)\n", device_get_nameunit(dev),
 		    (void *)state->bulk_in, (void *)state->bulk_out);
 		usb_log_flush();
-		if (state->rx_buffer != NULL) {
-			kmem_free(state->rx_buffer);
-		}
-		if (state->tx_buffer != NULL) {
-			kmem_free(state->tx_buffer);
-		}
+		rndis_buffers_free(state);
 		kmem_free(state);
 		return (-1);
 	}
@@ -593,8 +605,7 @@ rndis_attach(device_t dev)
 		usb_log_printf("rndis: attach %s: set packet filter failed\n",
 		    device_get_nameunit(dev));
 		usb_log_flush();
-		kmem_free(state->rx_buffer);
-		kmem_free(state->tx_buffer);
+		rndis_buffers_free(state);
 		kmem_free(state);
 		return (-1);
 	}
@@ -615,8 +626,7 @@ rndis_attach(device_t dev)
 		    device_get_nameunit(dev));
 		usb_log_flush();
 		netdev_unregister(&state->ndev);
-		kmem_free(state->rx_buffer);
-		kmem_free(state->tx_buffer);
+		rndis_buffers_free(state);
 		kmem_free(state);
 		return (-1);
 	}
@@ -644,15 +654,13 @@ rndis_detach(device_t dev)
 	if (state == NULL) {
 		return (0);
 	}
+	usb_log_printf("rndis: detach %s (%s)\n", device_get_nameunit(dev),
+	    state->ndev.name);
+	usb_log_flush();
 	state->running = 0;
 	net_iface_unregister(&state->iface);
 	netdev_unregister(&state->ndev);
-	if (state->rx_buffer != NULL) {
-		kmem_free(state->rx_buffer);
-	}
-	if (state->tx_buffer != NULL) {
-		kmem_free(state->tx_buffer);
-	}
+	rndis_buffers_free(state);
 	device_set_softc(dev, NULL);
 	kmem_free(state);
 	return (0);
