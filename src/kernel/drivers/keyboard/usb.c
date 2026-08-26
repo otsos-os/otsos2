@@ -57,6 +57,9 @@ usb_keyboard_complete(usb_device_t *usb, void *buffer, u32 length, int status, v
 							    keyboard->chead] = (char)ch;
 							keyboard->chead = next;
 						}
+						keyboard_char_put(
+						    &usb_keyboard_kbd_driver,
+						    (char)ch);
 					}
 					kbd_event_put(usage, usage, KEY_EVENT_PRESS,
 					    mods, ch);

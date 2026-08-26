@@ -308,6 +308,7 @@ buffer_write(char c)
 		kb_buffer[kb_head] = c;
 		kb_head = next;
 	}
+	keyboard_char_put(&atkbd_keyboard_driver, c);
 }
 
 static u32

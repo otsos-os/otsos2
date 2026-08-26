@@ -54,6 +54,10 @@ $define %func keyboard_driver_is_active as function with args keyboard_driver_t 
 $define %func keyboard_driver_handler as procedure with args keyboard_driver_t *
 $define %func keyboard_input_settle as procedure with args void
 $define %func keyboard_cm_update as function with args u32
+$define %func keyboard_char_put as procedure with args keyboard_driver_t *, char
+$define %func keyboard_char_get as function with args void
+$define %func keyboard_char_reset as procedure with args void
+$define %func keyboard_poll_drivers as procedure with args void
 $define %func keyboard_driver_priority as function with args keyboard_driver_t *
 $define %func keyboard_driver_matches as function with args keyboard_driver_t *, const char *
 $define %func keyboard_find_preferred as function with args const char *
@@ -80,6 +84,8 @@ $space %export keyboard_input_settle
 $space %export keyboard_cm_update
 $space %internal keyboard_driver_priority, keyboard_driver_matches
 $space %internal keyboard_find_preferred
+$space %export keyboard_char_put
+$space %internal keyboard_char_get, keyboard_char_reset, keyboard_poll_drivers
 $space %export kbd_event_put, kbd_event_get, kbd_event_count, kbd_event_reset
 
 */
@@ -101,6 +107,7 @@ $space %export kbd_event_put, kbd_event_get, kbd_event_count, kbd_event_reset
 #define	KBD_STATUS_PORT	0x64
 #define	KEYBOARD_MAX_DRIVERS	8
 #define	KEYBOARD_PREFERENCE_LEN	16
+#define	KEYBOARD_CHAR_RING_SIZE	256
 
 static keyboard_driver_t			*current_driver;
 static keyboard_driver_t			*keyboard_drivers[
@@ -115,6 +122,13 @@ static char				keyboard_preferred_driver[
 static struct kbd_event	kbd_event_ring[KBD_EVENT_RING_SIZE];
 static int			kbd_event_head;
 static int			kbd_event_tail;
+static char			keyboard_char_ring[KEYBOARD_CHAR_RING_SIZE];
+static int			keyboard_char_head;
+static int			keyboard_char_tail;
+
+static char	keyboard_char_get(void);
+static void	keyboard_char_reset(void);
+static void	keyboard_poll_drivers(void);
 
 static int
 keyboard_driver_priority(keyboard_driver_t *driver)
@@ -180,6 +194,7 @@ keyboard_manager_init(void)
 	}
 	keyboard_driver_count = 0;
 	current_driver = NULL;
+	keyboard_char_reset();
 	kbd_event_reset();
 	cm_register_consumer(CM_CONSUMER_INPUT, "input", keyboard_cm_update);
 	keyboard_initialized = 1;
@@ -207,18 +222,18 @@ keyboard_register_driver(keyboard_driver_t *driver)
 		    KEYBOARD_MAX_DRIVERS);
 		return (-1);
 	}
+	if (driver->init != NULL && driver->init() != 0) {
+		drivers_log("[KEYBOARD] %s init failed, not registered\n",
+		    (char *)driver->name);
+		return (-1);
+	}
 	keyboard_drivers[keyboard_driver_count++] = driver;
+	if (current_driver == NULL) {
+		current_driver = driver;
+	}
 
 	drivers_log("[KEYBOARD] detected: %s\n",
 	    (char *)driver->name);
-
-	if (current_driver == NULL ||
-	    keyboard_driver_matches(driver, keyboard_preferred_driver) ||
-	    (strcmp(keyboard_preferred_driver, "auto") == 0 &&
-	    keyboard_driver_priority(driver) >
-	    keyboard_driver_priority(current_driver))) {
-		return (keyboard_switch_driver(driver));
-	}
 	return (0);
 }
 
@@ -240,14 +255,6 @@ keyboard_switch_driver(keyboard_driver_t *driver)
 	}
 	if (i == keyboard_driver_count) {
 		return (-1);
-	}
-	if (driver->init != NULL && driver->init() != 0) {
-		drivers_log("[KEYBOARD] switch init failed, "
-		    "driver disabled.\n");
-		return (-1);
-	}
-	if (current_driver != NULL && current_driver->flush != NULL) {
-		current_driver->flush();
 	}
 	current_driver = driver;
 	drivers_log("[KEYBOARD] switch to driver: %s\n",
@@ -272,18 +279,29 @@ keyboard_cm_update(u32 flags)
 	    strcmp(preference, "usb") != 0) {
 		return (-API_ERR_BAD_VALUE);
 	}
+	strcpy(keyboard_preferred_driver, preference);
 	driver = keyboard_find_preferred(preference);
-	if (!driver) {
-		strcpy(keyboard_preferred_driver, preference);
+	if (driver == NULL) {
 		drivers_log("[KEYBOARD] preferred driver %s is not present\n",
 		    preference);
 		return (0);
 	}
-	if (keyboard_switch_driver(driver) != 0) {
-		return (-API_ERR_BAD_VALUE);
-	}
-	strcpy(keyboard_preferred_driver, preference);
+	(void)keyboard_switch_driver(driver);
 	return (0);
+}
+
+static void
+keyboard_poll_drivers(void)
+{
+	int	i;
+
+	for (i = 0; i < keyboard_driver_count; i++) {
+		if (keyboard_drivers[i]->poll == NULL ||
+		    !keyboard_driver_is_active(keyboard_drivers[i])) {
+			continue;
+		}
+		keyboard_drivers[i]->poll();
+	}
 }
 
 char
@@ -297,14 +315,8 @@ keyboard_getchar(void)
 		return (0);
 	}
 
-	if (current_driver) {
-		if (current_driver->poll) {
-			current_driver->poll();
-		}
-		if (current_driver->getchar) {
-			c = current_driver->getchar();
-		}
-	}
+	keyboard_poll_drivers();
+	c = keyboard_char_get();
 
 	if (kshell_try_open_if_requested()) {
 		return (0);
@@ -351,7 +363,7 @@ keyboard_driver_handler(keyboard_driver_t *driver)
 		return;
 	}
 	driver->handler();
-	if (driver != current_driver) {
+	if (!keyboard_driver_is_active(driver)) {
 		return;
 	}
 	keyboard_input_settle();
@@ -366,27 +378,35 @@ keyboard_common_handler(void)
 void
 keyboard_poll(void)
 {
-	if (!current_driver || !current_driver->poll) {
+	if (keyboard_driver_count == 0) {
 		return;
 	}
-
-	current_driver->poll();
+	keyboard_poll_drivers();
 	keyboard_input_settle();
 }
 
 void
 keyboard_reset_state(void)
 {
-	if (current_driver && current_driver->reset) {
-		current_driver->reset();
+	int	i;
+
+	for (i = 0; i < keyboard_driver_count; i++) {
+		if (keyboard_drivers[i]->reset != NULL) {
+			keyboard_drivers[i]->reset();
+		}
 	}
 }
 
 void
 keyboard_flush_chars(void)
 {
-	if (current_driver && current_driver->flush) {
-		current_driver->flush();
+	int	i;
+
+	keyboard_char_reset();
+	for (i = 0; i < keyboard_driver_count; i++) {
+		if (keyboard_drivers[i]->flush != NULL) {
+			keyboard_drivers[i]->flush();
+		}
 	}
 }
 
@@ -437,7 +457,52 @@ keyboard_get_driver_name(void)
 int
 keyboard_driver_is_active(keyboard_driver_t *driver)
 {
-	return (driver != NULL && driver == current_driver);
+	if (driver == NULL) {
+		return (0);
+	}
+	if (strcmp(keyboard_preferred_driver, "auto") == 0) {
+		return (1);
+	}
+	return (keyboard_driver_matches(driver, keyboard_preferred_driver));
+}
+
+void
+keyboard_char_put(keyboard_driver_t *driver, char c)
+{
+	int	next;
+
+	if (c == 0) {
+		return;
+	}
+	next = (keyboard_char_head + 1) % KEYBOARD_CHAR_RING_SIZE;
+	if (next == keyboard_char_tail) {
+		return;
+	}
+	keyboard_char_ring[keyboard_char_head] = c;
+	keyboard_char_head = next;
+	if (driver != NULL) {
+		current_driver = driver;
+	}
+}
+
+static char
+keyboard_char_get(void)
+{
+	char	c;
+
+	if (keyboard_char_head == keyboard_char_tail) {
+		return (0);
+	}
+	c = keyboard_char_ring[keyboard_char_tail];
+	keyboard_char_tail = (keyboard_char_tail + 1) % KEYBOARD_CHAR_RING_SIZE;
+	return (c);
+}
+
+static void
+keyboard_char_reset(void)
+{
+	keyboard_char_head = 0;
+	keyboard_char_tail = 0;
 }
 
 void

@@ -64,6 +64,7 @@ $define %func kbd_event_reset as procedure with args void
 
 $space %export keyboard_manager_init, keyboard_getchar
 $space %export keyboard_register_driver
+$space %export keyboard_char_put
 $space %export keyboard_getchar_blocking, keyboard_common_handler
 $space %export keyboard_poll, keyboard_reset_state
 $space %export keyboard_flush_chars, keyboard_flush_input
@@ -117,6 +118,7 @@ struct kbd_event {
 void		keyboard_manager_init(void);
 int		keyboard_register_driver(keyboard_driver_t *driver);
 int		keyboard_switch_driver(keyboard_driver_t *driver);
+void		keyboard_char_put(keyboard_driver_t *driver, char c);
 int		keyboard_driver_is_active(keyboard_driver_t *driver);
 void		keyboard_driver_handler(keyboard_driver_t *driver);
 void		keyboard_input_settle(void);
