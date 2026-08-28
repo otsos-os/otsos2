@@ -8,9 +8,13 @@ $define %func swm_now_ms as function with args swm_state *
 $define %func swm_deliver_frames as function with args swm_state *
 $define %func swm_terminal_acquire as function with args guard
 $define %func swm_terminal_release as procedure with args guard
+$define %func swm_de_watch as function with args swm_state *, int
+$define %func swm_de_unwatch as procedure with args swm_state *
+$define %func swm_de_restart as function with args swm_state *
 $define %func swm_start_de as function with args void
 $define %func swm_run as function with args swm_state *
 $define %func main as start with args void
+$define %const SWM_DE_MAX_RESTARTS as ceiling on desktop restart attempts
 
 */
 
@@ -19,6 +23,7 @@ $define %func main as start with args void
 $space %internal swm_drain_protocol, swm_poll_input, swm_now_ms
 $space %internal swm_deliver_frames, swm_run
 $space %internal swm_terminal_acquire, swm_terminal_release, swm_start_de
+$space %internal swm_de_watch, swm_de_unwatch, swm_de_restart
 $space %export main
 
 */
@@ -43,6 +48,7 @@ $space %export main
 #define SWM_WAIT_MS		8
 #define SWM_INPUT_BATCH		64
 #define SWM_BACKGROUND		0xff101418U
+#define SWM_DE_MAX_RESTARTS	3
 #define SWM_DE_PATH		"/bin/de"
 
 struct swm_frame_delivery {
@@ -112,6 +118,79 @@ swm_start_de(void)
 	argv[0] = (char *)SWM_DE_PATH;
 	argv[1] = NULL;
 	return (procSpawnNative(SWM_DE_PATH, argv, NULL));
+}
+
+static int
+swm_de_watch(swm_state_t *swm, int pid)
+{
+	struct kevent	change;
+	int		handle;
+
+	handle = procOpen((uint32_t)pid);
+	if (handle < 0) {
+		return (-1);
+	}
+
+	memset(&change, 0, sizeof(change));
+	change.ident = (uint64_t)(uint32_t)pid;
+	change.filter = EVFILT_PROC;
+	change.flags = EV_ADD | EV_ONESHOT;
+	change.fflags = NOTE_EXIT;
+	if (eventWait(swm->kq, &change, 1, NULL, 0, 0) < 0) {
+		(void)procClose(handle);
+		return (-1);
+	}
+
+	swm->de_pid = pid;
+	swm->de_handle = handle;
+	return (0);
+}
+
+static void
+swm_de_unwatch(swm_state_t *swm)
+{
+	struct kevent	change;
+
+	if (swm->de_pid > 0 && swm->kq >= 0) {
+		memset(&change, 0, sizeof(change));
+		change.ident = (uint64_t)(uint32_t)swm->de_pid;
+		change.filter = EVFILT_PROC;
+		change.flags = EV_DELETE;
+		(void)eventWait(swm->kq, &change, 1, NULL, 0, 0);
+	}
+	if (swm->de_handle >= 0) {
+		(void)procClose(swm->de_handle);
+		swm->de_handle = -1;
+	}
+	swm->de_pid = 0;
+}
+
+static int
+swm_de_restart(swm_state_t *swm)
+{
+	int	pid;
+
+	swm_de_unwatch(swm);
+	if (swm->de_restarts >= SWM_DE_MAX_RESTARTS) {
+		fprintf(stderr, "swm: %s died %d times, giving up\n",
+		    SWM_DE_PATH, swm->de_restarts);
+		return (-1);
+	}
+	swm->de_restarts++;
+	pid = swm_start_de();
+	if (pid < 0) {
+		fprintf(stderr, "swm: cannot restart %s: %s\n", SWM_DE_PATH,
+		    strerror(errno));
+		return (-1);
+	}
+	if (swm_de_watch(swm, pid) != 0) {
+		fprintf(stderr, "swm: cannot watch %s: %s\n", SWM_DE_PATH,
+		    strerror(errno));
+		(void)procKill((uint32_t)pid, 9);
+		return (-1);
+	}
+	fprintf(stderr, "swm: restarted %s as pid %d\n", SWM_DE_PATH, pid);
+	return (0);
 }
 
 static int
@@ -229,7 +308,20 @@ swm_run(swm_state_t *swm)
 		memset(&event, 0, sizeof(event));
 		ret = eventWait(swm->kq, NULL, 0, &event, 1, SWM_WAIT_MS);
 		if (ret < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
 			return (-1);
+		}
+		if (ret > 0 && event.filter == EVFILT_PROC &&
+		    (event.fflags & NOTE_EXIT) != 0) {
+			fprintf(stderr, "swm: %s exited with %d\n",
+			    SWM_DE_PATH, (int)event.data);
+			if (swm_de_restart(swm) != 0) {
+				return (-1);
+			}
+			swm_damage_all(swm);
+			changed = 1;
 		}
 		if (ret > 0 && (event.fflags & NOTE_IPC_READ) != 0) {
 			(void)swm_drain_protocol(swm);
@@ -278,6 +370,7 @@ main(void)
 	memset(&swm, 0, sizeof(swm));
 	swm.ipc = -1;
 	swm.kq = -1;
+	swm.de_handle = -1;
 	swm.next_cascade_x = 64;
 	swm.next_cascade_y = 64;
 	ret = swm_output_create_default(&swm.output);
@@ -315,10 +408,26 @@ main(void)
 		swm_output_destroy(swm.output);
 		return (1);
 	}
-	run_ret = swm_run(&swm);
-	if (de_pid > 0) {
+	if (swm_de_watch(&swm, de_pid) != 0) {
+		fprintf(stderr, "swm: cannot watch %s: %s\n", SWM_DE_PATH,
+		    strerror(errno));
 		(void)procKill((uint32_t)de_pid, 9);
+		swm_terminal_release(&terminal);
+		(void)eventClose(swm.kq);
+		(void)entityClose(swm.ipc);
+		swm_output_destroy(swm.output);
+		return (1);
 	}
+	run_ret = swm_run(&swm);
+	if (swm.de_handle >= 0 && swm.de_pid > 0) {
+		int	de_code;
+
+		de_code = 0;
+		if (procExitCode(swm.de_handle, &de_code) == 0) {
+			(void)procKill((uint32_t)swm.de_pid, 9);
+		}
+	}
+	swm_de_unwatch(&swm);
 	for (i = 0; i < SWM_MAX_CLIENTS; i++) {
 		if (swm.clients[i].in_use) {
 			swm_protocol_drop_client(&swm, &swm.clients[i],

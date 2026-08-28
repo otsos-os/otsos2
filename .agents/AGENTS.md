@@ -450,14 +450,16 @@ User need to test, dont run test manually, ask user.
   links or large files. POSIX personality uses the VFS and devfs on top of it.
 - POSIX personality is opt-in per process via `CALL_PERSONALITY` (`0xFFFF`);
   default is native `PERSONALITY_OTSOS`.
-- **Process death is two-phase.**  A process releases its own resources in
-  `process_exit()` but cannot free its own kernel stack, so it parks in
-  `PROC_STATE_ZOMBIE` and spins in `process_yield()`.  Phase two -- the
-  `thread_destroy()` plus `memset(proc)` that frees the thread and process
-  slots -- only ever runs in another context: `api_proc_wait()` or
-  `scheduler_reap_orphans()`.  A killer is therefore not done when the victim
-  is dead; whoever kills must also reap, or the slot leaks for the lifetime of
-  the system.
+- **Children are matched by parent entity id, never by ppid.** 
+- **Three notification mechanisms.**  Synchronous
+  (`procWait`/`procWaitHandle`), asynchronous (`kernel/apc.c` exit upcall, and `kqueue`.
+- **User APCs: normal vs special.**  A normal user APC is delivered only in an
+  alertable wait (`apcAlert`), so its handler runs at a moment the program
+  chose and need not be async-signal-safe.  A special user APC is delivered at
+  any return to user mode and is as dangerous as a signal handler -- handlers
+  must do nothing but set a flag and call `apcReturn()`.  `apcReturn()`
+  restores the interrupted frame whole, `rax` included, so an interrupted
+  syscall still reports its own result.
 -Newbus devices/interfaces are entities
   bound under `/Entity/Interface/Driver/...`; do not mount them in VFS and do
   not expose them to POSIX syscalls. POSIX programs use `/dev`.

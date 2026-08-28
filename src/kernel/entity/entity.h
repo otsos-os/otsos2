@@ -36,6 +36,10 @@ $define %type process as struct with process control block
 
 $define %func entity_init as procedure with args void
 $define %func entity_is_initialized as function with args void
+$define %func entity_slot_used as function with args archetype, index
+$define %func entity_id_at as function with args archetype, index
+$define %func entity_retain_checked as function with args entity id
+$define %func entity_saturations as function with args void
 $define %func entity_create as function with args archetype, flags, credentials
 $define %func entity_destroy as function with args entity id
 $define %func entity_retain as procedure with args entity id
@@ -93,6 +97,8 @@ $define %func entity_arch_io_get as function with args archetype
 /* !SPACE!
 
 $space %export entity_init, entity_is_initialized
+$space %export entity_slot_used, entity_id_at
+$space %export entity_retain_checked, entity_saturations
 $space %export entity_create, entity_destroy, entity_retain, entity_release
 $space %export entity_valid, entity_arch, entity_state, entity_refs
 $space %export entity_flags, entity_owner, entity_size, entity_set_size
@@ -122,10 +128,10 @@ $space %export entity_arch_io_get
 
 #include <mlibc/mlibc.h>
 
-#define	ENTITY_MAX_ENTITIES		2048
+#define	ENTITY_MAX_ENTITIES		8192
 #define	ENTITY_MAX_ARCHETYPES		64
-#define	ENTITY_MAX_HANDLES		1024
-#define	ENTITY_MAX_NS_NODES		4096
+#define	ENTITY_MAX_HANDLES		4096
+#define	ENTITY_MAX_NS_NODES		8192
 #define	ENTITY_NAME_MAX			64
 #define	ENTITY_PATH_MAX			256
 #define	ENTITY_DATA_COUNT		8
@@ -138,7 +144,7 @@ $space %export entity_arch_io_get
  * with inline objects (e.g. process/thread tables) register their own
  * block so the objects and their metadata live in the same allocation.
  */
-#define	ENTITY_BLOCK_SHIFT		7
+#define	ENTITY_BLOCK_SHIFT		8
 #define	ENTITY_BLOCK_ENTRIES		(1U << ENTITY_BLOCK_SHIFT)
 #define	ENTITY_BLOCK_COUNT		(ENTITY_MAX_ENTITIES / \
 					    ENTITY_BLOCK_ENTRIES)
@@ -250,6 +256,10 @@ entity_id_make(u16 arch, u16 gen, u32 index)
 void	entity_init(void);
 int	entity_is_initialized(void);
 int	entity_arch_release_register(u16 arch, entity_release_fn fn);
+int	entity_slot_used(u16 arch, u32 index);
+entity_id_t entity_id_at(u16 arch, u32 index);
+int	entity_retain_checked(entity_id_t id);
+u64	entity_saturations(void);
 
 entity_id_t entity_create(u16 arch, u32 flags, u32 owner_pid, u32 uid,
 	    u32 gid, u32 euid, u32 egid, int kusr);

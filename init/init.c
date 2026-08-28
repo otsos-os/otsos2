@@ -48,7 +48,7 @@ $define %func termRead as function with args void *, unsigned long
 $define %func procSpawnAbi as function with args const char *, char *const *, char *const *, unsigned int
 $define %func procWait as function with args int *
 $define %func procTryWait as function with args int *
-$define %func reap_orphans as function with args int
+$define %func drain_exit_records as function with args int
 $define %func scan_events as function with args struct kevent *, int, int
 $define %func kqueue_create as function with args void
 $define %func kqueue_close as function with args int
@@ -65,7 +65,7 @@ $define %func trim_newline as procedure with args char *
 $space %export _start
 $space %internal syscall1, syscall3, termWrite, termRead
 $space %internal procSpawnAbi
-$space %internal procWait, procTryWait, reap_orphans, scan_events
+$space %internal procWait, procTryWait, drain_exit_records, scan_events
 $space %internal kqueue_create, kqueue_close, kevent
 $space %internal strlen, print, print_long, trim_newline
 
@@ -232,7 +232,7 @@ procTryWait(int *status)
 }
 
 static int
-reap_orphans(int fg)
+drain_exit_records(int fg)
 {
 	int	status, got, hit, i;
 
@@ -261,7 +261,7 @@ scan_events(struct kevent *events, int n, int fg)
 			continue;
 		}
 		if (events[i].fflags & NOTE_REAP) {
-			if (reap_orphans(fg)) {
+			if (drain_exit_records(fg)) {
 				exited = 1;
 			}
 		}
@@ -393,7 +393,7 @@ _start(void)
 		changes[0].udata = 0;
 		if (kevent(kq, changes, 1, 0, 0, -1) < 0) {
 			print("init: NOTE_REAP registration failed, "
-			    "orphans will accumulate\n");
+			    "adopted exit records will accumulate\n");
 		}
 	}
 
@@ -457,7 +457,7 @@ _start(void)
 			}
 		}
 
-		(void)reap_orphans(-1);
+		(void)drain_exit_records(-1);
 		child_pid = -1;
 	}
 }

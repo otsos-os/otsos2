@@ -33,7 +33,7 @@ $define %type int as 32 bit signed
 $define %type knote_t as struct with registered event state
 $define %type kevent as struct with event ident, filter, flags, fflags, data, udata
 $define %type filter_ops_t as struct with filter callbacks vtable
-$define %type process_t as struct with process control block
+$define %type entity_id_t as 64 bit generation tagged object id
 
 $define %func filt_proc_attach as function with args knote_t *
 $define %func filt_proc_detach as procedure with args knote_t *
@@ -55,6 +55,7 @@ $space %export event_notify_proc_reap
 
 */
 
+#include <kernel/entity/entity.h>
 #include <kernel/event/event.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
@@ -64,25 +65,30 @@ $space %export event_notify_proc_reap
 static int
 filt_proc_attach(knote_t *kn)
 {
+	entity_id_t	id;
 	u32		pid;
-	process_t	*proc;
+	int		code, flags;
 
 	pid = (u32)kn->ident;
 
-	proc = process_get(pid);
-	if (!proc) {
+	id = process_entity_of_pid(pid);
+	if (id == 0) {
 		printk("[EVFILT_PROC] attach: pid %d not "
 		    "found\n", pid);
 		return (-API_ERR_NO_PROC);
 	}
+	if (entity_retain_checked(id) != 0) {
+		return (-API_ERR_NO_MEMORY);
+	}
+	kn->fpriv = (u64)id;
 
 	printk("[EVFILT_PROC] attach: monitoring "
 	    "pid=%d\n", pid);
 
-	if (proc->main_thread &&
-	    proc->main_thread->state == PROC_STATE_ZOMBIE) {
+	if (process_record_read(id, &code, &flags, NULL, NULL) == 0 &&
+	    (flags & PROC_EXIT_EXITED)) {
 		kn->fflags |= NOTE_EXIT;
-		kn->data = proc->exit_code;
+		kn->data = code;
 		knote_ready(kn);
 	}
 
@@ -92,34 +98,43 @@ filt_proc_attach(knote_t *kn)
 static void
 filt_proc_detach(knote_t *kn)
 {
-	(void)kn;
+	entity_id_t	id;
+
+	if (kn->fpriv == 0) {
+		return;
+	}
+	id = (entity_id_t)kn->fpriv;
+	kn->fpriv = 0;
+	entity_release(id);
 }
 
 static int
 filt_proc_event(knote_t *kn, u32 nevents)
 {
-	u32		pid;
-	process_t	*proc;
-
-	pid = (u32)kn->ident;
+	entity_id_t	id;
+	int		code, flags;
 
 	if ((kn->fflags & NOTE_REAP) && kn->pending) {
 		return (1);
 	}
 
-	proc = process_get(pid);
-	if (!proc) {
+	id = (entity_id_t)kn->fpriv;
+	if (id == 0) {
 		kn->fflags |= NOTE_EXIT;
 		return (1);
 	}
 
-	if (proc->main_thread &&
-	    proc->main_thread->state == PROC_STATE_ZOMBIE) {
+	if (process_record_read(id, &code, &flags, NULL, NULL) != 0) {
+		kn->fflags |= NOTE_EXIT;
+		return (1);
+	}
+
+	if (flags & PROC_EXIT_EXITED) {
 		if (kn->fflags & NOTE_EXIT) {
 			return (kn->pending ? 1 : 0);
 		}
 		kn->fflags |= NOTE_EXIT;
-		kn->data = proc->exit_code;
+		kn->data = code;
 		return (1);
 	}
 

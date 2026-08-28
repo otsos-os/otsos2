@@ -104,7 +104,6 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
   child->name[PROCESS_NAME_LEN - 1] = '\0';
 
   child->user_stack = parent->user_stack;
-  child->exit_code = 0;
   child->owns_address_space = 1;
   child->preferred_cpu = -1;
   child->last_cpu = -1;
@@ -120,6 +119,11 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
   api_copy_handles(child, parent);
   posix_copy_fds(child, parent);
   api_session_fork(parent, child);
+  if (process_entity_attach(child) != 0) {
+    pmap_destroy(child_cr3);
+    process_creation_abort(child);
+    return -API_ERR_NO_MEMORY;
+  }
   scheduler_assign_process(child);
 
   /* Create thread for child process */
@@ -128,7 +132,7 @@ long api_proc_clone(u64 flags, u64 child_stack, u64 ptid, registers_t *regs) {
       USER_CS, USER_DS);
   if (!td) {
     pmap_destroy(child_cr3);
-    memset(child, 0, sizeof(process_t));
+    process_creation_abort(child);
     return -API_ERR_NO_MEMORY;
   }
 

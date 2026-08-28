@@ -38,8 +38,21 @@ struct vm_object;
 #define PERSONALITY_OTSOS	0
 #define PERSONALITY_POSIX	1
 
-#define MAX_PROCESSES 64
+#define MAX_PROCESSES 256
 #define PROCESS_NAME_LEN 32
+
+#define	PROC_REC_CODE		0
+#define	PROC_REC_FLAGS		1
+#define	PROC_REC_PID		2
+#define	PROC_REC_PPID		3
+#define	PROC_REC_NOTIFY		4
+#define	PROC_REC_TICK		0
+#define	PROC_REC_PARENT_ID	1
+#define	PROC_EXIT_EXITED	0x1
+#define	PROC_EXIT_KILLED	0x2
+#define	PROC_EXIT_REAPED	0x4
+#define	PROC_NOTIFY_NONE	0x0
+#define	PROC_NOTIFY_APC		0x1
 #define USER_STACK_SIZE (64 * 1024)   /* initial mapped user stack */
 #define USER_STACK_MAX_SIZE (8 * 1024 * 1024)
 #define USER_STACK_END 0x0000800000000000ULL
@@ -82,11 +95,13 @@ typedef struct process {
 	int		preferred_cpu;	/* scheduler placement target, -1 for any CPU */
 	int		last_cpu;	/* last CPU that ran this process */
 
-  /* Exit status */
-  int exit_code;
+  u64 exit_upcall;
+  int exit_upcall_special;
 
   /* Address space ownership */
   int owns_address_space;
+  int resources_released;
+  int reapable;
 
   /* KUSR privilege */
   int kusr_auth;
@@ -132,6 +147,9 @@ process_t *process_create_kernel(const char *name, void (*entry)(void));
 
 /* Get process by PID */
 process_t *process_get(u32 pid);
+process_t *process_ref(u32 pid);
+void process_unref(process_t *proc);
+int process_has_reapable(void);
 
 process_t *process_current(void);
 
@@ -139,8 +157,22 @@ void process_set_current(process_t *proc);
 
 /* Exit current process */
 void process_exit(int code);
+void process_exit_signalled(int code);
 int process_kill(u32 pid);
 int process_send_signal(u32 pid, int sig);
+int process_entity_attach(process_t *proc);
+entity_id_t process_entity_of_pid(u32 pid);
+entity_id_t process_record_find_child(entity_id_t parent, u32 want_pid);
+int process_child_count(u32 pid);
+void process_creation_abort(process_t *proc);
+int process_record_read(entity_id_t id, int *code, int *flags, u32 *pid,
+	    u32 *ppid);
+int process_record_mark_reaped(entity_id_t id);
+int process_record_consume(entity_id_t id);
+int process_record_notify_mode(entity_id_t id);
+int process_record_set_notify(entity_id_t id, int mode);
+void process_reap(void);
+void process_dump_records(void);
 
 void process_yield(void);
 

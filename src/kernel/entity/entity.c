@@ -114,6 +114,7 @@ static entity_meta_block_t	entity_blocks[ENTITY_BLOCK_COUNT];
 static u32		entity_free_next[ENTITY_MAX_ENTITIES];
 static u32		entity_free_head;
 static u32		entity_count;
+static u64		entity_refs_saturated;
 static const char	*entity_arch_names[ENTITY_MAX_ARCHETYPES];
 static entity_release_fn	entity_arch_release[ENTITY_MAX_ARCHETYPES];
 static const entity_io_ops_t	*entity_arch_io[ENTITY_MAX_ARCHETYPES];
@@ -319,6 +320,69 @@ entity_init(void)
 }
 
 int
+entity_slot_used(u16 arch, u32 index)
+{
+	entity_meta_block_t	*block;
+	u32			slot, base, count;
+	int			used;
+
+	if (arch == 0 || arch > ENTITY_ARCH_MAX) {
+		return (0);
+	}
+	smp_lock();
+	block = entity_arch_blocks[arch].meta;
+	base = entity_arch_blocks[arch].base;
+	count = entity_arch_blocks[arch].count;
+	if (block == NULL || index < base || index - base >= count) {
+		smp_unlock();
+		return (0);
+	}
+	slot = index - base;
+	used = block->used[slot] ? 1 : 0;
+	smp_unlock();
+	return (used);
+}
+
+entity_id_t
+entity_id_at(u16 arch, u32 index)
+{
+	entity_meta_block_t	*block;
+	entity_id_t		id;
+	u32			slot, base, count;
+
+	if (arch == 0 || arch > ENTITY_ARCH_MAX) {
+		return (0);
+	}
+	smp_lock();
+	block = entity_arch_blocks[arch].meta;
+	base = entity_arch_blocks[arch].base;
+	count = entity_arch_blocks[arch].count;
+	if (block == NULL || index < base || index - base >= count) {
+		smp_unlock();
+		return (0);
+	}
+	slot = index - base;
+	if (!block->used[slot] || block->arch[slot] != arch) {
+		smp_unlock();
+		return (0);
+	}
+	id = entity_id_make(arch, block->gen[slot], index);
+	smp_unlock();
+	return (id);
+}
+
+u64
+entity_saturations(void)
+{
+	u64	value;
+
+	smp_lock();
+	value = entity_refs_saturated;
+	smp_unlock();
+	return (value);
+}
+
+int
 entity_arch_release_register(u16 arch, entity_release_fn fn)
 {
 	if (arch == 0 || arch > ENTITY_ARCH_MAX) {
@@ -518,27 +582,45 @@ entity_destroy(entity_id_t id)
 	return (0);
 }
 
-void
-entity_retain(entity_id_t id)
+int
+entity_retain_checked(entity_id_t id)
 {
 	entity_meta_block_t	*block;
 	u32			slot;
+	int			saturated;
 
 	smp_lock();
 	if (entity_slot(id) < 0) {
 		smp_unlock();
-		return;
+		return (-API_ERR_BAD_HANDLE);
 	}
 	block = entity_cur_block;
 	slot = entity_cur_slot;
 	if (block->refs[slot] < ENTITY_REF_MAX) {
 		block->refs[slot]++;
+		saturated = 0;
+	} else {
+		entity_refs_saturated++;
+		saturated = 1;
 	}
 	smp_unlock();
+	if (saturated) {
+		printk("[ENTITY] refcount saturated on id=%p arch=%u: "
+		    "slot leaked for the lifetime of the system\n",
+		    (void *)id, (unsigned)entity_id_archetype(id));
+		return (-API_ERR_RETRY);
+	}
 	entity_trace_notify(id, ENTITY_EVENT_RETAIN);
 	if (entity_event_notify) {
 		entity_event_notify(id, ENTITY_EVENT_RETAIN);
 	}
+	return (0);
+}
+
+void
+entity_retain(entity_id_t id)
+{
+	(void)entity_retain_checked(id);
 }
 
 void
@@ -943,8 +1025,9 @@ entity_dump(void)
 	u32	index, slot, a;
 
 	smp_lock();
-	printk("Entity dump (%u used / %d slots):\n", entity_count,
-	    ENTITY_MAX_ENTITIES);
+	printk("Entity dump (%u used / %d slots, %llu refcount "
+	    "saturations):\n", entity_count, ENTITY_MAX_ENTITIES,
+	    (unsigned long long)entity_refs_saturated);
 	for (index = 0; index < ENTITY_MAX_ENTITIES; index++) {
 		entity_meta_block_t	*block;
 		char			name[ENTITY_NAME_MAX];

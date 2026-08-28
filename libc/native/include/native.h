@@ -27,6 +27,12 @@ $define %func ptyOpen as function with args int *, int *
 $define %func procSpawn as function with args spawn tuple
 $define %func procSpawnAbi as function with args spawn tuple, uint32_t
 $define %func procSpawnPty as function with args const char *, char *const [], char *const [], int, uint32_t
+$define %func procOpen as function with args uint32_t
+$define %func procExitCode as function with args int, int *
+$define %func procNotify as function with args int, int
+$define %func procUpcall as function with args upcall handler, int
+$define %func apcAlert as function with args uint64_t
+$define %func apcQueue as function with args uint32_t, upcall handler, uint64_t
 $define %func netListen as function with args int, int
 $define %func netAccept as function with args int, api_net_addr *, uint32_t
 $define %func ipcCreate as function with args const char *, uint32_t, uint32_t
@@ -76,7 +82,9 @@ $space %export dataWriteFull, dataSeek, dataPipe, dataDir
 $space %export fsChdir, fsGetcwd, fsListdir, fsStat, fsRename, fsUnlink
 $space %export fsMnt, fsUmnt
 $space %export procSpawn, procSpawnAbi, procSpawnNative, procSpawnPty, procWait
-$space %export procTryWait
+$space %export procTryWait, procOpen, procClose, procExitCode
+$space %export procWaitHandle, procNotify, procUpcall
+$space %export apcAlert, apcQueue, apcReturn
 $space %export procRun, procExit, procKill
 $space %export memMap, memUnmap, eventKqueue, eventWait, eventClose
 $space %export powerState
@@ -272,6 +280,15 @@ struct api_winsize {
 #define CALL_PROC_GETSID	0x412
 #define CALL_PROC_PERM		0x413
 #define CALL_PROC_TRYWAIT	0x414
+#define CALL_PROC_OPEN		0x415
+#define CALL_PROC_CLOSE		0x416
+#define CALL_PROC_EXITCODE	0x417
+#define CALL_PROC_WAITH		0x418
+#define CALL_PROC_NOTIFY	0x419
+#define CALL_PROC_UPCALL	0x41A
+#define CALL_APC_RETURN		0x420
+#define CALL_APC_ALERT		0x421
+#define CALL_APC_QUEUE		0x422
 #define CALL_SYS_INFO		0x500
 #define CALL_SYS_MEMINFO	0x501
 #define CALL_SYS_KMEMINFO	0x502
@@ -1426,6 +1443,20 @@ int	procSpawnPty(const char *path, char *const argv[], char *const envp[],
 	    int pts_id, uint32_t abi);
 int	procWait(int *status);
 int	procTryWait(int *status);
+int	procOpen(uint32_t pid);
+int	procClose(int handle);
+int	procExitCode(int handle, int *code);
+int	procWaitHandle(int handle, int *code);
+
+#define	PROC_NOTIFY_NONE	0x0
+#define	PROC_NOTIFY_APC		0x1
+
+int	procNotify(int handle, int mode);
+int	procUpcall(void (*handler)(uint64_t, uint64_t, int), int special);
+int	apcAlert(uint64_t spins);
+int	apcQueue(uint32_t tid, void (*handler)(uint64_t, uint64_t, int),
+	    uint64_t arg);
+void	apcReturn(void);
 int	procRun(const char *path, char *const argv[], char *const envp[],
 	    int *status);
 void	procExit(int code) __attribute__((noreturn));

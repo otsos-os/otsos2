@@ -34,6 +34,8 @@ $define %func signal_send as function with args u32, int
 $define %func signal_deliver as procedure with args struct process *, registers_t *
 $define %func signal_pending as function with args struct process *
 $define %func signal_default as function with args int
+$define %func signal_fatal_pending as function with args struct process *
+$define %func signal_clear_pending as procedure with args struct process *, int
 
 $define %constant SIG_DFL_IGNORE as default signal action: ignore
 $define %constant SIG_DFL_TERMINATE as default signal action: terminate
@@ -44,13 +46,18 @@ $define %constant SIG_DFL_STOP as default signal action: stop
 /* !SPACE!
 
 $space %export signal_send, signal_deliver, signal_pending, signal_default
+$space %export signal_fatal_pending, signal_clear_pending
 $space %export SIG_DFL_IGNORE, SIG_DFL_TERMINATE, SIG_DFL_STOP
 
 */
 
 #ifndef KERNEL_API_SIGNAL_H
 #define KERNEL_API_SIGNAL_H
+#include <kernel/interrupts/idt.h>
 #include <mlibc/mlibc.h>
+
+struct process;
+
 #define SIG_DFL_IGNORE		0
 #define SIG_DFL_TERMINATE	1
 #define SIG_DFL_STOP		2
@@ -58,4 +65,6 @@ int		signal_send(u32 pid, int sig);
 void		signal_deliver(struct process *proc, registers_t *regs);
 int		signal_pending(struct process *proc);
 int		signal_default(int sig);
+int		signal_fatal_pending(struct process *proc);
+void		signal_clear_pending(struct process *proc, int sig);
 #endif

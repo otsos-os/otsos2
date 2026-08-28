@@ -18,6 +18,9 @@ $space %export procKill, procList, procGetpid, procGetppid, procGettid
 $space %export procPerm
 $space %export threadExit, threadJoin, procExitGroup, procSetTidAddress
 $space %export procSetsid, procGetsid, kusrAuth, personality
+$space %export procOpen, procClose, procExitCode, procWaitHandle
+$space %export procNotify, procUpcall
+$space %export apcAlert, apcQueue, apcReturn
 
 */
 
@@ -92,6 +95,65 @@ int
 procTryWait(int *status)
 {
 	return (__sysret_int(__syscall1(CALL_PROC_TRYWAIT, (long)status)));
+}
+
+int
+procOpen(uint32_t pid)
+{
+	return (__sysret_int(__syscall1(CALL_PROC_OPEN, (long)pid)));
+}
+
+int
+procClose(int handle)
+{
+	return (__sysret_int(__syscall1(CALL_PROC_CLOSE, (long)handle)));
+}
+
+int
+procExitCode(int handle, int *code)
+{
+	return (__sysret_int(__syscall2(CALL_PROC_EXITCODE, (long)handle,
+	    (long)code)));
+}
+
+int
+procWaitHandle(int handle, int *code)
+{
+	return (__sysret_int(__syscall2(CALL_PROC_WAITH, (long)handle,
+	    (long)code)));
+}
+
+int
+procNotify(int handle, int mode)
+{
+	return (__sysret_int(__syscall2(CALL_PROC_NOTIFY, (long)handle,
+	    (long)mode)));
+}
+
+int
+procUpcall(void (*handler)(uint64_t, uint64_t, int), int special)
+{
+	return (__sysret_int(__syscall2(CALL_PROC_UPCALL, (long)handler,
+	    (long)special)));
+}
+
+int
+apcAlert(uint64_t spins)
+{
+	return (__sysret_int(__syscall1(CALL_APC_ALERT, (long)spins)));
+}
+
+int
+apcQueue(uint32_t tid, void (*handler)(uint64_t, uint64_t, int), uint64_t arg)
+{
+	return (__sysret_int(__syscall3(CALL_APC_QUEUE, (long)tid,
+	    (long)handler, (long)arg)));
+}
+
+void
+apcReturn(void)
+{
+	(void)__syscall0(CALL_APC_RETURN);
 }
 
 int

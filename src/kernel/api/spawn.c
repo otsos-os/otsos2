@@ -583,7 +583,6 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
   child->entry_point = entry;
   child->user_stack = user_stack;
 
-  child->exit_code = 0;
   child->owns_address_space = 1;
   child->preferred_cpu = -1;
   child->last_cpu = -1;
@@ -624,6 +623,15 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
       pty_set_session_pgrp(pty_num, child->sid, child->pgid);
     }
   }
+  if (process_entity_attach(child) != 0) {
+    pmap_load(new_cr3);
+    vm_map_free_all(child);
+    pmap_load(old_cr3);
+    pmap_destroy(new_cr3);
+    process_creation_abort(child);
+    kmem_free(kpath);
+    return -API_ERR_NO_MEMORY;
+  }
   scheduler_assign_process(child);
   posix_setup_stdio(child);
 
@@ -636,7 +644,7 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
     vm_map_free_all(child);
     pmap_load(old_cr3);
     pmap_destroy(new_cr3);
-    memset(child, 0, sizeof(process_t));
+    process_creation_abort(child);
     kmem_free(kpath);
     return -API_ERR_NO_MEMORY;
   }

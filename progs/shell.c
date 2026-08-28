@@ -369,8 +369,8 @@ static int
 run_external(const char *path, char **argv, char **envp)
 {
 	int	status;
+	int	handle;
 	int	pid;
-	int	got;
 	int	code;
 
 	pid = procSpawn(path, argv, envp);
@@ -383,20 +383,24 @@ run_external(const char *path, char **argv, char **envp)
 		return (-1);
 	}
 
-	for (;;) {
-		got = procWait(&status);
-		if (got > 0) {
-			break;
+	handle = procOpen((uint32_t)pid);
+	if (handle < 0) {
+		code = errno;
+		if (code == ESRCH) {
+			return (0);
 		}
-		if (got < 0) {
-			code = errno;
-			if (code == ECHILD) {
-				continue;
-			}
-			print_err_code("sh: wait", code);
-			return (-1);
-		}
+		print_err_code("sh: procOpen", code);
+		return (-1);
 	}
+
+	status = 0;
+	if (procWaitHandle(handle, &status) < 0) {
+		code = errno;
+		print_err_code("sh: wait", code);
+		procClose(handle);
+		return (-1);
+	}
+	procClose(handle);
 	return (0);
 }
 
@@ -794,7 +798,7 @@ state_name(uint32_t s)
 	case 4:
 		return ("SLEEP");
 	case 5:
-		return ("ZOMBIE");
+		return ("DEAD");
 	default:
 		return ("FREE");
 	}

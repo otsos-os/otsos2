@@ -134,6 +134,9 @@ typedef struct swm_state {
 	int32_t		next_cascade_y;
 	int		ipc;
 	int		kq;
+	int		de_pid;
+	int		de_handle;
+	int		de_restarts;
 	int		cursor_visible;
 	int		input_have_raw;
 	int		mouse_left_down;

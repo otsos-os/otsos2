@@ -31,6 +31,7 @@
 #include <kernel/api/shm.h>
 #include <kernel/api/posix/posix.h>
 #include <kernel/api/signal.h>
+#include <kernel/apc.h>
 #include <kernel/event/event.h>
 #include <kernel/ipc/ipc.h>
 #include <kernel/process.h>
@@ -138,10 +139,12 @@ void syscall_handler(registers_t *regs) {
     if (cur_proc->personality == PERSONALITY_POSIX) {
       posix_syscall_handler(regs);
       posix_signal_deliver(cur_proc, regs);
+      apc_deliver(thread_current(), regs, APC_AT_SYSCALL);
       trace_syscall_exit(regs, syscall_number, regs->rax, trace_start);
       return;
     }
   }
+  int apc_context = APC_AT_SYSCALL;
 
   switch (syscall_number) {
   case CALL_TERM_READ:
@@ -271,6 +274,38 @@ void syscall_handler(registers_t *regs) {
     break;
   case CALL_PROC_TRYWAIT:
     regs->rax = (u64)api_proc_trywait((int *)arg1);
+    break;
+  case CALL_PROC_OPEN:
+    regs->rax = (u64)api_proc_open((u32)arg1);
+    break;
+  case CALL_PROC_CLOSE:
+    regs->rax = (u64)api_proc_close((int)arg1);
+    break;
+  case CALL_PROC_EXITCODE:
+    regs->rax = (u64)api_proc_exitcode((int)arg1, (int *)arg2);
+    break;
+  case CALL_PROC_WAITH:
+    regs->rax = (u64)api_proc_waith((int)arg1, (int *)arg2);
+    break;
+  case CALL_PROC_NOTIFY:
+    regs->rax = (u64)api_proc_notify((int)arg1, (int)arg2);
+    break;
+  case CALL_PROC_UPCALL:
+    regs->rax = (u64)api_proc_upcall(arg1, (int)arg2);
+    break;
+  case CALL_APC_RETURN: {
+    int apc_ret = apc_return(thread_current(), regs);
+    if (apc_ret != 0) {
+      regs->rax = (u64)apc_ret;
+    }
+    return;
+  }
+  case CALL_APC_ALERT:
+    regs->rax = (u64)api_apc_alert((u64)arg1);
+    apc_context |= APC_AT_ALERTABLE;
+    break;
+  case CALL_APC_QUEUE:
+    regs->rax = (u64)api_apc_queue((u32)arg1, arg2, arg3);
     break;
 	case CALL_PROC_KILL:
 	    regs->rax = process_send_signal((u32)arg1, (int)arg2);
@@ -542,5 +577,6 @@ void syscall_handler(registers_t *regs) {
   if (cur_proc) {
     signal_deliver(cur_proc, regs);
   }
+  apc_deliver(thread_current(), regs, apc_context);
   trace_syscall_exit(regs, syscall_number, regs->rax, trace_start);
 }

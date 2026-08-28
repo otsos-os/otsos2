@@ -10,8 +10,13 @@ $define %func de_draw_tooltip as procedure with args desktop
 $define %func de_render as procedure with args desktop
 $define %func de_set_menu as procedure with args desktop, visible
 $define %func de_launch_terminal as procedure with args void
+$define %func de_child_upcall as procedure with args uint64_t, uint64_t, int
+$define %func de_child_watch as function with args int
+$define %func de_child_collect as procedure with args void
+$define %func de_child_close_all as procedure with args void
 $define %func de_cleanup as procedure with args desktop
 $define %func main as start with args void
+$define %const DE_MAX_CHILDREN as ceiling on simultaneously watched children
 
 */
 
@@ -21,6 +26,8 @@ $space %internal de_present, de_wait_surface, de_send_input, de_handle_event
 $space %internal de_window_find, de_window_update, de_window_remove
 $space %internal de_format_clock, de_format_stats, de_draw_panel
 $space %internal de_draw_menu, de_draw_tooltip, de_launch_terminal
+$space %internal de_child_upcall, de_child_watch, de_child_collect
+$space %internal de_child_close_all
 $space %internal de_set_menu, de_cleanup
 $space %export main
 
@@ -67,6 +74,12 @@ $space %export main
 #define DE_MENU_ITEM_H	22
 #define DE_MENU_ENTRIES	5
 #define DE_FRAME_MS	16
+#define DE_MAX_CHILDREN	16
+static volatile int		de_child_pid[DE_MAX_CHILDREN];
+static volatile int		de_child_handle[DE_MAX_CHILDREN];
+static volatile int		de_child_dead[DE_MAX_CHILDREN];
+static volatile int		de_child_code[DE_MAX_CHILDREN];
+static volatile int		de_child_events;
 
 #define DE_COLOR_BAR		0xff12141aU
 #define DE_COLOR_BORDER		0xff465f82U
@@ -121,6 +134,8 @@ struct de {
 	libg_anim_t		tooltip_anim;
 };
 
+static void	de_child_close_all(void);
+
 static void
 de_set_menu(struct de *desktop, int visible)
 {
@@ -134,6 +149,7 @@ de_set_menu(struct de *desktop, int visible)
 static void
 de_cleanup(struct de *desktop)
 {
+	de_child_close_all();
 	if (desktop == NULL) {
 		return;
 	}
@@ -548,11 +564,119 @@ de_draw_tooltip(struct de *desktop)
 }
 
 static void
+de_child_upcall(uint64_t entity_id, uint64_t pid, int code)
+{
+	int	i;
+
+	(void)entity_id;
+	for (i = 0; i < DE_MAX_CHILDREN; i++) {
+		if (de_child_pid[i] != (int)pid || de_child_dead[i]) {
+			continue;
+		}
+		de_child_code[i] = code;
+		de_child_dead[i] = 1;
+		de_child_events++;
+		break;
+	}
+	apcReturn();
+}
+
+
+static int
+de_child_watch(int pid)
+{
+	int	handle;
+	int	code;
+	int	i;
+
+	for (i = 0; i < DE_MAX_CHILDREN; i++) {
+		if (de_child_pid[i] == 0) {
+			break;
+		}
+	}
+	if (i == DE_MAX_CHILDREN) {
+		return (-1);
+	}
+	handle = procOpen((uint32_t)pid);
+	if (handle < 0) {
+		return (-1);
+	}
+	if (procNotify(handle, PROC_NOTIFY_APC) < 0) {
+		(void)procClose(handle);
+		return (-1);
+	}
+	de_child_handle[i] = handle;
+	de_child_pid[i] = pid;
+	code = 0;
+	if (procExitCode(handle, &code) == 1) {
+		de_child_code[i] = code;
+		de_child_dead[i] = 1;
+		de_child_events++;
+	}
+	return (0);
+}
+
+static void
+de_child_collect(void)
+{
+	int	code;
+	int	pid;
+	int	i;
+
+	if (!de_child_events) {
+		return;
+	}
+	de_child_events = 0;
+	for (i = 0; i < DE_MAX_CHILDREN; i++) {
+		if (!de_child_dead[i]) {
+			continue;
+		}
+		pid = de_child_pid[i];
+		code = de_child_code[i];
+		de_child_pid[i] = 0;
+		de_child_dead[i] = 0;
+		de_child_code[i] = 0;
+		if (de_child_handle[i] >= 0) {
+			(void)procClose(de_child_handle[i]);
+			de_child_handle[i] = -1;
+		}
+		fprintf(stderr, "de: terminal pid %d exited with %d\n", pid,
+		    code);
+	}
+}
+
+static void
+de_child_close_all(void)
+{
+	int	i;
+
+	for (i = 0; i < DE_MAX_CHILDREN; i++) {
+		de_child_pid[i] = 0;
+		de_child_dead[i] = 0;
+		if (de_child_handle[i] >= 0) {
+			(void)procClose(de_child_handle[i]);
+			de_child_handle[i] = -1;
+		}
+	}
+}
+
+static void
 de_launch_terminal(void)
 {
 	const char *argv[] = { "term", NULL };
+	int	pid;
 
-	(void)procSpawnNative("/bin/term", (char *const *)argv, NULL);
+	pid = procSpawnNative("/bin/term", (char *const *)argv, NULL);
+	if (pid < 0) {
+		fprintf(stderr, "de: cannot launch terminal: %s\n",
+		    strerror(errno));
+		return;
+	}
+	if (de_child_watch(pid) != 0) {
+		fprintf(stderr, "de: cannot watch terminal pid %d: %s\n", pid,
+		    strerror(errno));
+		(void)procKill((uint32_t)pid, 9);
+	}
 }
 
 static void
@@ -627,6 +751,15 @@ main(void)
 
 	memset(&desktop, 0, sizeof(desktop));
 	desktop.tooltip_window = -1;
+	for (ret = 0; ret < DE_MAX_CHILDREN; ret++) {
+		de_child_handle[ret] = -1;
+	}
+
+	if (procUpcall(de_child_upcall, 1) < 0) {
+		fprintf(stderr, "de: cannot register exit upcall: %s\n",
+		    strerror(errno));
+		return (1);
+	}
 	desktop.connection = sprot_connect(SPROT_DEFAULT_SERVICE);
 	if (desktop.connection == NULL) {
 		termPrint("de: cannot connect to swm\n");
@@ -696,6 +829,7 @@ main(void)
 		(void)libgBeginOverlay(desktop.menu_ui);
 		(void)libgBeginOverlay(desktop.tooltip_ui);
 		input_pending = 0;
+		de_child_collect();
 		ret = sprot_poll_event(desktop.connection, &event, DE_FRAME_MS);
 		if (ret < 0) {
 			if (errno == EAGAIN || errno == EINTR) {

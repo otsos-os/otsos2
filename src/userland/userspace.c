@@ -145,7 +145,7 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
     printk("[USERSPACE] Error: Failed to load ELF\n");
     pmap_load(old_cr3);
     pmap_destroy(new_cr3);
-    memset(new_proc, 0, sizeof(process_t));
+    process_creation_abort(new_proc);
     return NULL;
   }
 
@@ -181,7 +181,6 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   /* Stacks */
   new_proc->user_stack = user_stack;
 
-  new_proc->exit_code = 0;
   new_proc->owns_address_space = 1;
   new_proc->preferred_cpu = -1;
   new_proc->last_cpu = -1;
@@ -203,6 +202,15 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   api_init_process(new_proc);
   posix_init_process(new_proc);
   new_proc->personality = PERSONALITY_OTSOS;
+  if (process_entity_attach(new_proc) != 0) {
+    printk("[USERSPACE] error: entity attach failed\n");
+    pmap_load(new_cr3);
+    vm_map_free_all(new_proc);
+    pmap_load(old_cr3);
+    pmap_destroy(new_cr3);
+    process_creation_abort(new_proc);
+    return NULL;
+  }
   scheduler_assign_process(new_proc);
 
   thread_t *td = thread_create(new_proc, entry, user_stack,
@@ -213,7 +221,7 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
     vm_map_free_all(new_proc);
     pmap_load(old_cr3);
     pmap_destroy(new_cr3);
-    memset(new_proc, 0, sizeof(process_t));
+    process_creation_abort(new_proc);
     return NULL;
   }
 

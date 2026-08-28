@@ -157,8 +157,17 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_PROC_GETSID		0x412
 #define	CALL_PROC_PERM		0x413
 #define	CALL_PROC_TRYWAIT	0x414
+#define	CALL_PROC_OPEN		0x415
+#define	CALL_PROC_CLOSE		0x416
+#define	CALL_PROC_EXITCODE	0x417
+#define	CALL_PROC_WAITH		0x418
+#define	CALL_PROC_NOTIFY	0x419
+#define	CALL_PROC_UPCALL	0x41A
 #define	CALL_FUTEX_WAIT		0x40F
 #define	CALL_FUTEX_WAKE		0x410
+#define	CALL_APC_RETURN		0x420
+#define	CALL_APC_ALERT		0x421
+#define	CALL_APC_QUEUE		0x422
 #define	CALL_SYS_RANDOM		0x503
 #define	CALL_SYS_TIMEINFO	0x504
 #define	CALL_SYS_TIME		0x505

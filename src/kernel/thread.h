@@ -53,6 +53,9 @@ $define %func thread_exit as procedure with args int
 $define %func thread_join as function with args u32, int *
 $define %func thread_count_alive as function with args process_t *
 $define %func thread_kill_all as procedure with args process_t *
+$define %func thread_mark_dead as procedure with args thread_t *
+$define %func thread_has_dead as function with args void
+$define %func thread_retired_dead as procedure with args void
 
 */
 
@@ -66,6 +69,7 @@ $space %export thread_get_by_proc, thread_destroy
 $space %export thread_is_initialized, thread_get
 $space %export thread_exit, thread_join
 $space %export thread_count_alive, thread_kill_all
+$space %export thread_mark_dead, thread_has_dead, thread_retired_dead
 
 */
 
@@ -76,8 +80,9 @@ $space %export thread_count_alive, thread_kill_all
 #include <kernel/entity/entity.h>
 #include <mlibc/mlibc.h>
 
-#define MAX_THREADS 128
+#define MAX_THREADS 256
 #define FPU_FXSAVE_SIZE 512
+#define THREAD_MAX_APCS 16
 
 struct process;
 
@@ -96,14 +101,13 @@ typedef struct {
 	u8	bytes[FPU_FXSAVE_SIZE];
 } __attribute__((aligned(16))) fpu_context_t;
 
-/* Thread scheduling states */
 typedef enum {
 	PROC_STATE_UNUSED = 0,
 	PROC_STATE_EMBRYO,
 	PROC_STATE_RUNNABLE,
 	PROC_STATE_RUNNING,
 	PROC_STATE_SLEEPING,
-	PROC_STATE_ZOMBIE
+	PROC_STATE_TERMINATED
 } process_state_t;
 
 typedef struct thread {
@@ -127,6 +131,12 @@ typedef struct thread {
 	u64			trace_switches;
 	int			running_cpu;	/* -1 when not running on any CPU */
 	int			fpu_valid;
+	int			apc_head;
+	int			apc_count;
+	int			apc_alertable;
+	int			apc_in_user;
+	cpu_context_t		apc_saved_context;
+	fpu_context_t		apc_saved_fpu;
 	struct thread		*next;
 	struct thread		*prev;
 } thread_t;
@@ -149,6 +159,9 @@ void		thread_exit(int code);
 int		thread_join(u32 tid, int *status);
 int		thread_count_alive(struct process *proc);
 void		thread_kill_all(struct process *proc);
+void		thread_mark_dead(thread_t *td);
+int		thread_has_dead(void);
+void		thread_retired_dead(void);
 
 /*
  * AoSoA: threads and their entity metadata live in one block so the

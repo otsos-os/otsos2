@@ -59,6 +59,8 @@ $space %export kshell_echo_command
 #include <kernel/drivers/video/drm/kms/crtc.h>
 #include <kernel/kshell/kshell.h>
 #include <kernel/api/api.h>
+#include <kernel/apc.h>
+#include <kernel/entity/entity.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <mlibc/mlibc.h>
@@ -77,8 +79,8 @@ process_state_name(process_state_t state)
 		return ("RUNNING");
 	case PROC_STATE_SLEEPING:
 		return ("SLEEPING");
-	case PROC_STATE_ZOMBIE:
-		return ("ZOMBIE");
+	case PROC_STATE_TERMINATED:
+		return ("TERMINATED");
 	default:
 		return ("UNKNOWN");
 	}
@@ -272,6 +274,27 @@ print_kernel_var(const char *name)
 			    process_state_name(td->state));
 			kshell_console_write("\n");
 		}
+		return (0);
+	}
+
+	if (strcmp(name, "prec") == 0) {
+		process_dump_records();
+		return (0);
+	}
+
+	if (strcmp(name, "apcstat") == 0) {
+		u64	queued, delivered, dropped;
+
+		apc_stats(&queued, &delivered, &dropped);
+		kshell_console_write("apc queued: ");
+		kshell_console_write_int((int)queued);
+		kshell_console_write("\napc delivered: ");
+		kshell_console_write_int((int)delivered);
+		kshell_console_write("\napc dropped: ");
+		kshell_console_write_int((int)dropped);
+		kshell_console_write("\nentity refcount saturations: ");
+		kshell_console_write_int((int)entity_saturations());
+		kshell_console_write("\n");
 		return (0);
 	}
 

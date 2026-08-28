@@ -36,9 +36,11 @@ $define %type registers_t as struct with CPU register snapshot
 $define %func scheduler_load_config as procedure with args void
 $define %func pick_next_thread as function with args thread_t *
 $define %func pick_any_runnable_thread as function with args thread_t *
-$define %func scheduler_retire_zombies as procedure with args thread_t *
-$define %func scheduler_reap_orphans as procedure with args thread_t *
+$define %func scheduler_reap_apc as procedure with args u64, u64, u64
+$define %func scheduler_retire_dead as procedure with args thread_t *
 $define %func scheduler_cm_update as function with args u32
+$define %func scheduler_redirect_to_death as procedure with args thread_t *, registers_t *, int
+$define %func scheduler_user_return_work as procedure with args registers_t *
 $define %func scheduler_switch as procedure with args registers_t *, int
 $define %func scheduler_tick as procedure with args registers_t *
 $define %func scheduler_yield as procedure with args registers_t *
@@ -49,7 +51,8 @@ $define %func scheduler_yield as procedure with args registers_t *
 
 $space %internal scheduler_load_config
 $space %internal pick_next_thread, pick_any_runnable_thread
-$space %internal scheduler_retire_zombies, scheduler_reap_orphans
+$space %internal scheduler_reap_apc, scheduler_retire_dead
+$space %internal scheduler_redirect_to_death, scheduler_user_return_work
 $space %internal scheduler_switch
 $space %export scheduler_cm_update, scheduler_tick, scheduler_yield
 
@@ -57,6 +60,9 @@ $space %export scheduler_cm_update, scheduler_tick, scheduler_yield
 
 #include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <mm/vm/pmap.h>
+#include <kernel/apc.h>
+#include <kernel/api/signal.h>
+#include <kernel/gdt.h>
 #include <kernel/cm/cm.h>
 #include <kernel/entity/entity.h>
 #include <kernel/process.h>
@@ -70,7 +76,6 @@ static int	sched_strict_process_separation;
 static int	sched_smart_migration = 1;
 static int	sched_migration_threshold = 2;
 static int	sched_next_cpu;
-static int	sched_zkill;
 
 static void
 scheduler_load_config(void)
@@ -87,8 +92,6 @@ scheduler_load_config(void)
 	if (sched_migration_threshold < 0) {
 		sched_migration_threshold = 0;
 	}
-	sched_zkill =
-	    cm_get_bool_default("SYSTEM", "Scheduler", "Zkill", 0);
 }
 static int
 scheduler_cpu_runnable_count(int cpu)
@@ -101,7 +104,7 @@ scheduler_cpu_runnable_count(int cpu)
 		if (!td->used || !td->proc) {
 			continue;
 		}
-		if (td->state == PROC_STATE_ZOMBIE ||
+		if (td->state == PROC_STATE_TERMINATED ||
 		    td->state == PROC_STATE_UNUSED) {
 			continue;
 		}
@@ -168,9 +171,9 @@ scheduler_init(void)
 	cm_register_consumer(CM_CONSUMER_SCHEDULER, "scheduler",
 	    scheduler_cm_update);
 	sched_next_cpu = 0;
-	printk("[SCHED] strict=%d smart=%d migration_threshold=%d zkill=%d\n",
+	printk("[SCHED] strict=%d smart=%d migration_threshold=%d\n",
 	    sched_strict_process_separation, sched_smart_migration,
-	    sched_migration_threshold, sched_zkill);
+	    sched_migration_threshold);
 }
 
 int
@@ -178,10 +181,9 @@ scheduler_cm_update(u32 flags)
 {
 	(void)flags;
 	scheduler_load_config();
-	printk("[SCHED] updated strict=%d smart=%d migration_threshold=%d "
-	    "zkill=%d\n", sched_strict_process_separation,
-	    sched_smart_migration, sched_migration_threshold,
-	    sched_zkill);
+	printk("[SCHED] updated strict=%d smart=%d migration_threshold=%d\n",
+	    sched_strict_process_separation, sched_smart_migration,
+	    sched_migration_threshold);
 	return (0);
 }
 
@@ -206,19 +208,6 @@ scheduler_assign_process(process_t *proc)
 		proc->preferred_cpu = -1;
 	}
 	proc->last_cpu = -1;
-	if (entity_is_initialized() && proc->entity == 0) {
-		char	name[64];
-
-		proc->entity = entity_attach(ENTITY_ARCH_PROCESS,
-		    (u32)(proc - process_table), 0, proc->pid,
-		    proc->uid, proc->gid, proc->euid, proc->egid,
-		    proc->kusr_auth);
-		if (proc->entity != 0) {
-			snprintf(name, sizeof(name), "/Entity/Process/%u",
-			    proc->pid);
-			entity_ns_bind(name, proc->entity);
-		}
-	}
 	printk("[SCHED] PID %d preferred_cpu=%d\n", proc->pid,
 	    proc->preferred_cpu);
 }
@@ -276,61 +265,87 @@ pick_any_runnable_thread(thread_t *current)
 }
 
 static void
-scheduler_retire_zombies(thread_t *current)
+scheduler_reap_apc(u64 arg1, u64 arg2, u64 arg3)
+{
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
+	process_reap();
+}
+
+static void
+scheduler_retire_dead(thread_t *current)
 {
 	thread_t	*td;
-	int	cpu, i;
+	int	cpu, i, retired;
 
+	if (!thread_has_dead()) {
+		return;
+	}
+
+	retired = 0;
 	cpu = smp_cpu_index();
 	for (i = 0; i < MAX_THREADS; i++) {
 		td = &thread_table[i];
 		if (td->used && td != current &&
-		    td->state == PROC_STATE_ZOMBIE &&
+		    td->state == PROC_STATE_TERMINATED &&
 		    td->running_cpu == cpu) {
 			td->running_cpu = -1;
+			thread_retired_dead();
+			retired++;
 		}
+	}
+
+	if (retired > 0 && current != NULL &&
+	    current->state != PROC_STATE_TERMINATED &&
+	    process_has_reapable()) {
+		(void)apc_queue_kernel(current, scheduler_reap_apc, 0, 0, 0);
 	}
 }
 
 static void
-scheduler_reap_orphans(thread_t *skip)
+scheduler_redirect_to_death(thread_t *td, registers_t *regs, int code)
+{
+	u64	rsp;
+	rsp = (td->kernel_stack - 64) & ~0xFULL;
+	rsp -= 8;
+
+	regs->rip = (u64)process_exit_signalled;
+	regs->cs = KERNEL_CS;
+	regs->ss = KERNEL_DS;
+	regs->rsp = rsp;
+	regs->rflags = 0x202;
+	regs->rdi = (u64)(u32)code;
+}
+
+static void
+scheduler_user_return_work(registers_t *regs)
 {
 	process_t	*proc;
 	thread_t	*td;
-	int		i;
+	int		sig;
 
-	if (!sched_zkill) {
+	if (!regs || (regs->cs & 3) != 3) {
 		return;
 	}
 
-	for (i = 0; i < MAX_THREADS; i++) {
-		td = &thread_table[i];
-		if (!td->used || td == skip ||
-		    td->state != PROC_STATE_ZOMBIE ||
-		    td->running_cpu >= 0 || td->proc == NULL) {
-			continue;
-		}
-		proc = td->proc;
-		if (proc->ppid != 0 && process_get(proc->ppid) != NULL) {
-			continue;
-		}
-		api_trace_cleanup_process(proc);
-		api_release_handles(proc);
-		posix_cleanup_process(proc);
-		if (proc->owns_address_space && proc->cr3 != 0) {
-			u64	old_cr3;
-
-			old_cr3 = pmap_get_cr3();
-			pmap_load(proc->cr3);
-			vm_map_free_all(proc);
-			pmap_load(old_cr3);
-			pmap_destroy(proc->cr3);
-			proc->cr3 = 0;
-			proc->owns_address_space = 0;
-		}
-		thread_destroy(td);
-		memset(proc, 0, sizeof(process_t));
+	td = thread_current();
+	if (!td || td->state == PROC_STATE_TERMINATED) {
+		return;
 	}
+	proc = td->proc;
+	if (!proc || proc->pid == 0) {
+		return;
+	}
+
+	sig = signal_fatal_pending(proc);
+	if (sig > 0) {
+		signal_clear_pending(proc, sig);
+		scheduler_redirect_to_death(td, regs, 128 + sig);
+		return;
+	}
+
+	(void)apc_deliver(td, regs, APC_AT_USER_RETURN);
 }
 
 static void
@@ -340,6 +355,8 @@ scheduler_switch(registers_t *regs, int voluntary)
 	process_t	*cur_proc;
 	u32		trace_reason;
 	int		locked_here;
+
+	scheduler_user_return_work(regs);
 
 	current = thread_current();
 	if (!current) {
@@ -408,26 +425,26 @@ scheduler_switch(registers_t *regs, int voluntary)
 	if (locked_here) {
 		smp_lock();
 	}
-	scheduler_retire_zombies(current);
-	scheduler_reap_orphans(current);
+	scheduler_retire_dead(current);
+	process_reap();
 	thread_save_context(current, regs);
 
 	if (current->state == PROC_STATE_RUNNING) {
 		current->state = PROC_STATE_RUNNABLE;
 		current->running_cpu = -1;
-	} else if (current->state != PROC_STATE_ZOMBIE) {
+	} else if (current->state != PROC_STATE_TERMINATED) {
 		current->running_cpu = -1;
 	}
 
 	next = pick_next_thread(current);
 	if (!next || next == current) {
-		if (current->state == PROC_STATE_ZOMBIE) {
+		if (current->state == PROC_STATE_TERMINATED) {
 			next = pick_any_runnable_thread(current);
 		}
 	}
 
 	if (!next || next == current) {
-		if (current->state == PROC_STATE_ZOMBIE) {
+		if (current->state == PROC_STATE_TERMINATED) {
 			current->running_cpu = smp_cpu_index();
 			if (locked_here) {
 				smp_unlock();
@@ -442,7 +459,7 @@ scheduler_switch(registers_t *regs, int voluntary)
 		return;
 	}
 
-	if (current->state == PROC_STATE_ZOMBIE) {
+	if (current->state == PROC_STATE_TERMINATED) {
 		trace_reason = TRACE_SCHED_EXIT;
 	}
 	trace_sched_switch(current, next, trace_reason, regs);

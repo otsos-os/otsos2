@@ -35,12 +35,15 @@ $define %func signal_send as function with args u32, int
 $define %func signal_deliver as procedure with args struct process *, registers_t *
 $define %func signal_pending as function with args struct process *
 $define %func signal_default as function with args int
+$define %func signal_fatal_pending as function with args struct process *
+$define %func signal_clear_pending as procedure with args struct process *, int
 
 */
 
 /* !SPACE!
 
 $space %export signal_send, signal_deliver, signal_pending, signal_default
+$space %export signal_fatal_pending, signal_clear_pending
 
 */
 
@@ -122,6 +125,50 @@ signal_send(u32 pid, int sig)
 	return (0);
 }
 
+int
+signal_fatal_pending(struct process *proc)
+{
+	u64	pending, mask;
+	int	sig;
+
+	if (!proc || proc->sigpending == 0) {
+		return (0);
+	}
+
+	if (proc->sigpending & (1ULL << (SIGKILL - 1))) {
+		return (SIGKILL);
+	}
+
+	pending = proc->sigpending & ~proc->sigmask;
+	if (pending == 0) {
+		return (0);
+	}
+
+	for (sig = 1; sig <= MAX_POSIX_SIGS; sig++) {
+		mask = (1ULL << (sig - 1));
+		if ((pending & mask) == 0) {
+			continue;
+		}
+		if (proc->personality == PERSONALITY_POSIX &&
+		    proc->sigaction[sig - 1].handler != 0) {
+			continue;
+		}
+		if (signal_default(sig) == SIG_DFL_TERMINATE) {
+			return (sig);
+		}
+	}
+	return (0);
+}
+
+void
+signal_clear_pending(struct process *proc, int sig)
+{
+	if (!proc || sig < 1 || sig > MAX_POSIX_SIGS) {
+		return;
+	}
+	proc->sigpending &= ~(1ULL << (sig - 1));
+}
+
 void
 signal_deliver(struct process *proc, registers_t *regs)
 {
@@ -152,8 +199,7 @@ signal_deliver(struct process *proc, registers_t *regs)
 		if (pending & mask) {
 			if (sig == SIGKILL) {
 				proc->sigpending &= ~mask;
-				proc->exit_code = 128 + sig;
-				process_exit(proc->exit_code);
+				process_exit(128 + sig);
 				return;
 			}
 
@@ -187,8 +233,7 @@ signal_deliver(struct process *proc, registers_t *regs)
 				proc->sigpending &= ~mask;
 
 				if (dfl == SIG_DFL_TERMINATE) {
-					proc->exit_code = 128 + sig;
-					process_exit(proc->exit_code);
+					process_exit(128 + sig);
 					return;
 				}
 				if (dfl == SIG_DFL_STOP) {

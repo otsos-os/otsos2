@@ -363,6 +363,9 @@ execve_read_file(const char *path, u8 **out_buf, u32 *out_size)
 	return (0);
 }
 
+#define	POSIX_WAIT_PASSES	4096
+#define	POSIX_WNOHANG		1
+
 s64
 posix_getpid(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
     registers_t *regs)
@@ -676,89 +679,84 @@ posix_exit_group(u64 code, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	return (0);
 }
 
+static int
+posix_wait_status(int code, int flags)
+{
+	if (flags & PROC_EXIT_KILLED) {
+		if (code >= 128 && code < 128 + MAX_SIGNALS) {
+			return (code - 128);
+		}
+		return (SIGKILL);
+	}
+	return ((code & 0xff) << 8);
+}
+
+static u32
+posix_wait_target(u64 pid_u)
+{
+	s64	want;
+
+	want = (s64)pid_u;
+	if (want > 0) {
+		return ((u32)want);
+	}
+	return (0);
+}
+
 s64
 posix_wait4(u64 pid_u, u64 status_u, u64 options, u64 rusage_u,
     u64 a5, u64 a6, registers_t *regs)
 {
 	struct process	*current;
-	process_t	*child;
-	thread_t	*child_td;
-	u64		old_cr3;
+	entity_id_t	id;
+	u32		pid, ppid, want;
 	int		*status;
-	int		attempt, i, reaped_pid;
+	int		code, flags, pass;
 
-	(void)pid_u; (void)options; (void)rusage_u; (void)a5; (void)a6;
-	(void)regs;
+	(void)rusage_u; (void)a5; (void)a6; (void)regs;
 
 	current = process_current();
-	if (!current) {
+	if (!current || current->entity == 0) {
 		return (-POSIX_ECHILD);
 	}
 
 	status = (int *)status_u;
+	want = posix_wait_target(pid_u);
 
-	for (attempt = 0; attempt < 2; attempt++) {
-		for (i = 0; i < MAX_PROCESSES; i++) {
-			child = &process_table[i];
-			if (child->pid == 0) {
-				continue;
+	for (pass = 0; pass < POSIX_WAIT_PASSES; pass++) {
+		id = process_record_find_child(current->entity, want);
+		if (id != 0) {
+			if (process_record_read(id, &code, &flags, &pid,
+			    &ppid) != 0) {
+				return (-POSIX_ECHILD);
 			}
-			child_td = child->main_thread;
-			if (!child_td ||
-			    child_td->state != PROC_STATE_ZOMBIE) {
-				continue;
-			}
-			if (child->ppid != current->pid) {
-				continue;
-			}
-
 			if (status && is_user_address(status,
 			    sizeof(int))) {
-				*status = child->exit_code;
+				*status = posix_wait_status(code, flags);
 			}
-
-			if (child_td->running_cpu >= 0) {
-				reaped_pid = (int)child->pid;
-				if (current->controlling_tty >= 0) {
-					terminal_set_pgrp(current->controlling_tty,
-					    current->pgid);
-				} else if (current->controlling_tty < -1) {
-					int pty_num = -current->controlling_tty - 2;
-					pty_set_session_pgrp(pty_num, current->sid,
-					    current->pgid);
-				}
-				child->ppid = 0;
-				return ((s64)reaped_pid);
+			if (process_record_consume(id) != 0) {
+				return (-POSIX_ECHILD);
 			}
-
-			if (child->owns_address_space && child->cr3) {
-				old_cr3 = pmap_get_cr3();
-				pmap_load(child->cr3);
-				vm_map_free_all(child);
-				pmap_load(old_cr3);
-				pmap_destroy(child->cr3);
-				child->cr3 = 0;
-				child->owns_address_space = 0;
-			}
-
-			thread_destroy(child_td);
-
-			reaped_pid = (int)child->pid;
-			memset(child, 0, sizeof(process_t));
 			if (current->controlling_tty >= 0) {
 				terminal_set_pgrp(current->controlling_tty,
 				    current->pgid);
 			} else if (current->controlling_tty < -1) {
-				int pty_num = -current->controlling_tty - 2;
+				int pty_num;
+
+				pty_num = -current->controlling_tty - 2;
 				pty_set_session_pgrp(pty_num, current->sid,
 				    current->pgid);
 			}
-			return ((s64)reaped_pid);
+			return ((s64)pid);
 		}
 
-		if (attempt == 0) {
-			proc_sleep((void *)current);
+		if (process_child_count(current->pid) == 0) {
+			return (-POSIX_ECHILD);
 		}
+		if (options & POSIX_WNOHANG) {
+			return (0);
+		}
+		proc_sleep((void *)current);
 	}
 
 	return (-POSIX_ECHILD);
@@ -813,7 +811,6 @@ posix_fork(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	}
 
 	child->user_stack = parent->user_stack;
-	child->exit_code = 0;
 	child->owns_address_space = 1;
 	child->mmap_base = parent->mmap_base;
 	child->brk_min = parent->brk_min;
@@ -833,13 +830,18 @@ posix_fork(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	vm_map_fork(parent, child);
 	api_copy_handles(child, parent);
 	posix_copy_fds(child, parent);
+	if (process_entity_attach(child) != 0) {
+		pmap_destroy(child_cr3);
+		process_creation_abort(child);
+		return (-POSIX_ENOMEM);
+	}
 
 	/* Create thread for child process */
 	child_td = thread_create(child, parent->entry_point,
 	    parent->user_stack, USER_CS, USER_DS);
 	if (!child_td) {
 		pmap_destroy(child_cr3);
-		memset(child, 0, sizeof(process_t));
+		process_creation_abort(child);
 		return (-POSIX_ENOMEM);
 	}
 

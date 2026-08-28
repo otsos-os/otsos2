@@ -57,6 +57,11 @@ $define %func thread_fpu_init_context as procedure with args fpu_context_t *
 $define %func thread_fpu_save as procedure with args thread_t *
 $define %func thread_link as procedure with args process_t *, thread_t *
 $define %func thread_unlink as procedure with args thread_t *
+$define %func thread_release_hook as procedure with args entity id
+$define %func thread_mark_dead as procedure with args thread_t *
+$define %func thread_has_dead as function with args void
+$define %func thread_retired_dead as procedure with args void
+$define %const THREAD_JOIN_SPINS as bound on thread_join waits
 
 */
 
@@ -72,9 +77,12 @@ $space %export thread_is_initialized
 $space %export thread_exit, thread_join
 $space %export thread_count_alive, thread_kill_all
 $space %internal thread_fpu_init_context, thread_fpu_save
+$space %internal thread_release_hook
+$space %export thread_mark_dead, thread_has_dead, thread_retired_dead
 
 */
 
+#include <kernel/apc.h>
 #include <kernel/gdt.h>
 #include <kernel/process.h>
 #include <kernel/thread.h>
@@ -86,6 +94,7 @@ $space %internal thread_fpu_init_context, thread_fpu_save
 #include <mm/kmem.h>
 
 extern void	futex_wake_all(u64 uaddr);
+#define	THREAD_JOIN_SPINS	100000
 
 #define	MSR_FS_BASE	0xC0000100
 #define	FPU_FCW_DEFAULT	0x037F
@@ -114,11 +123,39 @@ thread_wrmsr(u32 msr, u64 value)
 thread_block_t	thread_block;
 u32		next_tid = 1;
 static int	thread_initialized = 0;
+static volatile int	thread_dead_pending;
 
 static void	thread_link(process_t *proc, thread_t *td);
 static void	thread_unlink(thread_t *td);
 static void	thread_fpu_init_context(fpu_context_t *ctx);
 static void	thread_fpu_save(thread_t *td);
+static void	thread_release_hook(entity_id_t id);
+
+void
+thread_mark_dead(thread_t *td)
+{
+	if (!td) {
+		return;
+	}
+	td->state = PROC_STATE_TERMINATED;
+	if (td->running_cpu >= 0) {
+		thread_dead_pending++;
+	}
+}
+
+int
+thread_has_dead(void)
+{
+	return (thread_dead_pending != 0);
+}
+
+void
+thread_retired_dead(void)
+{
+	if (thread_dead_pending > 0) {
+		thread_dead_pending--;
+	}
+}
 
 static void
 thread_fpu_init_context(fpu_context_t *ctx)
@@ -147,6 +184,19 @@ thread_fpu_save(thread_t *td)
 	td->fpu_valid = 1;
 }
 
+static void
+thread_release_hook(entity_id_t id)
+{
+	int	i;
+
+	for (i = 0; i < MAX_THREADS; i++) {
+		if (thread_table[i].entity == id) {
+			thread_table[i].entity = 0;
+			return;
+		}
+	}
+}
+
 void
 thread_init(void)
 {
@@ -154,6 +204,8 @@ thread_init(void)
 	memset(thread_table, 0, sizeof(thread_table));
 	entity_meta_register(ENTITY_ARCH_THREAD, &thread_block.meta,
 	    0, MAX_THREADS);
+	entity_arch_release_register(ENTITY_ARCH_THREAD,
+	    thread_release_hook);
 	next_tid = 1;
 	smp_set_current_thread(NULL);
 	thread_initialized = 1;
@@ -174,13 +226,19 @@ thread_alloc(void)
 	thread_t	*td;
 
 	for (i = 0; i < MAX_THREADS; i++) {
-		if (!thread_table[i].used) {
-			td = &thread_table[i];
-			memset(td, 0, sizeof(thread_t));
-			td->used = 1;
-			td->tid = next_tid++;
-			return (td);
+		if (thread_table[i].used) {
+			continue;
 		}
+		if (entity_is_initialized() &&
+		    entity_slot_used(ENTITY_ARCH_THREAD, (u32)i)) {
+			continue;
+		}
+		td = &thread_table[i];
+		memset(td, 0, sizeof(thread_t));
+		td->used = 1;
+		td->tid = next_tid++;
+		td->apc_head = -1;
+		return (td);
 	}
 	return (NULL);
 }
@@ -234,6 +292,10 @@ thread_create(process_t *proc, u64 rip, u64 rsp, u64 cs, u64 ss)
 	td->trace_switches = 0;
 	td->running_cpu = -1;
 	td->fpu_valid = 0;
+	td->apc_head = -1;
+	td->apc_count = 0;
+	td->apc_alertable = 0;
+	td->apc_in_user = 0;
 	thread_fpu_init_context(&td->fpu_context);
 	if (entity_is_initialized()) {
 		char	name[64];
@@ -242,11 +304,16 @@ thread_create(process_t *proc, u64 rip, u64 rsp, u64 cs, u64 ss)
 		    (u32)(td - thread_table), 0, proc->pid, proc->uid,
 		    proc->gid, proc->euid, proc->egid,
 		    proc->kusr_auth);
-		if (td->entity != 0) {
-			snprintf(name, sizeof(name), "/Entity/Thread/%u",
-			    td->tid);
-			entity_ns_bind(name, td->entity);
+		if (td->entity == 0) {
+			printk("[THREAD] Error: entity attach failed "
+			    "for tid=%d (slot %d)\n", td->tid,
+			    (int)(td - thread_table));
+			kmem_free(kstack);
+			td->used = 0;
+			return (NULL);
 		}
+		snprintf(name, sizeof(name), "/Entity/Thread/%u", td->tid);
+		entity_ns_bind(name, td->entity);
 	}
 
 	td->state = PROC_STATE_RUNNABLE;
@@ -446,8 +513,14 @@ thread_destroy(thread_t *td)
 	if (!td || !td->used) {
 		return;
 	}
+	if (td == thread_current() || td->running_cpu >= 0) {
+		printk("[THREAD] Error: refusing to destroy tid=%d "
+		    "still on CPU %d\n", td->tid, td->running_cpu);
+		return;
+	}
 
 	thread_unlink(td);
+	apc_flush_thread(td);
 
 	if (td->kernel_stack) {
 		u8	*kstack_base;
@@ -459,9 +532,9 @@ thread_destroy(thread_t *td)
 
 	if (td->entity != 0) {
 		entity_destroy(td->entity);
-		td->entity = 0;
 	}
 	memset(td, 0, sizeof(thread_t));
+	td->apc_head = -1;
 }
 
 void
@@ -481,8 +554,8 @@ thread_exit(int code)
 	    td->tid, proc ? (int)proc->pid : 0, code);
 
 	td->exit_code = code;
-	td->state = PROC_STATE_ZOMBIE;
 	td->running_cpu = smp_cpu_index();
+	thread_mark_dead(td);
 
 	/* If set_tid_address was called, clear the TID field
 	 * and do a futex wake so anyone waiting on it wakes up */
@@ -520,16 +593,18 @@ thread_join(u32 tid, int *status)
 	if (!td) {
 		return (-1);
 	}
+	if (td == thread_current()) {
+		return (-1);
+	}
 
-	/* Wait for the thread to become zombie */
-	for (i = 0; i < 100000; i++) {
-		if (td->state == PROC_STATE_ZOMBIE) {
+	for (i = 0; i < THREAD_JOIN_SPINS; i++) {
+		if (td->state == PROC_STATE_TERMINATED ||
+		    td->state == PROC_STATE_UNUSED) {
 			break;
 		}
 		proc_sleep((void *)td);
 	}
-
-	if (td->state != PROC_STATE_ZOMBIE) {
+	if (td->state != PROC_STATE_TERMINATED) {
 		return (-1);
 	}
 
@@ -537,11 +612,19 @@ thread_join(u32 tid, int *status)
 		*status = td->exit_code;
 	}
 
-	int	reaped_tid;
+	for (i = 0; i < THREAD_JOIN_SPINS; i++) {
+		if (td->running_cpu < 0) {
+			break;
+		}
+		process_yield();
+	}
+	if (td->running_cpu >= 0) {
+		return ((int)tid);
+	}
 
-	reaped_tid = (int)td->tid;
+	i = (int)td->tid;
 	thread_destroy(td);
-	return (reaped_tid);
+	return (i);
 }
 
 int
@@ -556,7 +639,7 @@ thread_count_alive(process_t *proc)
 
 	count = 0;
 	for (td = proc->thread_list; td; td = td->next) {
-		if (td->state != PROC_STATE_ZOMBIE &&
+		if (td->state != PROC_STATE_TERMINATED &&
 		    td->state != PROC_STATE_UNUSED) {
 			count++;
 		}
@@ -577,9 +660,8 @@ thread_kill_all(process_t *proc)
 	while (td) {
 		next = td->next;
 		if (td != proc->cur_thread) {
-			td->state = PROC_STATE_ZOMBIE;
-			td->running_cpu = -1;
 			td->exit_code = -1;
+			thread_mark_dead(td);
 		}
 		td = next;
 	}

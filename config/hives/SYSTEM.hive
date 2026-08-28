@@ -47,7 +47,6 @@ hive SYSTEM @access(read=user, add=kusr, edit=kusr) {
 		bool StrictProcessSeparation = true
 		bool SmartMigration = true
 		u32 MigrationThreshold = 2
-		bool Zkill = true
 		bool ApScheduling = false
 	}
 
