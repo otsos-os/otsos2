@@ -7,30 +7,28 @@ section .text
 extern syscall_handler
 extern smp_lock
 extern smp_unlock
-extern smp_tss_current
 
 %define USER_DS 0x1B
 %define USER_CS 0x23
 
-section .data
-syscall_entry_lock:
-    dq 0
-syscall_user_rsp:
-    dq 0
-
-align 16
-syscall_bootstrap_stack:
-    times 4096 db 0
-syscall_bootstrap_stack_top:
+%define PCPU_SYSCALL_SCRATCH 8
+%define PCPU_SYSCALL_STACK   16
 
 global syscall_entry
 syscall_entry:
-    cli
-.lock:
-    lock bts qword [rel syscall_entry_lock], 0
-    jc .lock
-    mov [rel syscall_user_rsp], rsp
-    lea rsp, [rel syscall_bootstrap_stack_top]
+    swapgs
+    mov [gs:PCPU_SYSCALL_SCRATCH], rsp
+    mov rsp, [gs:PCPU_SYSCALL_STACK]
+    test rsp, rsp
+    jz .no_stack
+
+    push qword USER_DS
+    push qword [gs:PCPU_SYSCALL_SCRATCH]
+    push r11
+    push qword USER_CS
+    push rcx
+    push qword 0
+    push qword 0
     push rax
     push rbx
     push rcx
@@ -46,38 +44,13 @@ syscall_entry:
     push r13
     push r14
     push r15
-    push qword [rel syscall_user_rsp]
-    mov r15, rsp
+
     call smp_lock
-    call smp_tss_current
-    mov rsp, [rax + 4]
-    push qword USER_DS
-    push qword [r15 + 0]
-    push qword [r15 + 40]
-    push qword USER_CS
-    push qword [r15 + 104]
-    push qword 0
-    push qword 0
-    push qword [r15 + 120]
-    push qword [r15 + 112]
-    push qword [r15 + 104]
-    push qword [r15 + 96]           ; rdx
-    push qword [r15 + 88]           ; rsi
-    push qword [r15 + 80]           ; rdi
-    push qword [r15 + 72]           ; rbp
-    push qword [r15 + 64]           ; r8
-    push qword [r15 + 56]           ; r9
-    push qword [r15 + 48]           ; r10
-    push qword [r15 + 40]           ; r11
-    push qword [r15 + 32]           ; r12
-    push qword [r15 + 24]           ; r13
-    push qword [r15 + 16]           ; r14
-    push qword [r15 + 8]            ; r15
-    lock btr qword [rel syscall_entry_lock], 0
     mov rdi, rsp
     call syscall_handler
     call smp_unlock
 
+    cli
     pop r15
     pop r14
     pop r13
@@ -98,4 +71,11 @@ syscall_entry:
     add rsp, 8
     pop r11
     pop rsp
+    swapgs
     o64 sysret
+
+.no_stack:
+    cli
+.hang:
+    hlt
+    jmp .hang

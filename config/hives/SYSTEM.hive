@@ -50,6 +50,11 @@ hive SYSTEM @access(read=user, add=kusr, edit=kusr) {
 		bool ApScheduling = false
 	}
 
+	key Sync {
+		bool Witness = true
+		u32 SpinTimeoutKcycles = 200000
+	}
+
 	key Trace {
 		bool Enabled = true
 		u32 RingRecords = 1024

@@ -70,6 +70,7 @@ $space %export api_apc_alert, api_apc_queue
 #include <kernel/api/signal.h>
 #include <kernel/process.h>
 #include <kernel/smp/smp.h>
+#include <kernel/sync/sync.h>
 #include <kernel/thread.h>
 #include <kernel/useraddr.h>
 #include <mlibc/stdio.h>
@@ -91,6 +92,7 @@ static u64	apc_queued_total;
 static u64	apc_delivered_total;
 static u64	apc_dropped_total;
 static int	apc_initialized;
+static spin_t	apc_spin = SPIN_INITIALIZER("apc", LO_APC);
 
 void
 apc_init(void)
@@ -198,14 +200,15 @@ apc_deliverable(int type, int context, int in_user_apc)
 static void
 apc_wake(thread_t *td)
 {
-	if (td->state != PROC_STATE_SLEEPING) {
-		return;
-	}
 	if (!td->apc_alertable) {
 		return;
 	}
-	td->state = PROC_STATE_RUNNABLE;
-	td->wait_channel = NULL;
+	thread_lock();
+	if (thread_state_get(td) == PROC_STATE_SLEEPING) {
+		thread_state_set(td, PROC_STATE_RUNNABLE);
+		__atomic_store_n(&td->wait_channel, NULL, __ATOMIC_RELEASE);
+	}
+	thread_unlock();
 }
 
 int
@@ -218,15 +221,15 @@ apc_queue_kernel(thread_t *td, apc_kernel_fn fn, u64 arg1, u64 arg2,
 	if (!td || !td->used || fn == NULL) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	smp_lock();
-	if (td->state == PROC_STATE_TERMINATED) {
-		smp_unlock();
+	spin_lock(&apc_spin);
+	if (thread_state_get(td) == PROC_STATE_TERMINATED) {
+		spin_unlock(&apc_spin);
 		return (-API_ERR_NO_PROC);
 	}
 	slot = apc_alloc();
 	if (slot == APC_SLOT_NONE) {
 		apc_dropped_total++;
-		smp_unlock();
+		spin_unlock(&apc_spin);
 		printk("[APC] pool exhausted, kernel APC dropped\n");
 		return (-API_ERR_RETRY);
 	}
@@ -239,12 +242,12 @@ apc_queue_kernel(thread_t *td, apc_kernel_fn fn, u64 arg1, u64 arg2,
 	if (err != 0) {
 		apc_free(slot);
 		apc_dropped_total++;
-		smp_unlock();
+		spin_unlock(&apc_spin);
 		return (err);
 	}
 	apc_queued_total++;
 	apc_wake(td);
-	smp_unlock();
+	spin_unlock(&apc_spin);
 	return (0);
 }
 
@@ -261,15 +264,15 @@ apc_queue_user(thread_t *td, u64 handler, int special, u64 arg1, u64 arg2,
 	if (!is_user_address((const void *)handler, 1)) {
 		return (-API_ERR_BAD_ADDR);
 	}
-	smp_lock();
-	if (td->state == PROC_STATE_TERMINATED) {
-		smp_unlock();
+	spin_lock(&apc_spin);
+	if (thread_state_get(td) == PROC_STATE_TERMINATED) {
+		spin_unlock(&apc_spin);
 		return (-API_ERR_NO_PROC);
 	}
 	slot = apc_alloc();
 	if (slot == APC_SLOT_NONE) {
 		apc_dropped_total++;
-		smp_unlock();
+		spin_unlock(&apc_spin);
 		printk("[APC] pool exhausted, user APC dropped\n");
 		return (-API_ERR_RETRY);
 	}
@@ -282,12 +285,12 @@ apc_queue_user(thread_t *td, u64 handler, int special, u64 arg1, u64 arg2,
 	if (err != 0) {
 		apc_free(slot);
 		apc_dropped_total++;
-		smp_unlock();
+		spin_unlock(&apc_spin);
 		return (err);
 	}
 	apc_queued_total++;
 	apc_wake(td);
-	smp_unlock();
+	spin_unlock(&apc_spin);
 	return (0);
 }
 
@@ -304,7 +307,7 @@ apc_pending(thread_t *td, int context)
 		return (0);
 	}
 	found = 0;
-	smp_lock();
+	spin_lock(&apc_spin);
 	cur = (td->apc_head < 0) ? APC_SLOT_NONE : (u32)td->apc_head;
 	while (cur != APC_SLOT_NONE) {
 		if (apc_deliverable((int)apc_pool_type[cur], context,
@@ -314,7 +317,7 @@ apc_pending(thread_t *td, int context)
 		}
 		cur = apc_pool_next[cur];
 	}
-	smp_unlock();
+	spin_unlock(&apc_spin);
 	return (found);
 }
 
@@ -324,9 +327,9 @@ apc_enter_alertable(thread_t *td)
 	if (!td) {
 		return;
 	}
-	smp_lock();
+	spin_lock(&apc_spin);
 	td->apc_alertable++;
-	smp_unlock();
+	spin_unlock(&apc_spin);
 }
 
 void
@@ -335,11 +338,11 @@ apc_leave_alertable(thread_t *td)
 	if (!td) {
 		return;
 	}
-	smp_lock();
+	spin_lock(&apc_spin);
 	if (td->apc_alertable > 0) {
 		td->apc_alertable--;
 	}
-	smp_unlock();
+	spin_unlock(&apc_spin);
 }
 
 void
@@ -350,7 +353,7 @@ apc_flush_thread(thread_t *td)
 	if (!td) {
 		return;
 	}
-	smp_lock();
+	spin_lock(&apc_spin);
 	cur = (td->apc_head < 0) ? APC_SLOT_NONE : (u32)td->apc_head;
 	while (cur != APC_SLOT_NONE) {
 		next = apc_pool_next[cur];
@@ -361,7 +364,7 @@ apc_flush_thread(thread_t *td)
 	td->apc_count = 0;
 	td->apc_alertable = 0;
 	td->apc_in_user = 0;
-	smp_unlock();
+	spin_unlock(&apc_spin);
 }
 
 static u32
@@ -415,10 +418,10 @@ apc_deliver(thread_t *td, registers_t *regs, int context)
 	arg2 = 0;
 	arg3 = 0;
 	for (;;) {
-		smp_lock();
+		spin_lock(&apc_spin);
 		slot = apc_pop(td, context);
 		if (slot == APC_SLOT_NONE) {
-			smp_unlock();
+			spin_unlock(&apc_spin);
 			break;
 		}
 		type = (int)apc_pool_type[slot];
@@ -430,13 +433,13 @@ apc_deliver(thread_t *td, registers_t *regs, int context)
 			td->apc_in_user = 1;
 			apc_free(slot);
 			apc_delivered_total++;
-			smp_unlock();
+			spin_unlock(&apc_spin);
 			have_user = 1;
 			break;
 		}
 		apc_free(slot);
 		apc_delivered_total++;
-		smp_unlock();
+		spin_unlock(&apc_spin);
 		fn = (apc_kernel_fn)handler;
 		fn(arg1, arg2, arg3);
 		delivered++;
@@ -447,10 +450,10 @@ apc_deliver(thread_t *td, registers_t *regs, int context)
 	}
 
 	if ((regs->cs & 3) != 3) {
-		smp_lock();
+		spin_lock(&apc_spin);
 		td->apc_in_user = 0;
 		apc_dropped_total++;
-		smp_unlock();
+		spin_unlock(&apc_spin);
 		printk("[APC] refused user APC over a kernel frame "
 		    "(tid=%u context=0x%x)\n", td->tid, (unsigned)context);
 		return (delivered);
@@ -458,20 +461,20 @@ apc_deliver(thread_t *td, registers_t *regs, int context)
 
 	rsp = regs->rsp;
 	if (rsp <= APC_RED_ZONE) {
-		smp_lock();
+		spin_lock(&apc_spin);
 		td->apc_in_user = 0;
 		apc_dropped_total++;
-		smp_unlock();
+		spin_unlock(&apc_spin);
 		return (delivered);
 	}
 	rsp -= APC_RED_ZONE;
 	rsp &= ~0xFULL;
 	rsp -= 8;
 	if (!is_user_address((const void *)rsp, 8)) {
-		smp_lock();
+		spin_lock(&apc_spin);
 		td->apc_in_user = 0;
 		apc_dropped_total++;
-		smp_unlock();
+		spin_unlock(&apc_spin);
 		printk("[APC] user stack unusable, APC dropped (tid=%u)\n",
 		    td->tid);
 		return (delivered);
@@ -535,16 +538,16 @@ apc_return(thread_t *td, registers_t *regs)
 	td->fpu_valid = 1;
 	thread_load_fpu_context(td);
 
-	smp_lock();
+	spin_lock(&apc_spin);
 	td->apc_in_user = 0;
-	smp_unlock();
+	spin_unlock(&apc_spin);
 	return (0);
 }
 
 void
 apc_stats(u64 *queued, u64 *delivered, u64 *dropped)
 {
-	smp_lock();
+	spin_lock(&apc_spin);
 	if (queued) {
 		*queued = apc_queued_total;
 	}
@@ -554,7 +557,7 @@ apc_stats(u64 *queued, u64 *delivered, u64 *dropped)
 	if (dropped) {
 		*dropped = apc_dropped_total;
 	}
-	smp_unlock();
+	spin_unlock(&apc_spin);
 }
 
 int

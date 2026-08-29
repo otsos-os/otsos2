@@ -1434,6 +1434,7 @@ posix_set_tid_address(u64 tidptr_u, u64 a2, u64 a3, u64 a4, u64 a5,
 }
 
 #define	MSR_FS_BASE	0xC0000100
+#define	MSR_KERNEL_GS_BASE_USER	0xC0000102
 
 static inline u64
 posix_rdmsr(u32 msr)
@@ -1486,14 +1487,14 @@ posix_arch_prctl(u64 code, u64 addr, u64 a3, u64 a4, u64 a5, u64 a6,
 		return (0);
 
 	case ARCH_SET_GS:
-		posix_wrmsr(0xC0000101, addr);
+		posix_wrmsr(MSR_KERNEL_GS_BASE_USER, addr);
 		return (0);
 
 	case ARCH_GET_GS:
 		if (!is_user_address((void *)addr, sizeof(u64))) {
 			return (-POSIX_EFAULT);
 		}
-		*(u64 *)addr = posix_rdmsr(0xC0000101);
+		*(u64 *)addr = posix_rdmsr(MSR_KERNEL_GS_BASE_USER);
 		return (0);
 
 	default:

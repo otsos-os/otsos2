@@ -25,6 +25,7 @@
  */
 
 #include <kernel/gdt.h>
+#include <kernel/smp/pcpu.h>
 #include <kernel/smp/smp.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -131,10 +132,13 @@ void gdt_init(void) {
 
   /* Load GDT */
   gdt_flush((u64)&gdt_ptr);
+  pcpu_reload_gsbase();
 
   /* Load TSS */
   tss_load(GDT_TSS);
   gdt_initialized = 1;
+
+  pcpu_set_syscall_stack(tss.rsp0);
 
   printk("[GDT] GDT loaded at %p, TSS at %p\n", &gdt, &tss);
   printk("[GDT] Kernel stack RSP0: %p\n", (void *)tss.rsp0);
@@ -160,6 +164,7 @@ void gdt_init_cpu(u8 cpu_index, tss_t *tss, gdt_entry_t *gdt) {
 void tss_set_rsp0(u64 stack) {
   tss_t *tss = smp_tss_current();
   tss->rsp0 = stack;
+  pcpu_set_syscall_stack(stack);
 }
 
 u64 tss_get_rsp0(void) {

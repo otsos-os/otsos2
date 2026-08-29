@@ -44,6 +44,8 @@ $define %func smp_start_ap as procedure with args u8, u8
 $define %func smp_lock as procedure with args void
 $define %func smp_unlock as procedure with args void
 $define %func smp_lock_held as function with args void
+$define %func smp_lock_release_all as function with args void
+$define %func smp_lock_acquire_depth as procedure with args u32
 $define %func smp_cpu_id as function with args void
 $define %func smp_cpu_index as function with args void
 $define %func smp_cpu_count_var as function with args void
@@ -77,6 +79,7 @@ $space %internal smp_ap_count_cb, smp_ap_list_cb
 $space %internal smp_send_init, smp_send_sipi, smp_wait_us, smp_wait_ticks
 $space %internal smp_trampoline_setup, smp_ap_ready_clear, smp_ap_park
 $space %export smp_init, smp_init_single_cpu, smp_lock, smp_unlock, smp_lock_held
+$space %export smp_lock_release_all, smp_lock_acquire_depth
 $space %export smp_cpu_id, smp_cpu_index, smp_cpu_count_var
 $space %export smp_tss_current, smp_tss_register
 $space %export smp_current_thread, smp_set_current_thread
@@ -97,6 +100,7 @@ $space %export ap_main
 #include <kernel/mm/vm/pmap.h>
 #include <kernel/panic.h>
 #include <kernel/process.h>
+#include <kernel/smp/pcpu.h>
 #include <kernel/smp/smp.h>
 #include <kernel/syscall.h>
 #include <kernel/trace/trace.h>
@@ -205,6 +209,10 @@ int
 smp_cpu_index(void)
 {
 	int	idx;
+
+	if (pcpu_is_ready()) {
+		return ((int)pcpu_id());
+	}
 	idx = smp_cpu_index_from_lapic(smp_cpu_id());
 	if (idx < 0) {
 		return (0);
@@ -266,6 +274,8 @@ smp_init_single_cpu(void)
 	smp_cpu_map[0].tss = gdt_get_tss();
 	smp_tss_register(smp_bsp_lapic_id, smp_cpu_map[0].tss);
 	smp_ap_ready[0] = 1;
+	pcpu_attach(0, smp_bsp_lapic_id);
+	pcpu_set_syscall_stack(smp_cpu_map[0].stack_top);
 	printk("[SMP] single CPU fallback initialized\n");
 }
 
@@ -349,6 +359,31 @@ int
 smp_lock_held(void)
 {
 	return (smp_bkl.locked && smp_bkl.owner == smp_cpu_id());
+}
+
+u32
+smp_lock_release_all(void)
+{
+	u32	depth;
+
+	if (!smp_lock_held()) {
+		return (0);
+	}
+	depth = smp_bkl.recursion + 1;
+	while (smp_lock_held()) {
+		smp_unlock();
+	}
+	return (depth);
+}
+
+void
+smp_lock_acquire_depth(u32 depth)
+{
+	u32	i;
+
+	for (i = 0; i < depth; i++) {
+		smp_lock();
+	}
 }
 
 static void
@@ -568,6 +603,8 @@ smp_init_bsp(void)
 	smp_cpu_map[0].stack_top = gdt_get_tss() ? gdt_get_tss()->rsp0 : 0;
 	smp_cpu_map[0].tss = gdt_get_tss();
 	smp_tss_register(bsp_id, gdt_get_tss());
+	pcpu_attach(0, bsp_id);
+	pcpu_set_syscall_stack(smp_cpu_map[0].stack_top);
 
 	ap_count = 0;
 	acpi_madt_foreach(ACPI_MADT_LOCAL_APIC, smp_ap_count_cb,
@@ -649,12 +686,13 @@ ap_main(u8 cpu_index)
 	gdt_ptr_t	gdt_ptr;
 	u8	lapic_id;
 	lapic_enable();
-	pmap_init();
 	lapic_id = lapic_get_id();
 	if (cpu_index >= SMP_MAX_CPUS) {
 		panic("[SMP]with ap cpu_index %u out of range\n",
 		    (u32)cpu_index);
 	}
+	pcpu_attach((int)cpu_index, lapic_id);
+	pmap_init();
 	stack_top = smp_cpu_map[cpu_index].stack_top;
 	if (smp_cpu_map[cpu_index].lapic_id != lapic_id) {
 		smp_cpu_map[cpu_index].lapic_id = lapic_id;
@@ -674,9 +712,11 @@ ap_main(u8 cpu_index)
 	if (stack_top != 0) {
 		tss->rsp0 = stack_top;
 	}
+	pcpu_set_syscall_stack(stack_top);
 	gdt_ptr.limit = sizeof(gdt_entry_t) * 7 - 1;
 	gdt_ptr.base = (u64)gdt;
 	gdt_flush((u64)&gdt_ptr);
+	pcpu_reload_gsbase();
 	tss_load(GDT_TSS);
 	load_idt(&idt_ptr);
 	syscall_init();

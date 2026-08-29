@@ -40,6 +40,8 @@ $define %func smp_init_single_cpu as procedure with args void
 $define %func smp_lock as procedure with args void
 $define %func smp_unlock as procedure with args void
 $define %func smp_lock_held as function with args void
+$define %func smp_lock_release_all as function with args void
+$define %func smp_lock_acquire_depth as procedure with args u32
 $define %func smp_cpu_id as function with args void
 $define %func smp_cpu_index as function with args void
 $define %func smp_cpu_count as function with args void
@@ -62,6 +64,7 @@ $define %const SMP_MAX_CPUS as 32
 
 $space %internal smp_init_bsp, smp_start_ap
 $space %export smp_init, smp_init_single_cpu, smp_lock, smp_unlock, smp_lock_held
+$space %export smp_lock_release_all, smp_lock_acquire_depth
 $space %export smp_cpu_id, smp_cpu_index, smp_cpu_count
 $space %export smp_tss_current, smp_tss_register
 $space %export smp_current_thread, smp_set_current_thread
@@ -104,6 +107,8 @@ void	smp_init_single_cpu(void);
 void	smp_lock(void);
 void	smp_unlock(void);
 int	smp_lock_held(void);
+u32	smp_lock_release_all(void);
+void	smp_lock_acquire_depth(u32 depth);
 u8	smp_cpu_id(void);
 int	smp_cpu_index(void);
 int	smp_cpu_count(void);

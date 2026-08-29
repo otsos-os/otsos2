@@ -56,6 +56,13 @@ $define %func thread_kill_all as procedure with args process_t *
 $define %func thread_mark_dead as procedure with args thread_t *
 $define %func thread_has_dead as function with args void
 $define %func thread_retired_dead as procedure with args void
+$define %func thread_lock as procedure with args void
+$define %func thread_unlock as procedure with args void
+$define %func thread_lock_held as function with args void
+$define %func thread_state_set as procedure with args thread_t *, process_state_t
+$define %func thread_state_get as function with args thread_t *
+
+$define %const THREAD_WITNESS_DEPTH as ceiling on nested sleepable locks per thread
 
 */
 
@@ -70,6 +77,8 @@ $space %export thread_is_initialized, thread_get
 $space %export thread_exit, thread_join
 $space %export thread_count_alive, thread_kill_all
 $space %export thread_mark_dead, thread_has_dead, thread_retired_dead
+$space %export thread_lock, thread_unlock, thread_lock_held
+$space %export thread_state_set, thread_state_get
 
 */
 
@@ -83,6 +92,7 @@ $space %export thread_mark_dead, thread_has_dead, thread_retired_dead
 #define MAX_THREADS 256
 #define FPU_FXSAVE_SIZE 512
 #define THREAD_MAX_APCS 16
+#define THREAD_WITNESS_DEPTH 8
 
 struct process;
 
@@ -137,6 +147,9 @@ typedef struct thread {
 	int			apc_in_user;
 	cpu_context_t		apc_saved_context;
 	fpu_context_t		apc_saved_fpu;
+	u32			lock_depth;
+	u32			lock_level[THREAD_WITNESS_DEPTH];
+	const char		*lock_name[THREAD_WITNESS_DEPTH];
 	struct thread		*next;
 	struct thread		*prev;
 } thread_t;
@@ -162,6 +175,11 @@ void		thread_kill_all(struct process *proc);
 void		thread_mark_dead(thread_t *td);
 int		thread_has_dead(void);
 void		thread_retired_dead(void);
+void		thread_lock(void);
+void		thread_unlock(void);
+int		thread_lock_held(void);
+void		thread_state_set(thread_t *td, process_state_t state);
+process_state_t	thread_state_get(thread_t *td);
 
 /*
  * AoSoA: threads and their entity metadata live in one block so the

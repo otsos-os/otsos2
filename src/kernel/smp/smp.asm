@@ -69,7 +69,6 @@ ap_trampoline_long64:
 	mov ds, ax
 	mov es, ax
 	mov fs, ax
-	mov gs, ax
 	mov ss, ax
 	mov rax, TRAMPOLINE_BASE + OFF_STACK
 	mov rsp, [rax]

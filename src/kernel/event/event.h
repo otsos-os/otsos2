@@ -48,8 +48,10 @@ $define %func kqueue_destroy as function with args int
 $define %func kqueue_get as function with args int
 $define %func kevent_process as function with args int, struct kevent *, int, struct kevent *, int, s64
 $define %func knote_ready as procedure with args knote_t *
+$define %func knote_ready_locked as procedure with args knote_t *
 $define %func knote_notify_all as procedure with args s16, u64, u32, s64
 $define %func kqueue_wakeup as procedure with args kqueue_t *
+$define %func kqueue_wakeup_locked as procedure with args kqueue_t *
 $define %func filter_register as procedure with args const filter_ops_t *
 $define %func filter_lookup as function with args s16
 $define %func event_timer_tick as procedure with args void
@@ -62,6 +64,12 @@ $define %func event_notify_signal as procedure with args u32, int
 $define %func event_notify_pipe_change as procedure with args struct pipe *
 $define %func event_notify_net_change as procedure with args net_endpoint_t *
 $define %func event_notify_ipc_change as procedure with args ipc_endpoint_t *
+$define %func proc_sleep as procedure with args void *
+$define %func proc_sleep_interlock as procedure with args void *, struct spin *
+$define %func proc_wakeup as procedure with args void *
+$define %func proc_wakeup_one as procedure with args void *
+$define %func event_lock as procedure with args void
+$define %func event_unlock as procedure with args void
 
 */
 
@@ -70,6 +78,7 @@ $define %func event_notify_ipc_change as procedure with args ipc_endpoint_t *
 $space %export event_init, kqueue_create, kqueue_destroy
 $space %export kqueue_get, kevent_process, knote_ready
 $space %export knote_notify_all, kqueue_wakeup
+$space %export knote_ready_locked, kqueue_wakeup_locked
 $space %export filter_register, filter_lookup
 $space %export event_timer_tick, event_cleanup_process
 $space %export event_fork_process
@@ -77,6 +86,9 @@ $space %export event_notify_proc_exit, event_notify_proc_fork
 $space %export event_notify_proc_reap
 $space %export event_notify_signal, event_notify_pipe_change
 $space %export event_notify_net_change, event_notify_ipc_change
+$space %export proc_sleep, proc_sleep_interlock
+$space %export proc_wakeup, proc_wakeup_one
+$space %export event_lock, event_unlock
 
 */
 
@@ -230,9 +242,11 @@ int	kevent_process(int kq_idx, struct kevent *changelist,
     int nchanges, struct kevent *eventlist, int nevents,
     s64 timeout_ms);
 void	knote_ready(knote_t *kn);
+void	knote_ready_locked(knote_t *kn);
 void	knote_notify_all(s16 filter, u64 ident, u32 fflags,
     s64 data);
 void	kqueue_wakeup(kqueue_t *kq);
+void	kqueue_wakeup_locked(kqueue_t *kq);
 void	filter_register(const filter_ops_t *ops);
 const filter_ops_t *filter_lookup(s16 filter);
 void	event_timer_tick(void);
@@ -249,8 +263,13 @@ void	event_notify_net_change(struct net_endpoint *ep);
 void	event_notify_ipc_change(struct ipc_endpoint *endpoint);
 void	event_notify_entity(u64 entity, u32 fflags);
 
+struct spin;
+
 void	proc_sleep(void *channel);
+void	proc_sleep_interlock(void *channel, struct spin *interlock);
 void	proc_wakeup(void *channel);
 void	proc_wakeup_one(void *channel);
+void	event_lock(void);
+void	event_unlock(void);
 
 #endif

@@ -175,6 +175,7 @@ filter_timer_tick(void)
 
 	now = timer_get_ticks();
 
+	event_lock();
 	for (i = 0; i < timer_count; i++) {
 		kn = timer_list[i];
 		if (!kn || !kn->used || kn->disabled) {
@@ -199,9 +200,10 @@ filter_timer_tick(void)
 				kn->fpriv = now + period;
 			}
 
-			knote_ready(kn);
+			knote_ready_locked(kn);
 		}
 	}
+	event_unlock();
 }
 
 const filter_ops_t filter_timer_ops = {

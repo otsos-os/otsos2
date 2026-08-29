@@ -41,7 +41,7 @@ $define %func entity_ns_find_entity as function with args entity_id
 $define %func entity_ns_free_slot as procedure with args u32
 $define %func entity_ns_init as procedure with args void
 $define %func entity_ns_is_path as function with args const char *
-$define %func entity_ns_name_of as function with args entity_id
+$define %func entity_ns_name_copy as function with args entity_id, char *, u32
 $define %func entity_ns_bind as function with args const char *, entity_id
 $define %func entity_ns_unbind as function with args const char *
 $define %func entity_ns_unbind_id as function with args entity_id
@@ -57,7 +57,8 @@ $space %internal entity_ns_component_valid, entity_ns_canonical
 $space %internal entity_ns_find_name, entity_ns_find_entity
 $space %internal entity_ns_free_slot
 $space %export entity_ns_init
-$space %export entity_ns_is_path, entity_ns_name_of
+$space %export entity_ns_is_path, entity_ns_name_copy
+$space %internal entity_ns_spin
 $space %export entity_ns_bind, entity_ns_unbind, entity_ns_unbind_id
 $space %export entity_ns_unbind_all_id
 $space %export entity_ns_lookup, entity_ns_list
@@ -68,6 +69,7 @@ $space %export entity_ns_lookup, entity_ns_list
 #include <kernel/api/errno.h>
 #include <kernel/entity/entity.h>
 #include <kernel/smp/smp.h>
+#include <kernel/sync/sync.h>
 #include <mlibc/mlibc.h>
 
 #define	ENTITY_NS_NONE		0xFFFFFFFFU
@@ -78,6 +80,9 @@ static u64	entity_ns_entity[ENTITY_MAX_NS_NODES];
 static char	entity_ns_names[ENTITY_MAX_NS_NODES][ENTITY_PATH_MAX];
 static u32	entity_ns_free_next[ENTITY_MAX_NS_NODES];
 static u32	entity_ns_free_head;
+
+static spin_t	entity_ns_spin =
+    SPIN_INITIALIZER("entity_ns", LO_ENTITY_NS);
 
 static int
 entity_ns_component_valid(const char *comp, int len)
@@ -212,16 +217,30 @@ entity_ns_is_path(const char *name)
 	return (entity_ns_canonical(name, canon, sizeof(canon)) == 0);
 }
 
-const char *
-entity_ns_name_of(entity_id_t id)
+int
+entity_ns_name_copy(entity_id_t id, char *buf, u32 bufsize)
 {
+	u32	len;
 	int	slot;
 
+	if (!buf || bufsize == 0) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	spin_lock(&entity_ns_spin);
 	slot = entity_ns_find_entity(id);
 	if (slot < 0) {
-		return (NULL);
+		spin_unlock(&entity_ns_spin);
+		buf[0] = '\0';
+		return (-API_ERR_NOT_FOUND);
 	}
-	return (entity_ns_names[(u32)slot]);
+	len = (u32)strlen(entity_ns_names[(u32)slot]);
+	if (len >= bufsize) {
+		len = bufsize - 1;
+	}
+	memcpy(buf, entity_ns_names[(u32)slot], len);
+	spin_unlock(&entity_ns_spin);
+	buf[len] = '\0';
+	return (0);
 }
 
 int
@@ -238,13 +257,13 @@ entity_ns_bind(const char *path, entity_id_t id)
 	if (ret != 0) {
 		return (ret);
 	}
-	smp_lock();
+	spin_lock(&entity_ns_spin);
 	if (entity_ns_find_name(canon) >= 0) {
-		smp_unlock();
+		spin_unlock(&entity_ns_spin);
 		return (-API_ERR_EXISTS);
 	}
 	if (entity_ns_free_head == ENTITY_NS_NONE) {
-		smp_unlock();
+		spin_unlock(&entity_ns_spin);
 		return (-API_ERR_NO_SPACE);
 	}
 	slot = entity_ns_free_head;
@@ -254,7 +273,7 @@ entity_ns_bind(const char *path, entity_id_t id)
 	entity_ns_entity[slot] = id;
 	memset(entity_ns_names[slot], 0, sizeof(entity_ns_names[slot]));
 	memcpy(entity_ns_names[slot], canon, strlen(canon) + 1);
-	smp_unlock();
+	spin_unlock(&entity_ns_spin);
 	return (0);
 }
 
@@ -269,14 +288,14 @@ entity_ns_unbind(const char *path)
 	if (ret != 0) {
 		return (ret);
 	}
-	smp_lock();
+	spin_lock(&entity_ns_spin);
 	slot = entity_ns_find_name(canon);
 	if (slot < 0) {
-		smp_unlock();
+		spin_unlock(&entity_ns_spin);
 		return (-API_ERR_NOT_FOUND);
 	}
 	entity_ns_free_slot((u32)slot);
-	smp_unlock();
+	spin_unlock(&entity_ns_spin);
 	return (0);
 }
 
@@ -285,12 +304,12 @@ entity_ns_unbind_id(entity_id_t id)
 {
 	int	slot;
 
-	smp_lock();
+	spin_lock(&entity_ns_spin);
 	slot = entity_ns_find_entity(id);
 	if (slot >= 0) {
 		entity_ns_free_slot((u32)slot);
 	}
-	smp_unlock();
+	spin_unlock(&entity_ns_spin);
 	return (0);
 }
 
@@ -304,7 +323,7 @@ entity_ns_unbind_all_id(entity_id_t id)
 		return (-API_ERR_BAD_VALUE);
 	}
 	count = 0;
-	smp_lock();
+	spin_lock(&entity_ns_spin);
 	for (;;) {
 		slot = entity_ns_find_entity(id);
 		if (slot < 0) {
@@ -313,7 +332,7 @@ entity_ns_unbind_all_id(entity_id_t id)
 		entity_ns_free_slot((u32)slot);
 		count++;
 	}
-	smp_unlock();
+	spin_unlock(&entity_ns_spin);
 	return (count > 0 ? 0 : -API_ERR_NOT_FOUND);
 }
 
@@ -332,14 +351,14 @@ entity_ns_lookup(const char *path, entity_id_t *id)
 	if (ret != 0) {
 		return (ret);
 	}
-	smp_lock();
+	spin_lock(&entity_ns_spin);
 	slot = entity_ns_find_name(canon);
 	if (slot < 0) {
-		smp_unlock();
+		spin_unlock(&entity_ns_spin);
 		return (-API_ERR_NOT_FOUND);
 	}
 	*id = entity_ns_entity[(u32)slot];
-	smp_unlock();
+	spin_unlock(&entity_ns_spin);
 	if (*id == 0) {
 		return (-API_ERR_NOT_FOUND);
 	}
@@ -375,7 +394,7 @@ entity_ns_list(const char *path, struct api_entity_entry *entries,
 	prefix[prefix_len + 1] = '\0';
 	prefix_len++;
 
-	smp_lock();
+	spin_lock(&entity_ns_spin);
 	out = 0;
 	for (i = 0; i < ENTITY_MAX_NS_NODES && out < max_entries; i++) {
 		const char	*name;
@@ -416,32 +435,28 @@ entity_ns_list(const char *path, struct api_entity_entry *entries,
 			if (entries[j].id == 0 && *comp_end == '\0' &&
 			    entity_ns_entity[i] != 0) {
 				entries[j].id = entity_ns_entity[i];
-				entries[j].archetype =
-				    entity_arch(entity_ns_entity[i]);
-				entries[j].state =
-				    entity_state(entity_ns_entity[i]);
-				entries[j].owner_pid =
-				    entity_owner(entity_ns_entity[i]);
 			}
 			continue;
 		}
 		memset(&entries[out], 0, sizeof(entries[out]));
 		if (*comp_end == '\0') {
 			entries[out].id = entity_ns_entity[i];
-			if (entries[out].id != 0) {
-				entries[out].archetype =
-				    entity_arch(entries[out].id);
-				entries[out].state =
-				    entity_state(entries[out].id);
-				entries[out].owner_pid =
-				    entity_owner(entries[out].id);
-			}
 		}
 		memcpy(entries[out].name, rest, comp_len);
 		entries[out].name[comp_len] = '\0';
 		out++;
 	}
-	smp_unlock();
+	spin_unlock(&entity_ns_spin);
+
+	for (i = 0; i < out; i++) {
+		if (entries[i].id == 0) {
+			continue;
+		}
+		entries[i].archetype = entity_arch(entries[i].id);
+		entries[i].state = entity_state(entries[i].id);
+		entries[i].owner_pid = entity_owner(entries[i].id);
+	}
+
 	*count = out;
 	return (0);
 }

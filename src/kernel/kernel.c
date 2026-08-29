@@ -98,6 +98,7 @@ $space %export kmain
 #include <kernel/other/kusr.h>
 #include <kernel/syscall.h>
 #include <kernel/smp/smp.h>
+#include <kernel/sync/sync.h>
 #include <kernel/trace/trace.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdio.h>
@@ -593,6 +594,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	timer_hz = 1000;
 
 	console_early_init();
+	sync_init();
 	bootmem_init(magic, addr, 0x100000,
     (u64)&kernel_end - KERNEL_VMA);
 	kmem_init();
@@ -611,6 +613,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 
 	init_idt();
 	pmap_init();
+	
 	module_pool_sz = 0;
 	if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
 		module_pool_sz = mb2_total_modules_size(
@@ -775,6 +778,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 		cm_ok = (cm_init() == 0);
 	}
 	if (cm_ok) {
+		sync_configure();
 		(void)cm_update_consumer(CM_CONSUMER_INPUT, 0);
 		(void)cm_update_consumer(CM_CONSUMER_NET, 0);
 	}
@@ -845,6 +849,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 		 * wants to use.  The boot menu / disk selection remains
 		 * visible up to this point.
 		 */
+
 		terminal_power_suspend_all();
 
 		if (mod_ctx.init_mod && mod_ctx.init_sz > 0) {

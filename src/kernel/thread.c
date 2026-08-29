@@ -61,6 +61,11 @@ $define %func thread_release_hook as procedure with args entity id
 $define %func thread_mark_dead as procedure with args thread_t *
 $define %func thread_has_dead as function with args void
 $define %func thread_retired_dead as procedure with args void
+$define %func thread_lock as procedure with args void
+$define %func thread_unlock as procedure with args void
+$define %func thread_lock_held as function with args void
+$define %func thread_state_set as procedure with args thread_t *, process_state_t
+$define %func thread_state_get as function with args thread_t *
 $define %const THREAD_JOIN_SPINS as bound on thread_join waits
 
 */
@@ -79,6 +84,8 @@ $space %export thread_count_alive, thread_kill_all
 $space %internal thread_fpu_init_context, thread_fpu_save
 $space %internal thread_release_hook
 $space %export thread_mark_dead, thread_has_dead, thread_retired_dead
+$space %export thread_lock, thread_unlock, thread_lock_held
+$space %export thread_state_set, thread_state_get
 
 */
 
@@ -89,6 +96,7 @@ $space %export thread_mark_dead, thread_has_dead, thread_retired_dead
 #include <kernel/event/event.h>
 #include <kernel/entity/entity.h>
 #include <kernel/smp/smp.h>
+#include <kernel/sync/sync.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #include <mm/kmem.h>
@@ -124,6 +132,7 @@ thread_block_t	thread_block;
 u32		next_tid = 1;
 static int	thread_initialized = 0;
 static volatile int	thread_dead_pending;
+static spin_t	thread_spin = SPIN_INITIALIZER("thread", LO_THREAD);
 
 static void	thread_link(process_t *proc, thread_t *td);
 static void	thread_unlink(thread_t *td);
@@ -132,28 +141,73 @@ static void	thread_fpu_save(thread_t *td);
 static void	thread_release_hook(entity_id_t id);
 
 void
+thread_lock(void)
+{
+	spin_lock(&thread_spin);
+}
+
+void
+thread_unlock(void)
+{
+	spin_unlock(&thread_spin);
+}
+
+int
+thread_lock_held(void)
+{
+	return (spin_owned(&thread_spin));
+}
+
+void
+thread_state_set(thread_t *td, process_state_t state)
+{
+	if (!td) {
+		return;
+	}
+	__atomic_store_n(&td->state, state, __ATOMIC_RELEASE);
+}
+
+process_state_t
+thread_state_get(thread_t *td)
+{
+	if (!td) {
+		return (PROC_STATE_UNUSED);
+	}
+	return (__atomic_load_n(&td->state, __ATOMIC_ACQUIRE));
+}
+
+void
 thread_mark_dead(thread_t *td)
 {
 	if (!td) {
 		return;
 	}
-	td->state = PROC_STATE_TERMINATED;
-	if (td->running_cpu >= 0) {
-		thread_dead_pending++;
+	thread_state_set(td, PROC_STATE_TERMINATED);
+	if (__atomic_load_n(&td->running_cpu, __ATOMIC_ACQUIRE) >= 0) {
+		__atomic_fetch_add(&thread_dead_pending, 1, __ATOMIC_RELAXED);
 	}
 }
 
 int
 thread_has_dead(void)
 {
-	return (thread_dead_pending != 0);
+	return (__atomic_load_n(&thread_dead_pending, __ATOMIC_RELAXED) != 0);
 }
 
 void
 thread_retired_dead(void)
 {
-	if (thread_dead_pending > 0) {
-		thread_dead_pending--;
+	int	cur;
+
+	for (;;) {
+		cur = __atomic_load_n(&thread_dead_pending, __ATOMIC_RELAXED);
+		if (cur <= 0) {
+			return;
+		}
+		if (__atomic_compare_exchange_n(&thread_dead_pending, &cur,
+		    cur - 1, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+			return;
+		}
 	}
 }
 
@@ -189,12 +243,15 @@ thread_release_hook(entity_id_t id)
 {
 	int	i;
 
+	thread_lock();
 	for (i = 0; i < MAX_THREADS; i++) {
 		if (thread_table[i].entity == id) {
 			thread_table[i].entity = 0;
+			thread_unlock();
 			return;
 		}
 	}
+	thread_unlock();
 }
 
 void
@@ -223,14 +280,18 @@ thread_t *
 thread_alloc(void)
 {
 	int		i;
+	int		entity_ready;
 	thread_t	*td;
 
+	entity_ready = entity_is_initialized();
 	for (i = 0; i < MAX_THREADS; i++) {
-		if (thread_table[i].used) {
+		if (entity_ready &&
+		    entity_slot_used(ENTITY_ARCH_THREAD, (u32)i)) {
 			continue;
 		}
-		if (entity_is_initialized() &&
-		    entity_slot_used(ENTITY_ARCH_THREAD, (u32)i)) {
+		thread_lock();
+		if (thread_table[i].used) {
+			thread_unlock();
 			continue;
 		}
 		td = &thread_table[i];
@@ -238,6 +299,8 @@ thread_alloc(void)
 		td->used = 1;
 		td->tid = next_tid++;
 		td->apc_head = -1;
+		td->running_cpu = -1;
+		thread_unlock();
 		return (td);
 	}
 	return (NULL);
@@ -316,9 +379,10 @@ thread_create(process_t *proc, u64 rip, u64 rsp, u64 cs, u64 ss)
 		entity_ns_bind(name, td->entity);
 	}
 
-	td->state = PROC_STATE_RUNNABLE;
-
+	thread_lock();
 	thread_link(proc, td);
+	thread_unlock();
+	thread_state_set(td, PROC_STATE_RUNNABLE);
 
 	printk("[THREAD] Created thread tid=%d for PID %d "
 	    "rip=%p\n", td->tid, proc->pid, (void *)rip);
@@ -496,20 +560,28 @@ thread_get_by_proc(process_t *proc)
 thread_t *
 thread_get(u32 tid)
 {
-	int	i;
+	thread_t	*td;
+	int		i;
 
+	td = NULL;
+	thread_lock();
 	for (i = 0; i < MAX_THREADS; i++) {
 		if (thread_table[i].used &&
 		    thread_table[i].tid == tid) {
-			return (&thread_table[i]);
+			td = &thread_table[i];
+			break;
 		}
 	}
-	return (NULL);
+	thread_unlock();
+	return (td);
 }
 
 void
 thread_destroy(thread_t *td)
 {
+	entity_id_t	entity;
+	u8		*kstack_base;
+
 	if (!td || !td->used) {
 		return;
 	}
@@ -519,22 +591,28 @@ thread_destroy(thread_t *td)
 		return;
 	}
 
-	thread_unlink(td);
 	apc_flush_thread(td);
 
-	if (td->kernel_stack) {
-		u8	*kstack_base;
-
-		kstack_base = (u8 *)(td->kernel_stack -
-		    KERNEL_STACK_SIZE);
-		kmem_free(kstack_base);
+	thread_lock();
+	if (!td->used || td->running_cpu >= 0) {
+		thread_unlock();
+		return;
 	}
-
-	if (td->entity != 0) {
-		entity_destroy(td->entity);
-	}
+	thread_unlink(td);
+	entity = td->entity;
+	kstack_base = td->kernel_stack ?
+	    (u8 *)(td->kernel_stack - KERNEL_STACK_SIZE) : NULL;
 	memset(td, 0, sizeof(thread_t));
 	td->apc_head = -1;
+	td->running_cpu = -1;
+	thread_unlock();
+
+	if (kstack_base != NULL) {
+		kmem_free(kstack_base);
+	}
+	if (entity != 0) {
+		entity_destroy(entity);
+	}
 }
 
 void
@@ -554,7 +632,8 @@ thread_exit(int code)
 	    td->tid, proc ? (int)proc->pid : 0, code);
 
 	td->exit_code = code;
-	td->running_cpu = smp_cpu_index();
+	__atomic_store_n(&td->running_cpu, (int)pcpu_current()->cpu_index,
+	    __ATOMIC_RELEASE);
 	thread_mark_dead(td);
 
 	/* If set_tid_address was called, clear the TID field
@@ -598,13 +677,13 @@ thread_join(u32 tid, int *status)
 	}
 
 	for (i = 0; i < THREAD_JOIN_SPINS; i++) {
-		if (td->state == PROC_STATE_TERMINATED ||
-		    td->state == PROC_STATE_UNUSED) {
+		if (thread_state_get(td) == PROC_STATE_TERMINATED ||
+		    thread_state_get(td) == PROC_STATE_UNUSED) {
 			break;
 		}
 		proc_sleep((void *)td);
 	}
-	if (td->state != PROC_STATE_TERMINATED) {
+	if (thread_state_get(td) != PROC_STATE_TERMINATED) {
 		return (-1);
 	}
 
@@ -613,12 +692,12 @@ thread_join(u32 tid, int *status)
 	}
 
 	for (i = 0; i < THREAD_JOIN_SPINS; i++) {
-		if (td->running_cpu < 0) {
+		if (__atomic_load_n(&td->running_cpu, __ATOMIC_ACQUIRE) < 0) {
 			break;
 		}
 		process_yield();
 	}
-	if (td->running_cpu >= 0) {
+	if (__atomic_load_n(&td->running_cpu, __ATOMIC_ACQUIRE) >= 0) {
 		return ((int)tid);
 	}
 
@@ -638,12 +717,14 @@ thread_count_alive(process_t *proc)
 	}
 
 	count = 0;
+	thread_lock();
 	for (td = proc->thread_list; td; td = td->next) {
 		if (td->state != PROC_STATE_TERMINATED &&
 		    td->state != PROC_STATE_UNUSED) {
 			count++;
 		}
 	}
+	thread_unlock();
 	return (count);
 }
 
@@ -656,13 +737,20 @@ thread_kill_all(process_t *proc)
 		return;
 	}
 
+	thread_lock();
 	td = proc->thread_list;
 	while (td) {
 		next = td->next;
 		if (td != proc->cur_thread) {
 			td->exit_code = -1;
-			thread_mark_dead(td);
+			thread_state_set(td, PROC_STATE_TERMINATED);
+			if (__atomic_load_n(&td->running_cpu,
+			    __ATOMIC_ACQUIRE) >= 0) {
+				__atomic_fetch_add(&thread_dead_pending, 1,
+				    __ATOMIC_RELAXED);
+			}
 		}
 		td = next;
 	}
+	thread_unlock();
 }

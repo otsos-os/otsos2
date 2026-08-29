@@ -34,6 +34,10 @@ $define %type process_t as struct with process control block
 $define %type registers_t as struct with CPU register snapshot
 
 $define %func scheduler_load_config as procedure with args void
+$define %func scheduler_load_snapshot as procedure with args int *
+$define %func scheduler_cpu_runnable_count as function with args int
+$define %func scheduler_least_loaded_cpu as function with args void
+$define %func scheduler_thread_can_run_on as function with args thread_t *, int, const int *
 $define %func pick_next_thread as function with args thread_t *
 $define %func pick_any_runnable_thread as function with args thread_t *
 $define %func scheduler_reap_apc as procedure with args u64, u64, u64
@@ -49,7 +53,9 @@ $define %func scheduler_yield as procedure with args registers_t *
 
 /* !SPACE!
 
-$space %internal scheduler_load_config
+$space %internal scheduler_load_config, scheduler_load_snapshot
+$space %internal scheduler_cpu_runnable_count, scheduler_least_loaded_cpu
+$space %internal scheduler_thread_can_run_on
 $space %internal pick_next_thread, pick_any_runnable_thread
 $space %internal scheduler_reap_apc, scheduler_retire_dead
 $space %internal scheduler_redirect_to_death, scheduler_user_return_work
@@ -68,6 +74,7 @@ $space %export scheduler_cm_update, scheduler_tick, scheduler_yield
 #include <kernel/process.h>
 #include <kernel/scheduler.h>
 #include <kernel/smp/smp.h>
+#include <kernel/sync/sync.h>
 #include <kernel/thread.h>
 #include <kernel/trace/trace.h>
 #include <kernel/api/posix/posix.h>
@@ -76,6 +83,7 @@ static int	sched_strict_process_separation;
 static int	sched_smart_migration = 1;
 static int	sched_migration_threshold = 2;
 static int	sched_next_cpu;
+static spin_t	sched_spin = SPIN_INITIALIZER("sched", LO_SCHED);
 
 static void
 scheduler_load_config(void)
@@ -93,12 +101,15 @@ scheduler_load_config(void)
 		sched_migration_threshold = 0;
 	}
 }
-static int
-scheduler_cpu_runnable_count(int cpu)
+static void
+scheduler_load_snapshot(int *load)
 {
-	int		i, count;
 	thread_t	*td;
-	count = 0;
+	int		i;
+
+	for (i = 0; i < PCPU_MAX_CPUS; i++) {
+		load[i] = 0;
+	}
 	for (i = 0; i < MAX_THREADS; i++) {
 		td = &thread_table[i];
 		if (!td->used || !td->proc) {
@@ -108,36 +119,58 @@ scheduler_cpu_runnable_count(int cpu)
 		    td->state == PROC_STATE_UNUSED) {
 			continue;
 		}
-		if (td->proc->preferred_cpu == cpu || td->running_cpu == cpu) {
-			count++;
+		if (td->proc->preferred_cpu >= 0 &&
+		    td->proc->preferred_cpu < PCPU_MAX_CPUS) {
+			load[td->proc->preferred_cpu]++;
+		}
+		if (td->running_cpu >= 0 && td->running_cpu < PCPU_MAX_CPUS &&
+		    td->running_cpu != td->proc->preferred_cpu) {
+			load[td->running_cpu]++;
 		}
 	}
-	return (count);
+}
+
+static int
+scheduler_cpu_runnable_count(int cpu)
+{
+	int	load[PCPU_MAX_CPUS];
+
+	if (cpu < 0 || cpu >= PCPU_MAX_CPUS) {
+		return (0);
+	}
+	thread_lock();
+	scheduler_load_snapshot(load);
+	thread_unlock();
+	return (load[cpu]);
 }
 
 static int
 scheduler_least_loaded_cpu(void)
 {
-	int	cpu, cpus, best_cpu, best_load, load;
+	int	load[PCPU_MAX_CPUS];
+	int	cpu, cpus, best_cpu;
 
 	cpus = smp_sched_cpu_count();
 	if (cpus <= 0) {
 		return (0);
 	}
+	if (cpus > PCPU_MAX_CPUS) {
+		cpus = PCPU_MAX_CPUS;
+	}
+	thread_lock();
+	scheduler_load_snapshot(load);
+	thread_unlock();
 	best_cpu = 0;
-	best_load = scheduler_cpu_runnable_count(0);
 	for (cpu = 1; cpu < cpus; cpu++) {
-		load = scheduler_cpu_runnable_count(cpu);
-		if (load < best_load) {
+		if (load[cpu] < load[best_cpu]) {
 			best_cpu = cpu;
-			best_load = load;
 		}
 	}
 	return (best_cpu);
 }
 
 static int
-scheduler_thread_can_run_on(thread_t *td, int cpu)
+scheduler_thread_can_run_on(thread_t *td, int cpu, const int *load)
 {
 	process_t	*proc;
 
@@ -160,8 +193,12 @@ scheduler_thread_can_run_on(thread_t *td, int cpu)
 	if (proc->last_cpu == cpu || proc->preferred_cpu == cpu) {
 		return (1);
 	}
-	return (scheduler_cpu_runnable_count(cpu) + sched_migration_threshold <
-	    scheduler_cpu_runnable_count(proc->preferred_cpu));
+	if (cpu < 0 || cpu >= PCPU_MAX_CPUS ||
+	    proc->preferred_cpu >= PCPU_MAX_CPUS) {
+		return (0);
+	}
+	return (load[cpu] + sched_migration_threshold <
+	    load[proc->preferred_cpu]);
 }
 
 void
@@ -216,20 +253,22 @@ static thread_t *
 pick_next_thread(thread_t *current)
 {
 	thread_t	*cand;
+	int		load[PCPU_MAX_CPUS];
 	int		start, i, idx, cpu;
 
 	start = 0;
-	cpu = smp_cpu_index();
+	cpu = (int)pcpu_current()->cpu_index;
 	if (current) {
 		start = (int)(current - thread_table) + 1;
 	}
 
+	scheduler_load_snapshot(load);
 	for (i = 0; i < MAX_THREADS; i++) {
 		idx = (start + i) % MAX_THREADS;
 		cand = &thread_table[idx];
 		if (cand->used &&
 		    cand->state == PROC_STATE_RUNNABLE &&
-		    scheduler_thread_can_run_on(cand, cpu)) {
+		    scheduler_thread_can_run_on(cand, cpu, load)) {
 			return (cand);
 		}
 	}
@@ -244,7 +283,7 @@ pick_any_runnable_thread(thread_t *current)
 	int	start, i, idx, cpu;
 
 	start = 0;
-	cpu = smp_cpu_index();
+	cpu = (int)pcpu_current()->cpu_index;
 	if (current) {
 		start = (int)(current - thread_table) + 1;
 	}
@@ -284,20 +323,23 @@ scheduler_retire_dead(thread_t *current)
 	}
 
 	retired = 0;
-	cpu = smp_cpu_index();
+	cpu = (int)pcpu_current()->cpu_index;
+	thread_lock();
 	for (i = 0; i < MAX_THREADS; i++) {
 		td = &thread_table[i];
 		if (td->used && td != current &&
-		    td->state == PROC_STATE_TERMINATED &&
+		    thread_state_get(td) == PROC_STATE_TERMINATED &&
 		    td->running_cpu == cpu) {
-			td->running_cpu = -1;
+			__atomic_store_n(&td->running_cpu, -1,
+			    __ATOMIC_RELEASE);
 			thread_retired_dead();
 			retired++;
 		}
 	}
+	thread_unlock();
 
 	if (retired > 0 && current != NULL &&
-	    current->state != PROC_STATE_TERMINATED &&
+	    thread_state_get(current) != PROC_STATE_TERMINATED &&
 	    process_has_reapable()) {
 		(void)apc_queue_kernel(current, scheduler_reap_apc, 0, 0, 0);
 	}
@@ -354,27 +396,24 @@ scheduler_switch(registers_t *regs, int voluntary)
 	thread_t	*current, *next;
 	process_t	*cur_proc;
 	u32		trace_reason;
-	int		locked_here;
+	int		cpu;
 
 	scheduler_user_return_work(regs);
 
+	cpu = (int)pcpu_current()->cpu_index;
 	current = thread_current();
 	if (!current) {
-		locked_here = !smp_lock_held();
-		if (locked_here) {
-			smp_lock();
-		}
+		spin_lock(&sched_spin);
+		thread_lock();
 		next = pick_next_thread(NULL);
 		if (!next || next->state != PROC_STATE_RUNNABLE) {
-			if (locked_here) {
-				smp_unlock();
-			}
+			thread_unlock();
+			spin_unlock(&sched_spin);
 			return;
 		}
 		thread_set_current(next);
-		if (locked_here) {
-			smp_unlock();
-		}
+		thread_unlock();
+		spin_unlock(&sched_spin);
 		if (next->proc) {
 			pmap_load(next->proc->cr3);
 		}
@@ -386,30 +425,26 @@ scheduler_switch(registers_t *regs, int voluntary)
 	cur_proc = current->proc;
 
 	if (!voluntary && (regs->cs & 3) == 0 &&
-	    current->state == PROC_STATE_RUNNING) {
+	    thread_state_get(current) == PROC_STATE_RUNNING) {
 		return;
 	}
 
-	if (current->state == PROC_STATE_SLEEPING) {
-		locked_here = !smp_lock_held();
-		if (locked_here) {
-			smp_lock();
-		}
+	if (thread_state_get(current) == PROC_STATE_SLEEPING) {
+		spin_lock(&sched_spin);
+		thread_lock();
 		current->running_cpu = -1;
 		next = pick_next_thread(current);
 		if (!next || next == current) {
-			current->running_cpu = smp_cpu_index();
-			if (locked_here) {
-				smp_unlock();
-			}
+			current->running_cpu = cpu;
+			thread_unlock();
+			spin_unlock(&sched_spin);
 			return;
 		}
 		thread_save_context(current, regs);
-		trace_sched_switch(current, next, TRACE_SCHED_SLEEP, regs);
 		thread_set_current(next);
-		if (locked_here) {
-			smp_unlock();
-		}
+		thread_unlock();
+		spin_unlock(&sched_spin);
+		trace_sched_switch(current, next, TRACE_SCHED_SLEEP, regs);
 		if (next->proc && cur_proc &&
 		    next->proc->cr3 != cur_proc->cr3) {
 			pmap_load(next->proc->cr3);
@@ -421,16 +456,15 @@ scheduler_switch(registers_t *regs, int voluntary)
 	}
 
 	trace_reason = TRACE_SCHED_PREEMPT;
-	locked_here = !smp_lock_held();
-	if (locked_here) {
-		smp_lock();
-	}
+	spin_lock(&sched_spin);
 	scheduler_retire_dead(current);
 	process_reap();
+
+	thread_lock();
 	thread_save_context(current, regs);
 
 	if (current->state == PROC_STATE_RUNNING) {
-		current->state = PROC_STATE_RUNNABLE;
+		thread_state_set(current, PROC_STATE_RUNNABLE);
 		current->running_cpu = -1;
 	} else if (current->state != PROC_STATE_TERMINATED) {
 		current->running_cpu = -1;
@@ -445,28 +479,25 @@ scheduler_switch(registers_t *regs, int voluntary)
 
 	if (!next || next == current) {
 		if (current->state == PROC_STATE_TERMINATED) {
-			current->running_cpu = smp_cpu_index();
-			if (locked_here) {
-				smp_unlock();
-			}
+			current->running_cpu = cpu;
+			thread_unlock();
+			spin_unlock(&sched_spin);
 			return;
 		}
-		current->state = PROC_STATE_RUNNING;
-		current->running_cpu = smp_cpu_index();
-		if (locked_here) {
-			smp_unlock();
-		}
+		thread_state_set(current, PROC_STATE_RUNNING);
+		current->running_cpu = cpu;
+		thread_unlock();
+		spin_unlock(&sched_spin);
 		return;
 	}
 
 	if (current->state == PROC_STATE_TERMINATED) {
 		trace_reason = TRACE_SCHED_EXIT;
 	}
-	trace_sched_switch(current, next, trace_reason, regs);
 	thread_set_current(next);
-	if (locked_here) {
-		smp_unlock();
-	}
+	thread_unlock();
+	spin_unlock(&sched_spin);
+	trace_sched_switch(current, next, trace_reason, regs);
 	if (next->proc && cur_proc &&
 	    next->proc->cr3 != cur_proc->cr3) {
 		pmap_load(next->proc->cr3);

@@ -35,8 +35,7 @@ userspace_enter:
     mov ds, cx
     mov es, cx
     mov fs, cx
-    mov gs, cx
-    
+
     ; Build iretq frame on stack
     push r11            ; SS (user data segment)
     sub rbx, 8          ; Align RSP to 8 mod 16 (System V ABI: _start
@@ -68,4 +67,5 @@ userspace_enter:
     xor r15, r15
     
     ; Jump to userspace!
+    swapgs
     iretq

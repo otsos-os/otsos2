@@ -80,6 +80,7 @@ $space %export kmem_set_growth_pool
 
 #include <mlibc/stdio.h>
 #include <kernel/bootmem.h>
+#include <kernel/sync/sync.h>
 #include <mm/kmem.h>
 #include <mm/vm/vm_page.h>
 #include <mlibc/mlibc.h>
@@ -108,6 +109,8 @@ static char		*growth_pool_ptr = NULL;
 static size_t		growth_pool_remaining = 0;
 static char		*growth_pool_start = NULL;
 static char		*growth_pool_end = NULL;
+
+static spin_t		kmem_spin = SPIN_INITIALIZER("kmem", LO_KMEM);
 
 static size_t
 align16(size_t size)
@@ -181,10 +184,12 @@ coalesce(header_t *block)
 void
 kmem_set_growth_pool(void *addr, size_t size)
 {
+	spin_lock(&kmem_spin);
 	growth_pool_ptr = (char *)addr;
 	growth_pool_remaining = size;
 	growth_pool_start = (char *)addr;
 	growth_pool_end = (char *)addr + size;
+	spin_unlock(&kmem_spin);
 	printk("[KMEM] growth pool set: %p size=%d\n",
 	    addr, (int)size);
 }
@@ -214,7 +219,7 @@ kmem_init_internal(void)
 	    kmem_heap_start, (int)sizeof(header_t));
 	printk("free block size: %d\n",
 	    (int)kmem_heap_head->size);
-	kmem_heap_init = 1;
+	__atomic_store_n(&kmem_heap_init, 1, __ATOMIC_RELEASE);
 }
 
 static void *
@@ -677,49 +682,83 @@ kmem_dump_internal(void)
 void
 kmem_init(void)
 {
+	spin_lock(&kmem_spin);
 	kmem_init_internal();
+	spin_unlock(&kmem_spin);
 }
 
 void *
 kmem_alloc(size_t size)
 {
-	return (kmem_alloc_internal(size));
+	void	*ptr;
+
+	spin_lock(&kmem_spin);
+	ptr = kmem_alloc_internal(size);
+	spin_unlock(&kmem_spin);
+	return (ptr);
 }
 
 void
 kmem_free(void *ptr)
 {
+	spin_lock(&kmem_spin);
 	kmem_free_internal(ptr);
+	spin_unlock(&kmem_spin);
 }
 
 void *
 kmem_calloc(size_t nmemb, size_t size)
 {
-	return (kmem_calloc_internal(nmemb, size));
+	void	*ptr;
+
+	spin_lock(&kmem_spin);
+	ptr = kmem_calloc_internal(nmemb, size);
+	spin_unlock(&kmem_spin);
+	return (ptr);
 }
 
 void *
 kmem_realloc(void *ptr, size_t size)
 {
-	return (kmem_realloc_internal(ptr, size));
+	void	*out;
+
+	spin_lock(&kmem_spin);
+	out = kmem_realloc_internal(ptr, size);
+	spin_unlock(&kmem_spin);
+	return (out);
 }
 
 void *
 kmem_alloc_aligned(size_t size, size_t align)
 {
-	return (kmem_alloc_aligned_internal(size, align));
+	void	*ptr;
+
+	spin_lock(&kmem_spin);
+	ptr = kmem_alloc_aligned_internal(size, align);
+	spin_unlock(&kmem_spin);
+	return (ptr);
 }
 
 size_t
 kmem_usable_size(void *ptr)
 {
-	return (kmem_usable_size_internal(ptr));
+	size_t	sz;
+
+	spin_lock(&kmem_spin);
+	sz = kmem_usable_size_internal(ptr);
+	spin_unlock(&kmem_spin);
+	return (sz);
 }
 
 size_t
 kmem_free_bytes(void)
 {
-	return (kmem_free_bytes_internal());
+	size_t	sz;
+
+	spin_lock(&kmem_spin);
+	sz = kmem_free_bytes_internal();
+	spin_unlock(&kmem_spin);
+	return (sz);
 }
 
 size_t
@@ -731,18 +770,32 @@ kmem_total_bytes(void)
 size_t
 kmem_used_bytes(void)
 {
-	return (KMEM_HEAP_SIZE_VAL -
-	    kmem_free_bytes_internal());
+	size_t	sz;
+
+	spin_lock(&kmem_spin);
+	sz = kmem_free_bytes_internal();
+	spin_unlock(&kmem_spin);
+	return (KMEM_HEAP_SIZE_VAL - sz);
 }
 
 int
 kmem_is_initialized(void)
 {
-	return (kmem_is_init_internal());
+	int	ok;
+
+	if (__atomic_load_n(&kmem_heap_init, __ATOMIC_ACQUIRE) == 0) {
+		return (0);
+	}
+	spin_lock(&kmem_spin);
+	ok = kmem_is_init_internal();
+	spin_unlock(&kmem_spin);
+	return (ok);
 }
 
 void
 kmem_dump(void)
 {
+	spin_lock(&kmem_spin);
 	kmem_dump_internal();
+	spin_unlock(&kmem_spin);
 }

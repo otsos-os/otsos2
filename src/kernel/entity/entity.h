@@ -80,7 +80,7 @@ $define %func entity_handle_foreach as function with args process *, callback
 
 $define %func entity_ns_is_path as function with args const char *
 $define %func entity_ns_init as procedure with args void
-$define %func entity_ns_name_of as function with args entity id
+$define %func entity_ns_name_copy as function with args entity id, char *, u32
 $define %func entity_ns_bind as function with args const char *, entity id
 $define %func entity_ns_unbind as function with args const char *
 $define %func entity_ns_unbind_id as function with args entity id
@@ -114,7 +114,7 @@ $space %export entity_handle_lookup, entity_handle_free, entity_handle_dup
 $space %export entity_handle_copy_all, entity_handle_release_all
 $space %export entity_handle_drop
 $space %export entity_handle_foreach
-$space %export entity_ns_is_path, entity_ns_init, entity_ns_name_of
+$space %export entity_ns_is_path, entity_ns_init, entity_ns_name_copy
 $space %export entity_ns_bind, entity_ns_unbind
 $space %export entity_ns_unbind_id, entity_ns_unbind_all_id
 $space %export entity_ns_lookup, entity_ns_list
@@ -192,6 +192,7 @@ typedef struct entity_meta_block {
 
 #define	ENTITY_STATE_ACTIVE		1
 #define	ENTITY_STATE_DELETED		2
+#define	ENTITY_STATE_DYING		3
 
 #define	ENTITY_ACCESS_READ		0x00000001
 #define	ENTITY_ACCESS_WRITE		0x00000002
@@ -310,7 +311,7 @@ int	entity_handle_foreach(const struct process *proc,
 
 int	entity_ns_is_path(const char *name);
 void	entity_ns_init(void);
-const char *entity_ns_name_of(entity_id_t id);
+int	entity_ns_name_copy(entity_id_t id, char *buf, u32 bufsize);
 int	entity_ns_bind(const char *name, entity_id_t id);
 int	entity_ns_unbind(const char *name);
 int	entity_ns_unbind_id(entity_id_t id);

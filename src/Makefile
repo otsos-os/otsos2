@@ -297,6 +297,13 @@ AML_NAMED_O = ../bin/aml_named.o
 AML_RESOURCE_O = ../bin/aml_resource.o
 SMP_O = ../bin/smp.o
 SMP_ASM_O = ../bin/smp_asm.o
+PCPU_O = ../bin/pcpu.o
+SYNC_O = ../bin/sync.o
+SYNC_CRITICAL_O = ../bin/sync_critical.o
+SYNC_SPINLOCK_O = ../bin/sync_spinlock.o
+SYNC_MUTEX_O = ../bin/sync_mutex.o
+SYNC_RWLOCK_O = ../bin/sync_rwlock.o
+SYNC_WITNESS_O = ../bin/sync_witness.o
 POWER_O = ../bin/power.o
 POWER_CTRL_O = ../bin/power_controller.o
 POWER_PBUTTON_O = ../bin/power_pbutton.o
@@ -412,7 +419,9 @@ OBJ_NO_KSYMTAB = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UAR
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(ACPI_PRT_O) \
       $(AML_O) $(AML_BUS_O) $(AML_OBJECT_O) $(AML_NAMESPACE_O) $(AML_PARSE_O) $(AML_REGION_O) $(AML_EXEC_O) $(AML_OP_O) $(AML_NAMED_O) $(AML_RESOURCE_O) \
-      $(SMP_O) $(SMP_ASM_O) $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
+      $(SMP_O) $(SMP_ASM_O) $(PCPU_O) \
+      $(SYNC_O) $(SYNC_CRITICAL_O) $(SYNC_SPINLOCK_O) $(SYNC_MUTEX_O) $(SYNC_RWLOCK_O) $(SYNC_WITNESS_O) \
+      $(POWER_O) $(POWER_CTRL_O) $(POWER_PBUTTON_O) \
       $(NEWBUS_DEVICE_O) $(NEWBUS_MODULE_O) $(NEWBUS_ROOT_O) $(NEWBUS_NEXUS_O) $(NEWBUS_PLATFORM_O) $(NEWBUS_CONFIG_O) $(NEWBUS_RESOURCE_O) $(NEWBUS_INTR_O) $(NEWBUS_POLL_O) $(NEWBUS_DEBUG_O) $(NEWBUS_INTERFACE_O) \
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_MSI_O) $(PCI_BAR_O) \
       $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O) \
@@ -1382,6 +1391,34 @@ $(SMP_O): kernel/smp/smp.c kernel/smp/smp.h kernel/gdt.h kernel/interrupts/apic/
 $(SMP_ASM_O): kernel/smp/smp.asm
 	@echo "  AS      $<"
 	@$(AS) -f $(NASM_FORMAT) -g -F dwarf $< -o $@
+
+$(PCPU_O): kernel/smp/pcpu.c kernel/smp/pcpu.h kernel/gdt.h kernel/interrupts/apic/lapic.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(SYNC_O): kernel/sync/sync.c kernel/sync/sync.h kernel/smp/pcpu.h kernel/cm/cm.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(SYNC_CRITICAL_O): kernel/sync/critical.c kernel/sync/sync.h kernel/smp/pcpu.h kernel/interrupts/irq.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(SYNC_SPINLOCK_O): kernel/sync/spinlock.c kernel/sync/sync.h kernel/smp/pcpu.h kernel/interrupts/irq.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(SYNC_MUTEX_O): kernel/sync/mutex.c kernel/sync/sync.h kernel/smp/pcpu.h kernel/thread.h kernel/event/event.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(SYNC_RWLOCK_O): kernel/sync/rwlock.c kernel/sync/sync.h kernel/thread.h kernel/event/event.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(SYNC_WITNESS_O): kernel/sync/witness.c kernel/sync/sync.h kernel/smp/pcpu.h kernel/thread.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(POWER_O): kernel/drivers/power/power.c kernel/drivers/power/power.h kernel/drivers/acpi/acpi.h
 	@echo "  CC      $<"

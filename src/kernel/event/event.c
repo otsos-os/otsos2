@@ -45,9 +45,13 @@ $define %func filter_index as function with args s16
 $define %func filter_register as procedure with args const filter_ops_t *
 $define %func filter_lookup as function with args s16
 $define %func proc_sleep as procedure with args void *
+$define %func proc_sleep_interlock as procedure with args void *, spin_t *
+$define %func proc_sleep_wait as procedure with args thread_t *
 $define %func proc_wakeup as procedure with args void *
 $define %func proc_wakeup_one as procedure with args void *
 $define %func event_init as procedure with args void
+$define %func event_lock as procedure with args void
+$define %func event_unlock as procedure with args void
 $define %func kqueue_create as function with args void
 $define %func kqueue_destroy as function with args int
 $define %func kqueue_get as function with args int
@@ -75,8 +79,12 @@ $define %func event_notify_ipc_change as procedure with args ipc_endpoint_t *
 $space %internal filter_index, knote_find, knote_alloc
 $space %internal knote_add_to_ready, knote_remove_from_ready
 $space %internal process_change, collect_events
+$space %internal proc_sleep_wait, kqueue_destroy_locked
 $space %export filter_register, filter_lookup
-$space %export proc_sleep, proc_wakeup, proc_wakeup_one
+$space %export proc_sleep, proc_sleep_interlock
+$space %export proc_wakeup, proc_wakeup_one
+$space %export event_lock, event_unlock, event_spin
+$space %export knote_ready_locked, kqueue_wakeup_locked
 $space %export event_init, kqueue_create, kqueue_destroy
 $space %export kqueue_get, knote_ready, kqueue_wakeup
 $space %export knote_notify_all, kevent_process
@@ -94,6 +102,7 @@ $space %export event_notify_net_change, event_notify_ipc_change
 #include <kernel/process.h>
 #include <kernel/thread.h>
 #include <kernel/smp/smp.h>
+#include <kernel/sync/sync.h>
 #include <kernel/panic.h>
 #include <kernel/trace/trace.h>
 #include <mm/kmem.h>
@@ -103,6 +112,8 @@ $space %export event_notify_net_change, event_notify_ipc_change
 static kqueue_t			kqueue_pool[MAX_KQUEUES];
 static int			event_initialized;
 static const filter_ops_t	*filter_table[EVFILT_SYSCOUNT];
+static spin_t			event_spin =
+				    SPIN_INITIALIZER("event", LO_EVENT);
 
 static int
 filter_index(s16 filter)
@@ -145,44 +156,72 @@ filter_lookup(s16 filter)
 }
 
 void
-proc_sleep(void *channel)
+event_lock(void)
+{
+	spin_lock(&event_spin);
+}
+
+void
+event_unlock(void)
+{
+	spin_unlock(&event_spin);
+}
+
+static void
+proc_sleep_wait(thread_t *td)
+{
+	while (__atomic_load_n(&td->wait_channel, __ATOMIC_ACQUIRE) != NULL) {
+		__asm__ volatile("sti");
+		__asm__ volatile("int %0" :: "i"(IRQ_VECTOR_YIELD)
+		    : "memory");
+		__asm__ volatile("cli");
+		if (__atomic_load_n(&td->wait_channel,
+		    __ATOMIC_ACQUIRE) == NULL) {
+			break;
+		}
+		__asm__ volatile("sti; hlt; cli");
+	}
+}
+
+void
+proc_sleep_interlock(void *channel, spin_t *interlock)
 {
 	thread_t	*td;
-	int		had_lock;
+	u64		flags;
+	u32		depth;
 
 	td = thread_current();
 	if (!td) {
+		if (interlock != NULL) {
+			spin_unlock(interlock);
+		}
 		return;
 	}
 
-	had_lock = smp_lock_held();
-	td->wait_channel = channel;
-	td->state = PROC_STATE_SLEEPING;
+	__atomic_store_n(&td->wait_channel, channel, __ATOMIC_RELEASE);
+	thread_state_set(td, PROC_STATE_SLEEPING);
 
-	/*
-	 * The thread still executes on this CPU until the scheduler saves its
-	 * context.  Clearing running_cpu here lets another CPU run the same
-	 * kernel/user stack while this CPU is only halted in the loop below.
-	 */
-
-	if (had_lock) {
-		smp_unlock();
+	if (interlock != NULL) {
+		flags = spin_unlock_nocli(interlock);
+	} else {
+		__asm__ volatile("pushfq; pop %0; cli"
+		    : "=r"(flags) :: "memory");
 	}
 
-	__asm__ volatile("sti");
-	while (td->wait_channel != NULL) {
-		__asm__ volatile("int %0" :: "i"(IRQ_VECTOR_YIELD) : "memory");
-		if (td->wait_channel != NULL) {
-			__asm__ volatile("hlt");
-		}
+	depth = smp_lock_release_all();
+	witness_check_sleep("proc_sleep");
+	proc_sleep_wait(td);
+	if (depth != 0) {
+		smp_lock_acquire_depth(depth);
 	}
-	__asm__ volatile("cli");
+	thread_state_set(td, PROC_STATE_RUNNING);
+	spin_flags_restore(flags);
+}
 
-	if (had_lock) {
-		smp_lock();
-	}
-
-	td->state = PROC_STATE_RUNNING;
+void
+proc_sleep(void *channel)
+{
+	proc_sleep_interlock(channel, NULL);
 }
 
 void
@@ -191,14 +230,19 @@ proc_wakeup(void *channel)
 	int		i;
 	thread_t	*td;
 
+	thread_lock();
 	for (i = 0; i < MAX_THREADS; i++) {
 		td = &thread_table[i];
-		if (td->used && td->state == PROC_STATE_SLEEPING &&
-		    td->wait_channel == channel) {
-			td->state = PROC_STATE_RUNNABLE;
-			td->wait_channel = NULL;
+		if (td->used &&
+		    thread_state_get(td) == PROC_STATE_SLEEPING &&
+		    __atomic_load_n(&td->wait_channel,
+		    __ATOMIC_ACQUIRE) == channel) {
+			thread_state_set(td, PROC_STATE_RUNNABLE);
+			__atomic_store_n(&td->wait_channel, NULL,
+			    __ATOMIC_RELEASE);
 		}
 	}
+	thread_unlock();
 }
 
 void
@@ -207,15 +251,20 @@ proc_wakeup_one(void *channel)
 	int		i;
 	thread_t	*td;
 
+	thread_lock();
 	for (i = 0; i < MAX_THREADS; i++) {
 		td = &thread_table[i];
-		if (td->used && td->state == PROC_STATE_SLEEPING &&
-		    td->wait_channel == channel) {
-			td->state = PROC_STATE_RUNNABLE;
-			td->wait_channel = NULL;
-			return;
+		if (td->used &&
+		    thread_state_get(td) == PROC_STATE_SLEEPING &&
+		    __atomic_load_n(&td->wait_channel,
+		    __ATOMIC_ACQUIRE) == channel) {
+			thread_state_set(td, PROC_STATE_RUNNABLE);
+			__atomic_store_n(&td->wait_channel, NULL,
+			    __ATOMIC_RELEASE);
+			break;
 		}
 	}
+	thread_unlock();
 }
 
 void
@@ -261,55 +310,65 @@ event_init(void)
 int
 kqueue_create(void)
 {
-	int	i, handle;
+	process_t	*owner;
+	entity_id_t	id;
+	int		i, slot, handle;
 
 	if (!event_initialized) {
 		return (-1);
 	}
 
+	owner = process_current();
+	slot = -1;
+	spin_lock(&event_spin);
 	for (i = 0; i < MAX_KQUEUES; i++) {
-		entity_id_t	id;
-
 		if (!kqueue_pool[i].used) {
-			memset(&kqueue_pool[i], 0,
-			    sizeof(kqueue_t));
+			memset(&kqueue_pool[i], 0, sizeof(kqueue_t));
 			kqueue_pool[i].used = 1;
-			kqueue_pool[i].owner =
-			    process_current();
-			kqueue_pool[i].wait_channel =
-			    &kqueue_pool[i];
-			id = entity_io_create_raw(ENTITY_ARCH_KQUEUE, 0);
-			if (id == 0) {
-				kqueue_pool[i].used = 0;
-				return (-1);
-			}
-			entity_io_set_ptr(id, ENTITY_IO_PTR_BACKING,
-			    &kqueue_pool[i]);
-			handle = entity_io_attach(id,
-			    ENTITY_ACCESS_READ | ENTITY_ACCESS_WRITE);
-			if (handle < 0) {
-				entity_destroy(id);
-				kqueue_pool[i].used = 0;
-				return (handle);
-			}
-			kqueue_pool[i].entity = id;
-			kqueue_pool[i].entity_handle = handle;
-			printk("[EVENT] Created kqueue idx=%d "
-			    "owner_pid=%d\n", i,
-			    process_current() ?
-			    (int)process_current()->pid : 0);
-			trace_kqueue_create(i, kqueue_pool[i].owner ?
-			    kqueue_pool[i].owner->pid : 0);
-			return (handle);
+			kqueue_pool[i].owner = owner;
+			kqueue_pool[i].wait_channel = &kqueue_pool[i];
+			slot = i;
+			break;
 		}
 	}
+	spin_unlock(&event_spin);
 
-	printk("[EVENT] kqueue_create: no free slots\n");
-	return (-1);
+	if (slot < 0) {
+		printk("[EVENT] kqueue_create: no free slots\n");
+		return (-1);
+	}
+
+	id = entity_io_create_raw(ENTITY_ARCH_KQUEUE, 0);
+	if (id == 0) {
+		spin_lock(&event_spin);
+		kqueue_pool[slot].used = 0;
+		spin_unlock(&event_spin);
+		return (-1);
+	}
+	entity_io_set_ptr(id, ENTITY_IO_PTR_BACKING, &kqueue_pool[slot]);
+	handle = entity_io_attach(id,
+	    ENTITY_ACCESS_READ | ENTITY_ACCESS_WRITE);
+	if (handle < 0) {
+		spin_lock(&event_spin);
+		kqueue_pool[slot].used = 0;
+		spin_unlock(&event_spin);
+		entity_destroy(id);
+		return (handle);
+	}
+
+	spin_lock(&event_spin);
+	kqueue_pool[slot].entity = id;
+	kqueue_pool[slot].entity_handle = handle;
+	spin_unlock(&event_spin);
+
+	printk("[EVENT] Created kqueue idx=%d owner_pid=%d\n", slot,
+	    owner ? (int)owner->pid : 0);
+	trace_kqueue_create(slot, owner ? owner->pid : 0);
+	return (handle);
 }
 
 static int
-kqueue_destroy_internal(int kq_idx, int force)
+kqueue_destroy_locked(int kq_idx, int force)
 {
 	kqueue_t		*kq;
 	int			i;
@@ -404,9 +463,14 @@ kqueue_entity_release(entity_id_t entity)
 		return;
 	}
 	idx = (int)(kq - kqueue_pool);
-	if (idx >= 0 && idx < MAX_KQUEUES && kq->used) {
-		kqueue_destroy_internal(idx, 1);
+	if (idx < 0 || idx >= MAX_KQUEUES) {
+		return;
 	}
+	spin_lock(&event_spin);
+	if (kqueue_pool[idx].used) {
+		kqueue_destroy_locked(idx, 1);
+	}
+	spin_unlock(&event_spin);
 }
 
 static knote_t *
@@ -491,7 +555,7 @@ knote_remove_from_ready(kqueue_t *kq, knote_t *kn)
 }
 
 void
-knote_ready(knote_t *kn)
+knote_ready_locked(knote_t *kn)
 {
 	kqueue_t	*kq;
 
@@ -505,12 +569,20 @@ knote_ready(knote_t *kn)
 	}
 
 	knote_add_to_ready(kq, kn);
-	kqueue_wakeup(kq);
+	kqueue_wakeup_locked(kq);
 	trace_knote_ready(kn->filter, kn->ident, kn->data);
 }
 
 void
-kqueue_wakeup(kqueue_t *kq)
+knote_ready(knote_t *kn)
+{
+	spin_lock(&event_spin);
+	knote_ready_locked(kn);
+	spin_unlock(&event_spin);
+}
+
+void
+kqueue_wakeup_locked(kqueue_t *kq)
 {
 	if (kq && kq->used) {
 		proc_wakeup_one(kq->wait_channel);
@@ -518,10 +590,19 @@ kqueue_wakeup(kqueue_t *kq)
 }
 
 void
+kqueue_wakeup(kqueue_t *kq)
+{
+	spin_lock(&event_spin);
+	kqueue_wakeup_locked(kq);
+	spin_unlock(&event_spin);
+}
+
+void
 knote_notify_all(s16 filter, u64 ident, u32 fflags, s64 data)
 {
 	int	i, j;
 
+	spin_lock(&event_spin);
 	for (i = 0; i < MAX_KQUEUES; i++) {
 		kqueue_t	*kq;
 		knote_t		*kn;
@@ -551,9 +632,10 @@ knote_notify_all(s16 filter, u64 ident, u32 fflags, s64 data)
 				kn->data = data;
 			}
 
-			knote_ready(kn);
+			knote_ready_locked(kn);
 		}
 	}
+	spin_unlock(&event_spin);
 }
 
 static int
@@ -644,7 +726,7 @@ process_change(kqueue_t *kq, struct kevent *kev)
 			if (!kn->disabled && ops->event) {
 				pending = ops->event(kn, 0);
 				if (pending > 0) {
-					knote_ready(kn);
+					knote_ready_locked(kn);
 				}
 			}
 		}
@@ -659,7 +741,7 @@ process_change(kqueue_t *kq, struct kevent *kev)
 		if (ops->event) {
 			pending = ops->event(kn, 0);
 			if (pending > 0) {
-				knote_ready(kn);
+				knote_ready_locked(kn);
 			}
 		}
 	}
@@ -737,7 +819,7 @@ collect_events(kqueue_t *kq, struct kevent *eventlist, int nevents)
 
 		knote_remove_from_ready(kq, kn);
 		if (requeue && !kn->disabled) {
-			knote_ready(kn);
+			knote_ready_locked(kn);
 		}
 	}
 
@@ -772,6 +854,7 @@ kevent_process(int kq_idx, struct kevent *changelist,
 	td = thread_current();
 	trace_kevent_wait(kq_idx, nchanges, nevents, timeout_ms);
 
+	spin_lock(&event_spin);
 	for (i = 0; i < nchanges; i++) {
 		struct kevent	*kev;
 
@@ -800,17 +883,20 @@ kevent_process(int kq_idx, struct kevent *changelist,
 	}
 
 	if (nevents <= 0) {
+		spin_unlock(&event_spin);
 		trace_kevent_return(kq_idx, 0, timeout_ms);
 		return (0);
 	}
 
 	count = collect_events(kq, eventlist, nevents);
 	if (count > 0) {
+		spin_unlock(&event_spin);
 		trace_kevent_return(kq_idx, count, timeout_ms);
 		return (count);
 	}
 
 	if (timeout_ms == 0) {
+		spin_unlock(&event_spin);
 		trace_kevent_return(kq_idx, 0, timeout_ms);
 		return (0);
 	}
@@ -830,9 +916,16 @@ kevent_process(int kq_idx, struct kevent *changelist,
 	}
 
 	while (1) {
+		if (!kq->used) {
+			spin_unlock(&event_spin);
+			trace_kevent_return(kq_idx, 0, timeout_ms);
+			return (-API_ERR_BAD_HANDLE);
+		}
+
 		if (kq->ready_count > 0) {
 			count = collect_events(kq, eventlist,
 			    nevents);
+			spin_unlock(&event_spin);
 			trace_kevent_return(kq_idx, count, timeout_ms);
 			return (count);
 		}
@@ -840,6 +933,7 @@ kevent_process(int kq_idx, struct kevent *changelist,
 		if (timeout_ms > 0) {
 			elapsed = timer_get_ticks() - start_ticks;
 			if (elapsed >= timeout_ticks) {
+				spin_unlock(&event_spin);
 				trace_kevent_return(kq_idx, 0,
 				    timeout_ms);
 				return (0);
@@ -850,19 +944,19 @@ kevent_process(int kq_idx, struct kevent *changelist,
 			now_ticks = timer_get_ticks();
 			elapsed = now_ticks - start_ticks;
 			if (elapsed >= timeout_ticks) {
+				spin_unlock(&event_spin);
 				trace_kevent_return(kq_idx, 0, timeout_ms);
 				return (0);
 			}
 			remaining_ticks = timeout_ticks - elapsed;
 			td->sleep_target_ticks = now_ticks + remaining_ticks;
 		}
-		proc_sleep(kq->wait_channel);
+		proc_sleep_interlock(kq->wait_channel, &event_spin);
 		if (td != NULL) {
 			td->sleep_target_ticks = 0;
 		}
+		spin_lock(&event_spin);
 	}
-
-	return (0);
 }
 
 void
@@ -890,10 +984,11 @@ event_cleanup_process(struct process *proc)
 		return;
 	}
 
+	spin_lock(&event_spin);
 	for (i = 0; i < MAX_KQUEUES; i++) {
 		kq = &kqueue_pool[i];
 		if (kq->used && kq->owner == proc) {
-			kqueue_destroy_internal(i, 1);
+			kqueue_destroy_locked(i, 1);
 		}
 	}
 
@@ -920,6 +1015,7 @@ event_cleanup_process(struct process *proc)
 			}
 		}
 	}
+	spin_unlock(&event_spin);
 }
 
 void

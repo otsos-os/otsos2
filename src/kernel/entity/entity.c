@@ -102,6 +102,7 @@ $space %export entity_arch_io_get
 #include <kernel/entity/entity.h>
 #include <kernel/process.h>
 #include <kernel/smp/smp.h>
+#include <kernel/sync/sync.h>
 #include <kernel/trace/trace.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -127,8 +128,8 @@ typedef struct entity_arch_block {
 } entity_arch_block_t;
 
 static entity_arch_block_t	entity_arch_blocks[ENTITY_MAX_ARCHETYPES];
-static entity_meta_block_t	*entity_cur_block;
-static u32			entity_cur_slot;
+
+static spin_t		entity_spin = SPIN_INITIALIZER("entity", LO_ENTITY);
 
 static void
 entity_trace_notify(entity_id_t id, u32 fflags)
@@ -155,13 +156,8 @@ entity_trace_notify(entity_id_t id, u32 fflags)
 	trace_probe_fire(probe, 0, NULL, args);
 }
 
-/*
- * Resolve an entity id to its meta block and slot. Must be called with
- * smp_lock held. Returns 0 on success and fills entity_cur_block /
- * entity_cur_slot, or -1 if the id is stale or out of range.
- */
 static int
-entity_slot(entity_id_t id)
+entity_slot(entity_id_t id, entity_meta_block_t **out_block, u32 *out_slot)
 {
 	u16		arch;
 	u32		index, slot, base, count;
@@ -193,8 +189,8 @@ entity_slot(entity_id_t id)
 	if (block->arch[slot] != arch) {
 		return (-1);
 	}
-	entity_cur_block = block;
-	entity_cur_slot = slot;
+	*out_block = block;
+	*out_slot = slot;
 	return (0);
 }
 
@@ -238,32 +234,21 @@ entity_meta_register(u16 arch, entity_meta_block_t *meta, u32 base,
 	    count == 0 || count > ENTITY_BLOCK_ENTRIES) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	smp_lock();
+	spin_lock(&entity_spin);
 	entity_meta_init(arch, meta, base, count);
-	smp_unlock();
+	spin_unlock(&entity_spin);
 	return (0);
 }
 
 static int
 entity_fill_name(entity_id_t id, char *buf, u32 bufsize)
 {
-	const char	*name;
-	u32		len;
-
 	if (!buf || bufsize == 0) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	name = entity_ns_name_of(id);
-	if (!name) {
+	if (entity_ns_name_copy(id, buf, bufsize) != 0) {
 		buf[0] = '\0';
-		return (0);
 	}
-	len = (u32)strlen(name);
-	if (len >= bufsize) {
-		len = bufsize - 1;
-	}
-	memcpy(buf, name, len);
-	buf[len] = '\0';
 	return (0);
 }
 
@@ -329,17 +314,17 @@ entity_slot_used(u16 arch, u32 index)
 	if (arch == 0 || arch > ENTITY_ARCH_MAX) {
 		return (0);
 	}
-	smp_lock();
+	spin_lock(&entity_spin);
 	block = entity_arch_blocks[arch].meta;
 	base = entity_arch_blocks[arch].base;
 	count = entity_arch_blocks[arch].count;
 	if (block == NULL || index < base || index - base >= count) {
-		smp_unlock();
+		spin_unlock(&entity_spin);
 		return (0);
 	}
 	slot = index - base;
 	used = block->used[slot] ? 1 : 0;
-	smp_unlock();
+	spin_unlock(&entity_spin);
 	return (used);
 }
 
@@ -353,21 +338,21 @@ entity_id_at(u16 arch, u32 index)
 	if (arch == 0 || arch > ENTITY_ARCH_MAX) {
 		return (0);
 	}
-	smp_lock();
+	spin_lock(&entity_spin);
 	block = entity_arch_blocks[arch].meta;
 	base = entity_arch_blocks[arch].base;
 	count = entity_arch_blocks[arch].count;
 	if (block == NULL || index < base || index - base >= count) {
-		smp_unlock();
+		spin_unlock(&entity_spin);
 		return (0);
 	}
 	slot = index - base;
 	if (!block->used[slot] || block->arch[slot] != arch) {
-		smp_unlock();
+		spin_unlock(&entity_spin);
 		return (0);
 	}
 	id = entity_id_make(arch, block->gen[slot], index);
-	smp_unlock();
+	spin_unlock(&entity_spin);
 	return (id);
 }
 
@@ -376,9 +361,9 @@ entity_saturations(void)
 {
 	u64	value;
 
-	smp_lock();
+	spin_lock(&entity_spin);
 	value = entity_refs_saturated;
-	smp_unlock();
+	spin_unlock(&entity_spin);
 	return (value);
 }
 
@@ -388,9 +373,9 @@ entity_arch_release_register(u16 arch, entity_release_fn fn)
 	if (arch == 0 || arch > ENTITY_ARCH_MAX) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	smp_lock();
+	spin_lock(&entity_spin);
 	entity_arch_release[arch] = fn;
-	smp_unlock();
+	spin_unlock(&entity_spin);
 	return (0);
 }
 
@@ -400,9 +385,9 @@ entity_arch_io_register(u16 arch, const entity_io_ops_t *ops)
 	if (arch == 0 || arch > ENTITY_ARCH_MAX) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	smp_lock();
+	spin_lock(&entity_spin);
 	entity_arch_io[arch] = ops;
-	smp_unlock();
+	spin_unlock(&entity_spin);
 	return (0);
 }
 
@@ -414,9 +399,9 @@ entity_arch_io_get(u16 arch)
 	if (arch == 0 || arch > ENTITY_ARCH_MAX) {
 		return (NULL);
 	}
-	smp_lock();
+	spin_lock(&entity_spin);
 	ops = entity_arch_io[arch];
-	smp_unlock();
+	spin_unlock(&entity_spin);
 	return (ops);
 }
 
@@ -440,19 +425,19 @@ entity_create(u16 arch, u32 flags, u32 owner_pid, u32 uid, u32 gid,
 		return (0);
 	}
 	created = timer_is_initialized() ? timer_get_ticks() : 0;
-	smp_lock();
+	spin_lock(&entity_spin);
 	if (!entity_initialized) {
-		smp_unlock();
+		spin_unlock(&entity_spin);
 		return (0);
 	}
 	/* Archetypes with inline blocks are owned by their subsystem. */
 	if (entity_arch_blocks[arch].meta != NULL) {
-		smp_unlock();
+		spin_unlock(&entity_spin);
 		return (0);
 	}
 	index = entity_free_pop();
 	if (index == ENTITY_SLOT_NONE) {
-		smp_unlock();
+		spin_unlock(&entity_spin);
 		return (0);
 	}
 	block_idx = index >> ENTITY_BLOCK_SHIFT;
@@ -479,7 +464,7 @@ entity_create(u16 arch, u32 flags, u32 owner_pid, u32 uid, u32 gid,
 	block->name_off[slot] = 0;
 	entity_count++;
 	id = entity_id_make(arch, gen, index);
-	smp_unlock();
+	spin_unlock(&entity_spin);
 	entity_trace_notify(id, ENTITY_EVENT_CREATE);
 	if (entity_event_notify) {
 		entity_event_notify(id, ENTITY_EVENT_CREATE);
@@ -501,21 +486,21 @@ entity_attach(u16 arch, u32 index, u32 flags, u32 owner_pid, u32 uid,
 		return (0);
 	}
 	created = timer_is_initialized() ? timer_get_ticks() : 0;
-	smp_lock();
+	spin_lock(&entity_spin);
 	if (!entity_initialized) {
-		smp_unlock();
+		spin_unlock(&entity_spin);
 		return (0);
 	}
 	block = entity_arch_blocks[arch].meta;
 	base = entity_arch_blocks[arch].base;
 	count = entity_arch_blocks[arch].count;
 	if (block == NULL || index < base || index - base >= count) {
-		smp_unlock();
+		spin_unlock(&entity_spin);
 		return (0);
 	}
 	slot = index - base;
 	if (block->used[slot]) {
-		smp_unlock();
+		spin_unlock(&entity_spin);
 		return (0);
 	}
 	gen = block->gen[slot] + 1;
@@ -539,7 +524,7 @@ entity_attach(u16 arch, u32 index, u32 flags, u32 owner_pid, u32 uid,
 	block->name_off[slot] = 0;
 	entity_count++;
 	id = entity_id_make(arch, gen, index);
-	smp_unlock();
+	spin_unlock(&entity_spin);
 	entity_trace_notify(id, ENTITY_EVENT_CREATE);
 	if (entity_event_notify) {
 		entity_event_notify(id, ENTITY_EVENT_CREATE);
@@ -550,9 +535,9 @@ entity_attach(u16 arch, u32 index, u32 flags, u32 owner_pid, u32 uid,
 void
 entity_event_set_notify(void (*fn)(entity_id_t id, u32 fflags))
 {
-	smp_lock();
+	spin_lock(&entity_spin);
 	entity_event_notify = fn;
-	smp_unlock();
+	spin_unlock(&entity_spin);
 }
 
 int
@@ -560,19 +545,22 @@ entity_destroy(entity_id_t id)
 {
 	entity_meta_block_t	*block;
 	u32			slot;
+	int			unbind;
 
-	smp_lock();
-	if (entity_slot(id) < 0) {
-		smp_unlock();
+	spin_lock(&entity_spin);
+	if (entity_slot(id, &block, &slot) < 0) {
+		spin_unlock(&entity_spin);
 		return (-API_ERR_BAD_HANDLE);
 	}
-	block = entity_cur_block;
-	slot = entity_cur_slot;
+	unbind = 0;
 	if (block->state[slot] == ENTITY_STATE_ACTIVE) {
 		block->state[slot] = ENTITY_STATE_DELETED;
+		unbind = 1;
+	}
+	spin_unlock(&entity_spin);
+	if (unbind) {
 		entity_ns_unbind_all_id(id);
 	}
-	smp_unlock();
 	entity_trace_notify(id, ENTITY_EVENT_STATE | ENTITY_EVENT_DESTROY);
 	if (entity_event_notify) {
 		entity_event_notify(id, ENTITY_EVENT_STATE |
@@ -589,13 +577,15 @@ entity_retain_checked(entity_id_t id)
 	u32			slot;
 	int			saturated;
 
-	smp_lock();
-	if (entity_slot(id) < 0) {
-		smp_unlock();
+	spin_lock(&entity_spin);
+	if (entity_slot(id, &block, &slot) < 0) {
+		spin_unlock(&entity_spin);
 		return (-API_ERR_BAD_HANDLE);
 	}
-	block = entity_cur_block;
-	slot = entity_cur_slot;
+	if (block->state[slot] == ENTITY_STATE_DYING) {
+		spin_unlock(&entity_spin);
+		return (-API_ERR_BAD_HANDLE);
+	}
 	if (block->refs[slot] < ENTITY_REF_MAX) {
 		block->refs[slot]++;
 		saturated = 0;
@@ -603,7 +593,7 @@ entity_retain_checked(entity_id_t id)
 		entity_refs_saturated++;
 		saturated = 1;
 	}
-	smp_unlock();
+	spin_unlock(&entity_spin);
 	if (saturated) {
 		printk("[ENTITY] refcount saturated on id=%p arch=%u: "
 		    "slot leaked for the lifetime of the system\n",
@@ -626,40 +616,52 @@ entity_retain(entity_id_t id)
 void
 entity_release(entity_id_t id)
 {
-	u16			arch;
+	entity_release_fn	hook;
 	entity_meta_block_t	*block;
 	u32			slot, index;
+	u16			arch;
 
-	smp_lock();
-	if (entity_slot(id) < 0) {
-		smp_unlock();
+	spin_lock(&entity_spin);
+	if (entity_slot(id, &block, &slot) < 0) {
+		spin_unlock(&entity_spin);
 		return;
 	}
 	arch = entity_id_archetype(id);
 	index = entity_id_index(id);
-	block = entity_cur_block;
-	slot = entity_cur_slot;
 	if (block->refs[slot] > 0) {
 		block->refs[slot]--;
 	}
 	if (block->refs[slot] != 0) {
-		smp_unlock();
+		spin_unlock(&entity_spin);
 		entity_trace_notify(id, ENTITY_EVENT_RELEASE);
 		if (entity_event_notify) {
 			entity_event_notify(id, ENTITY_EVENT_RELEASE);
 		}
 		return;
 	}
-	if (entity_arch_release[arch] != NULL) {
-		entity_arch_release[arch](id);
+	if (block->state[slot] == ENTITY_STATE_DYING) {
+		spin_unlock(&entity_spin);
+		return;
+	}
+	block->state[slot] = ENTITY_STATE_DYING;
+	hook = entity_arch_release[arch];
+	spin_unlock(&entity_spin);
+
+	if (hook != NULL) {
+		hook(id);
 	}
 	entity_ns_unbind_all_id(id);
-	block->used[slot] = 0;
-	entity_count--;
-	if (entity_arch_blocks[arch].meta == NULL) {
-		entity_free_push(index);
+
+	spin_lock(&entity_spin);
+	if (entity_slot(id, &block, &slot) == 0 &&
+	    block->state[slot] == ENTITY_STATE_DYING) {
+		block->used[slot] = 0;
+		entity_count--;
+		if (entity_arch_blocks[arch].meta == NULL) {
+			entity_free_push(index);
+		}
 	}
-	smp_unlock();
+	spin_unlock(&entity_spin);
 	entity_trace_notify(id, ENTITY_EVENT_RELEASE | ENTITY_EVENT_DESTROY);
 	if (entity_event_notify) {
 		entity_event_notify(id, ENTITY_EVENT_RELEASE |
@@ -670,226 +672,265 @@ entity_release(entity_id_t id)
 int
 entity_valid(entity_id_t id)
 {
-	int	valid;
+	entity_meta_block_t	*block;
+	u32			slot;
+	int			valid;
 
-	smp_lock();
-	valid = entity_slot(id) == 0 ? 1 : 0;
-	smp_unlock();
+	spin_lock(&entity_spin);
+	valid = entity_slot(id, &block, &slot) == 0 ? 1 : 0;
+	spin_unlock(&entity_spin);
 	return (valid);
 }
 
 u16
 entity_arch(entity_id_t id)
 {
-	u16	arch;
+	entity_meta_block_t	*block;
+	u16			arch;
+	u32			slot;
 
-	smp_lock();
-	arch = entity_slot(id) == 0 ?
-	    entity_cur_block->arch[entity_cur_slot] : 0;
-	smp_unlock();
+	spin_lock(&entity_spin);
+	arch = entity_slot(id, &block, &slot) == 0 ?
+	    block->arch[slot] : 0;
+	spin_unlock(&entity_spin);
 	return (arch);
 }
 
 u32
 entity_state(entity_id_t id)
 {
-	u32	state;
+	entity_meta_block_t	*block;
+	u32			state;
+	u32			slot;
 
-	smp_lock();
-	state = entity_slot(id) == 0 ?
-	    entity_cur_block->state[entity_cur_slot] : 0;
-	smp_unlock();
+	spin_lock(&entity_spin);
+	state = entity_slot(id, &block, &slot) == 0 ?
+	    block->state[slot] : 0;
+	spin_unlock(&entity_spin);
 	return (state);
 }
 
 s32
 entity_refs(entity_id_t id)
 {
-	s32	refs;
+	entity_meta_block_t	*block;
+	s32			refs;
+	u32			slot;
 
-	smp_lock();
-	refs = entity_slot(id) == 0 ?
-	    entity_cur_block->refs[entity_cur_slot] : 0;
-	smp_unlock();
+	spin_lock(&entity_spin);
+	refs = entity_slot(id, &block, &slot) == 0 ?
+	    block->refs[slot] : 0;
+	spin_unlock(&entity_spin);
 	return (refs);
 }
 
 u32
 entity_flags(entity_id_t id)
 {
-	u32	flags;
+	entity_meta_block_t	*block;
+	u32			flags;
+	u32			slot;
 
-	smp_lock();
-	flags = entity_slot(id) == 0 ?
-	    entity_cur_block->flags[entity_cur_slot] : 0;
-	smp_unlock();
+	spin_lock(&entity_spin);
+	flags = entity_slot(id, &block, &slot) == 0 ?
+	    block->flags[slot] : 0;
+	spin_unlock(&entity_spin);
 	return (flags);
 }
 
 u32
 entity_owner(entity_id_t id)
 {
-	u32	owner;
+	entity_meta_block_t	*block;
+	u32			owner;
+	u32			slot;
 
-	smp_lock();
-	owner = entity_slot(id) == 0 ?
-	    entity_cur_block->owner[entity_cur_slot] : 0;
-	smp_unlock();
+	spin_lock(&entity_spin);
+	owner = entity_slot(id, &block, &slot) == 0 ?
+	    block->owner[slot] : 0;
+	spin_unlock(&entity_spin);
 	return (owner);
 }
 
 u32
 entity_uid(entity_id_t id)
 {
-	u32	value;
+	entity_meta_block_t	*block;
+	u32			value;
+	u32			slot;
 
-	smp_lock();
-	value = entity_slot(id) == 0 ?
-	    entity_cur_block->uid[entity_cur_slot] : 0;
-	smp_unlock();
+	spin_lock(&entity_spin);
+	value = entity_slot(id, &block, &slot) == 0 ?
+	    block->uid[slot] : 0;
+	spin_unlock(&entity_spin);
 	return (value);
 }
 
 u32
 entity_gid(entity_id_t id)
 {
-	u32	value;
+	entity_meta_block_t	*block;
+	u32			value;
+	u32			slot;
 
-	smp_lock();
-	value = entity_slot(id) == 0 ?
-	    entity_cur_block->gid[entity_cur_slot] : 0;
-	smp_unlock();
+	spin_lock(&entity_spin);
+	value = entity_slot(id, &block, &slot) == 0 ?
+	    block->gid[slot] : 0;
+	spin_unlock(&entity_spin);
 	return (value);
 }
 
 u32
 entity_euid(entity_id_t id)
 {
-	u32	value;
+	entity_meta_block_t	*block;
+	u32			value;
+	u32			slot;
 
-	smp_lock();
-	value = entity_slot(id) == 0 ?
-	    entity_cur_block->euid[entity_cur_slot] : 0;
-	smp_unlock();
+	spin_lock(&entity_spin);
+	value = entity_slot(id, &block, &slot) == 0 ?
+	    block->euid[slot] : 0;
+	spin_unlock(&entity_spin);
 	return (value);
 }
 
 u32
 entity_egid(entity_id_t id)
 {
-	u32	value;
+	entity_meta_block_t	*block;
+	u32			value;
+	u32			slot;
 
-	smp_lock();
-	value = entity_slot(id) == 0 ?
-	    entity_cur_block->egid[entity_cur_slot] : 0;
-	smp_unlock();
+	spin_lock(&entity_spin);
+	value = entity_slot(id, &block, &slot) == 0 ?
+	    block->egid[slot] : 0;
+	spin_unlock(&entity_spin);
 	return (value);
 }
 
 u64
 entity_size(entity_id_t id)
 {
-	u64	size;
+	entity_meta_block_t	*block;
+	u64			size;
+	u32			slot;
 
-	smp_lock();
-	size = entity_slot(id) == 0 ?
-	    entity_cur_block->size[entity_cur_slot] : 0;
-	smp_unlock();
+	spin_lock(&entity_spin);
+	size = entity_slot(id, &block, &slot) == 0 ?
+	    block->size[slot] : 0;
+	spin_unlock(&entity_spin);
 	return (size);
 }
 
 u64
 entity_created(entity_id_t id)
 {
-	u64	created;
+	entity_meta_block_t	*block;
+	u64			created;
+	u32			slot;
 
-	smp_lock();
-	created = entity_slot(id) == 0 ?
-	    entity_cur_block->born[entity_cur_slot] : 0;
-	smp_unlock();
+	spin_lock(&entity_spin);
+	created = entity_slot(id, &block, &slot) == 0 ?
+	    block->born[slot] : 0;
+	spin_unlock(&entity_spin);
 	return (created);
 }
 
 int
 entity_set_size(entity_id_t id, u64 size)
 {
-	smp_lock();
-	if (entity_slot(id) < 0) {
-		smp_unlock();
+	entity_meta_block_t	*block;
+	u32			slot;
+
+	spin_lock(&entity_spin);
+	if (entity_slot(id, &block, &slot) < 0) {
+		spin_unlock(&entity_spin);
 		return (-API_ERR_BAD_HANDLE);
 	}
-	entity_cur_block->size[entity_cur_slot] = size;
-	smp_unlock();
+	block->size[slot] = size;
+	spin_unlock(&entity_spin);
 	return (0);
 }
 
 int
 entity_get_data(entity_id_t id, u32 index, u64 *value)
 {
+	entity_meta_block_t	*block;
+	u32			slot;
+
 	if (!value) {
 		return (-API_ERR_BAD_VALUE);
 	}
 	if (index >= ENTITY_DATA_COUNT) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	smp_lock();
-	if (entity_slot(id) < 0) {
-		smp_unlock();
+	spin_lock(&entity_spin);
+	if (entity_slot(id, &block, &slot) < 0) {
+		spin_unlock(&entity_spin);
 		return (-API_ERR_BAD_HANDLE);
 	}
-	*value = entity_cur_block->data[index][entity_cur_slot];
-	smp_unlock();
+	*value = block->data[index][slot];
+	spin_unlock(&entity_spin);
 	return (0);
 }
 
 int
 entity_set_data(entity_id_t id, u32 index, u64 value)
 {
+	entity_meta_block_t	*block;
+	u32			slot;
+
 	if (index >= ENTITY_DATA_COUNT) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	smp_lock();
-	if (entity_slot(id) < 0) {
-		smp_unlock();
+	spin_lock(&entity_spin);
+	if (entity_slot(id, &block, &slot) < 0) {
+		spin_unlock(&entity_spin);
 		return (-API_ERR_BAD_HANDLE);
 	}
-	entity_cur_block->data[index][entity_cur_slot] = value;
-	smp_unlock();
+	block->data[index][slot] = value;
+	spin_unlock(&entity_spin);
 	return (0);
 }
 
 int
 entity_get_i32(entity_id_t id, u32 index, s32 *value)
 {
+	entity_meta_block_t	*block;
+	u32			slot;
+
 	if (!value) {
 		return (-API_ERR_BAD_VALUE);
 	}
 	if (index >= ENTITY_I32_COUNT) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	smp_lock();
-	if (entity_slot(id) < 0) {
-		smp_unlock();
+	spin_lock(&entity_spin);
+	if (entity_slot(id, &block, &slot) < 0) {
+		spin_unlock(&entity_spin);
 		return (-API_ERR_BAD_HANDLE);
 	}
-	*value = entity_cur_block->i32[index][entity_cur_slot];
-	smp_unlock();
+	*value = block->i32[index][slot];
+	spin_unlock(&entity_spin);
 	return (0);
 }
 
 int
 entity_set_i32(entity_id_t id, u32 index, s32 value)
 {
+	entity_meta_block_t	*block;
+	u32			slot;
+
 	if (index >= ENTITY_I32_COUNT) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	smp_lock();
-	if (entity_slot(id) < 0) {
-		smp_unlock();
+	spin_lock(&entity_spin);
+	if (entity_slot(id, &block, &slot) < 0) {
+		spin_unlock(&entity_spin);
 		return (-API_ERR_BAD_HANDLE);
 	}
-	entity_cur_block->i32[index][entity_cur_slot] = value;
-	smp_unlock();
+	block->i32[index][slot] = value;
+	spin_unlock(&entity_spin);
 	return (0);
 }
 
@@ -898,37 +939,40 @@ entity_name(entity_id_t id, char *buf, u32 bufsize)
 {
 	int	ret;
 
-	smp_lock();
+	spin_lock(&entity_spin);
 	ret = entity_fill_name(id, buf, bufsize);
-	smp_unlock();
+	spin_unlock(&entity_spin);
 	return (ret);
 }
 
 int
 entity_access(const struct process *proc, entity_id_t id, u32 want)
 {
+	entity_meta_block_t	*block;
+	u32			slot;
+
 	(void)want;
 	if (!proc) {
 		return (0);
 	}
-	smp_lock();
-	if (entity_slot(id) < 0) {
-		smp_unlock();
+	spin_lock(&entity_spin);
+	if (entity_slot(id, &block, &slot) < 0) {
+		spin_unlock(&entity_spin);
 		return (-API_ERR_BAD_HANDLE);
 	}
 	if (proc->kusr_auth || proc->euid == 0) {
-		smp_unlock();
+		spin_unlock(&entity_spin);
 		return (0);
 	}
-	if (proc->euid == entity_cur_block->euid[entity_cur_slot]) {
-		smp_unlock();
+	if (proc->euid == block->euid[slot]) {
+		spin_unlock(&entity_spin);
 		return (0);
 	}
-	if (proc->egid == entity_cur_block->egid[entity_cur_slot]) {
-		smp_unlock();
+	if (proc->egid == block->egid[slot]) {
+		spin_unlock(&entity_spin);
 		return (0);
 	}
-	smp_unlock();
+	spin_unlock(&entity_spin);
 	return (-API_ERR_ACCESS);
 }
 
@@ -942,7 +986,7 @@ entity_foreach(u16 arch, u32 start, int (*cb)(entity_id_t id, void *ctx),
 	if (!cb) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	smp_lock();
+	spin_lock(&entity_spin);
 	ret = 0;
 	if (arch == 0 || arch > ENTITY_ARCH_MAX ||
 	    entity_arch_blocks[arch].meta == NULL) {
@@ -968,7 +1012,7 @@ entity_foreach(u16 arch, u32 start, int (*cb)(entity_id_t id, void *ctx),
 		}
 	}
 	if (ret != 0) {
-		smp_unlock();
+		spin_unlock(&entity_spin);
 		return (ret);
 	}
 	if (arch == 0) {
@@ -1015,7 +1059,7 @@ entity_foreach(u16 arch, u32 start, int (*cb)(entity_id_t id, void *ctx),
 			}
 		}
 	}
-	smp_unlock();
+	spin_unlock(&entity_spin);
 	return (ret);
 }
 
@@ -1024,7 +1068,7 @@ entity_dump(void)
 {
 	u32	index, slot, a;
 
-	smp_lock();
+	spin_lock(&entity_spin);
 	printk("Entity dump (%u used / %d slots, %llu refcount "
 	    "saturations):\n", entity_count, ENTITY_MAX_ENTITIES,
 	    (unsigned long long)entity_refs_saturated);
@@ -1081,7 +1125,7 @@ entity_dump(void)
 			    (unsigned long long)block->size[slot], name);
 		}
 	}
-	smp_unlock();
+	spin_unlock(&entity_spin);
 }
 
 static void

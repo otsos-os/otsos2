@@ -102,10 +102,10 @@ filt_signal_event(knote_t *kn, u32 nevents)
 		return (0);
 	}
 
-	count = signal_counts[slot][sig];
+	count = __atomic_exchange_n(&signal_counts[slot][sig], 0,
+	    __ATOMIC_ACQ_REL);
 	if (count > 0) {
 		kn->data = (s64)count;
-		signal_counts[slot][sig] = 0;
 		return (1);
 	}
 
@@ -129,7 +129,7 @@ event_notify_signal(u32 pid, int sig)
 	}
 
 	slot = (int)(pid % MAX_SIGNAL_SLOTS);
-	signal_counts[slot][sig]++;
+	__atomic_fetch_add(&signal_counts[slot][sig], 1, __ATOMIC_ACQ_REL);
 
 	knote_notify_all(EVFILT_SIGNAL, (u64)sig, 0, 0);
 }

@@ -610,17 +610,14 @@ process_set_current(process_t *proc)
 void
 process_yield(void)
 {
-	int	had_lock;
+	u32	depth;
 
-	had_lock = smp_lock_held();
-	if (had_lock) {
-		smp_unlock();
-	}
+	depth = smp_lock_release_all();
 
 	__asm__ volatile("int %0" :: "i"(IRQ_VECTOR_YIELD) : "memory");
 
-	if (had_lock) {
-		smp_lock();
+	if (depth != 0) {
+		smp_lock_acquire_depth(depth);
 	}
 }
 

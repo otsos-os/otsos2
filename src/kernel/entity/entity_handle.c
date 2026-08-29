@@ -34,7 +34,7 @@ $define %type int as 32 bit signed
 $define %type entity_id as 64 bit packed archetype/generation/index
 $define %type process as struct with process control block
 
-$define %func entity_handle_unlink as procedure with args u32
+$define %func entity_handle_unlink as procedure with args process *, u32
 $define %func entity_handle_link as procedure with args process *, u32
 $define %func entity_handle_slot as function with args process *, int, u64 *, u32 *
 $define %func entity_handle_init_process as procedure with args process *
@@ -46,13 +46,19 @@ $define %func entity_handle_free as function with args process *, int
 $define %func entity_handle_dup as function with args process *, int, u32
 $define %func entity_handle_copy_all as function with args process *, process *
 $define %func entity_handle_release_all as procedure with args process *
+$define %func entity_handle_drop_locked as function with args process *, int, entity id *
+$define %func entity_handle_snapshot as function with args process *, snap *, u32, u32 *
+$define %func entity_handle_snap_take as function with args process *, u32 *
+$define %type entity_handle_snap_t as struct with id, handle, access
 
 */
 
 /* !SPACE!
 
 $space %internal entity_handle_unlink, entity_handle_link
-$space %internal entity_handle_slot
+$space %internal entity_handle_slot, entity_handle_drop_locked
+$space %internal entity_handle_snapshot, entity_handle_snap_take
+$space %internal entity_handle_spin
 $space %export entity_handle_init_process, entity_handle_alloc
 $space %export entity_handle_lookup, entity_handle_free, entity_handle_dup
 $space %export entity_handle_copy_all, entity_handle_release_all
@@ -65,6 +71,8 @@ $space %export entity_handle_foreach
 #include <kernel/entity/entity.h>
 #include <kernel/process.h>
 #include <kernel/smp/smp.h>
+#include <kernel/sync/sync.h>
+#include <mm/kmem.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -80,6 +88,15 @@ static u32	entity_handle_next[ENTITY_MAX_HANDLES];
 static u32	entity_handle_prev[ENTITY_MAX_HANDLES];
 static u32	entity_handle_free_head;
 static u32	entity_handle_count;
+
+static spin_t	entity_handle_spin =
+    SPIN_INITIALIZER("entity_handle", LO_HANDLE);
+
+typedef struct entity_handle_snap {
+	entity_id_t	id;
+	int		handle;
+	u32		access;
+} entity_handle_snap_t;
 
 void
 entity_handle_init(void)
@@ -101,7 +118,7 @@ entity_handle_init(void)
 }
 
 static void
-entity_handle_unlink(u32 slot)
+entity_handle_unlink(process_t *proc, u32 slot)
 {
 	u32	prev;
 	u32	next;
@@ -110,19 +127,9 @@ entity_handle_unlink(u32 slot)
 	next = entity_handle_next[slot];
 	if (prev != ENTITY_HANDLE_NONE) {
 		entity_handle_next[prev] = next;
-	} else {
-		u32	pid;
-
-		pid = entity_handle_pid[slot];
-		if (pid != 0) {
-			process_t	*proc;
-
-			proc = process_get(pid);
-			if (proc &&
-			    (u32)proc->entity_handle_head == slot) {
-				proc->entity_handle_head = next;
-			}
-		}
+	} else if (proc != NULL &&
+	    (u32)proc->entity_handle_head == slot) {
+		proc->entity_handle_head = (int)next;
 	}
 	if (next != ENTITY_HANDLE_NONE) {
 		entity_handle_prev[next] = prev;
@@ -190,17 +197,19 @@ entity_handle_alloc(struct process *proc, entity_id_t id, u32 access)
 {
 	u32	slot;
 	u32	gen;
+	int	ret;
 
 	if (id == 0 || access == 0) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	smp_lock();
-	if (!entity_valid(id)) {
-		smp_unlock();
+	ret = entity_retain_checked(id);
+	if (ret != 0) {
 		return (-API_ERR_BAD_HANDLE);
 	}
+	spin_lock(&entity_handle_spin);
 	if (entity_handle_free_head == ENTITY_HANDLE_NONE) {
-		smp_unlock();
+		spin_unlock(&entity_handle_spin);
+		entity_release(id);
 		return (-API_ERR_HANDLES_FULL);
 	}
 	slot = entity_handle_free_head;
@@ -218,8 +227,7 @@ entity_handle_alloc(struct process *proc, entity_id_t id, u32 access)
 	if (proc) {
 		entity_handle_link(proc, slot);
 	}
-	entity_retain(id);
-	smp_unlock();
+	spin_unlock(&entity_handle_spin);
 	return ((int)((gen << 16) | slot));
 }
 
@@ -227,13 +235,17 @@ int
 entity_handle_lookup(const struct process *proc, int handle, entity_id_t *id,
     u32 *access)
 {
-	return (entity_handle_slot(proc, handle, id, access));
+	int	ret;
+
+	spin_lock(&entity_handle_spin);
+	ret = entity_handle_slot(proc, handle, id, access);
+	spin_unlock(&entity_handle_spin);
+	return (ret);
 }
 
-int
-entity_handle_drop(struct process *proc, int handle, int release)
+static int
+entity_handle_drop_locked(struct process *proc, int handle, entity_id_t *out_id)
 {
-	entity_id_t	id;
 	u32		slot;
 	u32		gen;
 
@@ -242,18 +254,16 @@ entity_handle_drop(struct process *proc, int handle, int release)
 	}
 	slot = ((u32)handle) & ENTITY_HANDLE_MASK;
 	gen = ((u32)handle) >> 16;
-	smp_lock();
 	if (slot >= ENTITY_MAX_HANDLES ||
 	    !entity_handle_used[slot] ||
 	    (proc ? entity_handle_pid[slot] != proc->pid :
 	    entity_handle_pid[slot] != 0) ||
 	    entity_handle_gen[slot] != gen) {
-		smp_unlock();
 		return (-API_ERR_BAD_HANDLE);
 	}
-	id = entity_handle_id[slot];
+	*out_id = entity_handle_id[slot];
 	if (proc) {
-		entity_handle_unlink(slot);
+		entity_handle_unlink(proc, slot);
 	}
 	entity_handle_used[slot] = 0;
 	entity_handle_pid[slot] = 0;
@@ -268,7 +278,22 @@ entity_handle_drop(struct process *proc, int handle, int release)
 			proc->entity_handle_count = 0;
 		}
 	}
-	smp_unlock();
+	return (0);
+}
+
+int
+entity_handle_drop(struct process *proc, int handle, int release)
+{
+	entity_id_t	id;
+	int		ret;
+
+	id = 0;
+	spin_lock(&entity_handle_spin);
+	ret = entity_handle_drop_locked(proc, handle, &id);
+	spin_unlock(&entity_handle_spin);
+	if (ret != 0) {
+		return (ret);
+	}
 	if (release) {
 		entity_release(id);
 	}
@@ -298,10 +323,72 @@ entity_handle_dup(struct process *proc, int handle, u32 access)
 	return (entity_handle_alloc(proc, id, access));
 }
 
+static u32
+entity_handle_snapshot(const struct process *proc,
+    entity_handle_snap_t *out, u32 cap, u32 *total)
+{
+	u32	slot;
+	u32	n;
+
+	n = 0;
+	*total = 0;
+	slot = (u32)proc->entity_handle_head;
+	while (slot != ENTITY_HANDLE_NONE && slot < ENTITY_MAX_HANDLES) {
+		(*total)++;
+		if (n < cap) {
+			out[n].handle = (int)((entity_handle_gen[slot] << 16) |
+			    slot);
+			out[n].id = entity_handle_id[slot];
+			out[n].access = entity_handle_flags[slot];
+			n++;
+		}
+		slot = entity_handle_next[slot];
+	}
+	return (n);
+}
+
+static entity_handle_snap_t *
+entity_handle_snap_take(const struct process *proc, u32 *out_n)
+{
+	entity_handle_snap_t	*snap;
+	u32			cap;
+	u32			n;
+	u32			total;
+	int			tries;
+
+	cap = 16;
+	for (tries = 0; tries < 8; tries++) {
+		snap = (entity_handle_snap_t *)kmem_alloc(
+		    sizeof(*snap) * cap);
+		if (snap == NULL) {
+			return (NULL);
+		}
+		spin_lock(&entity_handle_spin);
+		n = entity_handle_snapshot(proc, snap, cap, &total);
+		spin_unlock(&entity_handle_spin);
+		if (total <= cap) {
+			*out_n = n;
+			return (snap);
+		}
+		kmem_free(snap);
+		if (cap >= ENTITY_MAX_HANDLES) {
+			return (NULL);
+		}
+		cap = total + 8;
+		if (cap > ENTITY_MAX_HANDLES) {
+			cap = ENTITY_MAX_HANDLES;
+		}
+	}
+	return (NULL);
+}
+
 int
 entity_handle_copy_all(struct process *dst, const struct process *src)
 {
-	u32	slot;
+	entity_handle_snap_t	*snap;
+	u32			n;
+	u32			i;
+	int			handle;
 
 	if (!dst || !src) {
 		return (-API_ERR_BAD_VALUE);
@@ -310,33 +397,30 @@ entity_handle_copy_all(struct process *dst, const struct process *src)
 	    dst->entity_handle_count == 0) {
 		entity_handle_init_process(dst);
 	}
-	smp_lock();
-	slot = (u32)src->entity_handle_head;
-	while (slot != ENTITY_HANDLE_NONE) {
-		u32	next;
-		int	handle;
-
-		next = entity_handle_next[slot];
-		handle = entity_handle_alloc(dst,
-		    entity_handle_id[slot],
-		    entity_handle_flags[slot]);
+	snap = entity_handle_snap_take(src, &n);
+	if (snap == NULL) {
+		return (-API_ERR_NO_MEMORY);
+	}
+	for (i = 0; i < n; i++) {
+		handle = entity_handle_alloc(dst, snap[i].id,
+		    snap[i].access);
 		if (handle < 0) {
-			while (dst->entity_handle_head != -1) {
-				entity_handle_drop(dst,
-				    dst->entity_handle_head, 1);
-			}
-			smp_unlock();
+			kmem_free(snap);
+			entity_handle_release_all(dst);
 			return (handle);
 		}
-		slot = next;
 	}
-	smp_unlock();
+	kmem_free(snap);
 	return (0);
 }
 
 void
 entity_handle_release_all(struct process *proc)
 {
+	entity_id_t	id;
+	int		handle;
+	int		ret;
+
 	if (!proc) {
 		return;
 	}
@@ -345,13 +429,22 @@ entity_handle_release_all(struct process *proc)
 		entity_handle_init_process(proc);
 		return;
 	}
-	while (proc->entity_handle_head != -1) {
-		u32	slot;
-		int	handle;
-
-		slot = (u32)proc->entity_handle_head;
-		handle = (int)((entity_handle_gen[slot] << 16) | slot);
-		entity_handle_drop(proc, handle, 1);
+	for (;;) {
+		id = 0;
+		spin_lock(&entity_handle_spin);
+		handle = proc->entity_handle_head;
+		if (handle < 0 || (u32)handle >= ENTITY_MAX_HANDLES) {
+			spin_unlock(&entity_handle_spin);
+			break;
+		}
+		handle = (int)((entity_handle_gen[(u32)handle] << 16) |
+		    (u32)handle);
+		ret = entity_handle_drop_locked(proc, handle, &id);
+		spin_unlock(&entity_handle_spin);
+		if (ret != 0) {
+			break;
+		}
+		entity_release(id);
 	}
 }
 
@@ -360,27 +453,25 @@ entity_handle_foreach(const struct process *proc,
     int (*cb)(int handle, entity_id_t id, u32 access, void *ctx),
     void *ctx)
 {
-	u32	slot;
-	int	ret;
+	entity_handle_snap_t	*snap;
+	u32			n;
+	u32			i;
+	int			ret;
 
 	if (!proc || !cb) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	smp_lock();
+	snap = entity_handle_snap_take(proc, &n);
+	if (snap == NULL) {
+		return (-API_ERR_NO_MEMORY);
+	}
 	ret = 0;
-	slot = (u32)proc->entity_handle_head;
-	while (slot != ENTITY_HANDLE_NONE) {
-		u32	next;
-
-		next = entity_handle_next[slot];
-		ret = cb((int)((entity_handle_gen[slot] << 16) | slot),
-		    entity_handle_id[slot], entity_handle_flags[slot],
-		    ctx);
+	for (i = 0; i < n; i++) {
+		ret = cb(snap[i].handle, snap[i].id, snap[i].access, ctx);
 		if (ret != 0) {
 			break;
 		}
-		slot = next;
 	}
-	smp_unlock();
+	kmem_free(snap);
 	return (ret);
 }

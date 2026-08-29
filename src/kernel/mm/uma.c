@@ -30,7 +30,8 @@ $define %type u8 as 8 bit unsigned
 $define %type u32 as 32 bit unsigned
 $define %type int as 32 bit signed
 $define %type size_t as unsigned long
-$define %type uma_zone as struct with name, item_size, align, flags, nitems, nfree, free_list, slabs, nslabs, max_slabs, initialized
+$define %type uma_zone as struct with name, item_size, align, flags, nitems, nfree, free_list, slabs, nslabs, max_slabs, initialized, lock
+$define %type spin_t as spin mutex
 
 $define %func uma_align_up as function with args size_t, size_t
 $define %func uma_strncmp as function with args const char *, const char *, size_t
@@ -55,11 +56,13 @@ $define %func uma_zfind as function with args const char *
 $space %internal uma_align_up, uma_strncmp, uma_strncpy, uma_strlen
 $space %internal uma_zone_register, uma_zone_alloc_struct
 $space %internal uma_zone_free_struct, uma_slab_grow
+$space %internal uma_reg_spin
 $space %export uma_zcreate, uma_zdestroy, uma_zalloc, uma_zfree
 $space %export uma_zfind, uma_init, uma_dump
 
 */
 
+#include <kernel/sync/sync.h>
 #include <mm/uma.h>
 #include <mm/kmem.h>
 #include <mlibc/mlibc.h>
@@ -77,10 +80,13 @@ struct uma_zone {
 	u32		nslabs;
 	u32		max_slabs;
 	int		initialized;
+	spin_t		lock;
 };
 
 static struct uma_zone	*g_zones[UMA_ZONE_MAX];
 static struct uma_zone	*g_zone_zone;
+
+static spin_t		uma_reg_spin = SPIN_INITIALIZER("uma_reg", LO_UMA);
 
 static size_t
 uma_align_up(size_t value, size_t align)
@@ -136,22 +142,29 @@ static int
 uma_zone_register(struct uma_zone *zone)
 {
 	u32	i;
+	int	rc;
 
+	rc = -1;
+	spin_lock(&uma_reg_spin);
 	for (i = 0; i < UMA_ZONE_MAX; i++) {
 		if (g_zones[i] == NULL) {
 			g_zones[i] = zone;
-			return (0);
+			rc = 0;
+			break;
 		}
 	}
-	return (-1);
+	spin_unlock(&uma_reg_spin);
+	return (rc);
 }
 
 static struct uma_zone *
 uma_zone_alloc_struct(void)
 {
-	if (g_zone_zone != NULL) {
-		return ((struct uma_zone *)uma_zalloc(
-		    g_zone_zone, M_WAITOK));
+	struct uma_zone	*zz;
+
+	zz = __atomic_load_n(&g_zone_zone, __ATOMIC_ACQUIRE);
+	if (zz != NULL) {
+		return ((struct uma_zone *)uma_zalloc(zz, M_WAITOK));
 	}
 	return ((struct uma_zone *)kmem_alloc(
 	    sizeof(struct uma_zone)));
@@ -160,8 +173,11 @@ uma_zone_alloc_struct(void)
 static void
 uma_zone_free_struct(struct uma_zone *zone)
 {
-	if (g_zone_zone != NULL) {
-		uma_zfree(g_zone_zone, zone);
+	struct uma_zone	*zz;
+
+	zz = __atomic_load_n(&g_zone_zone, __ATOMIC_ACQUIRE);
+	if (zz != NULL) {
+		uma_zfree(zz, zone);
 	} else {
 		kmem_free(zone);
 	}
@@ -249,6 +265,7 @@ uma_zcreate(const char *name, size_t size, size_t align,
 	zone->max_slabs = 0;
 	zone->nitems = 0;
 	zone->nfree = 0;
+	spin_init(&zone->lock, zone->name, LO_UMA_ZONE);
 	zone->initialized = 1;
 
 	if (uma_zone_register(zone) != 0) {
@@ -262,24 +279,40 @@ uma_zcreate(const char *name, size_t size, size_t align,
 void
 uma_zdestroy(uma_zone_t zone)
 {
+	void	**slabs;
+	u32	nslabs;
 	u32	i;
 
 	if (zone == NULL) {
 		return;
 	}
 
+	spin_lock(&uma_reg_spin);
 	for (i = 0; i < UMA_ZONE_MAX; i++) {
 		if (g_zones[i] == zone) {
 			g_zones[i] = NULL;
 			break;
 		}
 	}
+	spin_unlock(&uma_reg_spin);
 
-	for (i = 0; i < zone->nslabs; i++) {
-		kmem_free(zone->slabs[i]);
+	spin_lock(&zone->lock);
+	zone->initialized = 0;
+	slabs = zone->slabs;
+	nslabs = zone->nslabs;
+	zone->slabs = NULL;
+	zone->nslabs = 0;
+	zone->max_slabs = 0;
+	zone->free_list = NULL;
+	zone->nitems = 0;
+	zone->nfree = 0;
+	spin_unlock(&zone->lock);
+
+	for (i = 0; i < nslabs; i++) {
+		kmem_free(slabs[i]);
 	}
-	if (zone->slabs != NULL) {
-		kmem_free(zone->slabs);
+	if (slabs != NULL) {
+		kmem_free(slabs);
 	}
 	uma_zone_free_struct(zone);
 }
@@ -289,15 +322,19 @@ uma_zalloc(uma_zone_t zone, u32 flags)
 {
 	void	*item;
 
-	if (zone == NULL || !zone->initialized) {
+	if (zone == NULL) {
+		return (NULL);
+	}
+
+	spin_lock(&zone->lock);
+	if (!zone->initialized) {
+		spin_unlock(&zone->lock);
 		return (NULL);
 	}
 
 	if (zone->free_list == NULL) {
 		if (uma_slab_grow(zone) != 0) {
-			if (flags & M_NOWAIT) {
-				return (NULL);
-			}
+			spin_unlock(&zone->lock);
 			return (NULL);
 		}
 	}
@@ -305,6 +342,7 @@ uma_zalloc(uma_zone_t zone, u32 flags)
 	item = zone->free_list;
 	zone->free_list = *(void **)item;
 	zone->nfree--;
+	spin_unlock(&zone->lock);
 
 	if (flags & M_ZERO) {
 		memset(item, 0, zone->item_size);
@@ -320,9 +358,11 @@ uma_zfree(uma_zone_t zone, void *item)
 		return;
 	}
 
+	spin_lock(&zone->lock);
 	*(void **)item = zone->free_list;
 	zone->free_list = item;
 	zone->nfree++;
+	spin_unlock(&zone->lock);
 }
 
 void
@@ -332,32 +372,36 @@ uma_init(void)
 	    256, 512, 1024, 2048, 4096};
 	static const char	*names[] = {"16", "32", "64",
 	    "128", "256", "512", "1024", "2048", "4096"};
+	struct uma_zone		*zz;
 	u32			i;
 
+	spin_lock(&uma_reg_spin);
 	for (i = 0; i < UMA_ZONE_MAX; i++) {
 		g_zones[i] = NULL;
 	}
+	spin_unlock(&uma_reg_spin);
 
-	g_zone_zone = (struct uma_zone *)kmem_alloc(
-	    sizeof(struct uma_zone));
-	if (g_zone_zone == NULL) {
+	zz = (struct uma_zone *)kmem_alloc(sizeof(struct uma_zone));
+	if (zz == NULL) {
 		return;
 	}
-	memset(g_zone_zone, 0, sizeof(*g_zone_zone));
-	uma_strncpy(g_zone_zone->name, "zone", 32);
-	g_zone_zone->align = UMA_ALIGN_CACHE;
-	g_zone_zone->item_size = uma_align_up(
-	    sizeof(struct uma_zone), UMA_ALIGN_CACHE);
-	g_zone_zone->flags = 0;
-	g_zone_zone->free_list = NULL;
-	g_zone_zone->slabs = NULL;
-	g_zone_zone->nslabs = 0;
-	g_zone_zone->max_slabs = 0;
-	g_zone_zone->nitems = 0;
-	g_zone_zone->nfree = 0;
-	g_zone_zone->initialized = 1;
+	memset(zz, 0, sizeof(*zz));
+	uma_strncpy(zz->name, "zone", 32);
+	zz->align = UMA_ALIGN_CACHE;
+	zz->item_size = uma_align_up(sizeof(struct uma_zone),
+	    UMA_ALIGN_CACHE);
+	zz->flags = 0;
+	zz->free_list = NULL;
+	zz->slabs = NULL;
+	zz->nslabs = 0;
+	zz->max_slabs = 0;
+	zz->nitems = 0;
+	zz->nfree = 0;
+	spin_init(&zz->lock, zz->name, LO_UMA_ZONE);
+	zz->initialized = 1;
 
-	uma_zone_register(g_zone_zone);
+	uma_zone_register(zz);
+	__atomic_store_n(&g_zone_zone, zz, __ATOMIC_RELEASE);
 
 	for (i = 0; i < sizeof(sizes) / sizeof(sizes[0]);
 	    i++) {
@@ -369,41 +413,59 @@ uma_init(void)
 void
 uma_dump(void)
 {
-	u32	i;
+	struct uma_zone	*z;
+	char		name[32];
+	size_t		item_size;
+	u32		nitems;
+	u32		nfree;
+	u32		nslabs;
+	u32		i;
 
 	printk("[uma] zone dump:\n");
 	for (i = 0; i < UMA_ZONE_MAX; i++) {
-		struct uma_zone	*z;
-
+		spin_lock(&uma_reg_spin);
 		z = g_zones[i];
 		if (z == NULL) {
+			spin_unlock(&uma_reg_spin);
 			continue;
 		}
+		spin_lock(&z->lock);
+		item_size = z->item_size;
+		nitems = z->nitems;
+		nfree = z->nfree;
+		nslabs = z->nslabs;
+		uma_strncpy(name, z->name, sizeof(name));
+		spin_unlock(&z->lock);
+		spin_unlock(&uma_reg_spin);
 		printk("  %-8s item_size=%lu nitems=%u "
-		    "nfree=%u nslabs=%u\n", z->name,
-		    z->item_size, z->nitems, z->nfree,
-		    z->nslabs);
+		    "nfree=%u nslabs=%u\n", name,
+		    item_size, nitems, nfree, nslabs);
 	}
 }
 
 uma_zone_t
 uma_zfind(const char *name)
 {
-	u32	i;
+	struct uma_zone	*found;
+	u32		i;
 
 	if (name == NULL) {
 		return (NULL);
 	}
 
+	found = NULL;
+	spin_lock(&uma_reg_spin);
 	for (i = 0; i < UMA_ZONE_MAX; i++) {
 		if (g_zones[i] == NULL) {
 			continue;
 		}
 		if (uma_strncmp(g_zones[i]->name, name, 32)
 		    == 0) {
-			return (g_zones[i]);
+			found = g_zones[i];
+			break;
 		}
 	}
+	spin_unlock(&uma_reg_spin);
 
-	return (NULL);
+	return (found);
 }

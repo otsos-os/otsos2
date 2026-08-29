@@ -60,6 +60,11 @@ $define %func vm_page_queue_count as function with args int
 $define %func vm_page_queue_counts as procedure with args u64 *, u64 *, u64 *, u64 *
 $define %func vm_page_lookup as function with args u64
 $define %func vm_page_dump as procedure with args void
+$define %func vm_page_lookup_locked as function with args u64
+$define %func vm_page_alloc_locked as function with args u32
+$define %func vm_page_free_locked as procedure with args vm_page_t *
+$define %func vm_page_reserve_locked as procedure with args u64, u64
+$define %func vm_page_queue_count_locked as function with args int
 
 */
 
@@ -67,6 +72,9 @@ $define %func vm_page_dump as procedure with args void
 
 $space %internal round_page, trunc_page, atop
 $space %internal vm_page_queue_insert, vm_page_queue_remove
+$space %internal vm_page_lookup_locked, vm_page_alloc_locked
+$space %internal vm_page_free_locked, vm_page_reserve_locked
+$space %internal vm_page_queue_count_locked, vm_page_spin
 $space %export vm_page_init, vm_page_init_from_bootmem
 $space %export vm_page_alloc, vm_page_free, vm_page_alloc_phys
 $space %export vm_page_alloc_contig, vm_page_free_phys
@@ -82,6 +90,7 @@ $space %export vm_page_reserve_range
 
 #include <mm/vm/vm_page.h>
 #include <kernel/bootmem.h>
+#include <kernel/sync/sync.h>
 #include <mm/kmem.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdio.h>
@@ -96,6 +105,8 @@ static u64 page_count;
 
 static vm_page_t *queue_head[PQ_COUNT];
 static vm_page_t *queue_tail[PQ_COUNT];
+
+static spin_t vm_page_spin = SPIN_INITIALIZER("vm_page", LO_VM_PAGE);
 
 static u64
 round_page(u64 value)
@@ -270,8 +281,20 @@ vm_page_init_from_bootmem(void)
 	bootmem_set_reserve_cb(vm_page_reserve_range);
 }
 
-vm_page_t *
-vm_page_alloc(u32 flags)
+static vm_page_t *
+vm_page_lookup_locked(u64 phys_addr)
+{
+	u64 i;
+
+	for (i = 0; i < page_count; i++) {
+		if (pages[i].phys_addr == phys_addr)
+			return (&pages[i]);
+	}
+	return (NULL);
+}
+
+static vm_page_t *
+vm_page_alloc_locked(u32 flags)
 {
 	vm_page_t *page;
 
@@ -300,8 +323,8 @@ vm_page_alloc(u32 flags)
 	return (page);
 }
 
-void
-vm_page_free(vm_page_t *page)
+static void
+vm_page_free_locked(vm_page_t *page)
 {
 	if (page == NULL)
 		return;
@@ -312,15 +335,36 @@ vm_page_free(vm_page_t *page)
 	vm_page_queue_insert(page, PQ_FREE);
 }
 
+vm_page_t *
+vm_page_alloc(u32 flags)
+{
+	vm_page_t *page;
+
+	spin_lock(&vm_page_spin);
+	page = vm_page_alloc_locked(flags);
+	spin_unlock(&vm_page_spin);
+	return (page);
+}
+
+void
+vm_page_free(vm_page_t *page)
+{
+	spin_lock(&vm_page_spin);
+	vm_page_free_locked(page);
+	spin_unlock(&vm_page_spin);
+}
+
 u64
 vm_page_alloc_phys(u32 flags)
 {
 	vm_page_t *page;
+	u64	phys;
 
-	page = vm_page_alloc(flags);
-	if (page == NULL)
-		return (0);
-	return (page->phys_addr);
+	spin_lock(&vm_page_spin);
+	page = vm_page_alloc_locked(flags);
+	phys = page != NULL ? page->phys_addr : 0;
+	spin_unlock(&vm_page_spin);
+	return (phys);
 }
 
 u64
@@ -334,6 +378,7 @@ vm_page_alloc_contig(u32 page_total, u64 alignment, u64 max_address)
 	    (alignment & (alignment - 1)) != 0) {
 		return (0);
 	}
+	spin_lock(&vm_page_spin);
 	for (i = 0; i + page_total <= page_count; i++) {
 		base = pages[i].phys_addr;
 		if ((base & (alignment - 1)) != 0 ||
@@ -357,8 +402,10 @@ vm_page_alloc_contig(u32 page_total, u64 alignment, u64 max_address)
 			page->state = VM_PAGE_USED | VM_PAGE_WIRED;
 			page->ref_count = 1;
 		}
+		spin_unlock(&vm_page_spin);
 		return (base);
 	}
+	spin_unlock(&vm_page_spin);
 	return (0);
 }
 
@@ -368,12 +415,15 @@ vm_page_free_contig(u64 phys_addr, u32 page_total)
 	vm_page_t	*page;
 	u32		i;
 
+	spin_lock(&vm_page_spin);
 	for (i = 0; i < page_total; i++) {
-		page = vm_page_lookup(phys_addr + (u64)i * PAGE_SIZE);
+		page = vm_page_lookup_locked(phys_addr +
+		    (u64)i * PAGE_SIZE);
 		if (page != NULL) {
-			vm_page_free(page);
+			vm_page_free_locked(page);
 		}
 	}
+	spin_unlock(&vm_page_spin);
 }
 
 int
@@ -381,14 +431,19 @@ vm_page_free_phys(u64 phys_addr)
 {
 	vm_page_t *page;
 
-	page = vm_page_lookup(phys_addr & ~((u64)PAGE_SIZE - 1));
-	if (page == NULL)
+	spin_lock(&vm_page_spin);
+	page = vm_page_lookup_locked(phys_addr & ~((u64)PAGE_SIZE - 1));
+	if (page == NULL) {
+		spin_unlock(&vm_page_spin);
 		return (-1);
+	}
 	if (page->ref_count > 1) {
 		page->ref_count--;
+		spin_unlock(&vm_page_spin);
 		return (0);
 	}
-	vm_page_free(page);
+	vm_page_free_locked(page);
+	spin_unlock(&vm_page_spin);
 	return (0);
 }
 
@@ -397,16 +452,22 @@ vm_page_ref(vm_page_t *page)
 {
 	if (page == NULL)
 		return;
-	page->ref_count++;
+	__atomic_fetch_add(&page->ref_count, 1, __ATOMIC_ACQ_REL);
 }
 
 void
 vm_page_unref(vm_page_t *page)
 {
+	u32	old;
+
 	if (page == NULL)
 		return;
-	if (page->ref_count > 0)
-		page->ref_count--;
+	do {
+		old = __atomic_load_n(&page->ref_count, __ATOMIC_RELAXED);
+		if (old == 0)
+			return;
+	} while (!__atomic_compare_exchange_n(&page->ref_count, &old,
+	    old - 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED));
 }
 
 void
@@ -414,21 +475,24 @@ vm_page_ref_phys(u64 phys_addr)
 {
 	vm_page_t *page;
 
-	page = vm_page_lookup(phys_addr & ~((u64)PAGE_SIZE - 1));
-	if (page == NULL)
-		return;
-	vm_page_ref(page);
+	spin_lock(&vm_page_spin);
+	page = vm_page_lookup_locked(phys_addr & ~((u64)PAGE_SIZE - 1));
+	if (page != NULL)
+		page->ref_count++;
+	spin_unlock(&vm_page_spin);
 }
 
 u32
 vm_page_ref_count(u64 phys_addr)
 {
 	vm_page_t *page;
+	u32	count;
 
-	page = vm_page_lookup(phys_addr & ~((u64)PAGE_SIZE - 1));
-	if (page == NULL)
-		return (0);
-	return (page->ref_count);
+	spin_lock(&vm_page_spin);
+	page = vm_page_lookup_locked(phys_addr & ~((u64)PAGE_SIZE - 1));
+	count = page != NULL ? page->ref_count : 0;
+	spin_unlock(&vm_page_spin);
+	return (count);
 }
 
 void
@@ -436,10 +500,12 @@ vm_page_activate(vm_page_t *page)
 {
 	if (page == NULL)
 		return;
-	if (page->state & VM_PAGE_WIRED)
-		return;
-	vm_page_queue_remove(page);
-	vm_page_queue_insert(page, PQ_ACTIVE);
+	spin_lock(&vm_page_spin);
+	if (!(page->state & VM_PAGE_WIRED)) {
+		vm_page_queue_remove(page);
+		vm_page_queue_insert(page, PQ_ACTIVE);
+	}
+	spin_unlock(&vm_page_spin);
 }
 
 void
@@ -447,10 +513,12 @@ vm_page_deactivate(vm_page_t *page)
 {
 	if (page == NULL)
 		return;
-	if (page->state & VM_PAGE_WIRED)
-		return;
-	vm_page_queue_remove(page);
-	vm_page_queue_insert(page, PQ_INACTIVE);
+	spin_lock(&vm_page_spin);
+	if (!(page->state & VM_PAGE_WIRED)) {
+		vm_page_queue_remove(page);
+		vm_page_queue_insert(page, PQ_INACTIVE);
+	}
+	spin_unlock(&vm_page_spin);
 }
 
 void
@@ -458,15 +526,18 @@ vm_page_cache_insert(vm_page_t *page)
 {
 	if (page == NULL)
 		return;
-	if (page->state & VM_PAGE_WIRED)
-		return;
-	vm_page_queue_remove(page);
-	page->state = VM_PAGE_FREE;
-	page->ref_count = 0;
-	vm_page_queue_insert(page, PQ_CACHE);
+	spin_lock(&vm_page_spin);
+	if (!(page->state & VM_PAGE_WIRED)) {
+		vm_page_queue_remove(page);
+		page->state = VM_PAGE_FREE;
+		page->ref_count = 0;
+		vm_page_queue_insert(page, PQ_CACHE);
+	}
+	spin_unlock(&vm_page_spin);
 }
-void
-vm_page_reserve_range(u64 phys_start, u64 size)
+
+static void
+vm_page_reserve_locked(u64 phys_start, u64 size)
 {
 	u64	addr;
 	u64	end;
@@ -474,7 +545,7 @@ vm_page_reserve_range(u64 phys_start, u64 size)
 
 	end = phys_start + size;
 	for (addr = phys_start; addr < end; addr += PAGE_SIZE) {
-		vp = vm_page_lookup(addr);
+		vp = vm_page_lookup_locked(addr);
 		if (vp == NULL) {
 			continue;
 		}
@@ -485,6 +556,14 @@ vm_page_reserve_range(u64 phys_start, u64 size)
 	}
 }
 
+void
+vm_page_reserve_range(u64 phys_start, u64 size)
+{
+	spin_lock(&vm_page_spin);
+	vm_page_reserve_locked(phys_start, size);
+	spin_unlock(&vm_page_spin);
+}
+
 u64
 vm_page_count_free(void)
 {
@@ -492,15 +571,17 @@ vm_page_count_free(void)
 	u64 count;
 
 	count = 0;
+	spin_lock(&vm_page_spin);
 	for (p = queue_head[PQ_FREE]; p != NULL; p = p->queue_next)
 		count++;
 	for (p = queue_head[PQ_CACHE]; p != NULL; p = p->queue_next)
 		count++;
+	spin_unlock(&vm_page_spin);
 	return (count);
 }
 
-u64
-vm_page_queue_count(int qid)
+static u64
+vm_page_queue_count_locked(int qid)
 {
 	vm_page_t *p;
 	u64 count;
@@ -514,31 +595,37 @@ vm_page_queue_count(int qid)
 }
 
 u64
+vm_page_queue_count(int qid)
+{
+	u64	count;
+
+	spin_lock(&vm_page_spin);
+	count = vm_page_queue_count_locked(qid);
+	spin_unlock(&vm_page_spin);
+	return (count);
+}
+
+u64
 vm_page_count_total(void)
 {
-	return (page_count);
+	return (__atomic_load_n(&page_count, __ATOMIC_ACQUIRE));
 }
 
 void
 vm_page_queue_counts(u64 *active, u64 *inactive, u64 *cache, u64 *wired)
 {
-	vm_page_t *p;
 	u64 act, inact, cach, wir, i;
 
-	act = 0;
-	for (p = queue_head[PQ_ACTIVE]; p != NULL; p = p->queue_next)
-		act++;
-	inact = 0;
-	for (p = queue_head[PQ_INACTIVE]; p != NULL; p = p->queue_next)
-		inact++;
-	cach = 0;
-	for (p = queue_head[PQ_CACHE]; p != NULL; p = p->queue_next)
-		cach++;
+	spin_lock(&vm_page_spin);
+	act = vm_page_queue_count_locked(PQ_ACTIVE);
+	inact = vm_page_queue_count_locked(PQ_INACTIVE);
+	cach = vm_page_queue_count_locked(PQ_CACHE);
 	wir = 0;
 	for (i = 0; i < page_count; i++) {
 		if (pages[i].state & VM_PAGE_WIRED)
 			wir++;
 	}
+	spin_unlock(&vm_page_spin);
 
 	if (active != NULL)
 		*active = act;
@@ -553,13 +640,12 @@ vm_page_queue_counts(u64 *active, u64 *inactive, u64 *cache, u64 *wired)
 vm_page_t *
 vm_page_lookup(u64 phys_addr)
 {
-	u64 i;
+	vm_page_t *page;
 
-	for (i = 0; i < page_count; i++) {
-		if (pages[i].phys_addr == phys_addr)
-			return (&pages[i]);
-	}
-	return (NULL);
+	spin_lock(&vm_page_spin);
+	page = vm_page_lookup_locked(phys_addr);
+	spin_unlock(&vm_page_spin);
+	return (page);
 }
 
 void
@@ -567,14 +653,12 @@ vm_page_dump(void)
 {
 	const char *qnames[] = {"NONE", "FREE", "CACHE",
 	    "ACTIVE", "INACTIVE", "LAUNDRY"};
-	vm_page_t *p;
 	u64 qcount[PQ_COUNT];
 	u64 reserved_count, wired_count, i;
 
+	spin_lock(&vm_page_spin);
 	for (i = 0; i < PQ_COUNT; i++) {
-		qcount[i] = 0;
-		for (p = queue_head[i]; p != NULL; p = p->queue_next)
-			qcount[i]++;
+		qcount[i] = vm_page_queue_count_locked((int)i);
 	}
 
 	reserved_count = 0;
@@ -586,6 +670,7 @@ vm_page_dump(void)
 			wired_count++;
 		}
 	}
+	spin_unlock(&vm_page_spin);
 
 	printk("--- vm_page dump ---\n");
 	printk("total pages : %u\n", (u32)page_count);

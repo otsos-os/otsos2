@@ -7,6 +7,7 @@
 #include <kernel/bootmem.h>
 #include <kernel/multiboot.h>
 #include <kernel/multiboot2.h>
+#include <kernel/sync/sync.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
@@ -25,6 +26,7 @@ static u32 free_count;
 static u64 highest_addr;
 static int initialized;
 static void (*reserve_cb)(u64 phys_start, u64 size);
+static spin_t bootmem_spin = SPIN_INITIALIZER("bootmem", LO_BOOTMEM);
 
 static u64 align_up(u64 val, u64 align) {
   if (align == 0)
@@ -94,7 +96,9 @@ static void reserve_range(u64 start, u64 end) {
 void bootmem_reserve_phys(u64 phys_start, u64 size) {
   if (size == 0)
     return;
+  spin_lock(&bootmem_spin);
   reserve_range(phys_start, phys_start + size);
+  spin_unlock(&bootmem_spin);
 }
 
 static void load_mb1_mmap(multiboot_info_t *mb) {
@@ -193,12 +197,16 @@ void bootmem_init(u64 magic, u64 info_addr, u64 kernel_start, u64 kernel_end) {
 }
 
 void *bootmem_alloc(u64 size, u64 align) {
+  void (*cb)(u64, u64);
+  u64 got = 0;
+
   if (!initialized)
     return NULL;
   if (align < PAGE_SIZE)
     align = PAGE_SIZE;
   size = align_up(size, PAGE_SIZE);
 
+  spin_lock(&bootmem_spin);
   for (u32 i = 0; i < free_count; i++) {
     u64 addr = align_up(free_ranges[i].start, align);
     u64 end = addr + size;
@@ -210,36 +218,49 @@ void *bootmem_alloc(u64 size, u64 align) {
       free_ranges[i] = free_ranges[free_count - 1];
       free_count--;
     }
-    if (reserve_cb)
-      reserve_cb(addr, size);
-    return (void *)(addr + DMAP_BASE);
+    got = addr;
+    break;
   }
+  cb = reserve_cb;
+  spin_unlock(&bootmem_spin);
 
-  return NULL;
+  if (got == 0)
+    return NULL;
+  if (cb)
+    cb(got, size);
+  return (void *)(got + DMAP_BASE);
 }
 
 u64 bootmem_free_bytes(void) {
   u64 total = 0;
+  spin_lock(&bootmem_spin);
   for (u32 i = 0; i < free_count; i++)
     total += free_ranges[i].end - free_ranges[i].start;
+  spin_unlock(&bootmem_spin);
   return total;
 }
 
 u64 bootmem_highest_addr(void) { return highest_addr; }
 
-u32 bootmem_range_count(void) { return free_count; }
+u32 bootmem_range_count(void) {
+  return __atomic_load_n(&free_count, __ATOMIC_ACQUIRE);
+}
 
 const bootmem_range_t *bootmem_ranges(void) { return free_ranges; }
 void bootmem_set_reserve_cb(void (*cb)(u64 phys_start, u64 size)) {
+  spin_lock(&bootmem_spin);
   reserve_cb = cb;
+  spin_unlock(&bootmem_spin);
 }
 
 void bootmem_dump(void) {
   printk("--- bootmem ranges ---\n");
+  spin_lock(&bootmem_spin);
   for (u32 i = 0; i < free_count; i++) {
     printk("%u: %p - %p (%u KB)\n", i, (void *)free_ranges[i].start,
                 (void *)free_ranges[i].end,
                 (free_ranges[i].end - free_ranges[i].start) / 1024);
   }
+  spin_unlock(&bootmem_spin);
   printk("----------------------\n");
 }

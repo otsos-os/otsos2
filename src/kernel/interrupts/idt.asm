@@ -49,7 +49,22 @@ irq_stub_spurious:
 extern smp_lock
 extern smp_unlock
 
+%macro SWAPGS_IF_USER_ENTRY 0
+    test qword [rsp + 24], 3
+    jz %%kernel
+    swapgs
+%%kernel:
+%endmacro
+
+%macro SWAPGS_IF_USER_EXIT 0
+    test qword [rsp + 8], 3
+    jz %%kernel
+    swapgs
+%%kernel:
+%endmacro
+
 isr_common:
+    SWAPGS_IF_USER_ENTRY
     push rax
     push rbx
     push rcx
@@ -92,9 +107,11 @@ isr_common:
     pop rbx
     pop rax
     add rsp, 16
+    SWAPGS_IF_USER_EXIT
     iretq
 
 irq_common:
+    SWAPGS_IF_USER_ENTRY
     push rax
     push rbx
     push rcx
@@ -137,6 +154,7 @@ irq_common:
     pop rbx
     pop rax
     add rsp, 16
+    SWAPGS_IF_USER_EXIT
     iretq
 
 ; Exceptions 0-31
