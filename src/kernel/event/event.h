@@ -200,6 +200,7 @@ typedef struct knote {
 	s16			filter;
 	u16			flags;
 	u32			fflags;
+	u32			sfflags;
 	s64			data;
 	u64			udata;
 	u64			fpriv;

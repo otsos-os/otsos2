@@ -540,7 +540,12 @@ knote_notify_all(s16 filter, u64 ident, u32 fflags, s64 data)
 			}
 
 			if (fflags) {
-				kn->fflags |= fflags;
+				if (kn->sfflags != 0 &&
+				    (kn->sfflags & fflags) == 0) {
+					continue;
+				}
+				kn->fflags |= (kn->sfflags != 0) ?
+				    (fflags & kn->sfflags) : fflags;
 			}
 			if (data) {
 				kn->data = data;
@@ -583,6 +588,7 @@ process_change(kqueue_t *kq, struct kevent *kev)
 	if (kev->flags & EV_ADD) {
 		if (kn) {
 			kn->fflags = kev->fflags;
+			kn->sfflags = kev->fflags;
 			kn->data = kev->data;
 			if (!(kev->flags & EV_KEEPUDATA)) {
 				kn->udata = kev->udata;
@@ -610,6 +616,7 @@ process_change(kqueue_t *kq, struct kevent *kev)
 			kn->filter = kev->filter;
 			kn->flags = kev->flags;
 			kn->fflags = kev->fflags;
+			kn->sfflags = kev->fflags;
 			kn->data = kev->data;
 			kn->udata = kev->udata;
 			kn->kq = kq;

@@ -114,7 +114,8 @@ filt_proc_event(knote_t *kn, u32 nevents)
 	entity_id_t	id;
 	int		code, flags;
 
-	if ((kn->fflags & NOTE_REAP) && kn->pending) {
+	if ((kn->sfflags & NOTE_REAP) && (kn->fflags & NOTE_REAP) &&
+	    kn->pending) {
 		return (1);
 	}
 
@@ -145,6 +146,7 @@ static void
 filt_proc_touch(knote_t *kn, struct kevent *kev)
 {
 	kn->fflags = kev->fflags;
+	kn->sfflags = kev->fflags;
 }
 
 void
