@@ -19,9 +19,21 @@
 #include <string.h>
 
 #define KEY_QUEUE_SIZE 64
+#define DOOM_WINDOW_W 640
+#define DOOM_WINDOW_H 480
+#define DOOM_ASPECT_NUM 4
+#define DOOM_ASPECT_DEN 3
+#define DOOM_FIXED_SHIFT 16
 
 static sprot_connection_t	*s_conn;
 static sprot_surface_t		*s_surface;
+static uint32_t			 s_surface_w;
+static uint32_t			 s_surface_h;
+static uint32_t			 s_img_x;
+static uint32_t			 s_img_y;
+static uint32_t			 s_img_w;
+static uint32_t			 s_img_h;
+static int			 s_geometry_dirty;
 
 static uint16_t			 s_key_queue[KEY_QUEUE_SIZE];
 static uint32_t			 s_key_queue_write;
@@ -125,6 +137,147 @@ queue_key_event(int pressed, unsigned char doom_key)
 }
 
 static void
+compute_fit(uint32_t surface_w, uint32_t surface_h)
+{
+	uint32_t	width, height;
+
+	if (surface_w == 0 || surface_h == 0) {
+		s_img_x = 0;
+		s_img_y = 0;
+		s_img_w = 0;
+		s_img_h = 0;
+		return;
+	}
+
+	width = surface_w;
+	height = (uint32_t)(((uint64_t)width * DOOM_ASPECT_DEN) /
+	    DOOM_ASPECT_NUM);
+	if (height > surface_h) {
+		height = surface_h;
+		width = (uint32_t)(((uint64_t)height * DOOM_ASPECT_NUM) /
+		    DOOM_ASPECT_DEN);
+	}
+
+	if (width == 0) {
+		width = 1;
+	}
+	if (height == 0) {
+		height = 1;
+	}
+	if (width > surface_w) {
+		width = surface_w;
+	}
+	if (height > surface_h) {
+		height = surface_h;
+	}
+
+	s_img_w = width;
+	s_img_h = height;
+	s_img_x = (surface_w - width) / 2;
+	s_img_y = (surface_h - height) / 2;
+}
+
+static void
+clear_surface(void)
+{
+	uint32_t	*pixels;
+	size_t		 bytes;
+
+	if (s_surface == NULL) {
+		return;
+	}
+	pixels = sprot_surface_pixels(s_surface);
+	if (pixels == NULL) {
+		return;
+	}
+	bytes = (size_t)sprot_surface_stride(s_surface) * (size_t)s_surface_h;
+	memset(pixels, 0, bytes);
+}
+
+static void
+scale_row(uint32_t *dst, const uint32_t *src, uint32_t x_step)
+{
+	uint32_t	x_acc, sx;
+	uint32_t	x;
+
+	if (s_img_w == (uint32_t)DOOMGENERIC_RESX) {
+		memcpy(dst, src,
+		    (size_t)DOOMGENERIC_RESX * sizeof(uint32_t));
+		return;
+	}
+
+	x_acc = 0;
+	for (x = 0; x < s_img_w; x++) {
+		sx = x_acc >> DOOM_FIXED_SHIFT;
+		x_acc += x_step;
+		if (sx >= (uint32_t)DOOMGENERIC_RESX) {
+			sx = (uint32_t)DOOMGENERIC_RESX - 1;
+		}
+		dst[x] = src[sx];
+	}
+}
+
+static void
+blit_scaled(uint32_t *dst, uint32_t dst_stride_px)
+{
+	const uint32_t	*src;
+	uint32_t	*row_dst, *prev_dst;
+	uint32_t	 x_step, y_step, y_acc, sy, prev_sy;
+	uint32_t	 y;
+
+	src = (const uint32_t *)DG_ScreenBuffer;
+	x_step = ((uint32_t)DOOMGENERIC_RESX << DOOM_FIXED_SHIFT) / s_img_w;
+	y_step = ((uint32_t)DOOMGENERIC_RESY << DOOM_FIXED_SHIFT) / s_img_h;
+
+	prev_sy = (uint32_t)-1;
+	prev_dst = NULL;
+	y_acc = 0;
+
+	for (y = 0; y < s_img_h; y++) {
+		sy = y_acc >> DOOM_FIXED_SHIFT;
+		y_acc += y_step;
+		if (sy >= (uint32_t)DOOMGENERIC_RESY) {
+			sy = (uint32_t)DOOMGENERIC_RESY - 1;
+		}
+
+		row_dst = dst + (size_t)(s_img_y + y) * (size_t)dst_stride_px +
+		    (size_t)s_img_x;
+
+		if (sy == prev_sy && prev_dst != NULL) {
+			memcpy(row_dst, prev_dst,
+			    (size_t)s_img_w * sizeof(uint32_t));
+			continue;
+		}
+
+		scale_row(row_dst,
+		    src + (size_t)sy * (size_t)DOOMGENERIC_RESX, x_step);
+		prev_sy = sy;
+		prev_dst = row_dst;
+	}
+}
+
+static int
+resize_surface(uint32_t width, uint32_t height)
+{
+	if (s_surface == NULL || width == 0 || height == 0) {
+		return (-1);
+	}
+	if (width == s_surface_w && height == s_surface_h) {
+		return (0);
+	}
+	if (sprot_resize_surface(s_surface, width, height) != 0) {
+		return (-1);
+	}
+
+	s_surface_w = sprot_surface_width(s_surface);
+	s_surface_h = sprot_surface_height(s_surface);
+	compute_fit(s_surface_w, s_surface_h);
+	clear_surface();
+	s_geometry_dirty = 1;
+	return (0);
+}
+
+static void
 poll_sprot_events(int timeout_ms)
 {
 	sprot_event_t event;
@@ -141,6 +294,9 @@ poll_sprot_events(int timeout_ms)
 			if (doom_key != 0) {
 				queue_key_event(event.u.key.state != 0, doom_key);
 			}
+		} else if (event.kind == SPROT_EVENT_SURFACE_CONFIGURE) {
+			(void)resize_surface(event.u.configure.width,
+			    event.u.configure.height);
 		} else if (event.kind == SPROT_EVENT_SURFACE_CLOSE) {
 			exit(0);
 		} else if (event.kind == SPROT_EVENT_DISCONNECT) {
@@ -204,11 +360,17 @@ DG_Init(void)
 
 	atexit(cleanup_sprot);
 
-	s_surface = sprot_create_surface(s_conn, DOOMGENERIC_RESX, DOOMGENERIC_RESY);
+	s_surface = sprot_create_surface(s_conn, DOOM_WINDOW_W, DOOM_WINDOW_H);
 	if (s_surface == NULL || wait_surface_ready(s_conn, s_surface) != 0) {
 		termPrint("doom: cannot create window surface\n");
 		procExit(1);
 	}
+
+	s_surface_w = sprot_surface_width(s_surface);
+	s_surface_h = sprot_surface_height(s_surface);
+	compute_fit(s_surface_w, s_surface_h);
+	clear_surface();
+	s_geometry_dirty = 1;
 
 	if (sprot_set_role(s_surface, SPROT_SURFACE_ROLE_TOPLEVEL, 0, 80, 50) != 0 ||
 	    sprot_set_title(s_surface, "DOOM") != 0 ||
@@ -223,9 +385,11 @@ DG_DrawFrame(void)
 {
 	uint32_t *dst;
 	uint32_t stride_px;
-	uint32_t y;
 
 	if (s_surface == NULL || DG_ScreenBuffer == NULL) {
+		return;
+	}
+	if (s_img_w == 0 || s_img_h == 0) {
 		return;
 	}
 
@@ -235,18 +399,20 @@ DG_DrawFrame(void)
 	}
 
 	stride_px = sprot_surface_stride(s_surface) / sizeof(uint32_t);
-	if (stride_px == (uint32_t)DOOMGENERIC_RESX) {
-		memcpy(dst, DG_ScreenBuffer,
-		    (size_t)DOOMGENERIC_RESX * (size_t)DOOMGENERIC_RESY * sizeof(uint32_t));
-	} else {
-		for (y = 0; y < (uint32_t)DOOMGENERIC_RESY; y++) {
-			memcpy(dst + (size_t)y * stride_px,
-			    DG_ScreenBuffer + (size_t)y * (size_t)DOOMGENERIC_RESX,
-			    (size_t)DOOMGENERIC_RESX * sizeof(uint32_t));
-		}
+	if (stride_px == 0 || s_img_x + s_img_w > stride_px ||
+	    s_img_y + s_img_h > s_surface_h) {
+		return;
 	}
 
-	(void)sprot_damage(s_surface, 0, 0, DOOMGENERIC_RESX, DOOMGENERIC_RESY);
+	blit_scaled(dst, stride_px);
+
+	if (s_geometry_dirty) {
+		(void)sprot_damage(s_surface, 0, 0, s_surface_w, s_surface_h);
+		s_geometry_dirty = 0;
+	} else {
+		(void)sprot_damage(s_surface, (int32_t)s_img_x,
+		    (int32_t)s_img_y, s_img_w, s_img_h);
+	}
 	(void)sprot_commit(s_surface);
 
 	poll_sprot_events(0);
