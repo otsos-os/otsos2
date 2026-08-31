@@ -89,7 +89,7 @@ filt_proc_attach(knote_t *kn)
 	    (flags & PROC_EXIT_EXITED)) {
 		kn->fflags |= NOTE_EXIT;
 		kn->data = code;
-		knote_ready(kn);
+		knote_ready_locked(kn);
 	}
 
 	return (0);

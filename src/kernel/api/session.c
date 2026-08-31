@@ -53,6 +53,7 @@ int
 api_session_setsid(void)
 {
 	process_t	*proc;
+	u32		old_pgid;
 
 	proc = process_current();
 	if (!proc) {
@@ -61,11 +62,12 @@ api_session_setsid(void)
 	if (proc->is_session_leader) {
 		return (-API_ERR_PERM);
 	}
+	old_pgid = proc->pgid;
 	proc->sid = proc->pid;
 	proc->pgid = proc->pid;
 	proc->is_session_leader = 1;
 	if (proc->controlling_tty >= 0) {
-		terminal_hangup(proc->controlling_tty);
+		terminal_drop_pgrp(old_pgid);
 		proc->controlling_tty = -1;
 	}
 

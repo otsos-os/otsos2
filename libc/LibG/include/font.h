@@ -29,6 +29,14 @@ $space %export libg_font_row
 	((r) == 0 ? (a) : (r) == 1 ? (b) : (r) == 2 ? (c) : \
 	(r) == 3 ? (d) : (r) == 4 ? (e) : (r) == 5 ? (f) : (g))
 
+
+#define LIBG_CYR_UPPER_A	0x0410U
+#define LIBG_CYR_UPPER_YA	0x042FU
+#define LIBG_CYR_LOWER_A	0x0430U
+#define LIBG_CYR_LOWER_YA	0x044FU
+#define LIBG_CYR_YO_UPPER	0x0401U
+#define LIBG_CYR_YO_LOWER	0x0451U
+
 static inline uint8_t
 libg_font_row(uint32_t ch, uint32_t row)
 {
@@ -37,6 +45,162 @@ libg_font_row(uint32_t ch, uint32_t row)
 	}
 	if (ch >= 'a' && ch <= 'z') {
 		ch -= ('a' - 'A');
+	}
+	if (ch >= LIBG_CYR_LOWER_A && ch <= LIBG_CYR_LOWER_YA) {
+		ch -= (LIBG_CYR_LOWER_A - LIBG_CYR_UPPER_A);
+	}
+	if (ch == LIBG_CYR_YO_LOWER) {
+		ch = LIBG_CYR_YO_UPPER;
+	}
+
+
+	switch (ch) {
+	case 0x00A0U:			/* no-break space */
+		ch = ' ';
+		break;
+	case 0x2010U: case 0x2011U:	/* hyphen, non-breaking hyphen */
+	case 0x2012U: case 0x2013U:	/* figure dash, en dash */
+	case 0x2014U: case 0x2015U:	/* em dash, horizontal bar */
+	case 0x2212U:			/* minus sign */
+		ch = '-';
+		break;
+	case 0x2018U: case 0x2019U:	/* single quotes */
+	case 0x201AU: case 0x201BU:
+	case 0x2032U:			/* prime */
+		ch = '\'';
+		break;
+	case 0x201CU: case 0x201DU:	/* double quotes */
+	case 0x201EU: case 0x201FU:
+	case 0x00ABU: case 0x00BBU:	/* guillemets */
+	case 0x2033U:			/* double prime */
+		ch = '"';
+		break;
+	case 0x2022U: case 0x00B7U:	/* bullet, middle dot */
+		ch = '.';
+		break;
+	case 0x2026U:			/* ellipsis */
+		ch = '.';
+		break;
+	case 0x00A9U:			/* copyright */
+		ch = 'C';
+		break;
+	case 0x2116U:			/* numero sign */
+		ch = '#';
+		break;
+	case 0x00D7U:			/* multiplication sign */
+		ch = 'X';
+		break;
+	default:
+		break;
+	}
+	switch (ch) {
+	case 0x0410U:			/* А */
+		ch = 'A';
+		break;
+	case 0x0412U:			/* В */
+		ch = 'B';
+		break;
+	case 0x0415U:			/* Е */
+		ch = 'E';
+		break;
+	case 0x041AU:			/* К */
+		ch = 'K';
+		break;
+	case 0x041CU:			/* М */
+		ch = 'M';
+		break;
+	case 0x041DU:			/* Н */
+		ch = 'H';
+		break;
+	case 0x041EU:			/* О */
+		ch = 'O';
+		break;
+	case 0x0420U:			/* Р */
+		ch = 'P';
+		break;
+	case 0x0421U:			/* С */
+		ch = 'C';
+		break;
+	case 0x0422U:			/* Т */
+		ch = 'T';
+		break;
+	case 0x0425U:			/* Х */
+		ch = 'X';
+		break;
+	default:
+		break;
+	}
+
+	switch (ch) {
+	case 0x0411U:			/* Б */
+		return (LIBG_FONT_PICK(row, 0x1f, 0x10, 0x10, 0x1e, 0x11,
+		    0x11, 0x1e));
+	case 0x0413U:			/* Г */
+		return (LIBG_FONT_PICK(row, 0x1f, 0x10, 0x10, 0x10, 0x10,
+		    0x10, 0x10));
+	case 0x0414U:			/* Д */
+		return (LIBG_FONT_PICK(row, 0x06, 0x0a, 0x0a, 0x0a, 0x0a,
+		    0x1f, 0x11));
+	case 0x0416U:			/* Ж */
+		return (LIBG_FONT_PICK(row, 0x15, 0x15, 0x15, 0x1f, 0x15,
+		    0x15, 0x15));
+	case 0x0417U:			/* З */
+		return (LIBG_FONT_PICK(row, 0x0e, 0x11, 0x01, 0x06, 0x01,
+		    0x11, 0x0e));
+	case 0x0418U:			/* И */
+		return (LIBG_FONT_PICK(row, 0x11, 0x11, 0x13, 0x15, 0x19,
+		    0x11, 0x11));
+
+	case 0x0419U:			/* Й */
+		return (LIBG_FONT_PICK(row, 0x0a, 0x00, 0x11, 0x13, 0x15,
+		    0x19, 0x11));
+	case LIBG_CYR_YO_UPPER:		/* Ё */
+		return (LIBG_FONT_PICK(row, 0x0a, 0x00, 0x1f, 0x10, 0x1e,
+		    0x10, 0x1f));
+	case 0x041BU:			/* Л */
+		return (LIBG_FONT_PICK(row, 0x07, 0x09, 0x09, 0x09, 0x09,
+		    0x09, 0x19));
+	case 0x041FU:			/* П */
+		return (LIBG_FONT_PICK(row, 0x1f, 0x11, 0x11, 0x11, 0x11,
+		    0x11, 0x11));
+	case 0x0423U:			/* У */
+		return (LIBG_FONT_PICK(row, 0x11, 0x11, 0x11, 0x0f, 0x01,
+		    0x02, 0x1c));
+	case 0x0424U:			/* Ф */
+		return (LIBG_FONT_PICK(row, 0x04, 0x0e, 0x15, 0x15, 0x15,
+		    0x0e, 0x04));
+	case 0x0426U:			/* Ц */
+		return (LIBG_FONT_PICK(row, 0x11, 0x11, 0x11, 0x11, 0x11,
+		    0x1f, 0x01));
+	case 0x0427U:			/* Ч */
+		return (LIBG_FONT_PICK(row, 0x11, 0x11, 0x11, 0x0f, 0x01,
+		    0x01, 0x01));
+	case 0x0428U:			/* Ш */
+		return (LIBG_FONT_PICK(row, 0x15, 0x15, 0x15, 0x15, 0x15,
+		    0x15, 0x1f));
+	case 0x0429U:			/* Щ */
+		return (LIBG_FONT_PICK(row, 0x15, 0x15, 0x15, 0x15, 0x15,
+		    0x1f, 0x02));
+	case 0x042AU:			/* Ъ */
+		return (LIBG_FONT_PICK(row, 0x18, 0x08, 0x08, 0x0e, 0x09,
+		    0x09, 0x0e));
+	case 0x042BU:			/* Ы */
+		return (LIBG_FONT_PICK(row, 0x11, 0x11, 0x11, 0x1d, 0x13,
+		    0x13, 0x1d));
+	case 0x042CU:			/* Ь */
+		return (LIBG_FONT_PICK(row, 0x10, 0x10, 0x10, 0x1e, 0x11,
+		    0x11, 0x1e));
+	case 0x042DU:			/* Э */
+		return (LIBG_FONT_PICK(row, 0x1c, 0x02, 0x01, 0x0f, 0x01,
+		    0x02, 0x1c));
+	case 0x042EU:			/* Ю */
+		return (LIBG_FONT_PICK(row, 0x12, 0x15, 0x15, 0x1d, 0x15,
+		    0x15, 0x12));
+	case 0x042FU:			/* Я */
+		return (LIBG_FONT_PICK(row, 0x0f, 0x11, 0x11, 0x0f, 0x05,
+		    0x09, 0x11));
+	default:
+		break;
 	}
 
 	switch (ch) {

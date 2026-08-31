@@ -651,6 +651,111 @@ la_zlib_inflate(const void *in, size_t in_len, void *out, size_t out_cap,
 	return (LA_INF_OK);
 }
 
+#define LA_GZ_FHCRC		0x02u
+#define LA_GZ_FEXTRA		0x04u
+#define LA_GZ_FNAME		0x08u
+#define LA_GZ_FCOMMENT		0x10u
+#define LA_GZ_FRESERVED		0xE0u
+#define LA_GZ_MIN_LEN		18u
+
+int
+la_gzip_inflate(const void *in, size_t in_len, void *out, size_t out_cap,
+    size_t *out_len)
+{
+	const uint8_t	*p;
+	size_t		pos, extra;
+	uint32_t	stored_crc, stored_size, flg;
+	int		ret;
+
+	if (in == NULL || out == NULL || out_len == NULL) {
+		return (LA_INF_INVAL);
+	}
+	*out_len = 0;
+	if (in_len < LA_GZ_MIN_LEN) {
+		return (LA_INF_CORRUPT);
+	}
+
+	p = (const uint8_t *)in;
+	if (p[0] != 0x1Fu || p[1] != 0x8Bu) {
+		return (LA_INF_CORRUPT);
+	}
+	if (p[2] != 8u) {
+		return (LA_INF_UNSUPPORTED);
+	}
+	flg = p[3];
+	if ((flg & LA_GZ_FRESERVED) != 0u) {
+		return (LA_INF_UNSUPPORTED);
+	}
+	pos = 10;
+
+
+	if ((flg & LA_GZ_FEXTRA) != 0u) {
+		if (pos + 2 > in_len) {
+			return (LA_INF_CORRUPT);
+		}
+		extra = (size_t)p[pos] | ((size_t)p[pos + 1] << 8);
+		pos += 2;
+		if (extra > in_len - pos) {
+			return (LA_INF_CORRUPT);
+		}
+		pos += extra;
+	}
+	if ((flg & LA_GZ_FNAME) != 0u) {
+		while (pos < in_len && p[pos] != 0) {
+			pos++;
+		}
+		if (pos >= in_len) {
+			return (LA_INF_CORRUPT);
+		}
+		pos++;
+	}
+	if ((flg & LA_GZ_FCOMMENT) != 0u) {
+		while (pos < in_len && p[pos] != 0) {
+			pos++;
+		}
+		if (pos >= in_len) {
+			return (LA_INF_CORRUPT);
+		}
+		pos++;
+	}
+	if ((flg & LA_GZ_FHCRC) != 0u) {
+
+		if (pos + 2 > in_len) {
+			return (LA_INF_CORRUPT);
+		}
+		if ((uint32_t)((uint32_t)p[pos] | ((uint32_t)p[pos + 1] << 8)) !=
+		    (la_crc32(p, pos) & 0xFFFFu)) {
+			return (LA_INF_CORRUPT);
+		}
+		pos += 2;
+	}
+
+	if (pos + 8 >= in_len) {
+		return (LA_INF_CORRUPT);
+	}
+
+	ret = la_inflate(p + pos, in_len - pos - 8, out, out_cap, out_len);
+	if (ret != LA_INF_OK) {
+		return (ret);
+	}
+
+	stored_crc = (uint32_t)p[in_len - 8] |
+	    ((uint32_t)p[in_len - 7] << 8) |
+	    ((uint32_t)p[in_len - 6] << 16) |
+	    ((uint32_t)p[in_len - 5] << 24);
+	stored_size = (uint32_t)p[in_len - 4] |
+	    ((uint32_t)p[in_len - 3] << 8) |
+	    ((uint32_t)p[in_len - 2] << 16) |
+	    ((uint32_t)p[in_len - 1] << 24);
+
+	if (stored_size != (uint32_t)(*out_len & 0xFFFFFFFFu) ||
+	    stored_crc != la_crc32(out, *out_len)) {
+		*out_len = 0;
+		return (LA_INF_CORRUPT);
+	}
+	return (LA_INF_OK);
+}
+
 const char *
 la_inflate_strerror(int err)
 {

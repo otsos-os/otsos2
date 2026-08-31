@@ -4,23 +4,23 @@ AR ?= llvm-ar
 
 ROOT = ../..
 NATIVE_DIR = $(ROOT)/libc/native
+CRYPTO_DIR = $(ROOT)/libc/LibCrypto
+ARCHIVE_DIR = $(ROOT)/libc/LibArchive
 TARGET_CFLAGS ?= --target=$(TARGET)
 CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fPIE -fno-stack-protector \
 	-nostdlib -nostdinc -fno-builtin -O2 -Wall -Wextra \
-	-Iinclude -I$(NATIVE_DIR)/include
+	-Iinclude -Isrc -I$(NATIVE_DIR)/include -I$(CRYPTO_DIR)/include \
+	-I$(ARCHIVE_DIR)/include
 
-LIB = lib/libcrypto.a
-SRC = src/chacha20.c src/chacha20_poly1305.c src/curve25519.c \
-	src/hmac_sha256.c src/hmac_sha512.c src/pbkdf2.c src/poly1305.c \
-	src/random.c src/sha256.c \
-	src/sha512.c src/ed25519.c src/util.c src/sha1.c src/aes.c \
-	src/bignum.c src/rsa.c
+LIB = lib/libmtproto.a
+SRC = src/mtp_log.c src/mtp_write.c src/mtp_read.c src/mtp_transport.c src/mtp_session.c src/mtp_handshake.c src/mtp_srp.c src/mtp_rpc.c src/mtp_api.c src/mtp_store.c src/mtp_client.c src/mtp_schema.c
 OBJ = $(SRC:src/%.c=build/%.o)
-HDR = include/libcrypto.h src/private.h
+HDR = include/mtproto.h src/mtp_internal.h src/mtp_schema.h
 
 .PHONY: all clean
 
 all: $(LIB)
+
 
 $(LIB): $(OBJ)
 	@mkdir -p lib
@@ -29,7 +29,7 @@ $(LIB): $(OBJ)
 	@$(AR) rcs $@ $(OBJ)
 
 build/%.o: src/%.c $(HDR)
-	@mkdir -p build
+	@mkdir -p $(dir $@)
 	@echo "  CC       $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

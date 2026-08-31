@@ -32,6 +32,7 @@ $define %func libgMeasureText as procedure with args text, scale, out size
 $define %func libgPanel as procedure with args context, rect
 $define %func libgButton as function with args context, id, rect, label
 $define %func libgTextField as function with args context, id, rect, buffer
+$define %func libgPasswordField as function with args context, id, rect, buffer
 $define %func libgSlider as function with args context, id, rect, value
 $define %func libgAnimStart as procedure with args anim, from, to, duration, easing, now
 $define %func libgAnimUpdate as function with args anim, now, out_value
@@ -59,7 +60,9 @@ $space %export libgFillCircle, libgStrokeCircle
 $space %export libgSvgShape, libgSvgDoc
 $space %export libgSetClip, libgClearClip
 $space %export libgText, libgTextScale, libgMeasureText
+$space %internal libg_field
 $space %export libgPanel, libgButton, libgTextField, libgSlider
+$space %export libgPasswordField
 $space %export libgAnimStart, libgAnimUpdate, libgLerp, libgBlendColor
 $space %export libg_mark_dirty, libg_blend
 $space %export libg_clamp_i32, libg_rect_contains
@@ -1274,13 +1277,118 @@ libgText(libg_context_t *ctx, int32_t x, int32_t y,
 	libgTextScale(ctx, x, y, text, color, 1);
 }
 
+size_t
+libgUtf8Decode(const char *text, uint32_t *out_cp)
+{
+	const unsigned char	*p;
+	uint32_t		cp;
+	size_t			len, i;
+
+	if (out_cp != NULL) {
+		*out_cp = LIBG_UTF8_INVALID;
+	}
+	if (text == NULL || *text == '\0') {
+		return (0);
+	}
+
+	p = (const unsigned char *)text;
+	if (p[0] < 0x80u) {
+		if (out_cp != NULL) {
+			*out_cp = p[0];
+		}
+		return (1);
+	}
+	if ((p[0] & 0xE0u) == 0xC0u) {
+		len = 2;
+		cp = p[0] & 0x1Fu;
+	} else if ((p[0] & 0xF0u) == 0xE0u) {
+		len = 3;
+		cp = p[0] & 0x0Fu;
+	} else if ((p[0] & 0xF8u) == 0xF0u) {
+		len = 4;
+		cp = p[0] & 0x07u;
+	} else {
+		return (0);
+	}
+
+	for (i = 1; i < len; i++) {
+		if ((p[i] & 0xC0u) != 0x80u) {
+			return (0);
+		}
+		cp = (cp << 6) | (p[i] & 0x3Fu);
+	}
+
+	if ((len == 2 && cp < 0x80u) || (len == 3 && cp < 0x800u) ||
+	    (len == 4 && cp < 0x10000u)) {
+		return (0);
+	}
+	if (cp > 0x10FFFFu || (cp >= 0xD800u && cp <= 0xDFFFu)) {
+		return (0);
+	}
+	if (out_cp != NULL) {
+		*out_cp = cp;
+	}
+	return (len);
+}
+
+size_t
+libgUtf8Encode(uint32_t cp, char out[LIBG_UTF8_MAX])
+{
+	if (out == NULL || cp > 0x10FFFFu ||
+	    (cp >= 0xD800u && cp <= 0xDFFFu)) {
+		return (0);
+	}
+	if (cp < 0x80u) {
+		out[0] = (char)cp;
+		return (1);
+	}
+	if (cp < 0x800u) {
+		out[0] = (char)(0xC0u | (cp >> 6));
+		out[1] = (char)(0x80u | (cp & 0x3Fu));
+		return (2);
+	}
+	if (cp < 0x10000u) {
+		out[0] = (char)(0xE0u | (cp >> 12));
+		out[1] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
+		out[2] = (char)(0x80u | (cp & 0x3Fu));
+		return (3);
+	}
+	out[0] = (char)(0xF0u | (cp >> 18));
+	out[1] = (char)(0x80u | ((cp >> 12) & 0x3Fu));
+	out[2] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
+	out[3] = (char)(0x80u | (cp & 0x3Fu));
+	return (4);
+}
+
+size_t
+libgUtf8Prev(const char *text, size_t offset)
+{
+	const unsigned char	*p;
+	size_t			i, start;
+
+	if (text == NULL || offset == 0) {
+		return (0);
+	}
+	p = (const unsigned char *)text;
+	i = offset - 1;
+	start = (offset > LIBG_UTF8_MAX) ? offset - LIBG_UTF8_MAX : 0;
+	while (i > start && (p[i] & 0xC0u) == 0x80u) {
+		i--;
+	}
+	if ((p[i] & 0xC0u) == 0x80u) {
+		return (offset - 1);
+	}
+	return (i);
+}
+
 void
 libgTextScale(libg_context_t *ctx, int32_t x, int32_t y,
     const char *text, uint32_t color, uint32_t scale)
 {
 	const char	*p;
 	int32_t		origin_x;
-	uint32_t	row, col, bits;
+	uint32_t	row, col, bits, cp;
+	size_t		step;
 
 	if (!ctx || !text) {
 		return;
@@ -1290,18 +1398,26 @@ libgTextScale(libg_context_t *ctx, int32_t x, int32_t y,
 	}
 
 	origin_x = x;
-	for (p = text; *p != '\0'; p++) {
-		if (*p == '\n') {
+	p = text;
+	while (*p != '\0') {
+		step = libgUtf8Decode(p, &cp);
+		if (step == 0) {
+			cp = LIBG_UTF8_INVALID;
+			step = 1;
+		}
+		p += step;
+
+		if (cp == '\n') {
 			x = origin_x;
 			y += (LIBG_FONT_HEIGHT + 2) * (int32_t)scale;
 			continue;
 		}
-		if (*p == '\t') {
+		if (cp == '\t') {
 			x += LIBG_FONT_ADVANCE * (int32_t)scale * 4;
 			continue;
 		}
 		for (row = 0; row < LIBG_FONT_HEIGHT; row++) {
-			bits = libg_font_row((uint32_t)(unsigned char)*p, row);
+			bits = libg_font_row(cp, row);
 			for (col = 0; col < LIBG_FONT_WIDTH; col++) {
 				if ((bits & (1U << (LIBG_FONT_WIDTH - 1 - col)))
 				    != 0) {
@@ -1322,6 +1438,8 @@ libgMeasureText(const char *text, uint32_t scale, int32_t *out_w,
 {
 	const char	*p;
 	int32_t		line_w, max_w, lines;
+	uint32_t	cp;
+	size_t		step;
 
 	if (scale == 0) {
 		scale = 1;
@@ -1330,14 +1448,22 @@ libgMeasureText(const char *text, uint32_t scale, int32_t *out_w,
 	max_w = 0;
 	lines = 1;
 	if (text) {
-		for (p = text; *p != '\0'; p++) {
-			if (*p == '\n') {
+		p = text;
+
+		while (*p != '\0') {
+			step = libgUtf8Decode(p, &cp);
+			if (step == 0) {
+				cp = LIBG_UTF8_INVALID;
+				step = 1;
+			}
+			p += step;
+			if (cp == '\n') {
 				if (line_w > max_w) {
 					max_w = line_w;
 				}
 				line_w = 0;
 				lines++;
-			} else if (*p == '\t') {
+			} else if (cp == '\t') {
 				line_w += LIBG_FONT_ADVANCE *
 				    (int32_t)scale * 4;
 			} else {
@@ -1400,12 +1526,19 @@ libgButton(libg_context_t *ctx, uint32_t id, libg_rect_t rect,
 	return (state);
 }
 
-uint32_t
-libgTextField(libg_context_t *ctx, uint32_t id, libg_rect_t rect,
-    char *buf, size_t cap)
+
+#define LIBG_MASK_MAX	64
+
+
+static uint32_t
+libg_field(libg_context_t *ctx, uint32_t id, libg_rect_t rect, char *buf,
+    size_t cap, int mask)
 {
 	libg_rect_t	caret;
+	char		dots[LIBG_MASK_MAX + 1];
+	const char	*shown;
 	uint32_t	state, color;
+	size_t		i, n;
 	int32_t		tw, th;
 	int		inside;
 
@@ -1430,15 +1563,28 @@ libgTextField(libg_context_t *ctx, uint32_t id, libg_rect_t rect,
 		state |= libg_apply_text_input(ctx, buf, cap);
 	}
 
+	shown = buf;
+	if (mask) {
+		n = 0;
+		while (n < LIBG_MASK_MAX && buf[n] != '\0') {
+			n++;
+		}
+		for (i = 0; i < n; i++) {
+			dots[i] = '*';
+		}
+		dots[n] = '\0';
+		shown = dots;
+	}
+
 	color = ctx->focus_id == id ? ctx->style.field_focus :
 	    ctx->style.field;
 	libgFillRect(ctx, rect, color);
 	libgStrokeRect(ctx, rect, ctx->style.panel_border);
 	libgTextScale(ctx, rect.x + 8, rect.y + (rect.height - 14) / 2,
-	    buf, ctx->style.text, 2);
+	    shown, ctx->style.text, 2);
 
 	if (ctx->focus_id == id && id != 0) {
-		libgMeasureText(buf, 2, &tw, &th);
+		libgMeasureText(shown, 2, &tw, &th);
 		caret.x = rect.x + 8 + tw + 4;
 		caret.y = rect.y + (rect.height - 14) / 2;
 		caret.width = 2;
@@ -1447,6 +1593,20 @@ libgTextField(libg_context_t *ctx, uint32_t id, libg_rect_t rect,
 		(void)th;
 	}
 	return (state);
+}
+
+uint32_t
+libgTextField(libg_context_t *ctx, uint32_t id, libg_rect_t rect, char *buf,
+    size_t cap)
+{
+	return (libg_field(ctx, id, rect, buf, cap, 0));
+}
+
+uint32_t
+libgPasswordField(libg_context_t *ctx, uint32_t id, libg_rect_t rect, char *buf,
+    size_t cap)
+{
+	return (libg_field(ctx, id, rect, buf, cap, 1));
 }
 
 uint32_t

@@ -31,9 +31,13 @@ $define %func libgClearClip as procedure with args context
 $define %func libgText as procedure with args context, position, text, color
 $define %func libgTextScale as procedure with args context, position, text
 $define %func libgMeasureText as procedure with args text, scale, out size
+$define %func libgUtf8Decode as function with args text, out codepoint
+$define %func libgUtf8Encode as function with args codepoint, out buffer
+$define %func libgUtf8Prev as function with args text, byte offset
 $define %func libgPanel as procedure with args context, rect
 $define %func libgButton as function with args context, id, rect, label
 $define %func libgTextField as function with args context, id, rect, buffer
+$define %func libgPasswordField as function with args context, id, rect, buffer
 $define %func libgSlider as function with args context, id, rect, value
 $define %func libgScrollbar as function with args context, id, rect, axis, visible, total, step, value
 $define %func libgScrollbarThickness as function with args void
@@ -69,7 +73,9 @@ $space %export libgFillCircle, libgStrokeCircle
 $space %export libgSvgShape, libgSvgDoc
 $space %export libgSetClip, libgClearClip
 $space %export libgText, libgTextScale, libgMeasureText
+$space %export libgUtf8Decode, libgUtf8Encode, libgUtf8Prev
 $space %export libgPanel, libgButton, libgTextField, libgSlider
+$space %export libgPasswordField
 $space %export libgScrollbar, libgScrollbarThickness
 $space %export libgAnimStart, libgAnimUpdate, libgLerp, libgBlendColor
 $space %export libg_image_t, libgImageProbe, libgImageLoad
@@ -196,10 +202,19 @@ void	libgTextScale(libg_context_t *ctx, int32_t x, int32_t y,
 void	libgMeasureText(const char *text, uint32_t scale,
 	    int32_t *out_w, int32_t *out_h);
 
+#define LIBG_UTF8_MAX		4
+#define LIBG_UTF8_INVALID	0xFFFDU
+
+size_t	libgUtf8Decode(const char *text, uint32_t *out_cp);
+size_t	libgUtf8Encode(uint32_t cp, char out[LIBG_UTF8_MAX]);
+size_t	libgUtf8Prev(const char *text, size_t offset);
+
 void	libgPanel(libg_context_t *ctx, libg_rect_t rect);
 uint32_t	libgButton(libg_context_t *ctx, uint32_t id,
 	    libg_rect_t rect, const char *label);
 uint32_t	libgTextField(libg_context_t *ctx, uint32_t id,
+	    libg_rect_t rect, char *buf, size_t cap);
+uint32_t	libgPasswordField(libg_context_t *ctx, uint32_t id,
 	    libg_rect_t rect, char *buf, size_t cap);
 uint32_t	libgSlider(libg_context_t *ctx, uint32_t id,
 	    libg_rect_t rect, int32_t min, int32_t max, int32_t *value);

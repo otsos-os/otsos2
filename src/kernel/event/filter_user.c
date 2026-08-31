@@ -102,7 +102,7 @@ filt_user_touch(knote_t *kn, struct kevent *kev)
 		}
 
 		kn->fpriv |= NOTE_TRIGGER;
-		knote_ready(kn);
+		knote_ready_locked(kn);
 	} else {
 		kn->fflags = kev->fflags;
 	}

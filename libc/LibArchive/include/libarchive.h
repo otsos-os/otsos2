@@ -8,6 +8,7 @@ $define %type la_write_fn as push callback for decompressed output
 $define %type la_inflate as DEFLATE decoder state, caller allocated
 $define %func la_inflate as function with args const void *, size_t, void *, size_t, size_t *
 $define %func la_zlib_inflate as function with args const void *, size_t, void *, size_t, size_t *
+$define %func la_gzip_inflate as function with args const void *, size_t, void *, size_t, size_t *
 $define %func la_inflate_stream as function with args state, window, window size, read, read arg, write, write arg, out
 $define %func la_inflate_strerror as function with args int
 $define %func la_crc32 as function with args const void *, size_t
@@ -20,7 +21,7 @@ $define %func la_adler32 as function with args const void *, size_t
 
 $space %export la_zip_entry_cb, la_zip_options, la_zip_extract
 $space %export la_read_fn, la_write_fn, la_inflate_t
-$space %export la_inflate, la_zlib_inflate, la_inflate_stream
+$space %export la_inflate, la_zlib_inflate, la_gzip_inflate, la_inflate_stream
 $space %export la_inflate_strerror
 $space %export la_crc32, la_crc32_update, la_adler32
 
@@ -108,6 +109,9 @@ typedef struct la_inflate {
 int	la_inflate(const void *in, size_t in_len, void *out, size_t out_cap,
 	    size_t *out_len);
 int	la_zlib_inflate(const void *in, size_t in_len, void *out,
+	    size_t out_cap, size_t *out_len);
+
+int	la_gzip_inflate(const void *in, size_t in_len, void *out,
 	    size_t out_cap, size_t *out_len);
 int	la_inflate_stream(la_inflate_t *st, void *window, size_t win_cap,
 	    la_read_fn read, void *read_arg, la_write_fn write,

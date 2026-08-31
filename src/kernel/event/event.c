@@ -600,9 +600,13 @@ kqueue_wakeup(kqueue_t *kq)
 void
 knote_notify_all(s16 filter, u64 ident, u32 fflags, s64 data)
 {
-	int	i, j;
+	int		locked;
+	int		i, j;
 
-	spin_lock(&event_spin);
+	locked = spin_owned(&event_spin);
+	if (!locked) {
+		spin_lock(&event_spin);
+	}
 	for (i = 0; i < MAX_KQUEUES; i++) {
 		kqueue_t	*kq;
 		knote_t		*kn;
@@ -635,7 +639,9 @@ knote_notify_all(s16 filter, u64 ident, u32 fflags, s64 data)
 			knote_ready_locked(kn);
 		}
 	}
-	spin_unlock(&event_spin);
+	if (!locked) {
+		spin_unlock(&event_spin);
+	}
 }
 
 static int

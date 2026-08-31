@@ -1,0 +1,71 @@
+# Types whose constructors get full field tables (transitively closed), and
+# functions that only need an id.  Keep this list minimal: every root drags in
+# its whole reachable subgraph.
+#
+# Read by tools/tlc.py.  Regenerate with `make -C libc/LibMTProto schema`.
+
+# --- MTProto service messages decoded through the table ------------------
+root MsgsAck
+root BadMsgNotification
+root NewSession
+root Pong
+root RpcError
+root FutureSalts
+root MsgDetailedInfo
+root MsgResendReq
+root MsgsStateReq
+root MsgsAllInfo
+root DestroySessionRes
+
+# --- Auth key creation (plaintext handshake) ----------------------------
+root ResPQ
+root Server_DH_Params
+root Server_DH_inner_data
+root Set_client_DH_params_answer
+
+# --- API surface the client actually reads ------------------------------
+# Message/Dialog/User/Chat pull in the bulk of the table; they are what
+# messages.getDialogs and messages.getHistory return.
+root Dialog
+root Message
+root User
+root Chat
+root Peer
+root Bool
+root Updates
+root updates.State
+root messages.Dialogs
+root messages.Messages
+root auth.SentCode
+root auth.Authorization
+root Config
+root NearestDc
+# Cloud-password (2FA) login.  Drags in PasswordKdfAlgo and, because
+# new_secure_algo is an unconditional field, SecurePasswordKdfAlgo as well --
+# the client never uses the secure-storage algo, but the reader has to be able
+# to skip it to reach secure_random and the two trailing flag fields.
+root account.Password
+
+# --- Functions (serialised by hand in api.c) ----------------------------
+func invokeWithLayer
+func initConnection
+func help.getConfig
+func help.getNearestDc
+func auth.sendCode
+func auth.signIn
+func auth.logOut
+func account.getPassword
+func auth.checkPassword
+func users.getUsers
+func messages.getDialogs
+func messages.getHistory
+func messages.sendMessage
+func messages.readHistory
+func updates.getState
+func updates.getDifference
+func ping
+func ping_delay_disconnect
+func msgs_ack
+func req_pq_multi
+func req_DH_params
+func set_client_DH_params

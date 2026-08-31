@@ -109,6 +109,10 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 		string Dest = "/bin/browser"
 	}
 
+	key Modules.tclient {
+		string Dest = "/bin/tclient"
+	}
+
 	key Modules.udp_echo {
 		string Dest = "/bin/udp_echo"
 	}
