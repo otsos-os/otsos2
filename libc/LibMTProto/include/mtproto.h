@@ -27,6 +27,9 @@ $define %func mtpLogOut as function with args client
 $define %func mtpGetDialogs as function with args client, limit
 $define %func mtpGetHistory as function with args client, peer, limit, offset id
 $define %func mtpSendMessage as function with args client, peer, text
+$define %func mtpSendTopicMessage as function with args client, peer, topic id, text
+$define %func mtpPeerCanWrite as function with args client, peer, topic id
+$define %func mtpWriteRestrictionText as function with args reason
 $define %func mtpReadHistory as function with args client, peer, max id
 $define %func mtpDialogCount as function with args client
 $define %func mtpDialogAt as function with args client, index
@@ -60,6 +63,7 @@ $space %export mtpSendCode, mtpSignIn, mtpLogOut
 $space %export mtpCheckPassword, mtpPasswordNeeded, mtpPasswordHint
 $space %export mtpPasswordBusy, mtpPasswordReady
 $space %export mtpGetDialogs, mtpGetHistory, mtpSendMessage, mtpReadHistory
+$space %export mtpSendTopicMessage, mtpPeerCanWrite, mtpWriteRestrictionText
 $space %export mtpDialogCount, mtpDialogAt
 $space %export mtpHistoryCount, mtpHistoryAt, mtpHistoryPeer
 $space %export mtpPendingCount, mtpCodeHashPresent, mtpIsReady, mtpDcId
@@ -128,10 +132,21 @@ $space %export mtp_log_callback, mtpLogSet, mtpLogEnabled
 #define MTP_PEER_USER		1
 #define MTP_PEER_CHAT		2
 #define MTP_PEER_CHANNEL	3
+#define MTP_WRITE_OK		0
+#define MTP_WRITE_UNKNOWN	1
+#define MTP_WRITE_NO_PEER	2
+#define MTP_WRITE_FORBIDDEN	3
+#define MTP_WRITE_LEFT		4
+#define MTP_WRITE_DEACTIVATED	5
+#define MTP_WRITE_BROADCAST	6
+#define MTP_WRITE_BANNED	7
+#define MTP_WRITE_RESTRICTED	8
+#define MTP_WRITE_TOPIC_CLOSED	9
 
 #define MTP_MAX_NAME		128
 #define MTP_MAX_DIALOGS	128
 #define MTP_MAX_HISTORY	128
+#define MTP_MAX_FORUM_TOPICS	100	/* Telegram messages.getForumTopics limit */
 #define MTP_MAX_TEXT		4096
 #define MTP_MAX_PHONE		32
 #define MTP_MAX_ERROR		192
@@ -172,6 +187,14 @@ typedef struct mtp_dialog {
 	int32_t		date;
 	int		pinned;
 } mtp_dialog_t;
+
+typedef struct mtp_forum_topic {
+	int32_t	id;
+	int32_t	top_message;
+	int32_t	unread_count;
+	int	closed;
+	char		title[MTP_MAX_NAME];
+} mtp_forum_topic_t;
 
 typedef struct mtp_message {
 	int32_t		id;
@@ -226,6 +249,10 @@ int	mtpGetHistory(mtp_client_t *c, const mtp_peer_t *peer, int limit,
 	    int32_t offset_id);
 int	mtpSendMessage(mtp_client_t *c, const mtp_peer_t *peer,
 	    const char *text);
+int	mtpSendTopicMessage(mtp_client_t *c, const mtp_peer_t *peer,
+	    int32_t topic_id, const char *text);
+int	mtpGetForumTopics(mtp_client_t *c, const mtp_peer_t *peer, int limit);
+int	mtpGetTopicHistory(mtp_client_t *c, const mtp_peer_t *peer, int32_t topic_id, int limit);
 int	mtpReadHistory(mtp_client_t *c, const mtp_peer_t *peer, int32_t max_id);
 
 int			mtpDialogCount(const mtp_client_t *c);
@@ -233,6 +260,14 @@ const mtp_dialog_t	*mtpDialogAt(const mtp_client_t *c, int index);
 int			mtpHistoryCount(const mtp_client_t *c);
 const mtp_message_t	*mtpHistoryAt(const mtp_client_t *c, int index);
 const mtp_peer_t	*mtpHistoryPeer(const mtp_client_t *c);
+int			mtpForumTopicCount(const mtp_client_t *c);
+const mtp_forum_topic_t *mtpForumTopicAt(const mtp_client_t *c, int index);
+int			mtpPeerIsForum(const mtp_client_t *c, const mtp_peer_t *peer);
+int			mtpPeerCanWrite(const mtp_client_t *c,
+			    const mtp_peer_t *peer, int32_t topic_id);
+const char		*mtpWriteRestrictionText(int reason);
+const char	*mtpPeerPresence(const mtp_client_t *c, const mtp_peer_t *peer);
+uint32_t	mtpUpdateVersion(const mtp_client_t *c);
 
 const char	*mtpStrerror(int err);
 const char	*mtpStateName(int state);

@@ -24,6 +24,10 @@ typedef struct tclient_state {
 	int			flood_shown;
 	int			dialogs_asked;
 	int32_t			dialog_scroll;
+	int32_t			history_scroll;
+	int32_t			topic_scroll;
+	int32_t			selected_topic;
+	uint32_t		update_version;
 	char			api_id[16];
 	char			api_hash[64];
 	char			phone[MTP_MAX_PHONE];

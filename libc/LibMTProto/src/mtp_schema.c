@@ -5319,6 +5319,17 @@ static const struct mtp_field f_messages_emojiGameOutcome[] = {
 	{ "ton_amount", MTP_F_LONG, 0, MTP_F_UNCOND, 0, 0x00000000U },
 };
 
+static const struct mtp_field f_messages_forumTopics[] = {
+	{ "flags", MTP_F_FLAGS, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "order_by_create_date", MTP_F_TRUE, 0, 0, 0, 0x00000000U },
+	{ "count", MTP_F_INT, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "topics", MTP_F_VEC_OBJ, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "messages", MTP_F_VEC_OBJ, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "chats", MTP_F_VEC_OBJ, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "users", MTP_F_VEC_OBJ, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "pts", MTP_F_INT, 0, MTP_F_UNCOND, 0, 0x00000000U },
+};
+
 static const struct mtp_field f_messages_messages[] = {
 	{ "messages", MTP_F_VEC_OBJ, 0, MTP_F_UNCOND, 0, 0x00000000U },
 	{ "topics", MTP_F_VEC_OBJ, 0, MTP_F_UNCOND, 0, 0x00000000U },
@@ -5370,7 +5381,43 @@ static const struct mtp_field f_updates_state[] = {
 	{ "unread_count", MTP_F_INT, 0, MTP_F_UNCOND, 0, 0x00000000U },
 };
 
+/*
+ * updates.Difference was outside closure.txt, so tlc.py never emitted it and
+ * updates.getDifference replies could not be parsed at all.  Hand-written from
+ * schema/api.tl:489-492; every referenced type (Message, EncryptedMessage,
+ * Update, Chat, User, updates.State) is already in the table, so this adds no
+ * further closure.  Re-add `root updates.Difference` to closure.txt when the
+ * generator returns, and these four blocks become redundant.
+ */
+static const struct mtp_field f_updates_difference[] = {
+	{ "new_messages", MTP_F_VEC_OBJ, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "new_encrypted_messages", MTP_F_VEC_OBJ, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "other_updates", MTP_F_VEC_OBJ, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "chats", MTP_F_VEC_OBJ, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "users", MTP_F_VEC_OBJ, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "state", MTP_F_OBJECT, 0, MTP_F_UNCOND, 0, 0x00000000U },
+};
+
+static const struct mtp_field f_updates_differenceSlice[] = {
+	{ "new_messages", MTP_F_VEC_OBJ, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "new_encrypted_messages", MTP_F_VEC_OBJ, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "other_updates", MTP_F_VEC_OBJ, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "chats", MTP_F_VEC_OBJ, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "users", MTP_F_VEC_OBJ, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "intermediate_state", MTP_F_OBJECT, 0, MTP_F_UNCOND, 0, 0x00000000U },
+};
+
+static const struct mtp_field f_updates_differenceEmpty[] = {
+	{ "date", MTP_F_INT, 0, MTP_F_UNCOND, 0, 0x00000000U },
+	{ "seq", MTP_F_INT, 0, MTP_F_UNCOND, 0, 0x00000000U },
+};
+
+static const struct mtp_field f_updates_differenceTooLong[] = {
+	{ "pts", MTP_F_INT, 0, MTP_F_UNCOND, 0, 0x00000000U },
+};
+
 static const struct mtp_ctor mtp_schema_ctors[] = {
+	{ 0x000f49caU, "updates.difference", f_updates_difference, 6 },
 	{ 0x004a8537U, "securePasswordKdfAlgoUnknown", NULL, 0 },
 	{ 0x004b572cU, "inputRichMessageMarkdown", f_inputRichMessageMarkdown, 5 },
 	{ 0x0084cd5aU, "updateTranscribedAudio", f_updateTranscribedAudio, 6 },
@@ -5554,6 +5601,7 @@ static const struct mtp_ctor mtp_schema_ctors[] = {
 	{ 0x36437737U, "starGiftAttributeRarity", f_starGiftAttributeRarity, 1 },
 	{ 0x3645230aU, "pollAnswerVoters", f_pollAnswerVoters, 6 },
 	{ 0x3660c311U, "phoneCallAccepted", f_phoneCallAccepted, 9 },
+	{ 0x367617d3U, "messages.forumTopics", f_messages_forumTopics, 8 },
 	{ 0x36c6019aU, "peerChat", f_peerChat, 1 },
 	{ 0x36f8c871U, "documentEmpty", f_documentEmpty, 1 },
 	{ 0x372efcd0U, "wallPaperSettings", f_wallPaperSettings, 10 },
@@ -5618,6 +5666,7 @@ static const struct mtp_ctor mtp_schema_ctors[] = {
 	{ 0x49a6549cU, "mediaAreaWeather", f_mediaAreaWeather, 4 },
 	{ 0x49b92a26U, "todoList", f_todoList, 5 },
 	{ 0x4a8bfe80U, "messageActionChatJoinedViaCommunity", f_messageActionChatJoinedViaCommunity, 1 },
+	{ 0x4afe8f6dU, "updates.differenceTooLong", f_updates_differenceTooLong, 1 },
 	{ 0x4b3e14d6U, "boost", f_boost, 12 },
 	{ 0x4b7d786aU, "pollAnswer", f_pollAnswer, 6 },
 	{ 0x4ba3a95aU, "messageReactor", f_messageReactor, 6 },
@@ -5673,6 +5722,7 @@ static const struct mtp_ctor mtp_schema_ctors[] = {
 	{ 0x5bb98608U, "updatePinnedChannelMessages", f_updatePinnedChannelMessages, 6 },
 	{ 0x5cd3709dU, "inlineButtonTypeGame", NULL, 0 },
 	{ 0x5d20bae8U, "messageActionChangeCommunity", f_messageActionChangeCommunity, 2 },
+	{ 0x5d75a138U, "updates.differenceEmpty", f_updates_differenceEmpty, 2 },
 	{ 0x5da674b7U, "botAppNotModified", NULL, 0 },
 	{ 0x5e002502U, "auth.sentCode", f_auth_sentCode, 5 },
 	{ 0x5ec4be43U, "inlineQueryPeerTypeMegagroup", NULL, 0 },
@@ -5945,6 +5995,7 @@ static const struct mtp_ctor mtp_schema_ctors[] = {
 	{ 0xa87b0a1cU, "inputPeerUserFromMessage", f_inputPeerUserFromMessage, 3 },
 	{ 0xa8852491U, "messageMediaPaidMedia", f_messageMediaPaidMedia, 2 },
 	{ 0xa8a3c699U, "messageActionGiftTon", f_messageActionGiftTon, 6 },
+	{ 0xa8fb1981U, "updates.differenceSlice", f_updates_differenceSlice, 6 },
 	{ 0xa937c7beU, "inputSendMessageRichMessageDraftAction", f_inputSendMessageRichMessageDraftAction, 5 },
 	{ 0xa9478a1aU, "channelParticipantSelf", f_channelParticipantSelf, 7 },
 	{ 0xaa073bebU, "messageMediaGiveaway", f_messageMediaGiveaway, 10 },

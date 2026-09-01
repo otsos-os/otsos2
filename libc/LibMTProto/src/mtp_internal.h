@@ -97,7 +97,12 @@ $space %internal mtp_client
 #define MTP_REQ_PING		9
 #define MTP_REQ_GET_PASSWORD	10
 #define MTP_REQ_CHECK_PASSWORD	11
+#define MTP_REQ_FORUM_TOPICS	12
+#define MTP_REQ_TOPIC_HISTORY	13
+#define MTP_REQ_GET_STATE	14
+#define MTP_REQ_GET_DIFFERENCE	15
 #define MTP_SRP_MAX_SALT	128
+#define MTP_MAX_DIFFERENCE_CHAIN	16
 
 typedef struct mtp_writer {
 	uint8_t		*buf;
@@ -171,11 +176,30 @@ typedef struct mtp_srp {
 	lc_pbkdf2_sha512_ctx	kdf;
 } mtp_srp_t;
 
+
+typedef struct mtp_peer_rights {
+	int32_t		banned_until;
+	int		known;
+	int		creator;
+	int		left;
+	int		deactivated;
+	int		broadcast;
+	int		forbidden;
+	int		can_post;
+	int		manage_topics;
+	int		banned;
+	int		restricted;
+} mtp_peer_rights_t;
+
 typedef struct mtp_peer_name {
 	int64_t		id;
 	int64_t		access_hash;
 	int32_t		kind;
 	char		title[MTP_MAX_NAME];
+	mtp_peer_rights_t	rights;
+	int		forum;
+	int32_t	last_seen;
+	int		presence;
 } mtp_peer_name_t;
 
 struct mtp_client {
@@ -268,6 +292,19 @@ struct mtp_client {
 	mtp_peer_t	history_peer;
 	mtp_peer_name_t	names[MTP_MAX_PEER_CACHE];
 	int		name_count;
+
+	mtp_forum_topic_t	forum_topics[MTP_MAX_FORUM_TOPICS];
+	int		forum_topic_count;
+	mtp_peer_t	forum_peer;
+	uint32_t	update_version;
+
+	int32_t		upd_pts;
+	int32_t		upd_qts;
+	int32_t		upd_date;
+	int32_t		upd_seq;
+	int		upd_have_state;
+	int		upd_need_difference;
+	int		upd_difference_chain;
 };
 
 void		mtp_writer_init(mtp_writer_t *w, void *buf, size_t cap);
@@ -384,6 +421,10 @@ int		mtp_dispatch_result(mtp_client_t *c, mtp_pending_t *p,
 		    mtp_reader_t *r);
 int		mtp_dispatch_error(mtp_client_t *c, mtp_pending_t *p,
 		    int32_t code, const char *message);
+int		mtp_dispatch_update(mtp_client_t *c, const mtp_object_t *o);
+int		mtp_updates_is_container(uint32_t id);
+int		mtp_send_get_state(mtp_client_t *c);
+int		mtp_send_get_difference(mtp_client_t *c);
 int		mtp_run_queued(mtp_client_t *c);
 int		mtp_send_ping(mtp_client_t *c);
 

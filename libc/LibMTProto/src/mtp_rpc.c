@@ -448,6 +448,12 @@ rpc_handle_body(mtp_client_t *c, int64_t msg_id, int32_t seqno,
 		    "service message 0x%08x is not in the compiled schema",
 		    (unsigned int)id));
 	}
+	if (mtp_updates_is_container(o.ctor->id) ||
+	    o.ctor->id == MTP_ID_updateNewMessage ||
+	    o.ctor->id == MTP_ID_updateNewChannelMessage ||
+	    o.ctor->id == MTP_ID_updateUserStatus) {
+		return (mtp_dispatch_update(c, &o));
+	}
 	if (o.ctor->id == MTP_ID_bad_server_salt) {
 		int64_t	bad_msg_id;
 

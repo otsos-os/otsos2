@@ -189,6 +189,78 @@ api_row_failed(const mtp_reader_t *r, const char *what, uint32_t index,
 	    (unsigned int)index + 1, (unsigned int)count, why);
 }
 
+
+static mtp_peer_name_t *
+api_cache_slot(mtp_client_t *c, int32_t kind, int64_t id, int *out_fresh)
+{
+	int	i;
+
+	*out_fresh = 0;
+	for (i = 0; i < c->name_count; i++) {
+		if (c->names[i].kind == kind && c->names[i].id == id) {
+			return (&c->names[i]);
+		}
+	}
+	if (c->name_count >= MTP_MAX_PEER_CACHE) {
+		return (NULL);
+	}
+	*out_fresh = 1;
+	return (&c->names[c->name_count]);
+}
+
+
+static int
+api_rights_flag(const mtp_object_t *o, const char *slot, const char *field,
+    int32_t *out_until)
+{
+	mtp_reader_t	r;
+	mtp_object_t	rights;
+
+	if (out_until != NULL) {
+		*out_until = 0;
+	}
+	if (mtp_object_at(o, slot, &r) != 0 ||
+	    mtp_object_parse(&r, &rights) != 0) {
+		return (0);
+	}
+	if (out_until != NULL) {
+		*out_until = mtp_object_i32(&rights, "until_date", 0);
+	}
+	return (mtp_object_has(&rights, field));
+}
+
+static void
+api_parse_rights(mtp_peer_name_t *n, const mtp_object_t *o)
+{
+	mtp_peer_rights_t	*p;
+	int32_t			until;
+
+	p = &n->rights;
+	if (o->ctor->id == MTP_ID_chatForbidden ||
+	    o->ctor->id == MTP_ID_channelForbidden) {
+		p->known = 1;
+		p->forbidden = 1;
+		return;
+	}
+	if (o->ctor->id != MTP_ID_chat && o->ctor->id != MTP_ID_channel) {
+		return;
+	}
+	p->known = 1;
+	p->forbidden = 0;
+	p->creator = mtp_object_has(o, "creator");
+	p->left = mtp_object_has(o, "left");
+	p->deactivated = mtp_object_has(o, "deactivated");
+	p->broadcast = mtp_object_has(o, "broadcast");
+	p->can_post = api_rights_flag(o, "admin_rights", "post_messages", NULL);
+	p->manage_topics = api_rights_flag(o, "admin_rights", "manage_topics",
+	    NULL);
+	p->banned = api_rights_flag(o, "banned_rights", "send_messages",
+	    &until);
+	p->banned_until = p->banned ? until : 0;
+	p->restricted = api_rights_flag(o, "default_banned_rights",
+	    "send_messages", NULL);
+}
+
 static int
 api_parse_cache(mtp_client_t *c, const mtp_object_t *root, const char *field,
     int users)
@@ -197,21 +269,18 @@ api_parse_cache(mtp_client_t *c, const mtp_object_t *root, const char *field,
 	mtp_peer_name_t			*n;
 	mtp_reader_t			r;
 	mtp_object_t			o;
+	int64_t				id, access_hash;
 	uint32_t			count, i;
+	int				fresh, full_logged;
 
 	if (mtp_object_vector(root, field, &r, &count) != 0) {
 		return (-1);
 	}
+	full_logged = 0;
 	for (i = 0; i < count; i++) {
 		if (mtp_object_parse(&r, &o) != 0) {
 			api_row_failed(&r, field, i, count);
 			return (-1);
-		}
-		if (c->name_count == MTP_MAX_PEER_CACHE) {
-			mtp_logf(MTP_LOG_INFO, "%s: peer cache full at %d, %u "
-			    "row(s) keep their id but lose their name", field,
-			    MTP_MAX_PEER_CACHE, (unsigned int)(count - i));
-			break;
 		}
 		ck = api_cache_kind(o.ctor->name, users);
 		if (ck == NULL) {
@@ -219,29 +288,79 @@ api_parse_cache(mtp_client_t *c, const mtp_object_t *root, const char *field,
 			    o.ctor->name);
 			continue;
 		}
-		n = &c->names[c->name_count];
-		memset(n, 0, sizeof(*n));
-		n->kind = ck->kind;
-		n->id = mtp_object_i64(&o, "id", 0);
-		n->access_hash = mtp_object_i64(&o, "access_hash", 0);
-		if (ck->title_field != NULL) {
-			(void)mtp_object_str(&o, ck->title_field, n->title,
-			    sizeof(n->title));
-		}
-		if (n->title[0] == '\0' && ck->is_user) {
-			(void)mtp_object_str(&o, "username", n->title,
-			    sizeof(n->title));
-			if (n->title[0] == '\0') {
-				(void)mtp_object_str(&o, "last_name", n->title,
-				    sizeof(n->title));
-			}
-		}
-		if (n->id == 0) {
+		id = mtp_object_i64(&o, "id", 0);
+		if (id == 0) {
 			mtp_logf(MTP_LOG_DEBUG, "%s: %s carries id 0, skipped",
 			    field, o.ctor->name);
 			continue;
 		}
-		c->name_count++;
+
+		n = api_cache_slot(c, ck->kind, id, &fresh);
+		if (n == NULL) {
+			if (!full_logged) {
+				mtp_logf(MTP_LOG_INFO, "%s: peer cache full at "
+				    "%d, %u unseen row(s) keep their id but "
+				    "lose their name", field,
+				    MTP_MAX_PEER_CACHE,
+				    (unsigned int)(count - i));
+				full_logged = 1;
+			}
+			continue;
+		}
+		if (fresh) {
+			memset(n, 0, sizeof(*n));
+			n->kind = ck->kind;
+			n->id = id;
+		}
+
+		access_hash = mtp_object_i64(&o, "access_hash", 0);
+		if (access_hash != 0) {
+			n->access_hash = access_hash;
+		}
+		if (mtp_object_has(&o, "forum")) {
+			n->forum = 1;
+		}
+		if (!ck->is_user) {
+			api_parse_rights(n, &o);
+		}
+		if (ck->is_user) {
+			mtp_reader_t status_r;
+			mtp_object_t status;
+
+			if (mtp_object_at(&o, "status", &status_r) == 0 &&
+			    mtp_object_parse(&status_r, &status) == 0) {
+				if (status.ctor->id == MTP_ID_userStatusOnline) {
+					n->presence = 1;
+					n->last_seen = 0;
+				} else if (status.ctor->id == MTP_ID_userStatusOffline) {
+					n->presence = 2;
+					n->last_seen = mtp_object_i32(&status, "was_online", 0);
+				}
+			}
+		}
+		{
+			char	title[MTP_MAX_NAME];
+
+			title[0] = '\0';
+			if (ck->title_field != NULL) {
+				(void)mtp_object_str(&o, ck->title_field, title,
+				    sizeof(title));
+			}
+			if (title[0] == '\0' && ck->is_user) {
+				(void)mtp_object_str(&o, "username", title,
+				    sizeof(title));
+				if (title[0] == '\0') {
+					(void)mtp_object_str(&o, "last_name",
+					    title, sizeof(title));
+				}
+			}
+			if (title[0] != '\0') {
+				memcpy(n->title, title, sizeof(n->title));
+			}
+		}
+		if (fresh) {
+			c->name_count++;
+		}
 	}
 	return (r.error ? -1 : 0);
 }
@@ -345,6 +464,38 @@ api_parse_messages(mtp_client_t *c, const mtp_object_t *root)
 	return (r.error ? -1 : 0);
 }
 
+
+static int
+api_parse_forum_topics(mtp_client_t *c, const mtp_object_t *root)
+{
+	mtp_reader_t	r;
+	mtp_object_t	o;
+	mtp_forum_topic_t	*t;
+	uint32_t	count, i;
+
+	if (mtp_object_vector(root, "topics", &r, &count) != 0) {
+		return (-1);
+	}
+	c->forum_topic_count = 0;
+	for (i = 0; i < count && c->forum_topic_count < MTP_MAX_FORUM_TOPICS; i++) {
+		if (mtp_object_parse(&r, &o) != 0 ||
+		    o.ctor->id != MTP_ID_forumTopic) {
+			return (-1);
+		}
+		t = &c->forum_topics[c->forum_topic_count++];
+		memset(t, 0, sizeof(*t));
+		t->id = mtp_object_i32(&o, "id", 0);
+		if (t->id == 0) {
+			c->forum_topic_count--;
+			continue;
+		}
+		t->top_message = mtp_object_i32(&o, "top_message", 0);
+			t->unread_count = mtp_object_i32(&o, "unread_count", 0);
+			t->closed = mtp_object_has(&o, "closed");
+			(void)mtp_object_str(&o, "title", t->title, sizeof(t->title));
+	}
+	return (r.error ? -1 : 0);
+}
 
 static int
 api_decode_collection(mtp_client_t *c, mtp_pending_t *p, mtp_object_t *o)
@@ -570,6 +721,60 @@ mtp_send_ping(mtp_client_t *c)
 	return (api_send(c, body, w.len, 0, MTP_REQ_PING, 0));
 }
 
+
+int
+mtp_send_get_state(mtp_client_t *c)
+{
+	uint8_t		body[4];
+	mtp_writer_t	w;
+
+	if (mtp_pending_kind(c, MTP_REQ_GET_STATE) != NULL) {
+		return (MTP_OK);
+	}
+	mtp_writer_init(&w, body, sizeof(body));
+	mtp_write_u32(&w, MTP_FN_updates_getState);
+	mtp_logf(MTP_LOG_INFO, "getState: asking for the update baseline");
+	return (mtp_api_send(c, body, w.len, MTP_REQ_GET_STATE, 0));
+}
+
+int
+mtp_send_get_difference(mtp_client_t *c)
+{
+	uint8_t		body[32];
+	mtp_writer_t	w;
+
+	if (mtp_pending_kind(c, MTP_REQ_GET_DIFFERENCE) != NULL) {
+		return (MTP_OK);
+	}
+	if (!c->upd_have_state) {
+		return (mtp_send_get_state(c));
+	}
+	if (c->upd_difference_chain >= MTP_MAX_DIFFERENCE_CHAIN) {
+		mtp_logf(MTP_LOG_ERROR, "getDifference: %d slices without an end, "
+		    "giving up until the next update",
+		    MTP_MAX_DIFFERENCE_CHAIN);
+		c->upd_need_difference = 0;
+		c->upd_difference_chain = 0;
+		return (MTP_OK);
+	}
+	c->upd_need_difference = 0;
+	c->upd_difference_chain++;
+	mtp_writer_init(&w, body, sizeof(body));
+	mtp_write_u32(&w, MTP_FN_updates_getDifference);
+	mtp_write_i32(&w, 0);
+	mtp_write_i32(&w, c->upd_pts);
+	mtp_write_i32(&w, c->upd_date);
+	mtp_write_i32(&w, c->upd_qts);
+	if (w.overflow) {
+		return (mtp_fail(c, MTP_ERR_INVAL, "updates.getDifference does not "
+		    "fit its %u-byte buffer", (unsigned int)sizeof(body)));
+	}
+	mtp_logf(MTP_LOG_INFO, "getDifference: pts=%d qts=%d date=%d (attempt %d)",
+	    (int)c->upd_pts, (int)c->upd_qts, (int)c->upd_date,
+	    c->upd_difference_chain);
+	return (mtp_api_send(c, body, w.len, MTP_REQ_GET_DIFFERENCE, 0));
+}
+
 int
 mtp_dispatch_error(mtp_client_t *c, mtp_pending_t *p, int32_t code,
     const char *message)
@@ -640,6 +845,304 @@ mtp_dispatch_error(mtp_client_t *c, mtp_pending_t *p, int32_t code,
 	    message != NULL ? message : "unknown"));
 }
 
+
+int
+mtp_updates_is_container(uint32_t id)
+{
+	return (id == MTP_ID_updates || id == MTP_ID_updatesCombined ||
+	    id == MTP_ID_updateShort || id == MTP_ID_updateShortMessage ||
+	    id == MTP_ID_updateShortChatMessage ||
+	    id == MTP_ID_updateShortSentMessage || id == MTP_ID_updatesTooLong);
+}
+
+
+static void
+api_take_common_pts(mtp_client_t *c, const mtp_object_t *u)
+{
+	int32_t	pts;
+
+	switch (u->ctor->id) {
+	case MTP_ID_updateNewMessage:
+	case MTP_ID_updateDeleteMessages:
+	case MTP_ID_updateEditMessage:
+	case MTP_ID_updateReadHistoryInbox:
+	case MTP_ID_updateReadHistoryOutbox:
+	case MTP_ID_updateReadMessagesContents:
+	case MTP_ID_updateWebPage:
+	case MTP_ID_updatePinnedMessages:
+	case MTP_ID_updateFolderPeers:
+		break;
+	default:
+		return;
+	}
+	pts = mtp_object_i32(u, "pts", 0);
+	if (pts > c->upd_pts) {
+		c->upd_pts = pts;
+	}
+}
+
+static void
+api_update_presence(mtp_client_t *c, const mtp_object_t *u, int *changed)
+{
+	mtp_reader_t	r;
+	mtp_object_t	status;
+	int64_t		id;
+	int		i;
+
+	id = mtp_object_i64(u, "user_id", 0);
+	if (id == 0 || mtp_object_at(u, "status", &r) != 0 ||
+	    mtp_object_parse(&r, &status) != 0) {
+		return;
+	}
+	for (i = 0; i < c->name_count; i++) {
+		if (c->names[i].kind != MTP_PEER_USER || c->names[i].id != id) {
+			continue;
+		}
+		c->names[i].presence =
+		    status.ctor->id == MTP_ID_userStatusOnline ? 1 : 2;
+		c->names[i].last_seen = mtp_object_i32(&status, "was_online", 0);
+		*changed = 1;
+		return;
+	}
+}
+
+
+static void
+api_update_one(mtp_client_t *c, const mtp_object_t *u, int *changed)
+{
+	switch (u->ctor->id) {
+	case MTP_ID_updateNewMessage:
+	case MTP_ID_updateNewChannelMessage:
+	case MTP_ID_updateEditMessage:
+	case MTP_ID_updateEditChannelMessage:
+	case MTP_ID_updateDeleteMessages:
+	case MTP_ID_updateDeleteChannelMessages:
+		*changed = 1;
+		break;
+	case MTP_ID_updateUserStatus:
+		api_update_presence(c, u, changed);
+		break;
+	case MTP_ID_updateChannelTooLong:
+		mtp_logf(MTP_LOG_INFO, "updateChannelTooLong for channel %lld, "
+		    "forcing a refetch", (long long)mtp_object_i64(u,
+		    "channel_id", 0));
+		*changed = 1;
+		break;
+	case MTP_ID_updateReadHistoryInbox:
+	case MTP_ID_updateReadHistoryOutbox:
+	case MTP_ID_updateReadChannelInbox:
+	case MTP_ID_updateReadChannelOutbox:
+		*changed = 1;
+		break;
+	default:
+		break;
+	}
+	api_take_common_pts(c, u);
+}
+
+static int
+api_updates_vector(mtp_client_t *c, const mtp_object_t *o, int *changed)
+{
+	mtp_reader_t	r;
+	mtp_object_t	u;
+	uint32_t	count, i;
+
+	if (mtp_object_vector(o, "updates", &r, &count) != 0) {
+		return (-1);
+	}
+	(void)api_parse_cache(c, o, "chats", 0);
+	(void)api_parse_cache(c, o, "users", 1);
+	for (i = 0; i < count; i++) {
+		if (mtp_object_parse(&r, &u) != 0) {
+			char	why[MTP_MAX_ERROR];
+
+
+			(void)mtp_reader_explain(&r, why, sizeof(why));
+			mtp_logf(MTP_LOG_ERROR, "%s: member %u of %u does not "
+			    "parse (%s), asking for the difference",
+			    o->ctor->name, (unsigned int)i + 1,
+			    (unsigned int)count, why);
+			c->upd_need_difference = 1;
+			return (-1);
+		}
+		api_update_one(c, &u, changed);
+	}
+	return (0);
+}
+
+int
+mtp_dispatch_update(mtp_client_t *c, const mtp_object_t *o)
+{
+	mtp_reader_t	r;
+	mtp_object_t	inner;
+	int32_t		date, seq;
+	int		changed;
+
+	if (c == NULL || o == NULL || o->ctor == NULL) {
+		return (MTP_ERR_INVAL);
+	}
+	changed = 0;
+	switch (o->ctor->id) {
+	case MTP_ID_updatesTooLong:
+		mtp_logf(MTP_LOG_INFO, "updatesTooLong: the update sequence is "
+		    "too far behind, asking for the difference");
+		c->upd_need_difference = 1;
+		break;
+	case MTP_ID_updateShort:
+		if (mtp_object_at(o, "update", &r) != 0 ||
+		    mtp_object_parse(&r, &inner) != 0) {
+			mtp_logf(MTP_LOG_ERROR, "updateShort carries no parsable "
+			    "update, asking for the difference");
+			c->upd_need_difference = 1;
+			break;
+		}
+		api_update_one(c, &inner, &changed);
+		date = mtp_object_i32(o, "date", 0);
+		if (date > c->upd_date) {
+			c->upd_date = date;
+		}
+		break;
+	case MTP_ID_updateShortMessage:
+	case MTP_ID_updateShortChatMessage:
+		changed = 1;
+		if (mtp_object_i32(o, "pts", 0) > c->upd_pts) {
+			c->upd_pts = mtp_object_i32(o, "pts", 0);
+		}
+		date = mtp_object_i32(o, "date", 0);
+		if (date > c->upd_date) {
+			c->upd_date = date;
+		}
+		break;
+	case MTP_ID_updateShortSentMessage:
+		changed = 1;
+		if (mtp_object_i32(o, "pts", 0) > c->upd_pts) {
+			c->upd_pts = mtp_object_i32(o, "pts", 0);
+		}
+		break;
+	case MTP_ID_updates:
+	case MTP_ID_updatesCombined:
+		(void)api_updates_vector(c, o, &changed);
+		date = mtp_object_i32(o, "date", 0);
+		if (date > c->upd_date) {
+			c->upd_date = date;
+		}
+
+		seq = mtp_object_i32(o, "seq", 0);
+		if (seq > c->upd_seq) {
+			c->upd_seq = seq;
+		}
+		break;
+	default:
+		api_update_one(c, o, &changed);
+		break;
+	}
+	if (changed) {
+		c->update_version++;
+	}
+	return (MTP_OK);
+}
+
+static int
+api_take_state(mtp_client_t *c, const mtp_object_t *state, const char *what)
+{
+	if (state->ctor->id != MTP_ID_updates_state) {
+		return (mtp_soft_fail(c, MTP_ERR_PROTO, "%s carries %s where "
+		    "updates.state was expected", what, state->ctor->name));
+	}
+	c->upd_pts = mtp_object_i32(state, "pts", c->upd_pts);
+	c->upd_qts = mtp_object_i32(state, "qts", c->upd_qts);
+	c->upd_date = mtp_object_i32(state, "date", c->upd_date);
+	c->upd_seq = mtp_object_i32(state, "seq", c->upd_seq);
+	c->upd_have_state = 1;
+	mtp_logf(MTP_LOG_INFO, "%s: pts=%d qts=%d date=%d seq=%d", what,
+	    (int)c->upd_pts, (int)c->upd_qts, (int)c->upd_date,
+	    (int)c->upd_seq);
+	return (MTP_OK);
+}
+
+static int
+api_take_state_field(mtp_client_t *c, const mtp_object_t *o, const char *field,
+    const char *what)
+{
+	mtp_reader_t	r;
+	mtp_object_t	state;
+
+	if (mtp_object_at(o, field, &r) != 0 ||
+	    mtp_object_parse(&r, &state) != 0) {
+		return (mtp_soft_fail(c, MTP_ERR_PROTO, "%s has no parsable %s",
+		    what, field));
+	}
+	return (api_take_state(c, &state, what));
+}
+
+
+static int
+api_take_difference(mtp_client_t *c, const mtp_object_t *o)
+{
+	mtp_reader_t	r;
+	mtp_object_t	u;
+	uint32_t	count, i;
+	int		changed, ret;
+
+	changed = 0;
+	switch (o->ctor->id) {
+	case MTP_ID_updates_differenceEmpty:
+		c->upd_date = mtp_object_i32(o, "date", c->upd_date);
+		c->upd_seq = mtp_object_i32(o, "seq", c->upd_seq);
+		c->upd_have_state = 1;
+		c->upd_difference_chain = 0;
+		mtp_logf(MTP_LOG_DEBUG, "getDifference: nothing was missed");
+		return (MTP_OK);
+	case MTP_ID_updates_differenceTooLong:
+		c->upd_pts = mtp_object_i32(o, "pts", c->upd_pts);
+		c->upd_have_state = 1;
+		c->upd_difference_chain = 0;
+		c->update_version++;
+		mtp_logf(MTP_LOG_INFO, "getDifference: too long, resuming at "
+		    "pts=%d and reloading", (int)c->upd_pts);
+		return (MTP_OK);
+	case MTP_ID_updates_difference:
+	case MTP_ID_updates_differenceSlice:
+		break;
+	default:
+		return (mtp_soft_fail(c, MTP_ERR_PROTO, "getDifference returned "
+		    "%s, expected updates.difference*", o->ctor->name));
+	}
+
+	(void)api_parse_cache(c, o, "chats", 0);
+	(void)api_parse_cache(c, o, "users", 1);
+	if (mtp_object_vector(o, "new_messages", &r, &count) == 0 && count != 0) {
+		changed = 1;
+		mtp_logf(MTP_LOG_INFO, "getDifference: %u new message(s)",
+		    (unsigned int)count);
+	}
+	if (mtp_object_vector(o, "other_updates", &r, &count) == 0) {
+		for (i = 0; i < count; i++) {
+			if (mtp_object_parse(&r, &u) != 0) {
+				mtp_logf(MTP_LOG_ERROR, "getDifference: "
+				    "other_updates row %u of %u does not parse",
+				    (unsigned int)i + 1, (unsigned int)count);
+				break;
+			}
+			api_update_one(c, &u, &changed);
+		}
+	}
+	if (o->ctor->id == MTP_ID_updates_difference) {
+		ret = api_take_state_field(c, o, "state", "getDifference");
+		c->upd_difference_chain = 0;
+	} else {
+		ret = api_take_state_field(c, o, "intermediate_state",
+		    "getDifference");
+		if (ret == MTP_OK) {
+			c->upd_need_difference = 1;
+		}
+	}
+	if (changed) {
+		c->update_version++;
+	}
+	return (ret);
+}
+
 int
 mtp_dispatch_result(mtp_client_t *c, mtp_pending_t *p, mtp_reader_t *r)
 {
@@ -690,7 +1193,6 @@ mtp_dispatch_result(mtp_client_t *c, mtp_pending_t *p, mtp_reader_t *r)
 			    "returned %s, expected messages.dialogs[Slice]",
 			    o.ctor->name));
 		}
-		c->name_count = 0;
 		if (api_decode_collection(c, p, &o) != 0) {
 			return (mtp_soft_fail(c, MTP_ERR_PROTO,
 			    "cannot decode the %s collection", o.ctor->name));
@@ -706,7 +1208,6 @@ mtp_dispatch_result(mtp_client_t *c, mtp_pending_t *p, mtp_reader_t *r)
 			    "returned %s, expected messages.messages[Slice]",
 			    o.ctor->name));
 		}
-		c->name_count = 0;
 		if (api_decode_collection(c, p, &o) != 0) {
 			return (mtp_soft_fail(c, MTP_ERR_PROTO,
 			    "cannot decode the %s collection", o.ctor->name));
@@ -715,12 +1216,35 @@ mtp_dispatch_result(mtp_client_t *c, mtp_pending_t *p, mtp_reader_t *r)
 		mtp_logf(MTP_LOG_INFO, "getHistory: %u messages for peer %lld",
 		    (unsigned int)c->history_count, (long long)p->aux);
 		return (MTP_OK);
-	case MTP_REQ_SEND_MSG:
-		if (o.ctor->id != MTP_ID_updateShortSentMessage) {
-			return (mtp_fail(c, MTP_ERR_PROTO, "sendMessage returned "
-			    "%s, expected updateShortSentMessage", o.ctor->name));
+	case MTP_REQ_TOPIC_HISTORY:
+		if (o.ctor->id != MTP_ID_messages_messages &&
+		    o.ctor->id != MTP_ID_messages_messagesSlice &&
+		    o.ctor->id != MTP_ID_messages_channelMessages) return (MTP_ERR_PROTO);
+		return (api_decode_collection(c, p, &o) == 0 ? MTP_OK : MTP_ERR_PROTO);
+	case MTP_REQ_FORUM_TOPICS:
+		if (o.ctor->id != MTP_ID_messages_forumTopics ||
+		    api_parse_cache(c, &o, "chats", 0) != 0 ||
+		    api_parse_cache(c, &o, "users", 1) != 0 ||
+		    api_parse_forum_topics(c, &o) != 0) {
+			return (mtp_soft_fail(c, MTP_ERR_PROTO,
+			    "cannot decode messages.forumTopics"));
 		}
+		mtp_logf(MTP_LOG_INFO, "getForumTopics: %u topics",
+		    (unsigned int)c->forum_topic_count);
 		return (MTP_OK);
+	case MTP_REQ_SEND_MSG:
+		if (!mtp_updates_is_container(o.ctor->id)) {
+			return (mtp_soft_fail(c, MTP_ERR_PROTO, "sendMessage "
+			    "returned %s, which is not an Updates constructor",
+			    o.ctor->name));
+		}
+		mtp_logf(MTP_LOG_INFO, "sendMessage: accepted, server answered %s",
+		    o.ctor->name);
+		return (mtp_dispatch_update(c, &o));
+	case MTP_REQ_GET_STATE:
+		return (api_take_state(c, &o, "getState"));
+	case MTP_REQ_GET_DIFFERENCE:
+		return (api_take_difference(c, &o));
 	case MTP_REQ_LOGOUT:
 		mtp_store_forget(c);
 		return (MTP_OK);
@@ -746,8 +1270,13 @@ mtp_run_queued(mtp_client_t *c)
 	case MTP_REQ_HISTORY:
 		return (mtpGetHistory(c, &c->queued_peer, c->queued_i32,
 		    c->queued_i32b));
+	case MTP_REQ_FORUM_TOPICS:
+		return (mtpGetForumTopics(c, &c->queued_peer, c->queued_i32));
 	case MTP_REQ_SEND_MSG:
-		return (mtpSendMessage(c, &c->queued_peer, c->queued_text));
+		return (c->queued_i32 > 0 ?
+		    mtpSendTopicMessage(c, &c->queued_peer, c->queued_i32,
+		    c->queued_text) :
+		    mtpSendMessage(c, &c->queued_peer, c->queued_text));
 	case MTP_REQ_READ_HISTORY:
 		return (mtpReadHistory(c, &c->queued_peer, c->queued_i32));
 	default:

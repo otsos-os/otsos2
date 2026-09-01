@@ -15,12 +15,16 @@ $define %func mtpCheckPassword as function with args client, password
 $define %func mtpPasswordNeeded as function with args client
 $define %func mtpPasswordHint as function with args client
 $define %func mtpPasswordBusy as function with args client
+$define %func mtpSendTopicMessage as function with args client, peer, topic id, text
+$define %func mtpPeerCanWrite as function with args client, peer, topic id
+$define %func mtpWriteRestrictionText as function with args reason
 
 */
 
 /* !SPACE!
 
 $space %internal client_copy, client_queue, client_send, client_expire
+$space %internal client_send_message, client_peer_rights
 $space %export mtp_set_state
 $space %export mtpCreate, mtpDestroy, mtpStep, mtpTimeout
 $space %export mtpWatchFd, mtpWatchFilter, mtpState, mtpError
@@ -28,6 +32,7 @@ $space %export mtpIsAuthorized, mtpSelfId, mtpPendingCount, mtpCodeHashPresent
 $space %export mtpIsReady, mtpDcId, mtpFloodWait, mtpFloodRequest, mtpResetCode
 $space %export mtpSendCode, mtpSignIn, mtpLogOut
 $space %export mtpGetDialogs, mtpGetHistory, mtpSendMessage, mtpReadHistory
+$space %export mtpSendTopicMessage, mtpPeerCanWrite, mtpWriteRestrictionText
 $space %export mtpDialogCount, mtpDialogAt, mtpHistoryCount, mtpHistoryAt
 $space %export mtpHistoryPeer, mtpStrerror, mtpStateName
 
@@ -61,7 +66,7 @@ $space %export mtpHistoryPeer, mtpStrerror, mtpStateName
 
 #include <stdlib.h>
 #include <string.h>
-
+#include <stdio.h>
 #include "mtp_internal.h"
 
 #define CLIENT_HANDSHAKE_DEADLINE	MTP_HANDSHAKE_TIMEOUT_MS
@@ -148,12 +153,26 @@ client_queue(mtp_client_t *c, uint32_t kind, const mtp_peer_t *peer,
 	return (MTP_OK);
 }
 
+
+struct client_defer {
+	const mtp_peer_t	*peer;
+	const char		*text;
+	int32_t			a;
+	int32_t			b;
+};
+
 static int
 client_send(mtp_client_t *c, const uint8_t *body, size_t len, uint32_t kind,
-    int64_t aux)
+    int64_t aux, const struct client_defer *defer)
 {
 	if (c->state != MTP_STATE_READY) {
-		return (client_queue(c, kind, NULL, 0, 0, NULL));
+		if (defer == NULL) {
+			return (mtp_soft_fail(c, MTP_ERR_NOTREADY, "%s needs a "
+			    "ready session, the connection is %s",
+			    mtp_log_req_name(kind), mtpStateName(c->state)));
+		}
+		return (client_queue(c, kind, defer->peer, defer->a, defer->b,
+		    defer->text));
 	}
 	return (mtp_api_send(c, body, len, kind, aux));
 }
@@ -384,6 +403,20 @@ mtpStep(mtp_client_t *c)
 		if (mtp_send_check_password(c) != MTP_OK &&
 		    c->state == MTP_STATE_FAILED) {
 			return (c->last_error);
+		}
+	}
+	if (c->state == MTP_STATE_READY && c->authorized && c->out_len == 0 &&
+	    mtp_flood_left(c) == 0) {
+		if (!c->upd_have_state) {
+			if (mtp_send_get_state(c) != MTP_OK &&
+			    c->state == MTP_STATE_FAILED) {
+				return (c->last_error);
+			}
+		} else if (c->upd_need_difference) {
+			if (mtp_send_get_difference(c) != MTP_OK &&
+			    c->state == MTP_STATE_FAILED) {
+				return (c->last_error);
+			}
 		}
 	}
 	if (c->state == MTP_STATE_READY && c->queued_kind != MTP_REQ_NONE &&
@@ -769,8 +802,16 @@ mtpGetDialogs(mtp_client_t *c, int limit)
 	mtp_write_peer(&w, &empty);
 	mtp_write_i32(&w, limit);
 	mtp_write_i64(&w, 0);
-	return (w.overflow ? MTP_ERR_INVAL : client_send(c, body, w.len,
-	    MTP_REQ_DIALOGS, 0));
+	{
+		struct client_defer	defer;
+
+		defer.peer = NULL;
+		defer.text = NULL;
+		defer.a = limit;
+		defer.b = 0;
+		return (w.overflow ? MTP_ERR_INVAL : client_send(c, body, w.len,
+		    MTP_REQ_DIALOGS, 0, &defer));
+	}
 }
 
 int
@@ -804,40 +845,157 @@ mtpGetHistory(mtp_client_t *c, const mtp_peer_t *peer, int limit,
 	mtp_write_i32(&w, 0);
 	mtp_write_i32(&w, 0);
 	mtp_write_i64(&w, 0);
+	{
+		struct client_defer	defer;
+
+		defer.peer = peer;
+		defer.text = NULL;
+		defer.a = limit;
+		defer.b = offset_id;
+		return (w.overflow ? MTP_ERR_INVAL : client_send(c, body, w.len,
+		    MTP_REQ_HISTORY, peer->id, &defer));
+	}
+}
+
+int
+mtpGetForumTopics(mtp_client_t *c, const mtp_peer_t *peer, int limit)
+{
+	mtp_writer_t w;
+	uint8_t body[96];
+
+	if (c == NULL || peer == NULL || peer->kind != MTP_PEER_CHANNEL ||
+	    peer->id <= 0 || peer->access_hash == 0 || limit < 1 ||
+	    limit > MTP_MAX_FORUM_TOPICS) {
+		mtp_logf(MTP_LOG_ERROR, "getForumTopics: invalid peer or limit "
+		    "(kind=%d id=%lld hash=%s limit=%d)",
+		    peer != NULL ? (int)peer->kind : -1,
+		    peer != NULL ? (long long)peer->id : 0,
+		    peer != NULL && peer->access_hash != 0 ? "present" : "absent",
+		    limit);
+		return (MTP_ERR_INVAL);
+	}
+	mtp_logf(MTP_LOG_DEBUG, "getForumTopics: peer id=%lld limit=%d",
+	    (long long)peer->id, limit);
+	if (c->state != MTP_STATE_READY) {
+		return (client_queue(c, MTP_REQ_FORUM_TOPICS, peer, limit, 0, NULL));
+	}
+	mtp_writer_init(&w, body, sizeof(body));
+	mtp_write_u32(&w, MTP_FN_messages_getForumTopics);
+	mtp_write_i32(&w, 0);
+	mtp_write_peer(&w, peer);
+	mtp_write_i32(&w, 0);
+	mtp_write_i32(&w, 0);
+	mtp_write_i32(&w, 0);
+	mtp_write_i32(&w, limit);
+	{
+		struct client_defer	defer;
+
+		defer.peer = peer;
+		defer.text = NULL;
+		defer.a = limit;
+		defer.b = 0;
+		return (w.overflow ? MTP_ERR_INVAL : client_send(c, body, w.len,
+		    MTP_REQ_FORUM_TOPICS, peer->id, &defer));
+	}
+}
+
+int
+mtpGetTopicHistory(mtp_client_t *c, const mtp_peer_t *peer, int32_t topic_id,
+    int limit)
+{
+	mtp_writer_t w;
+	uint8_t body[80];
+
+	if (c == NULL || peer == NULL || peer->kind != MTP_PEER_CHANNEL ||
+	    topic_id <= 0 || limit < 1 || limit > MTP_MAX_HISTORY) return (MTP_ERR_INVAL);
+	if (c->state != MTP_STATE_READY) return (MTP_ERR_NOTREADY);
+	c->history_peer = *peer;
+	mtp_writer_init(&w, body, sizeof(body));
+	mtp_write_u32(&w, MTP_FN_messages_getReplies);
+	mtp_write_peer(&w, peer);
+	mtp_write_i32(&w, topic_id);
+	mtp_write_i32(&w, 0);
+	mtp_write_i32(&w, 0);
+	mtp_write_i32(&w, 0);
+	mtp_write_i32(&w, limit);
+	mtp_write_i32(&w, 0);
+	mtp_write_i32(&w, 0);
+	mtp_write_i64(&w, 0);
 	return (w.overflow ? MTP_ERR_INVAL : client_send(c, body, w.len,
-	    MTP_REQ_HISTORY, peer->id));
+	    MTP_REQ_TOPIC_HISTORY, peer->id, NULL));
+}
+
+
+#define CLIENT_SEND_F_REPLY_TO		(1u << 0)
+#define CLIENT_REPLY_F_TOP_MSG_ID	(1u << 0)
+
+static int
+client_send_message(mtp_client_t *c, const mtp_peer_t *peer, int32_t topic_id,
+    const char *text)
+{
+	mtp_writer_t	w;
+	uint8_t		body[MTP_MAX_TEXT + 128];
+	int64_t		random_id;
+
+	if (c == NULL || peer == NULL || peer->kind == MTP_PEER_EMPTY ||
+	    text == NULL || text[0] == '\0' || strlen(text) >= MTP_MAX_TEXT ||
+	    topic_id < 0) {
+		mtp_logf(MTP_LOG_ERROR, "sendMessage: invalid argument "
+		    "(peer_kind=%d topic=%d text_len=%u max=%u)",
+		    peer != NULL ? (int)peer->kind : -1, (int)topic_id,
+		    text != NULL ? (unsigned int)strlen(text) : 0,
+		    (unsigned int)MTP_MAX_TEXT - 1);
+		return (MTP_ERR_INVAL);
+	}
+	mtp_logf(MTP_LOG_DEBUG, "sendMessage: peer kind=%d id=%lld topic=%d "
+	    "text_len=%u", (int)peer->kind, (long long)peer->id, (int)topic_id,
+	    (unsigned int)strlen(text));
+	if (c->state != MTP_STATE_READY) {
+		return (client_queue(c, MTP_REQ_SEND_MSG, peer, topic_id, 0,
+		    text));
+	}
+	random_id = mtp_next_msg_id(c);
+	mtp_writer_init(&w, body, sizeof(body));
+	mtp_write_u32(&w, MTP_FN_messages_sendMessage);
+	mtp_write_i32(&w, topic_id != 0 ? (int32_t)CLIENT_SEND_F_REPLY_TO : 0);
+	mtp_write_peer(&w, peer);
+	if (topic_id != 0) {
+		mtp_write_u32(&w, MTP_ID_inputReplyToMessage);
+		mtp_write_i32(&w, (int32_t)CLIENT_REPLY_F_TOP_MSG_ID);
+		mtp_write_i32(&w, topic_id);
+		mtp_write_i32(&w, topic_id);
+	}
+	mtp_write_string(&w, text);
+	mtp_write_i64(&w, random_id);
+	{
+		struct client_defer	defer;
+
+		defer.peer = peer;
+		defer.text = text;
+		defer.a = topic_id;
+		defer.b = 0;
+		return (w.overflow ? MTP_ERR_INVAL : client_send(c, body, w.len,
+		    MTP_REQ_SEND_MSG, peer->id, &defer));
+	}
 }
 
 int
 mtpSendMessage(mtp_client_t *c, const mtp_peer_t *peer, const char *text)
 {
-	mtp_writer_t	w;
-	uint8_t		body[MTP_MAX_TEXT + 64];
-	int64_t		random_id;
+	return (client_send_message(c, peer, 0, text));
+}
 
-	if (c == NULL || peer == NULL || peer->kind == MTP_PEER_EMPTY ||
-	    text == NULL || text[0] == '\0' || strlen(text) >= MTP_MAX_TEXT) {
-		mtp_logf(MTP_LOG_ERROR, "sendMessage: invalid argument "
-		    "(peer_kind=%d text_len=%u max=%u)",
-		    peer != NULL ? (int)peer->kind : -1,
-		    text != NULL ? (unsigned int)strlen(text) : 0,
-		    (unsigned int)MTP_MAX_TEXT - 1);
+int
+mtpSendTopicMessage(mtp_client_t *c, const mtp_peer_t *peer, int32_t topic_id,
+    const char *text)
+{
+	if (peer == NULL || peer->kind != MTP_PEER_CHANNEL || topic_id <= 0) {
+		mtp_logf(MTP_LOG_ERROR, "sendTopicMessage: forum topics exist "
+		    "only on channels (kind=%d topic=%d)",
+		    peer != NULL ? (int)peer->kind : -1, (int)topic_id);
 		return (MTP_ERR_INVAL);
 	}
-	mtp_logf(MTP_LOG_DEBUG, "sendMessage: peer kind=%d id=%lld text_len=%u",
-	    (int)peer->kind, (long long)peer->id, (unsigned int)strlen(text));
-	if (c->state != MTP_STATE_READY) {
-		return (client_queue(c, MTP_REQ_SEND_MSG, peer, 0, 0, text));
-	}
-	random_id = mtp_next_msg_id(c);
-	mtp_writer_init(&w, body, sizeof(body));
-	mtp_write_u32(&w, MTP_FN_messages_sendMessage);
-	mtp_write_i32(&w, 0);
-	mtp_write_peer(&w, peer);
-	mtp_write_string(&w, text);
-	mtp_write_i64(&w, random_id);
-	return (w.overflow ? MTP_ERR_INVAL : client_send(c, body, w.len,
-	    MTP_REQ_SEND_MSG, peer->id));
+	return (client_send_message(c, peer, topic_id, text));
 }
 
 int
@@ -861,8 +1019,165 @@ mtpReadHistory(mtp_client_t *c, const mtp_peer_t *peer, int32_t max_id)
 	mtp_write_u32(&w, MTP_FN_messages_readHistory);
 	mtp_write_peer(&w, peer);
 	mtp_write_i32(&w, max_id);
-	return (w.overflow ? MTP_ERR_INVAL : client_send(c, body, w.len,
-	    MTP_REQ_READ_HISTORY, peer->id));
+	{
+		struct client_defer	defer;
+
+		defer.peer = peer;
+		defer.text = NULL;
+		defer.a = max_id;
+		defer.b = 0;
+		return (w.overflow ? MTP_ERR_INVAL : client_send(c, body, w.len,
+		    MTP_REQ_READ_HISTORY, peer->id, &defer));
+	}
+}
+
+static const mtp_peer_name_t *
+client_find_name(const mtp_client_t *c, const mtp_peer_t *peer)
+{
+	int i;
+
+	if (c == NULL || peer == NULL) return (NULL);
+	for (i = 0; i < c->name_count; i++) {
+		if (c->names[i].kind == peer->kind && c->names[i].id == peer->id)
+			return (&c->names[i]);
+	}
+	return (NULL);
+}
+
+int
+mtpForumTopicCount(const mtp_client_t *c)
+{
+	return (c == NULL ? 0 : c->forum_topic_count);
+}
+
+const mtp_forum_topic_t *
+mtpForumTopicAt(const mtp_client_t *c, int index)
+{
+	return (c == NULL || index < 0 || index >= c->forum_topic_count ? NULL :
+	    &c->forum_topics[index]);
+}
+
+int
+mtpPeerIsForum(const mtp_client_t *c, const mtp_peer_t *peer)
+{
+	const mtp_peer_name_t *n;
+
+	if (c == NULL || peer == NULL) return (0);
+	n = client_find_name(c, peer);
+	return (n != NULL && n->forum);
+}
+
+static const mtp_forum_topic_t *
+client_find_topic(const mtp_client_t *c, int32_t topic_id)
+{
+	int	i;
+
+	if (topic_id <= 0) {
+		return (NULL);
+	}
+	for (i = 0; i < c->forum_topic_count; i++) {
+		if (c->forum_topics[i].id == topic_id) {
+			return (&c->forum_topics[i]);
+		}
+	}
+	return (NULL);
+}
+
+int
+mtpPeerCanWrite(const mtp_client_t *c, const mtp_peer_t *peer,
+    int32_t topic_id)
+{
+	const mtp_forum_topic_t		*topic;
+	const mtp_peer_name_t		*n;
+	const mtp_peer_rights_t		*p;
+
+	if (c == NULL || peer == NULL || peer->kind == MTP_PEER_EMPTY) {
+		return (MTP_WRITE_NO_PEER);
+	}
+	if (peer->kind == MTP_PEER_USER) {
+		return (MTP_WRITE_OK);
+	}
+	n = client_find_name(c, peer);
+	if (n == NULL || !n->rights.known) {
+		return (MTP_WRITE_UNKNOWN);
+	}
+	p = &n->rights;
+	if (p->forbidden) {
+		return (MTP_WRITE_FORBIDDEN);
+	}
+	if (p->left) {
+		return (MTP_WRITE_LEFT);
+	}
+	if (p->deactivated) {
+		return (MTP_WRITE_DEACTIVATED);
+	}
+	if (p->creator) {
+		return (MTP_WRITE_OK);
+	}
+
+	if (p->banned) {
+		return (MTP_WRITE_BANNED);
+	}
+	if (p->broadcast) {
+		return (p->can_post ? MTP_WRITE_OK : MTP_WRITE_BROADCAST);
+	}
+	if (p->restricted) {
+		return (MTP_WRITE_RESTRICTED);
+	}
+	topic = client_find_topic(c, topic_id);
+	if (topic != NULL && topic->closed && !p->manage_topics) {
+		return (MTP_WRITE_TOPIC_CLOSED);
+	}
+	return (MTP_WRITE_OK);
+}
+
+const char *
+mtpWriteRestrictionText(int reason)
+{
+	switch (reason) {
+	case MTP_WRITE_OK:
+	case MTP_WRITE_UNKNOWN:
+		return ("");
+	case MTP_WRITE_NO_PEER:
+		return ("Choose a chat first");
+	case MTP_WRITE_FORBIDDEN:
+		return ("You are not a member of this chat");
+	case MTP_WRITE_LEFT:
+		return ("You left this chat");
+	case MTP_WRITE_DEACTIVATED:
+		return ("This group is deactivated");
+	case MTP_WRITE_BROADCAST:
+		return ("Only admins can post in this channel");
+	case MTP_WRITE_BANNED:
+		return ("You are restricted from sending messages here");
+	case MTP_WRITE_RESTRICTED:
+		return ("Sending messages is not allowed in this group");
+	case MTP_WRITE_TOPIC_CLOSED:
+		return ("This topic is closed");
+	default:
+		return ("You cannot send messages here");
+	}
+}
+
+const char *
+mtpPeerPresence(const mtp_client_t *c, const mtp_peer_t *peer)
+{
+	const mtp_peer_name_t *n;
+	static char result[64];
+
+	if (c == NULL || peer == NULL || peer->kind != MTP_PEER_USER) return (NULL);
+	n = client_find_name(c, peer);
+	if (n == NULL) return (NULL);
+	if (n->presence == 1) return ("online");
+	if (n->presence != 2 || n->last_seen <= 0) return ("last seen recently");
+	snprintf(result, sizeof(result), "last seen %d", n->last_seen);
+	return (result);
+}
+
+uint32_t
+mtpUpdateVersion(const mtp_client_t *c)
+{
+	return (c == NULL ? 0 : c->update_version);
 }
 
 int

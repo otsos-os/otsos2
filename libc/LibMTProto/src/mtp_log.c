@@ -184,6 +184,10 @@ mtp_log_req_name(uint32_t kind)
 	case MTP_REQ_PING: return ("ping");
 	case MTP_REQ_GET_PASSWORD: return ("account.getPassword");
 	case MTP_REQ_CHECK_PASSWORD: return ("auth.checkPassword");
+	case MTP_REQ_FORUM_TOPICS: return ("messages.getForumTopics");
+	case MTP_REQ_TOPIC_HISTORY: return ("messages.getReplies");
+	case MTP_REQ_GET_STATE: return ("updates.getState");
+	case MTP_REQ_GET_DIFFERENCE: return ("updates.getDifference");
 	default: return ("unknown");
 	}
 }

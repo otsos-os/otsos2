@@ -466,6 +466,10 @@ mtp_session_reset(mtp_client_t *c)
 	c->last_req_len = 0;
 	c->last_req_msg_id = 0;
 	c->last_req_resent = 0;
+	c->upd_difference_chain = 0;
+	if (c->upd_have_state) {
+		c->upd_need_difference = 1;
+	}
 	if (lc_random(&c->session_id, sizeof(c->session_id)) != 0) {
 		c->session_id = 0;
 		mtp_logf(MTP_LOG_ERROR, "session: no entropy for a session id; "

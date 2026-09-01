@@ -948,6 +948,7 @@ int			mtp_schema_layer(void);
 #define MTP_ID_messages_emojiGameUnavailable	0x59e65335U
 #define MTP_ID_messages_emojiGameDiceInfo	0x44e56023U
 #define MTP_ID_messages_emojiGameOutcome	0xda2ad647U
+#define MTP_ID_messages_forumTopics	0x367617d3U
 #define MTP_ID_messages_messages	0x1d73e7eaU
 #define MTP_ID_messages_messagesSlice	0x5f206716U
 #define MTP_ID_messages_channelMessages	0xc776ba4eU
@@ -955,6 +956,10 @@ int			mtp_schema_layer(void);
 #define MTP_ID_messages_stickerSet	0x6e153f16U
 #define MTP_ID_messages_stickerSetNotModified	0xd3f924ebU
 #define MTP_ID_updates_state	0xa56c2a3eU
+#define MTP_ID_updates_difference	0x000f49caU
+#define MTP_ID_updates_differenceSlice	0xa8fb1981U
+#define MTP_ID_updates_differenceEmpty	0x5d75a138U
+#define MTP_ID_updates_differenceTooLong	0x4afe8f6dU
 
 #define MTP_FN_invokeWithLayer	0xda9b0d0dU
 #define MTP_FN_initConnection	0xc1cd5ea9U
@@ -966,6 +971,8 @@ int			mtp_schema_layer(void);
 #define MTP_FN_account_getPassword	0x548a30f5U
 #define MTP_FN_auth_checkPassword	0xd18b4d16U
 #define MTP_FN_users_getUsers	0x0d91a548U
+#define MTP_FN_messages_getForumTopics	0x3ba47bffU
+#define MTP_FN_messages_getReplies	0x22ddd30cU
 #define MTP_FN_messages_getDialogs	0xa0f4cb4fU
 #define MTP_FN_messages_getHistory	0x4423e6c5U
 #define MTP_FN_messages_sendMessage	0xfef48f62U

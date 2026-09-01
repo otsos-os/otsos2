@@ -9,6 +9,7 @@ $define %func main as start with args int, char **, char **
 /* !SPACE!
 
 $space %internal tclient_copy, tclient_input, tclient_start, tclient_send
+$space %internal tclient_composer
 $space %internal tclient_list_metrics, tclient_list_clamp, tclient_wheel
 $space %internal tclient_hint, tclient_auth_status, tclient_retry_row
 $space %internal tclient_submit_password, tclient_password_row
@@ -67,12 +68,16 @@ $space %export tclient_draw_login, tclient_event, tclient_tick, main
 #define ID_PASSWORD	13
 #define ID_CHECK_PASSWORD	14
 #define ID_DIALOG_SCROLL	15
+#define ID_HISTORY_SCROLL	16
+#define ID_TOPIC_BASE	1000
 #define ID_DIALOG_BASE	100
 #define TCLIENT_LIST_Y		52
 #define TCLIENT_LIST_PAD	8
 #define TCLIENT_LIST_GAP	4
 #define TCLIENT_WHEEL_ROWS	3
 #define TCLIENT_ARROW_ROWS	1
+#define TCLIENT_MESSAGE_ROWS	22
+#define TCLIENT_TOPIC_ROWS	10
 #define TCLIENT_SURFACE_TRIES	100
 #define TCLIENT_SURFACE_WAIT	20
 #define TCLIENT_POLL_MS		20
@@ -162,21 +167,53 @@ tclient_list_clamp(tclient_state_t *st, const tclient_list_t *l)
 
 
 static void
+tclient_ellipsis(libg_context_t *ui, const char *text, int32_t width,
+    char *out, size_t cap)
+{
+	int32_t w, h;
+	size_t n;
+
+	(void)ui;
+	if (cap == 0) return;
+	if (text == NULL) text = "";
+	strncpy(out, text, cap);
+	out[cap - 1] = '\0';
+	libgMeasureText(out, 1, &w, &h);
+	if (w <= width) return;
+	while ((n = strlen(out)) != 0) {
+		n = libgUtf8Prev(out, n);
+		out[n] = '\0';
+		snprintf(out + n, cap - n, "...");
+		libgMeasureText(out, 1, &w, &h);
+		if (w <= width) return;
+		out[n] = '\0';
+	}
+	strncpy(out, "...", cap);
+	out[cap - 1] = '\0';
+}
+
+static void
 tclient_wheel(tclient_state_t *st, int32_t dy)
 {
-	tclient_list_t	l;
-	int32_t		x;
+	int32_t x;
 
-	if (st->mtp == NULL || !mtpIsAuthorized(st->mtp) || dy == 0) {
-		return;
-	}
+	if (st->mtp == NULL || !mtpIsAuthorized(st->mtp) || dy == 0) return;
 	libgMousePosition(st->ui, &x, NULL, NULL);
-	if (x < 0 || x >= TCLIENT_DIALOG_W) {
-		return;
+	if (x < TCLIENT_DIALOG_W) {
+		tclient_list_t l;
+		tclient_list_metrics(st, &l);
+		st->dialog_scroll += dy > 0 ? TCLIENT_WHEEL_ROWS : -TCLIENT_WHEEL_ROWS;
+		tclient_list_clamp(st, &l);
+	} else if (st->selected_topic != 0) {
+		st->history_scroll += dy > 0 ? TCLIENT_WHEEL_ROWS : -TCLIENT_WHEEL_ROWS;
+		if (st->history_scroll < 0) st->history_scroll = 0;
+	} else if (mtpPeerIsForum(st->mtp, &st->selected)) {
+		st->topic_scroll += dy > 0 ? TCLIENT_WHEEL_ROWS : -TCLIENT_WHEEL_ROWS;
+		if (st->topic_scroll < 0) st->topic_scroll = 0;
+	} else {
+		st->history_scroll += dy > 0 ? TCLIENT_WHEEL_ROWS : -TCLIENT_WHEEL_ROWS;
+		if (st->history_scroll < 0) st->history_scroll = 0;
 	}
-	tclient_list_metrics(st, &l);
-	st->dialog_scroll += dy > 0 ? TCLIENT_WHEEL_ROWS : -TCLIENT_WHEEL_ROWS;
-	tclient_list_clamp(st, &l);
 }
 
 
@@ -525,6 +562,34 @@ tclient_draw_login(tclient_state_t *st)
 	tclient_retry_row(st, LOGIN_X, LOGIN_RETRY_Y);
 }
 
+static void	tclient_send(tclient_state_t *st);
+
+static void
+tclient_composer(tclient_state_t *st)
+{
+	libg_rect_t	r;
+	int		reason;
+
+	reason = mtpPeerCanWrite(st->mtp, &st->selected, st->selected_topic);
+	r = (libg_rect_t){ TCLIENT_DIALOG_W + 16, TCLIENT_HEIGHT - 48,
+	    TCLIENT_WIDTH - TCLIENT_DIALOG_W - 130, 32 };
+	if (reason != MTP_WRITE_OK && reason != MTP_WRITE_UNKNOWN) {
+		libgFillRect(st->ui, (libg_rect_t){ r.x, r.y,
+		    TCLIENT_WIDTH - TCLIENT_DIALOG_W - 32, r.height },
+		    0xFFE6E9ED);
+		libgText(st->ui, r.x + 12, r.y + (r.height - 14) / 2,
+		    mtpWriteRestrictionText(reason), 0xFF5E6872);
+		return;
+	}
+	(void)libgTextField(st->ui, ID_MESSAGE, r, st->message,
+	    sizeof(st->message));
+	r.x += r.width + 8;
+	r.width = 90;
+	if (libgButton(st->ui, ID_SEND, r, "Send") & LIBG_WIDGET_CLICKED) {
+		tclient_send(st);
+	}
+}
+
 static void
 tclient_send(tclient_state_t *st)
 {
@@ -534,7 +599,18 @@ tclient_send(tclient_state_t *st)
 	    st->message[0] == '\0') {
 		return;
 	}
-	ret = mtpSendMessage(st->mtp, &st->selected, st->message);
+	ret = mtpPeerCanWrite(st->mtp, &st->selected, st->selected_topic);
+	if (ret != MTP_WRITE_OK && ret != MTP_WRITE_UNKNOWN) {
+		snprintf(st->status, sizeof(st->status), "%s",
+		    mtpWriteRestrictionText(ret));
+		return;
+	}
+	if (st->selected_topic != 0) {
+		ret = mtpSendTopicMessage(st->mtp, &st->selected,
+		    st->selected_topic, st->message);
+	} else {
+		ret = mtpSendMessage(st->mtp, &st->selected, st->message);
+	}
 	if (ret == MTP_OK) {
 		st->message[0] = '\0';
 		return;
@@ -594,8 +670,23 @@ tclient_draw(tclient_state_t *st)
 			if (result & LIBG_WIDGET_CLICKED) {
 				st->selected = d->peer;
 				st->selected_index = i;
-				(void)mtpGetHistory(st->mtp, &st->selected,
-				    MTP_MAX_HISTORY, 0);
+				st->selected_topic = 0;
+				st->history_scroll = 0;
+				st->topic_scroll = 0;
+				if (mtpPeerIsForum(st->mtp, &st->selected)) {
+					result = mtpGetForumTopics(st->mtp, &st->selected,
+					    MTP_MAX_FORUM_TOPICS);
+				} else {
+					result = mtpGetHistory(st->mtp, &st->selected,
+					    MTP_MAX_HISTORY, 0);
+				}
+				if ((int)result != MTP_OK) {
+					snprintf(st->status, sizeof(st->status), "Load: %s",
+					    mtpError(st->mtp)[0] != '\0' ? mtpError(st->mtp) :
+					    mtpStrerror((int)result));
+				} else {
+					snprintf(st->status, sizeof(st->status), "Loading...");
+				}
 			}
 			y += TCLIENT_ROW_H;
 		}
@@ -607,24 +698,76 @@ tclient_draw(tclient_state_t *st)
 			    LIBG_SCROLL_VERTICAL, l.rows, l.total,
 			    TCLIENT_ARROW_ROWS, &st->dialog_scroll);
 		}
-		libgTextScale(st->ui, TCLIENT_DIALOG_W + 20, 18,
-		    st->selected.kind == MTP_PEER_EMPTY ? "Choose a chat" : "Messages",
-		    0xFF20252B, 2);
-		y = 58;
-		for (i = 0; i < mtpHistoryCount(st->mtp) && y < TCLIENT_HEIGHT - 72; i++) {
-			m = mtpHistoryAt(st->mtp, i);
-			libgText(st->ui, TCLIENT_DIALOG_W + 20, y, m->author[0] != '\0' ?
-			    m->author : (m->out ? "You" : "Unknown"), 0xFF4E5964);
-			libgText(st->ui, TCLIENT_DIALOG_W + 120, y, m->text, 0xFF20252B);
-			y += 22;
+		{
+			const char *presence;
+			char shown[MTP_MAX_NAME];
+			int32_t total, visible, max_scroll, text_x;
+
+			presence = mtpPeerPresence(st->mtp, &st->selected);
+			if (st->status[0] != '\0' && st->selected.kind != MTP_PEER_EMPTY)
+				libgText(st->ui, TCLIENT_DIALOG_W + 20, 40, st->status,
+				    0xFF9B2C2C);
+			if (st->selected.kind == MTP_PEER_EMPTY) {
+				libgTextScale(st->ui, TCLIENT_DIALOG_W + 20, 18, "Choose a chat",
+				    0xFF20252B, 2);
+			} else if (mtpPeerIsForum(st->mtp, &st->selected) &&
+			    st->selected_topic == 0) {
+				libgTextScale(st->ui, TCLIENT_DIALOG_W + 20, 18, "Forum topics",
+				    0xFF20252B, 2);
+				total = mtpForumTopicCount(st->mtp);
+				if (total == 0 && mtpPendingCount(st->mtp) == 0) {
+					libgText(st->ui, TCLIENT_DIALOG_W + 20, 70,
+					    "No forum topics", 0xFF5E6872);
+				}
+				visible = (TCLIENT_HEIGHT - 90) / TCLIENT_ROW_H;
+				max_scroll = total - visible;
+				if (max_scroll < 0) max_scroll = 0;
+				if (st->topic_scroll > max_scroll) st->topic_scroll = max_scroll;
+				for (i = st->topic_scroll, y = 58;
+				    i < total && i < st->topic_scroll + visible; i++, y += TCLIENT_ROW_H) {
+					const mtp_forum_topic_t *topic = mtpForumTopicAt(st->mtp, i);
+					tclient_ellipsis(st->ui, topic->title, TCLIENT_WIDTH - TCLIENT_DIALOG_W - 70,
+					    shown, sizeof(shown));
+					r = (libg_rect_t){ TCLIENT_DIALOG_W + 16, y,
+					    TCLIENT_WIDTH - TCLIENT_DIALOG_W - 32, TCLIENT_ROW_H - 4 };
+					if (libgButton(st->ui, ID_TOPIC_BASE + (uint32_t)i, r, shown) &
+					    LIBG_WIDGET_CLICKED) {
+						st->selected_topic = topic->id;
+						st->history_scroll = 0;
+						(void)mtpGetTopicHistory(st->mtp, &st->selected, topic->id,
+						    MTP_MAX_HISTORY);
+					}
+				}
+			} else {
+				libgTextScale(st->ui, TCLIENT_DIALOG_W + 20, 18, "Messages",
+				    0xFF20252B, 2);
+				if (presence != NULL) libgText(st->ui, TCLIENT_DIALOG_W + 20, 40,
+				    presence, 0xFF4E8B57);
+				total = mtpHistoryCount(st->mtp);
+				if (total == 0 && mtpPendingCount(st->mtp) == 0 &&
+				    st->status[0] == '\0') {
+					libgText(st->ui, TCLIENT_DIALOG_W + 20, 70,
+					    "No messages", 0xFF5E6872);
+				}
+				visible = TCLIENT_MESSAGE_ROWS;
+				max_scroll = total - visible;
+				if (max_scroll < 0) max_scroll = 0;
+				if (st->history_scroll > max_scroll) st->history_scroll = max_scroll;
+				for (i = st->history_scroll, y = 58;
+				    i < total && i < st->history_scroll + visible; i++, y += 22) {
+					m = mtpHistoryAt(st->mtp, i);
+					tclient_ellipsis(st->ui, m->author[0] != '\0' ? m->author :
+					    (m->out ? "You" : "Unknown"), 88, shown, sizeof(shown));
+					libgText(st->ui, TCLIENT_DIALOG_W + 20, y, shown, 0xFF4E5964);
+					text_x = TCLIENT_DIALOG_W + 120;
+					tclient_ellipsis(st->ui, m->text, TCLIENT_WIDTH - text_x - 20,
+					    shown, sizeof(shown));
+					libgText(st->ui, text_x, y, shown, 0xFF20252B);
+				}
+				tclient_composer(st);
+			}
 		}
-		r = (libg_rect_t){ TCLIENT_DIALOG_W + 16, TCLIENT_HEIGHT - 48,
-		    TCLIENT_WIDTH - TCLIENT_DIALOG_W - 130, 32 };
-		(void)libgTextField(st->ui, ID_MESSAGE, r, st->message, sizeof(st->message));
-		r.x += r.width + 8; r.width = 90;
-		if (libgButton(st->ui, ID_SEND, r, "Send") & LIBG_WIDGET_CLICKED) {
-			tclient_send(st);
-		}
+
 	}
 	(void)libgPresent(st->ui);
 }
@@ -659,7 +802,24 @@ tclient_tick(tclient_state_t *st)
 	ret = mtpStep(st->mtp);
 	if (ret != MTP_OK) {
 		snprintf(st->status, sizeof(st->status), "%s", mtpError(st->mtp));
-		return;
+		if (mtpState(st->mtp) != MTP_STATE_READY) {
+			return;
+		}
+	}
+	if (mtpUpdateVersion(st->mtp) != st->update_version) {
+		st->update_version = mtpUpdateVersion(st->mtp);
+		if (st->selected.kind != MTP_PEER_EMPTY) {
+			if (st->selected_topic != 0)
+				(void)mtpGetTopicHistory(st->mtp, &st->selected, st->selected_topic,
+				    MTP_MAX_HISTORY);
+			else if (mtpPeerIsForum(st->mtp, &st->selected))
+				(void)mtpGetForumTopics(st->mtp, &st->selected, MTP_MAX_FORUM_TOPICS);
+			else
+				(void)mtpGetHistory(st->mtp, &st->selected, MTP_MAX_HISTORY, 0);
+		}
+		if (st->dialogs_asked && mtpPendingCount(st->mtp) == 0) {
+			(void)mtpGetDialogs(st->mtp, MTP_MAX_DIALOGS);
+		}
 	}
 	if (!st->dialogs_asked && mtpState(st->mtp) == MTP_STATE_READY &&
 	    mtpIsAuthorized(st->mtp) && mtpDialogCount(st->mtp) == 0 &&
