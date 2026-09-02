@@ -26,12 +26,11 @@
 
 /* !DEFINES!
 
-$define %type u8 as 8 bit unsigned
 $define %type u32 as 32 bit unsigned
 $define %type u64 as 64 bit unsigned
 $define %type int as 32 bit signed
 $define %type size_t as unsigned long
-$define %type header_t as struct with magic, is_free, size, payload_size, next, prev
+$define %type kmem_stat_t as struct with allocator accounting counters
 
 $define %func kmem_init as procedure with args void
 $define %func kmem_alloc as function with args size_t
@@ -62,12 +61,18 @@ $space %export kmem_is_initialized, kmem_dump
 
 #include <mlibc/mlibc.h>
 
-#define KMEM_HEAP_SIZE		(8 * 1024 * 1024)
-#define KMEM_REDZONE_SIZE	16
-#define KMEM_REDZONE_BYTE	0xCC
-#define KMEM_POISON_BYTE	0xAA
 #define KMEM_ALIGN		16
+#define KMEM_SMALL_MAX		4096
 
+typedef struct kmem_stat {
+	u64	allocs;
+	u64	frees;
+	u64	bytes_inuse;
+	u64	bytes_peak;
+	u64	fails;
+} kmem_stat_t;
+
+void	kmem_init(void);
 void	*kmem_alloc(size_t size);
 void	*kmem_calloc(size_t nmemb, size_t size);
 void	*kmem_realloc(void *ptr, size_t size);
@@ -78,8 +83,6 @@ size_t	kmem_free_bytes(void);
 size_t	kmem_total_bytes(void);
 size_t	kmem_used_bytes(void);
 int	kmem_is_initialized(void);
-void	kmem_init(void);
 void	kmem_dump(void);
-void	kmem_set_growth_pool(void *addr, size_t size);
 
 #endif

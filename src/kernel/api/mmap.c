@@ -73,7 +73,7 @@ static u64 mmap_gem(process_t *proc, u32 gem_handle, u64 length, u32 prot,
       return (u64)(-API_ERR_BAD_VALUE);
     }
   } else {
-    addr = vm_map_find_free(proc, aligned);
+    addr = vm_map_find_free(&proc->vm_map, aligned);
     if (!addr) {
       return (u64)(-API_ERR_NO_MEMORY);
     }
@@ -99,7 +99,7 @@ static u64 mmap_gem(process_t *proc, u32 gem_handle, u64 length, u32 prot,
     return (u64)(-API_ERR_NO_MEMORY);
   }
 
-  if (vm_map_insert(proc, addr, addr + aligned, prot, flags, gem_handle, obj,
+  if (vm_map_insert(&proc->vm_map, addr, addr + aligned, prot, flags, gem_handle, obj,
                     0) != 0) {
     for (u64 off = 0; off < aligned; off += PAGE_SIZE) {
       pmap_remove(addr + off);
@@ -122,7 +122,7 @@ static u64 mmap_anon(process_t *proc, u64 length, u32 prot, u32 flags,
       return (u64)(-API_ERR_BAD_VALUE);
     }
   } else {
-    addr = vm_map_find_free(proc, aligned);
+    addr = vm_map_find_free(&proc->vm_map, aligned);
     if (!addr) {
       return (u64)(-API_ERR_NO_MEMORY);
     }
@@ -133,7 +133,7 @@ static u64 mmap_anon(process_t *proc, u64 length, u32 prot, u32 flags,
     return (u64)(-API_ERR_NO_MEMORY);
   }
 
-  if (vm_map_insert(proc, addr, addr + aligned, prot, flags, 0, obj, 0) != 0) {
+  if (vm_map_insert(&proc->vm_map, addr, addr + aligned, prot, flags, 0, obj, 0) != 0) {
     vm_object_unref(obj);
     return (u64)(-API_ERR_NO_MEMORY);
   }
@@ -176,7 +176,7 @@ static u64 mmap_file(process_t *proc, u64 length, u32 prot, u32 flags,
       return (u64)(-API_ERR_BAD_VALUE);
     }
   } else {
-    addr = vm_map_find_free(proc, aligned);
+    addr = vm_map_find_free(&proc->vm_map, aligned);
     if (!addr) {
       return (u64)(-API_ERR_NO_MEMORY);
     }
@@ -188,7 +188,7 @@ static u64 mmap_file(process_t *proc, u64 length, u32 prot, u32 flags,
     return (u64)(-API_ERR_NO_MEMORY);
   }
 
-  if (vm_map_insert(proc, addr, addr + aligned, prot, flags, 0, obj,
+  if (vm_map_insert(&proc->vm_map, addr, addr + aligned, prot, flags, 0, obj,
                     offset) != 0) {
     vm_object_unref(obj);
     return (u64)(-API_ERR_NO_MEMORY);
@@ -246,7 +246,7 @@ int api_mem_unmap(void *addr, u64 length) {
     return -API_ERR_BAD_ADDR;
   }
 
-  vma_t *vma = vm_map_lookup(proc, vaddr);
+  vm_map_entry_t *vma = vm_map_lookup(&proc->vm_map, vaddr);
   if (!vma) {
     return -API_ERR_NOT_FOUND;
   }
@@ -266,6 +266,6 @@ int api_mem_unmap(void *addr, u64 length) {
     pmap_remove(va);
   }
 
-  vm_map_remove(proc, vaddr);
+  vm_map_remove(&proc->vm_map, vaddr);
   return 0;
 }

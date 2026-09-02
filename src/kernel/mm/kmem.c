@@ -26,26 +26,20 @@
 
 /* !DEFINES!
 
-$define %type u8 as 8 bit unsigned
+$define %type kmem_hdr_t as allocation header immediately before a client pointer
+$define %type uma_zone_t as opaque slab allocation zone
+$define %type size_t as unsigned long
 $define %type u32 as 32 bit unsigned
 $define %type u64 as 64 bit unsigned
 $define %type int as 32 bit signed
-$define %type size_t as unsigned long
-$define %type header_t as struct with magic, is_free, size, payload_size, next, prev
 
-$define %func align16 as function with args size_t
-$define %func split_block as procedure with args header_t *, size_t
-$define %func coalesce as function with args header_t *
-$define %func kmem_init_internal as procedure with args void
-$define %func kmem_alloc_internal as function with args size_t
-$define %func kmem_free_internal as procedure with args void *
-$define %func kmem_calloc_internal as function with args size_t, size_t
-$define %func kmem_realloc_internal as function with args void *, size_t
-$define %func kmem_alloc_aligned_internal as function with args size_t, size_t
-$define %func kmem_free_bytes_internal as function with args void
-$define %func kmem_is_init_internal as function with args void
-$define %func kmem_dump_internal as procedure with args void
-$define %func kmem_usable_size_internal as function with args void *
+$define %func kmem_class_index as function with args size_t
+$define %func kmem_header as function with args void *
+$define %func kmem_account_alloc as procedure with args size_t
+$define %func kmem_account_free as procedure with args size_t
+$define %func kmem_alloc_large as function with args size_t, size_t
+$define %func kmem_alloc_small as function with args size_t
+$define %func kmem_alloc_internal as function with args size_t, size_t
 $define %func kmem_init as procedure with args void
 $define %func kmem_alloc as function with args size_t
 $define %func kmem_free as procedure with args void *
@@ -58,744 +52,356 @@ $define %func kmem_total_bytes as function with args void
 $define %func kmem_used_bytes as function with args void
 $define %func kmem_is_initialized as function with args void
 $define %func kmem_dump as procedure with args void
-$define %func kmem_set_growth_pool as procedure with args void *, size_t
 
 */
 
 /* !SPACE!
 
-$space %internal align16, split_block, coalesce
-$space %internal kmem_init_internal, kmem_alloc_internal
-$space %internal kmem_free_internal, kmem_calloc_internal
-$space %internal kmem_realloc_internal, kmem_alloc_aligned_internal
-$space %internal kmem_free_bytes_internal, kmem_is_init_internal
-$space %internal kmem_dump_internal, kmem_usable_size_internal
+$space %internal kmem_class_index, kmem_header
+$space %internal kmem_account_alloc, kmem_account_free
+$space %internal kmem_alloc_large, kmem_alloc_small, kmem_alloc_internal
 $space %export kmem_init, kmem_alloc, kmem_free, kmem_calloc
 $space %export kmem_realloc, kmem_alloc_aligned, kmem_usable_size
 $space %export kmem_free_bytes, kmem_total_bytes, kmem_used_bytes
 $space %export kmem_is_initialized, kmem_dump
-$space %export kmem_set_growth_pool
 
 */
 
-#include <mlibc/stdio.h>
-#include <kernel/bootmem.h>
 #include <kernel/sync/sync.h>
 #include <mm/kmem.h>
+#include <mm/uma.h>
 #include <mm/vm/vm_page.h>
 #include <mlibc/mlibc.h>
+#include <mlibc/stdio.h>
 
-#define KMEM_HEAP_SIZE_VAL	(8 * 1024 * 1024)
-#define KMEM_MAGIC		0x48454150
-#define KMEM_REDZONE_SZ		16
-#define KMEM_REDZONE_PAT	0xCC
-#define KMEM_POISON_PAT		0xAA
+#define KMEM_MAGIC		0x4B4D454D48445231ULL
+#define KMEM_DEAD		0x4B4D454D44454144ULL
+#define KMEM_KIND_SLAB		1U
+#define KMEM_KIND_LARGE		2U
+#define KMEM_CLASS_COUNT	13
+#define KMEM_LARGE_ALIGN_MAX	((size_t)1 << 30)
+#define KMEM_ALIGN_UP(v, a)	(((v) + (a) - 1) & ~((a) - 1))
 
-typedef struct header {
-	u32			magic;
-	u32			is_free;
-	u64			size;
-	u64			payload_size;
-	struct header		*next;
-	struct header		*prev;
-} header_t;
+static const size_t kmem_class_size[KMEM_CLASS_COUNT] = {
+	64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096
+};
 
-static char		*kmem_heap_start = NULL;
-static char		*kmem_heap_end = NULL;
-static header_t		*kmem_heap_head = NULL;
-static int		kmem_heap_init = 0;
+typedef struct kmem_hdr {
+	u64		magic;
+	size_t		usable;
+	union {
+		uma_zone_t	zone;
+		u64		phys;
+	} owner;
+	u32		pages;
+	u32		kind;
+} kmem_hdr_t;
 
-static char		*growth_pool_ptr = NULL;
-static size_t		growth_pool_remaining = 0;
-static char		*growth_pool_start = NULL;
-static char		*growth_pool_end = NULL;
+_Static_assert(sizeof(kmem_hdr_t) == 32,
+    "kmem header must preserve KMEM_ALIGN payload alignment");
 
+static const char *kmem_class_name[KMEM_CLASS_COUNT] = {
+	"kmem-64", "kmem-96", "kmem-128", "kmem-192", "kmem-256",
+	"kmem-384", "kmem-512", "kmem-768", "kmem-1k", "kmem-1536",
+	"kmem-2k", "kmem-3k", "kmem-4k"
+};
+
+static uma_zone_t	kmem_zones[KMEM_CLASS_COUNT];
 static spin_t		kmem_spin = SPIN_INITIALIZER("kmem", LO_KMEM);
-
-static size_t
-align16(size_t size)
-{
-	return ((size + 15) & ~15UL);
-}
-
-static void
-split_block(header_t *current, size_t size)
-{
-	header_t	*new_block;
-
-	if (current->size >= size + sizeof(header_t) + 16) {
-		new_block = (header_t *)((char *)current +
-		    sizeof(header_t) + size);
-		new_block->magic = KMEM_MAGIC;
-		new_block->size = current->size - size -
-		    sizeof(header_t);
-		new_block->payload_size = 0;
-		new_block->is_free = 1;
-		new_block->next = current->next;
-		new_block->prev = current;
-		if (new_block->next != NULL) {
-			new_block->next->prev = new_block;
-		}
-		current->size = size;
-		current->next = new_block;
-	}
-}
-
-static header_t *
-coalesce(header_t *block)
-{
-	header_t	*next;
-	header_t	*prev;
-
-	if (block == NULL || !block->is_free) {
-		return (block);
-	}
-
-	next = block->next;
-	if (next != NULL && next->is_free &&
-	    next->magic == KMEM_MAGIC &&
-	    (char *)next == (char *)block +
-	    sizeof(header_t) + block->size) {
-		block->size += sizeof(header_t) + next->size;
-		block->payload_size = 0;
-		block->next = next->next;
-		if (block->next != NULL) {
-			block->next->prev = block;
-		}
-	}
-
-	prev = block->prev;
-	if (prev != NULL && prev->is_free &&
-	    prev->magic == KMEM_MAGIC &&
-	    (char *)block == (char *)prev +
-	    sizeof(header_t) + prev->size) {
-		prev->size += sizeof(header_t) + block->size;
-		prev->payload_size = 0;
-		prev->next = block->next;
-		if (block->next != NULL) {
-			block->next->prev = prev;
-		}
-		return (prev);
-	}
-
-	return (block);
-}
-
-void
-kmem_set_growth_pool(void *addr, size_t size)
-{
-	spin_lock(&kmem_spin);
-	growth_pool_ptr = (char *)addr;
-	growth_pool_remaining = size;
-	growth_pool_start = (char *)addr;
-	growth_pool_end = (char *)addr + size;
-	spin_unlock(&kmem_spin);
-	printk("[KMEM] growth pool set: %p size=%d\n",
-	    addr, (int)size);
-}
-
-static void
-kmem_init_internal(void)
-{
-	kmem_heap_start = (char *)bootmem_alloc(
-	    KMEM_HEAP_SIZE_VAL, 4096);
-	if (kmem_heap_start == NULL) {
-		printk("KMEM: bootmem failed to allocate "
-		    "heap\n");
-		return;
-	}
-	kmem_heap_end = kmem_heap_start + KMEM_HEAP_SIZE_VAL;
-
-	kmem_heap_head = (header_t *)kmem_heap_start;
-	kmem_heap_head->magic = KMEM_MAGIC;
-	kmem_heap_head->size = KMEM_HEAP_SIZE_VAL -
-	    sizeof(header_t);
-	kmem_heap_head->payload_size = 0;
-	kmem_heap_head->next = NULL;
-	kmem_heap_head->prev = NULL;
-	kmem_heap_head->is_free = 1;
-
-	printk("Heap initialized at %p header size: %d\n",
-	    kmem_heap_start, (int)sizeof(header_t));
-	printk("free block size: %d\n",
-	    (int)kmem_heap_head->size);
-	__atomic_store_n(&kmem_heap_init, 1, __ATOMIC_RELEASE);
-}
-
-static void *
-kmem_alloc_internal(size_t size)
-{
-	header_t	*current;
-	u8		*base;
-	size_t		payload_size;
-	size_t		total_size;
-
-	if (kmem_heap_head == NULL) {
-		kmem_init_internal();
-	}
-	if (size == 0) {
-		return (NULL);
-	}
-
-	size = align16(size);
-	payload_size = size;
-	total_size = payload_size + (2 * KMEM_REDZONE_SZ);
-
-	current = kmem_heap_head;
-	while (current != NULL) {
-		if (current->magic != KMEM_MAGIC) {
-			printk("HEAP CORRUPTION at %p "
-			    "magic=%x\n", current,
-			    current->magic);
-			return (NULL);
-		}
-		if (current->is_free &&
-		    current->size >= total_size) {
-			split_block(current, total_size);
-			current->is_free = 0;
-			current->payload_size = payload_size;
-			base = (u8 *)current +
-			    sizeof(header_t);
-			memset(base, KMEM_REDZONE_PAT,
-			    KMEM_REDZONE_SZ);
-			memset(base + KMEM_REDZONE_SZ +
-			    payload_size, KMEM_REDZONE_PAT,
-			    KMEM_REDZONE_SZ);
-			return (void *)(base +
-			    KMEM_REDZONE_SZ);
-		}
-		current = current->next;
-	}
-
-	{
-		size_t		grow_needed;
-		void		*new_area;
-		header_t	*hdr, *last;
-
-		grow_needed = total_size + sizeof(header_t);
-		grow_needed = (grow_needed + 4095) &
-		    ~(size_t)4095;
-
-		if (growth_pool_remaining >= grow_needed) {
-			new_area = growth_pool_ptr;
-			growth_pool_ptr += grow_needed;
-			growth_pool_remaining -= grow_needed;
-		} else {
-			new_area = bootmem_alloc(grow_needed,
-			    4096);
-			if (new_area) {
-				vm_page_reserve_range(
-				    (u64)new_area -
-				    DMAP_BASE, grow_needed);
-			}
-		}
-		if (!new_area) {
-			printk("KMALLOC FAILED! request "
-			    "size: %d\n", (int)size);
-			return (NULL);
-		}
-
-		printk("[KMEM] grow: new_area=%p grow_needed=%d "
-		    "phys=%p\n", new_area, (int)grow_needed,
-		    (void *)((u64)new_area - DMAP_BASE));
-
-		hdr = (header_t *)new_area;
-		hdr->magic = KMEM_MAGIC;
-		hdr->is_free = 1;
-		hdr->size = grow_needed -
-		    sizeof(header_t);
-		hdr->payload_size = 0;
-		hdr->next = NULL;
-
-		last = kmem_heap_head;
-		while (last->next) {
-			last = last->next;
-		}
-		hdr->prev = last;
-		last->next = hdr;
-
-		if ((char *)new_area < kmem_heap_start) {
-			kmem_heap_start = (char *)new_area;
-		}
-		if ((char *)new_area + grow_needed >
-		    kmem_heap_end) {
-			kmem_heap_end = (char *)new_area +
-			    grow_needed;
-		}
-
-		current = kmem_heap_head;
-		while (current != NULL) {
-			if (current->magic != KMEM_MAGIC) {
-				return (NULL);
-			}
-			if (current->is_free &&
-			    current->size >= total_size) {
-				split_block(current, total_size);
-				current->is_free = 0;
-				current->payload_size =
-				    payload_size;
-				base = (u8 *)current +
-				    sizeof(header_t);
-				memset(base, KMEM_REDZONE_PAT,
-				    KMEM_REDZONE_SZ);
-				memset(base + KMEM_REDZONE_SZ +
-				    payload_size,
-				    KMEM_REDZONE_PAT,
-				    KMEM_REDZONE_SZ);
-				return (void *)(base +
-				    KMEM_REDZONE_SZ);
-			}
-			current = current->next;
-		}
-
-		printk("KMALLOC FAILED! request "
-		    "size: %d\n", (int)size);
-		return (NULL);
-	}
-}
-
-static void
-kmem_free_internal(void *ptr)
-{
-	header_t	*header;
-	u8		*base;
-	u8		*payload;
-	u32		i;
-
-	if (ptr == NULL) {
-		return;
-	}
-	if (kmem_heap_start == NULL || kmem_heap_end == NULL) {
-		return;
-	}
-
-	header = (header_t *)((char *)ptr - KMEM_REDZONE_SZ -
-	    sizeof(header_t));
-
-	if (header->magic != KMEM_MAGIC) {
-		printk("KFREE: invalid pointer or heap "
-		    "corrupt %p\n", ptr);
-		return;
-	}
-	if (header->is_free) {
-		printk("KFREE: double free %p\n", ptr);
-		return;
-	}
-
-	base = (u8 *)header + sizeof(header_t);
-	payload = base + KMEM_REDZONE_SZ;
-	for (i = 0; i < KMEM_REDZONE_SZ; i++) {
-		if (base[i] != KMEM_REDZONE_PAT) {
-			printk("KFREE: left redzone "
-			    "corrupted %p\n", ptr);
-			break;
-		}
-	}
-	for (i = 0; i < KMEM_REDZONE_SZ; i++) {
-		if (payload[header->payload_size + i] !=
-		    KMEM_REDZONE_PAT) {
-			printk("KFREE: right redzone "
-			    "corrupted %p\n", ptr);
-			break;
-		}
-	}
-
-	memset(payload, KMEM_POISON_PAT,
-	    (size_t)header->payload_size);
-	header->payload_size = 0;
-	header->is_free = 1;
-	coalesce(header);
-}
-
-static void *
-kmem_calloc_internal(size_t nmemb, size_t size)
-{
-	void	*ptr;
-	size_t	total;
-
-	total = nmemb * size;
-	if (nmemb != 0 && total / nmemb != size) {
-		return (NULL);
-	}
-
-	ptr = kmem_alloc_internal(total);
-	if (ptr != NULL) {
-		memset(ptr, 0, total);
-	}
-	return (ptr);
-}
-
-static void *
-kmem_realloc_internal(void *ptr, size_t size)
-{
-	header_t	*header;
-	header_t	*next;
-	void		*new_ptr;
-
-	if (ptr == NULL) {
-		return (kmem_alloc_internal(size));
-	}
-	if (size == 0) {
-		kmem_free_internal(ptr);
-		return (NULL);
-	}
-
-	header = (header_t *)((char *)ptr - KMEM_REDZONE_SZ -
-	    sizeof(header_t));
-	if (header->magic != KMEM_MAGIC) {
-		return (NULL);
-	}
-	if (header->payload_size >= size) {
-		return (ptr);
-	}
-
-	next = header->next;
-	if (next != NULL && next->is_free &&
-	    (header->size + sizeof(header_t) + next->size) >=
-	    (align16(size) + (2 * KMEM_REDZONE_SZ))) {
-		header->size += sizeof(header_t) +
-		    next->size;
-		header->next = next->next;
-		if (header->next != NULL) {
-			header->next->prev = header;
-		}
-		header->payload_size = align16(size);
-		split_block(header, header->payload_size +
-		    (2 * KMEM_REDZONE_SZ));
-		return (ptr);
-	}
-
-	new_ptr = kmem_alloc_internal(size);
-	if (new_ptr == NULL) {
-		return (NULL);
-	}
-	memcpy(new_ptr, ptr, (size_t)header->payload_size);
-	kmem_free_internal(ptr);
-	return (new_ptr);
-}
-
-static void *
-kmem_alloc_aligned_internal(size_t size, size_t align)
-{
-	header_t	*current;
-	header_t	*aligned_block;
-	u8		*base;
-	size_t		payload_size;
-	size_t		total_size;
-	u64		data_start;
-	u64		aligned_payload;
-	u64		aligned_header;
-	u64		padding;
-
-	if (kmem_heap_head == NULL) {
-		kmem_init_internal();
-	}
-	if (size == 0) {
-		return (NULL);
-	}
-	if (align <= 16) {
-		return (kmem_alloc_internal(size));
-	}
-
-	payload_size = align16(size);
-	total_size = payload_size + (2 * KMEM_REDZONE_SZ);
-	current = kmem_heap_head;
-
-rescan:
-	while (current != NULL) {
-		if (current->is_free) {
-			data_start = (u64)current +
-			    sizeof(header_t) + KMEM_REDZONE_SZ;
-			aligned_payload = (data_start + align - 1) &
-			    ~(align - 1);
-			aligned_header = aligned_payload -
-			    KMEM_REDZONE_SZ - sizeof(header_t);
-			padding = aligned_header - (u64)current;
-
-			if (padding + total_size <= current->size) {
-				if (padding >= sizeof(header_t) + 16) {
-					aligned_block = (header_t *)
-					    ((char *)current + padding);
-					aligned_block->magic =
-					    KMEM_MAGIC;
-					aligned_block->is_free = 1;
-					aligned_block->size =
-					    current->size - padding;
-					aligned_block->payload_size = 0;
-					aligned_block->next =
-					    current->next;
-					aligned_block->prev = current;
-					if (aligned_block->next != NULL)
-						aligned_block->next->prev =
-						    aligned_block;
-					current->next = aligned_block;
-					current->size = padding -
-					    sizeof(header_t);
-					current->payload_size = 0;
-					current = aligned_block;
-					padding = 0;
-				} else if (padding != 0) {
-					current = current->next;
-					continue;
-				}
-
-				if (padding == 0) {
-					split_block(current,
-					    total_size);
-					current->is_free = 0;
-					current->payload_size =
-					    payload_size;
-					base = (u8 *)current +
-					    sizeof(header_t);
-					memset(base,
-					    KMEM_REDZONE_PAT,
-					    KMEM_REDZONE_SZ);
-					memset(base + KMEM_REDZONE_SZ +
-					    current->payload_size,
-					    KMEM_REDZONE_PAT,
-					    KMEM_REDZONE_SZ);
-					return (void *)(base +
-					    KMEM_REDZONE_SZ);
-				}
-			}
-		}
-		current = current->next;
-	}
-
-	{
-		size_t		grow_needed;
-		size_t		pad;
-		void		*new_area;
-		header_t	*hdr;
-
-		grow_needed = total_size + sizeof(header_t) + align;
-		grow_needed = (grow_needed + 4095) & ~(size_t)4095;
-		if (growth_pool_remaining >= grow_needed) {
-			new_area = growth_pool_ptr;
-			growth_pool_ptr += grow_needed;
-			growth_pool_remaining -= grow_needed;
-		} else {
-			new_area = bootmem_alloc(grow_needed, 4096);
-			if (new_area) {
-				vm_page_reserve_range(
-				    (u64)new_area - DMAP_BASE,
-				    grow_needed);
-			}
-		}
-		if (!new_area) {
-			printk("KMALLOC_ALIGNED FAILED! size=%d "
-			    "align=%d\n", (int)size, (int)align);
-			return (NULL);
-		}
-		printk("[KMEM] grow aligned: new_area=%p "
-		    "grow_needed=%d phys=%p\n", new_area,
-		    (int)grow_needed,
-		    (void *)((u64)new_area - DMAP_BASE));
-
-		pad = (sizeof(header_t) + KMEM_REDZONE_SZ) % align;
-		if (pad != 0) {
-			pad = align - pad;
-		}
-		hdr = (header_t *)((u8 *)new_area + pad);
-		hdr->magic = KMEM_MAGIC;
-		hdr->is_free = 1;
-		hdr->size = grow_needed - pad - sizeof(header_t);
-		hdr->payload_size = 0;
-		hdr->next = kmem_heap_head;
-		hdr->prev = NULL;
-		if (kmem_heap_head != NULL) {
-			kmem_heap_head->prev = hdr;
-		}
-		kmem_heap_head = hdr;
-		current = hdr;
-		goto rescan;
-	}
-}
-
-static size_t
-kmem_usable_size_internal(void *ptr)
-{
-	header_t	*header;
-
-	if (ptr == NULL) {
-		return (0);
-	}
-	header = (header_t *)((char *)ptr - KMEM_REDZONE_SZ -
-	    sizeof(header_t));
-	if (header->magic != KMEM_MAGIC) {
-		return (0);
-	}
-	return (header->payload_size);
-}
-
-static size_t
-kmem_free_bytes_internal(void)
-{
-	header_t	*current;
-	size_t		free_mem;
-
-	free_mem = 0;
-	current = kmem_heap_head;
-	while (current != NULL) {
-		if (current->is_free) {
-			free_mem += current->size;
-		}
-		current = current->next;
-	}
-	return (free_mem);
-}
+static u64		kmem_allocations;
+static u64		kmem_frees;
+static u64		kmem_bytes_inuse;
+static u64		kmem_bytes_peak;
+static u64		kmem_failures;
+static int		kmem_ready;
 
 static int
-kmem_is_init_internal(void)
+kmem_class_index(size_t size)
 {
-	if (!kmem_heap_init || kmem_heap_head == NULL) {
-		return (0);
+	int	index;
+
+	for (index = 0; index < KMEM_CLASS_COUNT; index++) {
+		if (size <= kmem_class_size[index]) {
+			return (index);
+		}
 	}
-	if (kmem_heap_head->magic != KMEM_MAGIC) {
-		return (0);
+	return (-1);
+}
+
+static kmem_hdr_t *
+kmem_header(void *ptr)
+{
+	if (ptr == NULL) {
+		return (NULL);
 	}
-	return (1);
+	return ((kmem_hdr_t *)ptr - 1);
 }
 
 static void
-kmem_dump_internal(void)
+kmem_account_alloc(size_t size)
 {
-	header_t	*current;
-	int		i;
+	u64	used;
 
-	printk("--- HEAP DUMP ---\n");
-	current = kmem_heap_head;
-	i = 0;
-	while (current != NULL) {
-		printk("Block %d: %p size=%d free=%d "
-		    "next=%p prev=%p\n", i++, current,
-		    (int)current->size,
-		    (int)current->is_free,
-		    current->next, current->prev);
-		current = current->next;
+	used = __atomic_add_fetch(&kmem_bytes_inuse, size, __ATOMIC_RELAXED);
+	__atomic_fetch_add(&kmem_allocations, 1, __ATOMIC_RELAXED);
+	while (used > __atomic_load_n(&kmem_bytes_peak, __ATOMIC_RELAXED)) {
+		u64	peak;
+
+		peak = __atomic_load_n(&kmem_bytes_peak, __ATOMIC_RELAXED);
+		if (__atomic_compare_exchange_n(&kmem_bytes_peak, &peak, used, 0,
+		    __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+			break;
+		}
 	}
-	printk("Total free: %d\n",
-	    (int)kmem_free_bytes_internal());
-	printk("-----------------\n");
+}
+
+static void
+kmem_account_free(size_t size)
+{
+	__atomic_fetch_sub(&kmem_bytes_inuse, size, __ATOMIC_RELAXED);
+	__atomic_fetch_add(&kmem_frees, 1, __ATOMIC_RELAXED);
+}
+
+
+static void *
+kmem_alloc_large(size_t size, size_t align)
+{
+	kmem_hdr_t	*header;
+	u64		base, phys, bytes, pages, payload;
+
+	if (align < KMEM_ALIGN) {
+		align = KMEM_ALIGN;
+	}
+	if (align > KMEM_LARGE_ALIGN_MAX ||
+	    size > (size_t)-1 - sizeof(*header) - align) {
+		return (NULL);
+	}
+	bytes = size + sizeof(*header) + align - 1;
+	pages = (bytes + PAGE_SIZE - 1) >> PAGE_SHIFT;
+	if (pages == 0 || pages > 0xFFFFFFFFU) {
+		return (NULL);
+	}
+	phys = vm_page_alloc_contig((u32)pages, align > PAGE_SIZE ? align : PAGE_SIZE,
+	    0);
+	if (phys == 0) {
+		return (NULL);
+	}
+	base = phys + DMAP_BASE;
+	payload = KMEM_ALIGN_UP(base + sizeof(*header), align);
+	header = (kmem_hdr_t *)(payload - sizeof(*header));
+	header->magic = KMEM_MAGIC;
+	header->usable = size;
+	header->owner.phys = phys;
+	header->pages = (u32)pages;
+	header->kind = KMEM_KIND_LARGE;
+	return ((void *)payload);
+}
+
+static void *
+kmem_alloc_small(size_t size)
+{
+	kmem_hdr_t	*header;
+	void		*item;
+	int		 index;
+
+	if (size > KMEM_SMALL_MAX - sizeof(*header)) {
+		return (NULL);
+	}
+	index = kmem_class_index(size + sizeof(*header));
+	if (index < 0 || kmem_zones[index] == NULL) {
+		return (NULL);
+	}
+	item = uma_zalloc(kmem_zones[index], M_WAITOK);
+	if (item == NULL) {
+		return (NULL);
+	}
+	header = (kmem_hdr_t *)item;
+	header->magic = KMEM_MAGIC;
+	header->usable = kmem_class_size[index] - sizeof(*header);
+	header->owner.zone = kmem_zones[index];
+	header->pages = 0;
+	header->kind = KMEM_KIND_SLAB;
+	return ((void *)(header + 1));
+}
+
+static void *
+kmem_alloc_internal(size_t size, size_t align)
+{
+	void	*ptr;
+
+	if (!kmem_ready || size == 0) {
+		return (NULL);
+	}
+	if (align == 0 || (align & (align - 1)) != 0) {
+		return (NULL);
+	}
+	if (align <= KMEM_ALIGN && size <= KMEM_SMALL_MAX - sizeof(kmem_hdr_t)) {
+		ptr = kmem_alloc_small(size);
+	} else {
+		ptr = kmem_alloc_large(size, align);
+	}
+	if (ptr == NULL) {
+		__atomic_fetch_add(&kmem_failures, 1, __ATOMIC_RELAXED);
+		return (NULL);
+	}
+	kmem_account_alloc(kmem_header(ptr)->usable);
+	return (ptr);
 }
 
 void
 kmem_init(void)
 {
+	int	index;
+
 	spin_lock(&kmem_spin);
-	kmem_init_internal();
+	if (kmem_ready) {
+		spin_unlock(&kmem_spin);
+		return;
+	}
+	for (index = 0; index < KMEM_CLASS_COUNT; index++) {
+		kmem_zones[index] = uma_zcreate(kmem_class_name[index],
+		    kmem_class_size[index], KMEM_ALIGN, 0);
+		if (kmem_zones[index] == NULL) {
+			printk("kmem: cannot create %s zone\n", kmem_class_name[index]);
+			spin_unlock(&kmem_spin);
+			return;
+		}
+	}
+	__atomic_store_n(&kmem_ready, 1, __ATOMIC_RELEASE);
 	spin_unlock(&kmem_spin);
 }
 
 void *
 kmem_alloc(size_t size)
 {
-	void	*ptr;
-
-	spin_lock(&kmem_spin);
-	ptr = kmem_alloc_internal(size);
-	spin_unlock(&kmem_spin);
-	return (ptr);
-}
-
-void
-kmem_free(void *ptr)
-{
-	spin_lock(&kmem_spin);
-	kmem_free_internal(ptr);
-	spin_unlock(&kmem_spin);
+	return (kmem_alloc_internal(size, KMEM_ALIGN));
 }
 
 void *
 kmem_calloc(size_t nmemb, size_t size)
 {
 	void	*ptr;
+	size_t	 total;
 
-	spin_lock(&kmem_spin);
-	ptr = kmem_calloc_internal(nmemb, size);
-	spin_unlock(&kmem_spin);
+	if (nmemb != 0 && size > (size_t)-1 / nmemb) {
+		return (NULL);
+	}
+	total = nmemb * size;
+	ptr = kmem_alloc_internal(total, KMEM_ALIGN);
+	if (ptr != NULL) {
+		memset(ptr, 0, total);
+	}
 	return (ptr);
 }
 
 void *
 kmem_realloc(void *ptr, size_t size)
 {
-	void	*out;
+	void	*new_ptr;
+	size_t	 old_size;
 
-	spin_lock(&kmem_spin);
-	out = kmem_realloc_internal(ptr, size);
-	spin_unlock(&kmem_spin);
-	return (out);
+	if (ptr == NULL) {
+		return (kmem_alloc(size));
+	}
+	if (size == 0) {
+		kmem_free(ptr);
+		return (NULL);
+	}
+	old_size = kmem_usable_size(ptr);
+	if (old_size == 0) {
+		return (NULL);
+	}
+	if (size <= old_size) {
+		return (ptr);
+	}
+	new_ptr = kmem_alloc(size);
+	if (new_ptr == NULL) {
+		return (NULL);
+	}
+	memcpy(new_ptr, ptr, old_size);
+	kmem_free(ptr);
+	return (new_ptr);
 }
 
 void *
 kmem_alloc_aligned(size_t size, size_t align)
 {
-	void	*ptr;
+	return (kmem_alloc_internal(size, align));
+}
 
-	spin_lock(&kmem_spin);
-	ptr = kmem_alloc_aligned_internal(size, align);
-	spin_unlock(&kmem_spin);
-	return (ptr);
+void
+kmem_free(void *ptr)
+{
+	kmem_hdr_t	*header;
+	size_t		 usable;
+
+	header = kmem_header(ptr);
+	if (header == NULL || header->magic != KMEM_MAGIC) {
+		return;
+	}
+	usable = header->usable;
+	if (header->kind != KMEM_KIND_SLAB && header->kind != KMEM_KIND_LARGE) {
+		return;
+	}
+	if (header->kind == KMEM_KIND_SLAB && header->owner.zone == NULL) {
+		return;
+	}
+	if (header->kind == KMEM_KIND_LARGE && header->pages == 0) {
+		return;
+	}
+	header->magic = KMEM_DEAD;
+	if (header->kind == KMEM_KIND_SLAB) {
+		uma_zfree(header->owner.zone, header);
+	} else {
+		vm_page_free_contig(header->owner.phys, header->pages);
+	}
+	kmem_account_free(usable);
 }
 
 size_t
 kmem_usable_size(void *ptr)
 {
-	size_t	sz;
+	kmem_hdr_t	*header;
 
-	spin_lock(&kmem_spin);
-	sz = kmem_usable_size_internal(ptr);
-	spin_unlock(&kmem_spin);
-	return (sz);
+	header = kmem_header(ptr);
+	if (header == NULL || header->magic != KMEM_MAGIC) {
+		return (0);
+	}
+	return (header->usable);
 }
 
 size_t
 kmem_free_bytes(void)
 {
-	size_t	sz;
-
-	spin_lock(&kmem_spin);
-	sz = kmem_free_bytes_internal();
-	spin_unlock(&kmem_spin);
-	return (sz);
+	return ((size_t)vm_page_count_free() * PAGE_SIZE);
 }
 
 size_t
 kmem_total_bytes(void)
 {
-	return ((size_t)KMEM_HEAP_SIZE_VAL);
+	return ((size_t)vm_page_count_total() * PAGE_SIZE);
 }
 
 size_t
 kmem_used_bytes(void)
 {
-	size_t	sz;
-
-	spin_lock(&kmem_spin);
-	sz = kmem_free_bytes_internal();
-	spin_unlock(&kmem_spin);
-	return (KMEM_HEAP_SIZE_VAL - sz);
+	return ((size_t)__atomic_load_n(&kmem_bytes_inuse, __ATOMIC_RELAXED));
 }
 
 int
 kmem_is_initialized(void)
 {
-	int	ok;
-
-	if (__atomic_load_n(&kmem_heap_init, __ATOMIC_ACQUIRE) == 0) {
-		return (0);
-	}
-	spin_lock(&kmem_spin);
-	ok = kmem_is_init_internal();
-	spin_unlock(&kmem_spin);
-	return (ok);
+	return (__atomic_load_n(&kmem_ready, __ATOMIC_ACQUIRE) != 0);
 }
 
 void
 kmem_dump(void)
 {
-	spin_lock(&kmem_spin);
-	kmem_dump_internal();
-	spin_unlock(&kmem_spin);
+	printk("kmem: alloc %u free %u used %u peak %u free-pages %u fail %u\n",
+	    (u32)__atomic_load_n(&kmem_allocations, __ATOMIC_RELAXED),
+	    (u32)__atomic_load_n(&kmem_frees, __ATOMIC_RELAXED),
+	    (u32)__atomic_load_n(&kmem_bytes_inuse, __ATOMIC_RELAXED),
+	    (u32)__atomic_load_n(&kmem_bytes_peak, __ATOMIC_RELAXED),
+	    (u32)vm_page_count_free(),
+	    (u32)__atomic_load_n(&kmem_failures, __ATOMIC_RELAXED));
 }

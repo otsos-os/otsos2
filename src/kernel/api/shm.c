@@ -28,7 +28,7 @@
 
 $define %type shm_segment_t as shared memory segment metadata
 $define %type process_t as struct with mmap state
-$define %type vma_t as struct with start, end, next
+$define %type vm_map_entry_t as address-space range entry
 
 $define %func align_up as function with args u64, u64
 $define %func shm_entity_release as procedure with args entity_id_t
@@ -123,9 +123,10 @@ shm_free_if_dead(shm_segment_t *seg)
 static int
 shm_range_busy(process_t *proc, u64 start, u64 end)
 {
-	vma_t	*v;
+	vm_map_entry_t	*v;
 
-	for (v = proc->vma_list; v != NULL; v = v->next) {
+	for (v = vm_map_first(&proc->vm_map); v != NULL;
+	    v = vm_map_next(v)) {
 		if (start < v->end && end > v->start) {
 			return (1);
 		}
@@ -405,14 +406,14 @@ shm_map(shm_segment_t *seg, u64 addr, u64 size, u32 prot, u32 flags)
 			return ((u64)-API_ERR_BAD_VALUE);
 		}
 	} else {
-		addr = vm_map_find_free(proc, aligned);
+		addr = vm_map_find_free(&proc->vm_map, aligned);
 		if (addr == 0) {
 			return ((u64)-API_ERR_NO_MEMORY);
 		}
 	}
 
 	flags |= API_MAP_SHARED;
-	if (vm_map_insert(proc, addr, addr + aligned, prot, flags,
+	if (vm_map_insert(&proc->vm_map, addr, addr + aligned, prot, flags,
 	    (u32)seg->id, seg->object, 0) != 0) {
 		return ((u64)-API_ERR_NO_MEMORY);
 	}

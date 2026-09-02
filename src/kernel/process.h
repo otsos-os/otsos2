@@ -32,6 +32,7 @@
 #include <kernel/thread.h>
 #include <kernel/entity/entity.h>
 #include <mlibc/mlibc.h>
+#include <mm/vm/vm_map.h>
 
 struct vm_object;
 
@@ -53,26 +54,13 @@ struct vm_object;
 #define	PROC_EXIT_REAPED	0x4
 #define	PROC_NOTIFY_NONE	0x0
 #define	PROC_NOTIFY_APC		0x1
-#define USER_STACK_SIZE (64 * 1024)   /* initial mapped user stack */
-#define USER_STACK_MAX_SIZE (8 * 1024 * 1024)
-#define USER_STACK_END 0x0000800000000000ULL
-#define USER_STACK_BASE (USER_STACK_END - 16)
-#define USER_STACK_TOP (USER_STACK_END - USER_STACK_SIZE)
-#define USER_STACK_LIMIT (USER_STACK_END - USER_STACK_MAX_SIZE)
+#define USER_STACK_SIZE VM_MAP_STACK_INIT
+#define USER_STACK_MAX_SIZE VM_MAP_STACK_MAX
+#define USER_STACK_END VM_MAP_STACK_END
+#define USER_STACK_BASE (VM_MAP_STACK_END - 16)
+#define USER_STACK_TOP VM_MAP_STACK_TOP
+#define USER_STACK_LIMIT VM_MAP_STACK_LIMIT
 #define KERNEL_STACK_SIZE (16 * 1024) // 16 kb kheap for thread
-
-/* Virtual Memory Area — tracks a mapped region of a process's address space. */
-typedef struct vma {
-  u64 start;           /* page-aligned virtual address */
-  u64 end;             /* page-aligned end (exclusive) */
-  u32 prot;            /* API_MAP_READ / WRITE / EXEC */
-  u32 flags;           /* API_MAP_ANON / MAP_GEM / MAP_PRIVATE etc */
-  u32 gem_handle;      /* GEM handle if MAP_GEM, else 0 */
-  u64 object_base;     /* byte offset to vm_object page array */
-  u64 object_offset;   /* offset into vm_object */
-  struct vm_object *object;
-  struct vma *next;    /* singly-linked list, sorted by start */
-} vma_t;
 
 /* Process Control Block (PCB) */
 typedef struct process {
@@ -112,9 +100,7 @@ typedef struct process {
   u32 suid;
   u32 sgid;
 
-  /* mmap */
-  u64 mmap_base;
-  vma_t *vma_list;    /* sorted list of virtual memory areas */
+  vm_map_t vm_map;
 
 	/* Entity handle table (index-linked, global store) */
 	int		entity_handle_count;

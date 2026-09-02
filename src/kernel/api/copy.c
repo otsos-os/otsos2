@@ -67,7 +67,6 @@ int api_proc_copy(registers_t *regs) {
   child->owns_address_space = 1;
   child->preferred_cpu = -1;
   child->last_cpu = -1;
-  child->mmap_base = parent->mmap_base;
   child->kusr_auth = parent->kusr_auth;
   child->uid = parent->uid;
   child->gid = parent->gid;
@@ -75,7 +74,12 @@ int api_proc_copy(registers_t *regs) {
   child->egid = parent->egid;
   child->suid = parent->suid;
   child->sgid = parent->sgid;
-  vm_map_fork(parent, child);
+  if (vm_map_init(&child->vm_map, 0, VM_MAP_STACK_END) != 0 ||
+      vm_map_fork(&parent->vm_map, &child->vm_map) != 0) {
+    pmap_destroy(child_cr3);
+    memset(child, 0, sizeof(process_t));
+    return (-API_ERR_NO_MEMORY);
+  }
   api_copy_handles(child, parent);
   api_session_fork(parent, child);
   if (process_entity_attach(child) != 0) {

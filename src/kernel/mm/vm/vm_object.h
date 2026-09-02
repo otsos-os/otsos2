@@ -28,8 +28,9 @@
 
 $define %type u32 as 32 bit unsigned
 $define %type u64 as 64 bit unsigned
-$define %type vm_object_t as struct with type, ref_count, size, pages, page_count, shadow, pager, next
-$define %type vm_pager_t as struct with type, size, handle, path, getpage, putpage, haspage
+$define %type vm_object_t as independently reference-counted VM backing object
+$define %type vm_radix_node_t as 512-way internal node in an object page index
+$define %type vm_pager_t as backing pager with getpage and putpage operations
 
 $define %func vm_object_create as function with args u32, u64, void *
 $define %func vm_object_create_shadow as function with args vm_object_t *
@@ -40,6 +41,7 @@ $define %func vm_object_page as function with args vm_object_t *, u64
 $define %func vm_object_find_page as function with args vm_object_t *, u64
 $define %func vm_object_set_page as function with args vm_object_t *, u64, u64
 $define %func vm_object_get_page as function with args vm_object_t *, u64, u64
+$define %func vm_object_resize as function with args vm_object_t *, u64
 $define %func vm_object_init as procedure with args void
 
 */
@@ -49,13 +51,14 @@ $define %func vm_object_init as procedure with args void
 $space %export vm_object_create, vm_object_create_shadow
 $space %export vm_object_ref, vm_object_unref, vm_object_type
 $space %export vm_object_page, vm_object_find_page, vm_object_set_page
-$space %export vm_object_get_page, vm_object_init
+$space %export vm_object_get_page, vm_object_resize, vm_object_init
 
 */
 
 #ifndef VM_OBJECT_H
 #define VM_OBJECT_H
 
+#include <kernel/sync/sync.h>
 #include <mlibc/mlibc.h>
 
 #define VM_OBJ_ANON		0x01
@@ -65,17 +68,27 @@ $space %export vm_object_get_page, vm_object_init
 #define VM_OBJ_SHM		0x10
 #define VM_OBJ_DEVICE		0x20
 
+#define VM_RADIX_SHIFT		9
+#define VM_RADIX_SLOTS		(1U << VM_RADIX_SHIFT)
+#define VM_RADIX_LEVELS	4
+
 struct vm_pager;
+struct vm_page;
+
+typedef struct vm_radix_node {
+	void	*slots[VM_RADIX_SLOTS];
+} vm_radix_node_t;
 
 typedef struct vm_object {
-	u32			type;
-	u32			ref_count;
-	u64			size;
-	u64			*pages;
-	u64			page_count;
+	u32			 type;
+	u32			 ref_count;
+	u64			 size;
+	u64			 page_count;
+	vm_radix_node_t		*root;
 	struct vm_object	*shadow;
 	struct vm_pager		*pager;
 	struct vm_object	*next;
+	spin_t			 spin;
 } vm_object_t;
 
 vm_object_t	*vm_object_create(u32 type, u64 size, void *backing);
@@ -85,10 +98,8 @@ void		vm_object_unref(vm_object_t *obj);
 u32		vm_object_type(vm_object_t *obj);
 u64		vm_object_page(vm_object_t *obj, u64 index);
 u64		vm_object_find_page(vm_object_t *obj, u64 index);
-int		vm_object_set_page(vm_object_t *obj, u64 index,
-		    u64 phys);
-u64		vm_object_get_page(vm_object_t *obj, u64 index,
-		    u64 file_offset);
+int		vm_object_set_page(vm_object_t *obj, u64 index, u64 phys);
+u64		vm_object_get_page(vm_object_t *obj, u64 index, u64 file_offset);
 int		vm_object_resize(vm_object_t *obj, u64 new_size);
 void		vm_object_init(void);
 

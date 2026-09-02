@@ -70,7 +70,7 @@ void userspace_init(void) {
 
 /* Allocate and map user stack */
 static u64 allocate_user_stack(process_t *proc) {
-  if (vm_map_create_user_stack(proc) != 0) {
+  if (vm_map_create_user_stack(&proc->vm_map) != 0) {
     printk("[USERSPACE] Error: Failed to allocate user stack\n");
     return 0;
   }
@@ -108,7 +108,7 @@ register_data_bss(process_t *proc, u64 data_start, u64 data_end)
     vm_object_set_page(obj, idx, phys);
   }
 
-  vm_map_insert(proc, data_start, data_end, API_MAP_READ | API_MAP_WRITE,
+  vm_map_insert(&proc->vm_map, data_start, data_end, API_MAP_READ | API_MAP_WRITE,
       API_MAP_PRIVATE | API_MAP_ANON, 0, obj, 0);
   vm_object_unref(obj);
 }
@@ -133,7 +133,12 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   memset(new_proc, 0, sizeof(process_t));
   new_proc->cr3 = new_cr3;
   new_proc->owns_address_space = 1;
-  new_proc->mmap_base = MMAP_BASE;
+  if (vm_map_init(&new_proc->vm_map, 0, VM_MAP_STACK_END) != 0) {
+    pmap_destroy(new_cr3);
+    memset(new_proc, 0, sizeof(process_t));
+    return NULL;
+  }
+  vm_map_hint_set(&new_proc->vm_map, MMAP_BASE);
 
   u64 old_cr3 = pmap_get_cr3();
   pmap_load(new_cr3);
@@ -152,7 +157,7 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   /* Allocate user stack */
   u64 user_stack = allocate_user_stack(new_proc);
   if (user_stack == 0) {
-    vm_map_free_all(new_proc);
+    vm_map_free_all(&new_proc->vm_map);
     pmap_load(old_cr3);
     pmap_destroy(new_cr3);
     memset(new_proc, 0, sizeof(process_t));
@@ -184,7 +189,6 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   new_proc->owns_address_space = 1;
   new_proc->preferred_cpu = -1;
   new_proc->last_cpu = -1;
-  new_proc->mmap_base = MMAP_BASE;
   new_proc->uid = 0;
   new_proc->gid = 0;
   new_proc->euid = 0;
@@ -205,7 +209,7 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   if (process_entity_attach(new_proc) != 0) {
     printk("[USERSPACE] error: entity attach failed\n");
     pmap_load(new_cr3);
-    vm_map_free_all(new_proc);
+    vm_map_free_all(&new_proc->vm_map);
     pmap_load(old_cr3);
     pmap_destroy(new_cr3);
     process_creation_abort(new_proc);
@@ -218,7 +222,7 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   if (!td) {
     printk("[USERSPACE] error: Failed to create thread\n");
     pmap_load(new_cr3);
-    vm_map_free_all(new_proc);
+    vm_map_free_all(&new_proc->vm_map);
     pmap_load(old_cr3);
     pmap_destroy(new_cr3);
     process_creation_abort(new_proc);

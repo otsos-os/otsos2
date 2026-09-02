@@ -110,7 +110,7 @@ pmap_alloc_table(void)
 {
 	u64	phys;
 
-	phys = vm_page_alloc_phys(VM_PAGE_WIRED);
+	phys = vm_page_alloc_phys(VM_ALLOC_WIRED);
 	if (phys == 0) {
 		return (NULL);
 	}

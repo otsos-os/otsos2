@@ -72,24 +72,29 @@ Tracks physical pages and manages a free list.
 - `vm_page_ref(page)` / `vm_page_unref(page)` — reference counting
 - Static page array (no heap allocation needed for early boot)
 
-### vm/vm_map — Virtual Memory Map
+### vm/vm_map — Standalone Virtual Address Spaces
 
-Per-process VMA (Virtual Memory Area) tracking. Moved from `kernel/vma.c`.
+`vm_map_t` owns one address-space interval independently of `process_t`.
+Entries are indexed by an address-ordered red-black tree and carry an in-order
+thread for safe client iteration.  A process embeds one map, but pmap, fault,
+fork and mapping mechanics all take `vm_map_t *` directly.
 
-- `vm_map_find_free(proc, length)` — find free virtual address range
-- `vm_map_insert(proc, start, end, prot, flags, gem)` — register a VMA
-- `vm_map_remove(proc, addr)` — remove a VMA
-- `vm_map_lookup(proc, addr)` — find VMA containing addr
-- `vm_map_free_all(proc)` — free all VMAs
-- `vm_map_copy(dst, src)` — deep-copy VMA list (for fork)
+- `vm_map_init(map, min, max)` — initialise an embedded map
+- `vm_map_find_free(map, length)` — choose a free page-aligned range
+- `vm_map_insert(map, ...)` / `vm_map_remove_range(map, ...)` — modify ranges
+- `vm_map_lookup(map, addr)` — O(log n) range lookup
+- `vm_map_fork(parent, child)` — construct private shadows or shared aliases
+- `vm_map_fault(map, addr, error)` — resolve pager and CoW faults
 
 ### vm/vm_object — VM Objects
 
-Abstraction for memory backing store (anonymous, file-backed, GEM).
+Reference-counted backing objects use a fixed four-level, 512-way radix index
+of `vm_page_t` ownership instead of a resizeable flat physical-address array.
+Radix nodes come from a dedicated UMA zone, avoiding page-run waste.
 
-- `vm_object_create(type, size, backing)` — create a VM object
-- `vm_object_ref(obj)` / `vm_object_unref(obj)` — reference counting
-- Types: `VM_OBJ_ANON`, `VM_OBJ_FILE`, `VM_OBJ_GEM`
+- `vm_object_create(type, size, backing)` — create a backing object
+- `vm_object_ref(obj)` / `vm_object_unref(obj)` — lifetime control
+- Types: `VM_OBJ_ANON`, `VM_OBJ_FILE`, `VM_OBJ_GEM`, `VM_OBJ_SHM`
 
 ## Compatibility
 

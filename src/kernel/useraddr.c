@@ -97,7 +97,7 @@ user_range_fault_in(const void *addr, size_t size, int write)
     if (write) {
       err |= 0x2;
     }
-    if (vm_map_fault(proc, page, err) != 0) {
+    if (vm_map_fault(&proc->vm_map, page, err) != 0) {
       return 0;
     }
 

@@ -225,7 +225,11 @@ process_create_kernel(const char *name, void (*entry)(void))
 	proc->cr3 = pmap_get_cr3();
 	proc->entry_point = (u64)entry;
 	proc->owns_address_space = 0;
-	proc->mmap_base = MMAP_BASE;
+	if (vm_map_init(&proc->vm_map, 0, VM_MAP_STACK_END) != 0) {
+		process_creation_abort(proc);
+		return (NULL);
+	}
+	vm_map_hint_set(&proc->vm_map, MMAP_BASE);
 	proc->preferred_cpu = -1;
 	proc->last_cpu = -1;
   proc->personality = PERSONALITY_OTSOS;
@@ -238,13 +242,13 @@ process_create_kernel(const char *name, void (*entry)(void))
   proc->egid = 0;
   proc->suid = 0;
   proc->sgid = 0;
+	api_init_process(proc);
 	if (process_entity_attach(proc) != 0) {
 		process_creation_abort(proc);
 		return (NULL);
 	}
 	scheduler_assign_process(proc);
 
-  api_init_process(proc);
 	posix_init_process(proc);
 
 	td = thread_create(proc, (u64)entry, 0, KERNEL_CS,
@@ -639,18 +643,19 @@ process_teardown_resources(process_t *proc)
 	if (proc->owns_address_space && proc->cr3 != 0) {
 		old_cr3 = pmap_get_cr3();
 		if (old_cr3 == proc->cr3) {
-			vm_map_free_all(proc);
+			vm_map_free_all(&proc->vm_map);
 			pmap_load(pmap_kernel_cr3());
 		} else {
 			pmap_load(proc->cr3);
-			vm_map_free_all(proc);
+			vm_map_free_all(&proc->vm_map);
 			pmap_load(old_cr3);
 		}
 		pmap_destroy(proc->cr3);
 		proc->cr3 = 0;
 		proc->owns_address_space = 0;
 	}
-	proc->mmap_base = MMAP_BASE;
+	vm_map_init(&proc->vm_map, 0, VM_MAP_STACK_END);
+	vm_map_hint_set(&proc->vm_map, MMAP_BASE);
 	terminal_drop_pgrp(proc->pgid);
 }
 

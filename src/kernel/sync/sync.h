@@ -85,6 +85,7 @@ $const LO_THREAD as lock order level of the thread table and thread state lock
 $const LO_HANDLE as lock order level of the entity handle table lock
 $const LO_ENTITY as lock order level of the entity store lock
 $const LO_ENTITY_NS as lock order level of the entity namespace lock
+$const LO_VM_MAP as lock order level of an address space lock
 $const LO_UMA as lock order level of the UMA zone registry lock
 $const LO_UMA_ZONE as lock order level of a single UMA zone lock
 $const LO_KMEM as lock order level of the kernel heap lock
@@ -130,9 +131,10 @@ $space %export sync_init, sync_configure
 #define	LO_HANDLE	60
 #define	LO_ENTITY	64
 #define	LO_ENTITY_NS	72
-#define	LO_UMA		80
-#define	LO_UMA_ZONE	84
-#define	LO_KMEM		88
+#define	LO_VM_MAP	76
+#define	LO_KMEM		80
+#define	LO_UMA		84
+#define	LO_UMA_ZONE	88
 #define	LO_VM_PAGE	96
 #define	LO_BOOTMEM	104
 #define	LO_INTERLOCK	4088

@@ -28,25 +28,22 @@
 #define MM_H
 
 /*
- * otsos2 kernel memory management subsystem.
+ * otsos2 memory ownership flows strictly in one direction:
  *
- * Architecture inspired by FreeBSD's VM system:
+ *   bootmem -> vm_phys -> vm_page -> UMA -> kmem -> vm_object/vm_map
  *
- *   mm/
- *     mm.h              — this umbrella header
- *     kmem.h/.c         — kernel heap allocator (kmem_alloc/kmem_free/kmem_calloc/kmem_realloc)
- *     uma.h/.c          — UMA zone (slab) allocator with type tracking
- *     vm/
- *       pmap.h/.c       — physical-to-virtual mapping (x86_64 page tables)
- *       vm_page.h/.c    — physical page frame allocator
- *       vm_map.h/.c     — virtual memory map (per-process VMA tracking)
- *       vm_object.h/.c  — VM objects (anonymous / file-backed memory)
+ * bootmem discovers RAM and remains available for boot-only metadata. vm_phys
+ * owns segmented physical free runs; vm_page adds reference, wire and paging
+ * queue policy; UMA creates slab zones directly from wired vm_page runs; kmem
+ * selects UMA size classes or a direct contiguous VM run. vm_object and vm_map
+ * are clients of that stack, never allocator backends.
  *
  * Initialization order:
- *   1. kmem_init()      — kernel heap (called early in kmain)
- *   2. pmap_init()      — page table subsystem
- *   3. vm_page_init()   — physical page allocator
- *   4. uma_init()       — zone allocator (on top of kmem)
+ *   1. bootmem_init()
+ *   2. vm_page_startup() (initializes vm_phys internally)
+ *   3. uma_init()
+ *   4. kmem_init()
+ *   5. vm_object_init() and VM-map clients
  */
 
 #include <mm/kmem.h>

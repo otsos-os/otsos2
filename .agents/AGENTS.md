@@ -35,8 +35,9 @@ Monolithic kernel with the following rough layers:
 2. Kernel core (`src/kernel/kernel.c`) — initializes core services, boot memory,
    interrupts, and newbus, then lets registered drivers attach by pass before
    loading `init`.
-3. Memory management (`src/kernel/mm/*`) — bootmem allocator, kernel heap
-   (`kmem`), UMA-style allocator, VM object/page/map/pager, page tables (`pmap`).
+3. Memory management (`src/kernel/mm/*`) — bootmem discovery, segmented buddy
+   physical allocator (`vm_phys`), page policy (`vm_page`), VM-page-backed UMA,
+   kmem size-class/page-run facade, VM object/page/map/pager, page tables (`pmap`).
 4. Process/threading (`src/kernel/process.c`, `thread.c`, `scheduler.c`) —
    process table, threads, context switch, round-robin scheduler, signals, futex.
 5. Drivers (`src/kernel/drivers/*`) — newbus-managed storage, filesystems,
@@ -62,8 +63,13 @@ Monolithic kernel with the following rough layers:
   `personality == PERSONALITY_POSIX`.  Syscall numbers track Linux x86-64.
   POSIX sockets support AF_UNIX and AF_INET TCP/UDP; AF_INET routes through the
   native `net_endpoint_*` stack rather than a separate socket stack.
-- `mm/` — `bootmem.c`, `kmem.c`, `uma.c`, `vm/pmap.c`, `vm/vm_page.c`,
-  `vm/vm_object.c`, `vm/vm_map.c`, `vm/vm_pager.c`.
+- `mm/` — memory ownership is `bootmem -> vm_phys -> vm_page -> UMA -> kmem`.
+  `vm_phys.c` owns segmented buddy free runs; `vm_page.c` owns page references,
+  wiring and paging queues; `uma.c` owns VM-page-backed slabs; `kmem.c` selects
+  UMA size classes or direct contiguous page runs. `vm_object.c`, `vm_map.c` and
+  `vm_pager.c` consume that stack and must not reintroduce an allocator beneath it.
+  `vm_object` stores owned pages in a four-level radix tree; `vm_map` is a
+  standalone RB-tree-backed address space
 - `drivers/` — storage, filesystem, video, keyboard, timer, ACPI, power, PCI,
   watchdog, PMU. Early serial console setup goes through `console_early_init()`;
   UART's full driver attach is a newbus ISA module. UART probing uses a
@@ -158,7 +164,7 @@ Monolithic kernel with the following rough layers:
   `ENTITY_ARCH_PTY`, `ENTITY_ARCH_PROCESS`, `ENTITY_ARCH_THREAD`). GEM, KOFO
   and newbus handles are entity kernel handles (pid 0) with raw-slot fallback
   before entity init. Handles are `(generation << 16) | slot`; entity IDs
-  pack archetype/generation/index. Entity I/O (read/write/seek/ioctl) is
+  pack archetype/generation/index. Per-process handle snapshots stay dynamic; Entity I/O (read/write/seek/ioctl) is
   dispatched through per-archetype `entity_io_ops_t` tables registered with
   `entity_arch_io_register`; `api/entity_io.c` owns the dispatcher and the
   FILE/VNODE/PIPE handlers, `drivers/newbus/interface.c` owns the newbus
@@ -536,8 +542,8 @@ User need to test, dont run test manually, ask user.
   mode. `KERNEL_VMA` (`0xFFFFFFFF80000000`) is only the kernel image mapping
   (phys 0-2GB). Phys->VA for kernel data: `phys + DMAP_BASE`; VA->phys:
   `va - DMAP_BASE`. Kernel image addresses (e.g. `&kernel_end`) still use
-  `KERNEL_VMA`. `pmap_table_ptr()`, `bootmem_alloc()`, kmem growth, physical
-  page zero/copy helpers and the Zig ELF loader's `phys_to_ptr()`
+  `KERNEL_VMA`. `pmap_table_ptr()`, `bootmem_alloc()`, direct kmem page runs,
+  physical page zero/copy helpers and the Zig ELF loader's `phys_to_ptr()`
   (`src/userland/elf.zig`) must all use `DMAP_BASE`; the old
   `KERNEL_VMA`-based data mapping wraps for phys >= 2GB and silently
   aliases the identity map on machines with more than 2GB RAM.

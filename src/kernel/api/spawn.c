@@ -211,7 +211,7 @@ static int read_file_into_buffer(const char *path, u8 **out_buf,
 }
 
 static u64 allocate_user_stack(process_t *proc) {
-  if (vm_map_create_user_stack(proc) != 0) {
+  if (vm_map_create_user_stack(&proc->vm_map) != 0) {
     return 0;
   }
   return USER_STACK_BASE;
@@ -447,6 +447,15 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
     return -API_ERR_RETRY;
   }
   memset(child, 0, sizeof(process_t));
+  if (vm_map_init(&child->vm_map, 0, VM_MAP_STACK_END) != 0) {
+    printk("[SPAWN] Error: failed to initialize child VM map\n");
+    kmem_free(elf_buf);
+    free_string_array(kargv);
+    free_string_array(kenvp);
+    kmem_free(kpath);
+    return -API_ERR_NO_MEMORY;
+  }
+  vm_map_hint_set(&child->vm_map, MMAP_BASE);
 
   u64 new_cr3 = pmap_create();
   if (!new_cr3) {
@@ -538,11 +547,11 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
 
   child->cr3 = new_cr3;
   child->owns_address_space = 1;
-  child->mmap_base = MMAP_BASE;
 
   u64 user_stack = allocate_user_stack(child);
   if (user_stack == 0) {
     printk("[SPAWN] Error: allocate_user_stack failed\n");
+    vm_map_free_all(&child->vm_map);
     pmap_load(old_cr3);
     free_spawn_cr3(new_cr3);
     memset(child, 0, sizeof(process_t));
@@ -559,7 +568,7 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
                          &envp_addr);
   if (err < 0) {
     printk("[SPAWN] Error: build_user_stack failed\n");
-    vm_map_free_all(child);
+    vm_map_free_all(&child->vm_map);
     pmap_load(old_cr3);
     free_spawn_cr3(new_cr3);
     memset(child, 0, sizeof(process_t));
@@ -586,7 +595,6 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
   child->owns_address_space = 1;
   child->preferred_cpu = -1;
   child->last_cpu = -1;
-  child->mmap_base = MMAP_BASE;
   /* Spawn inherits parent credentials for Linux-compatible privilege
    * semantics.  A root parent creates a root child; the child can drop
    * privileges via POSIX setuid/setgid if needed. */
@@ -625,7 +633,7 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
   }
   if (process_entity_attach(child) != 0) {
     pmap_load(new_cr3);
-    vm_map_free_all(child);
+    vm_map_free_all(&child->vm_map);
     pmap_load(old_cr3);
     pmap_destroy(new_cr3);
     process_creation_abort(child);
@@ -641,7 +649,7 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
   if (!td) {
     printk("[SPAWN] Error: failed to create thread\n");
     pmap_load(new_cr3);
-    vm_map_free_all(child);
+    vm_map_free_all(&child->vm_map);
     pmap_load(old_cr3);
     pmap_destroy(new_cr3);
     process_creation_abort(child);

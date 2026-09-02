@@ -47,8 +47,8 @@ $define %func entity_handle_dup as function with args process *, int, u32
 $define %func entity_handle_copy_all as function with args process *, process *
 $define %func entity_handle_release_all as procedure with args process *
 $define %func entity_handle_drop_locked as function with args process *, int, entity id *
-$define %func entity_handle_snapshot as function with args process *, snap *, u32, u32 *
-$define %func entity_handle_snap_take as function with args process *, u32 *
+$define %func entity_handle_snapshot as function with args process *, snap *, u32, u32 *, u32 *
+$define %func entity_handle_snap_take as function with args process *, u32 *, int *
 $define %type entity_handle_snap_t as struct with id, handle, access
 
 */
@@ -323,39 +323,63 @@ entity_handle_dup(struct process *proc, int handle, u32 access)
 	return (entity_handle_alloc(proc, id, access));
 }
 
-static u32
+static int
 entity_handle_snapshot(const struct process *proc,
-    entity_handle_snap_t *out, u32 cap, u32 *total)
+    entity_handle_snap_t *out, u32 cap, u32 *out_n, u32 *total)
 {
 	u32	slot;
+	u32	prev;
 	u32	n;
+	u32	seen;
 
+	if (proc->entity_handle_count < 0 ||
+	    proc->entity_handle_count > ENTITY_MAX_HANDLES) {
+		return (-API_ERR_BAD_HANDLE);
+	}
 	n = 0;
+	seen = 0;
 	*total = 0;
+	prev = ENTITY_HANDLE_NONE;
 	slot = (u32)proc->entity_handle_head;
-	while (slot != ENTITY_HANDLE_NONE && slot < ENTITY_MAX_HANDLES) {
+	while (slot != ENTITY_HANDLE_NONE) {
+		/* A malformed owner chain must reject the notification, not spin. */
+		if (slot >= ENTITY_MAX_HANDLES || seen >= ENTITY_MAX_HANDLES ||
+		    !entity_handle_used[slot] ||
+		    entity_handle_pid[slot] != proc->pid ||
+		    entity_handle_prev[slot] != prev) {
+			return (-API_ERR_BAD_HANDLE);
+		}
+		seen++;
 		(*total)++;
 		if (n < cap) {
 			out[n].handle = (int)((entity_handle_gen[slot] << 16) |
-			    slot);
+		    slot);
 			out[n].id = entity_handle_id[slot];
 			out[n].access = entity_handle_flags[slot];
 			n++;
 		}
+		prev = slot;
 		slot = entity_handle_next[slot];
 	}
-	return (n);
+	if (seen != (u32)proc->entity_handle_count) {
+		return (-API_ERR_BAD_HANDLE);
+	}
+	*out_n = n;
+	return (0);
 }
 
 static entity_handle_snap_t *
-entity_handle_snap_take(const struct process *proc, u32 *out_n)
+entity_handle_snap_take(const struct process *proc, u32 *out_n,
+    int *out_error)
 {
 	entity_handle_snap_t	*snap;
 	u32			cap;
 	u32			n;
 	u32			total;
+	int			error;
 	int			tries;
 
+	*out_error = -API_ERR_NO_MEMORY;
 	cap = 16;
 	for (tries = 0; tries < 8; tries++) {
 		snap = (entity_handle_snap_t *)kmem_alloc(
@@ -364,10 +388,16 @@ entity_handle_snap_take(const struct process *proc, u32 *out_n)
 			return (NULL);
 		}
 		spin_lock(&entity_handle_spin);
-		n = entity_handle_snapshot(proc, snap, cap, &total);
+		error = entity_handle_snapshot(proc, snap, cap, &n, &total);
 		spin_unlock(&entity_handle_spin);
+		if (error != 0) {
+			kmem_free(snap);
+			*out_error = error;
+			return (NULL);
+		}
 		if (total <= cap) {
 			*out_n = n;
+			*out_error = 0;
 			return (snap);
 		}
 		kmem_free(snap);
@@ -388,6 +418,7 @@ entity_handle_copy_all(struct process *dst, const struct process *src)
 	entity_handle_snap_t	*snap;
 	u32			n;
 	u32			i;
+	int			error;
 	int			handle;
 
 	if (!dst || !src) {
@@ -397,9 +428,9 @@ entity_handle_copy_all(struct process *dst, const struct process *src)
 	    dst->entity_handle_count == 0) {
 		entity_handle_init_process(dst);
 	}
-	snap = entity_handle_snap_take(src, &n);
+	snap = entity_handle_snap_take(src, &n, &error);
 	if (snap == NULL) {
-		return (-API_ERR_NO_MEMORY);
+		return (error);
 	}
 	for (i = 0; i < n; i++) {
 		handle = entity_handle_alloc(dst, snap[i].id,
@@ -456,14 +487,15 @@ entity_handle_foreach(const struct process *proc,
 	entity_handle_snap_t	*snap;
 	u32			n;
 	u32			i;
+	int			error;
 	int			ret;
 
 	if (!proc || !cb) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	snap = entity_handle_snap_take(proc, &n);
+	snap = entity_handle_snap_take(proc, &n, &error);
 	if (snap == NULL) {
-		return (-API_ERR_NO_MEMORY);
+		return (error);
 	}
 	ret = 0;
 	for (i = 0; i < n; i++) {

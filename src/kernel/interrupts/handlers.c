@@ -58,7 +58,7 @@ void isr_handler(registers_t *regs) {
     if (regs->int_no == 14) {
         u64 cr2 = 0;
         __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
-        if (proc && vm_map_fault(proc, cr2, regs->err_code) == 0) {
+        if (proc && vm_map_fault(&proc->vm_map, cr2, regs->err_code) == 0) {
             return;
         }
         if (vm_cow_fault(cr2, regs->err_code) == 0) {

@@ -160,7 +160,7 @@ free_string_array(char **arr)
 static u64
 allocate_execve_stack(process_t *proc)
 {
-	if (vm_map_create_user_stack(proc) != 0) {
+	if (vm_map_create_user_stack(&proc->vm_map) != 0) {
 		return (0);
 	}
 	return (USER_STACK_BASE);
@@ -812,7 +812,6 @@ posix_fork(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 
 	child->user_stack = parent->user_stack;
 	child->owns_address_space = 1;
-	child->mmap_base = parent->mmap_base;
 	child->brk_min = parent->brk_min;
 	child->brk = parent->brk;
   child->kusr_auth = parent->kusr_auth;
@@ -827,7 +826,12 @@ posix_fork(u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6,
 	child->is_session_leader = 0;
 	child->controlling_tty = parent->controlling_tty;
 
-	vm_map_fork(parent, child);
+	if (vm_map_init(&child->vm_map, 0, VM_MAP_STACK_END) != 0 ||
+      vm_map_fork(&parent->vm_map, &child->vm_map) != 0) {
+    pmap_destroy(child_cr3);
+    memset(child, 0, sizeof(process_t));
+    return (-POSIX_ENOMEM);
+  }
 	api_copy_handles(child, parent);
 	posix_copy_fds(child, parent);
 	if (process_entity_attach(child) != 0) {
@@ -998,7 +1002,15 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 	old_cr3 = pmap_get_cr3();
 	new_as.cr3 = new_cr3;
 	new_as.owns_address_space = 1;
-	new_as.mmap_base = MMAP_BASE;
+	if (vm_map_init(&new_as.vm_map, 0, VM_MAP_STACK_END) != 0) {
+		pmap_destroy(new_cr3);
+		kmem_free(elf_buf);
+		free_string_array(kargv);
+		free_string_array(kenvp);
+		kmem_free(kpath);
+		return (-POSIX_ENOMEM);
+	}
+	vm_map_hint_set(&new_as.vm_map, MMAP_BASE);
 	pmap_load(new_cr3);
 
 	{
@@ -1096,7 +1108,7 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 		err = build_execve_stack(kargv, argc, kenvp, envc,
 		    &aux, &new_rsp, &argv_addr, &envp_addr);
 		if (err < 0) {
-			vm_map_free_all(&new_as);
+			vm_map_free_all(&new_as.vm_map);
 			pmap_load(old_cr3);
 			pmap_destroy(new_cr3);
 			free_string_array(kargv);
@@ -1119,20 +1131,19 @@ posix_execve(u64 path_u, u64 argv_u, u64 envp_u, u64 a4, u64 a5,
 		u64	dead_cr3;
 
 		dead_cr3 = proc->cr3;
-		vm_map_free_all(proc);
+		vm_map_free_all(&proc->vm_map);
 		pmap_load(new_cr3);
 		pmap_destroy(dead_cr3);
 	} else {
 		pmap_load(new_cr3);
 	}
 
-	proc->vma_list = new_as.vma_list;
-	new_as.vma_list = NULL;
+	proc->vm_map = new_as.vm_map;
+	memset(&new_as.vm_map, 0, sizeof(new_as.vm_map));
 	proc->cr3 = new_cr3;
 	proc->entry_point = entry_point;
 	proc->user_stack = user_stack;
 	proc->owns_address_space = 1;
-  proc->mmap_base = MMAP_BASE;
   proc->kusr_auth = 0;
   proc->suid = proc->euid;
   proc->sgid = proc->egid;
@@ -1422,7 +1433,7 @@ posix_set_tid_address(u64 tidptr_u, u64 a2, u64 a3, u64 a4, u64 a5,
 		flags = pmap_extract_flags(tidptr_u);
 		if (!(flags & PTE_PRESENT) || (flags & PTE_COW) ||
 		    !(flags & PTE_RW)) {
-			if (vm_map_fault(process_current(), tidptr_u, 0x3)
+			if (vm_map_fault(&process_current()->vm_map, tidptr_u, 0x3)
 			    != 0 && vm_cow_fault(tidptr_u, 0x3) != 0) {
 				return (-POSIX_EFAULT);
 			}

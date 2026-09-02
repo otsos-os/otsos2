@@ -596,8 +596,12 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	console_early_init();
 	sync_init();
 	bootmem_init(magic, addr, 0x100000,
-    (u64)&kernel_end - KERNEL_VMA);
+	    (u64)&kernel_end - KERNEL_VMA);
+	vm_page_startup();
+	uma_init();
 	kmem_init();
+	vm_map_module_init();
+	vm_object_init();
 
 	stdio_init();
 	memset(&nb_boot, 0, sizeof(nb_boot));
@@ -632,19 +636,6 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	} else {
 		printk("[BOOT] module pool allocation failed\n");
 	}
-#define KMEM_GROWTH_RESERVE_SIZE	(22 * 1024 * 1024)
-	{
-		void *gpool = bootmem_alloc(
-		    KMEM_GROWTH_RESERVE_SIZE, PAGE_SIZE);
-		if (gpool) {
-			kmem_set_growth_pool(gpool,
-			    KMEM_GROWTH_RESERVE_SIZE);
-		} else {
-			printk("[KMEM] no growth reserve, "
-			    "will use bootmem fallback\n");
-		}
-	}
-	vm_page_init_from_bootmem();
 	nb_boot.module_pool = module_pool;
 	nb_boot.module_pool_size = module_pool_sz;
 	newbus_update_bootinfo(&nb_boot);
@@ -657,8 +648,6 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	newbus_update_bootinfo(&nb_boot);
 	timer_init(timer_hz);
 	time_init();
-	vm_object_init();
-	uma_init();
 	enable_sse();
 	trace_init();
 	__asm__ volatile("sti");
