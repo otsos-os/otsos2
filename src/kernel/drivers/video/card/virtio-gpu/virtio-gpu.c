@@ -62,6 +62,7 @@ $space %export drm_virtio_gpu_driver_get
 #include <drm/rapi/rapi.h>
 #include <kernel/pci/pci.h>
 #include <kernel/pci/utils/bar.h>
+#include <kernel/mm/dma/dma.h>
 #include <kernel/mm/vm/pmap.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -80,6 +81,7 @@ typedef struct {
 	u32		height;
 	u32		pitch;
 	u8		bpp;
+	dma_mem_t	backing_mem;
 	u8		*backing;
 	u64		backing_size;
 	u32		backing_resource_id;
@@ -114,7 +116,7 @@ virtio_gpu_setup_queues(virtio_gpu_state_t *st)
 			qsize = VIRTIO_GPU_QUEUE_SIZE;
 		}
 
-		if (virtio_vq_create(&st->vqs[i], qsize) != 0) {
+		if (virtio_vq_create(&st->vqs[i], hw, qsize) != 0) {
 			drivers_log("[VIRTIO_GPU] vq %d create "
 			    "failed\n", i);
 			return (-1);
@@ -282,17 +284,15 @@ attach_backing_store(virtio_gpu_state_t *st)
 	aligned = (fb_size + PAGE_SIZE - 1) &
 	    ~((u64)PAGE_SIZE - 1);
 
-	st->backing = (u8 *)kmem_alloc_aligned(aligned,
-	    PAGE_SIZE);
-	if (!st->backing) {
+	if (dma_mem_alloc(st->hw.buf_tag, aligned, 0, &st->backing_mem) != 0) {
 		drivers_log("[VIRTIO_GPU] backing alloc "
 		    "failed\n");
 		return (-1);
 	}
-	memset(st->backing, 0, aligned);
+	st->backing = st->backing_mem.virt;
 	st->backing_size = aligned;
 
-	backing_phys = virtio_virt_to_phys(st->backing);
+	backing_phys = st->backing_mem.phys;
 	drivers_log("[VIRTIO_GPU] backing: virt=%p "
 	    "phys=%p size=%u\n",
 	    st->backing, (void *)backing_phys, (u32)aligned);
@@ -307,7 +307,7 @@ attach_backing_store(virtio_gpu_state_t *st)
 	if (rc != 0) {
 		drivers_log("[VIRTIO_GPU] attach backing "
 		    "failed\n");
-		kmem_free(st->backing);
+		dma_mem_free(&st->backing_mem);
 		st->backing = NULL;
 		return (-1);
 	}

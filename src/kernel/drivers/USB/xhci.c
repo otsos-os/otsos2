@@ -32,6 +32,10 @@ $define %type xhci_state_t as xHCI PCI controller state
 $define %func xhci_wait32 as function with args volatile u32 *, u32, u32, u32
 $define %func xhci_halt as function with args xhci_state_t *
 $define %func xhci_reset as function with args xhci_state_t *
+$define %func xhci_tags_create as function with args xhci_state_t *
+$define %func xhci_tags_destroy as procedure with args xhci_state_t *
+$define %func xhci_ring_destroy as procedure with args xhci_ring_t *
+$define %func xhci_ring_put_segs as function with args xhci_ring_t *, const dma_seg_t *, u32
 $define %func xhci_setup_rings as function with args xhci_state_t *
 $define %func xhci_drain_enter as function with args xhci_state_t *, u64 *
 $define %func xhci_drain_exit as procedure with args xhci_state_t *, u64
@@ -52,6 +56,8 @@ $define %func xhci_pci_register as function with args void
 /* !SPACE!
 
 $space %internal xhci_wait32, xhci_halt, xhci_reset, xhci_setup_rings
+$space %internal xhci_tags_create, xhci_tags_destroy
+$space %internal xhci_ring_destroy, xhci_ring_put_segs
 $space %internal xhci_drain_enter, xhci_drain_exit, xhci_drain_ring
 $space %internal xhci_event_foreign, xhci_portsc_write, xhci_port_sweep
 $space %internal xhci_command_locked, xhci_control_locked
@@ -64,6 +70,7 @@ $space %export xhci_pci_register
 #include <kernel/drivers/USB/xhci.h>
 #include <kernel/drivers/USB/usb.h>
 #include <kernel/drivers/newbus/newbus.h>
+#include <kernel/mm/dma/dma.h>
 #include <kernel/mm/kmem.h>
 #include <kernel/mm/vm/pmap.h>
 #include <kernel/pci/pci.h>
@@ -77,6 +84,15 @@ $space %export xhci_pci_register
 #define	XHCI_RFLAGS_IF		(1ULL << 9)
 #define	XHCI_CAP_LENGTH		0x00
 #define	XHCI_HCSPARAMS1		0x04
+#define	XHCI_HCCPARAMS1		0x10
+#define	XHCI_HCC_AC64		(1U << 0)
+#define	XHCI_HCC_CSZ		(1U << 2)
+#define	XHCI_DMA32_MAX		0xffffffffULL
+#define	XHCI_CTX_ALIGN		64
+#define	XHCI_RING_BOUNDARY	65536
+#define	XHCI_XFER_SEGSZ		65536
+#define	XHCI_XFER_SEGS		64
+#define	XHCI_XFER_MAX		(4U * 1024U * 1024U)
 #define	XHCI_DBOFF			0x14
 #define	XHCI_RTSOFF			0x18
 #define	XHCI_USBCMD			0x00
@@ -117,6 +133,7 @@ $space %export xhci_pci_register
 #define	XHCI_TRB_BSR			(1U << 9)
 #define	XHCI_TRB_IOC			(1U << 5)
 #define	XHCI_TRB_IDT			(1U << 6)
+#define	XHCI_TRB_CH			(1U << 4)
 #define	XHCI_TRB_DIR_IN		(1U << 16)
 #define	XHCI_TRT_OUT			(2U << 16)
 #define	XHCI_TRT_IN			(3U << 16)
@@ -145,6 +162,7 @@ typedef struct {
 
 typedef struct {
 	xhci_trb_t	*trbs;
+	dma_mem_t	mem;
 	u64		phys;
 	u16		index;
 	u8		cycle;
@@ -158,15 +176,19 @@ typedef struct {
 
 typedef struct {
 	xhci_ring_t	ring;
+	dma_map_t	map;
 	usb_complete_t	complete;
 	void		*complete_arg;
 	void		*buffer;
 	u32		length;
 	u8		active;
+	u8		map_live;
 } xhci_endpoint_t;
 
 typedef struct {
 	usb_device_t	*usb;
+	dma_mem_t	output_mem;
+	dma_mem_t	input_mem;
 	void		*output_ctx;
 	void		*input_ctx;
 	u64		output_phys;
@@ -183,11 +205,19 @@ typedef struct {
 	volatile u8	*op;
 	volatile u8	*runtime;
 	volatile u8	*doorbell;
+	dma_tag_t	tag;
+	dma_tag_t	ctx_tag;
+	dma_tag_t	ring_tag;
+	dma_tag_t	xfer_tag;
+	dma_mem_t	dcbaa_mem;
+	dma_mem_t	scratch_mem;
+	dma_mem_t	events_mem;
+	dma_mem_t	erst_mem;
 	u64		*dcbaa;
 	u64		dcbaa_phys;
 	u64		*scratch;
 	u64		scratch_phys;
-	void		**scratch_bufs;
+	dma_mem_t	*scratch_bufs;
 	u32		scratch_count;
 	xhci_trb_t	*events;
 	xhci_erst_t	*erst;
@@ -237,7 +267,6 @@ static void	xhci_slot_release(xhci_state_t *state, u8 slot_id,
 static void	xhci_poll(void *arg);
 static int	xhci_intr(void *arg);
 static int	xhci_wait32(volatile u32 *reg, u32 mask, u32 value, u32 limit);
-static u64	xhci_phys(void *ptr);
 static int	xhci_drain_enter(xhci_state_t *state, u64 *flags);
 static void	xhci_drain_exit(xhci_state_t *state, u64 flags);
 static void	xhci_drain_ring(xhci_state_t *state);
@@ -257,19 +286,28 @@ static const usb_controller_ops_t xhci_usb_ops = {
 	.interrupt = xhci_interrupt,
 };
 
-static int
-xhci_ring_create(xhci_ring_t *ring)
+static void
+xhci_ring_destroy(xhci_ring_t *ring)
 {
-	ring->trbs = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
-	if (ring->trbs == NULL) {
+	if (ring == NULL) {
+		return;
+	}
+	dma_mem_free(&ring->mem);
+	ring->trbs = NULL;
+	ring->phys = 0;
+	ring->index = 0;
+	ring->cycle = 0;
+}
+
+static int
+xhci_ring_create(dma_tag_t tag, xhci_ring_t *ring)
+{
+	if (dma_mem_alloc(tag, XHCI_RING_TRBS * sizeof(xhci_trb_t), 0,
+	    &ring->mem) != 0) {
 		return (-1);
 	}
-	memset(ring->trbs, 0, PAGE_SIZE);
-	ring->phys = xhci_phys(ring->trbs);
-	if (ring->phys == 0) {
-		kmem_free(ring->trbs);
-		return (-1);
-	}
+	ring->trbs = ring->mem.virt;
+	ring->phys = ring->mem.phys;
 	ring->index = 0;
 	ring->cycle = 1;
 	ring->trbs[XHCI_RING_TRBS - 1].parameter = ring->phys;
@@ -522,13 +560,13 @@ xhci_port_reset(void *priv, u8 port)
 }
 
 static int
-xhci_endpoint_ring(xhci_device_t *device, u8 ep_id)
+xhci_endpoint_ring(xhci_state_t *state, xhci_device_t *device, u8 ep_id)
 {
 	if (ep_id >= 32) {
 		return (-1);
 	}
 	if (device->eps[ep_id].ring.trbs == NULL &&
-	    xhci_ring_create(&device->eps[ep_id].ring) != 0) {
+	    xhci_ring_create(state->ring_tag, &device->eps[ep_id].ring) != 0) {
 		return (-1);
 	}
 	return (0);
@@ -544,12 +582,15 @@ xhci_device_free(xhci_state_t *state, xhci_device_t *device)
 		return;
 	}
 	for (ep_id = 1; ep_id < 32; ep_id++) {
-		if (device->eps[ep_id].ring.trbs != NULL) {
-			kmem_free(device->eps[ep_id].ring.trbs);
+		if (device->eps[ep_id].map_live) {
+			dma_map_unload(&device->eps[ep_id].map);
+			device->eps[ep_id].map_live = 0;
 		}
+		dma_map_destroy(&device->eps[ep_id].map);
+		xhci_ring_destroy(&device->eps[ep_id].ring);
 	}
-	kmem_free(device->output_ctx);
-	kmem_free(device->input_ctx);
+	dma_mem_free(&device->output_mem);
+	dma_mem_free(&device->input_mem);
 	kmem_free(device);
 }
 
@@ -593,23 +634,17 @@ xhci_address_device(void *priv, usb_device_t *dev)
 		return (-1);
 	}
 	ctx_size = xhci_context_size(state);
-	device->output_ctx = kmem_alloc_aligned(33 * ctx_size,
-	    64);
-	device->input_ctx = kmem_alloc_aligned(34 * ctx_size,
-	    64);
-	if (device->output_ctx == NULL ||
-	    device->input_ctx == NULL || xhci_endpoint_ring(device, 1) != 0) {
+	if (dma_mem_alloc(state->ctx_tag, 33 * (u64)ctx_size, 0,
+	    &device->output_mem) != 0 || dma_mem_alloc(state->ctx_tag,
+	    34 * (u64)ctx_size, 0, &device->input_mem) != 0 ||
+	    xhci_endpoint_ring(state, device, 1) != 0) {
 		xhci_slot_release(state, slot_id, device);
 		return (-1);
 	}
-	memset(device->output_ctx, 0, 33 * ctx_size);
-	memset(device->input_ctx, 0, 34 * ctx_size);
-	device->output_phys = xhci_phys(device->output_ctx);
-	device->input_phys = xhci_phys(device->input_ctx);
-	if (device->output_phys == 0 || device->input_phys == 0) {
-		xhci_slot_release(state, slot_id, device);
-		return (-1);
-	}
+	device->output_ctx = device->output_mem.virt;
+	device->input_ctx = device->input_mem.virt;
+	device->output_phys = device->output_mem.phys;
+	device->input_phys = device->input_mem.phys;
 	input = xhci_context(device->input_ctx, ctx_size, 0);
 	input[1] = 3;
 	slot = xhci_context(device->input_ctx, ctx_size, 1);
@@ -780,8 +815,8 @@ xhci_interface_endpoints(usb_device_t *dev, u8 interface_number,
 }
 
 static int
-xhci_fill_endpoint_contexts(xhci_device_t *device, usb_device_t *dev,
-    u8 ctx_size, u32 mask)
+xhci_fill_endpoint_contexts(xhci_state_t *state, xhci_device_t *device,
+    usb_device_t *dev, u8 ctx_size, u32 mask)
 {
 	usb_endpoint_t	*endpoint;
 	usb_interface_t	*interface;
@@ -803,7 +838,7 @@ xhci_fill_endpoint_contexts(xhci_device_t *device, usb_device_t *dev,
 				continue;
 			}
 			if (!xhci_endpoint_supported(endpoint) ||
-			    xhci_endpoint_ring(device, endpoint_id) != 0) {
+			    xhci_endpoint_ring(state, device, endpoint_id) != 0) {
 				return (-1);
 			}
 			ep = xhci_context(device->input_ctx, ctx_size,
@@ -835,7 +870,12 @@ xhci_endpoint_ring_reset(xhci_device_t *device, u8 endpoint_id)
 	if (endpoint->ring.trbs == NULL) {
 		return;
 	}
-	memset(endpoint->ring.trbs, 0, PAGE_SIZE);
+	
+	if (endpoint->map_live) {
+		dma_map_unload(&endpoint->map);
+		endpoint->map_live = 0;
+	}
+	memset(endpoint->ring.trbs, 0, endpoint->ring.mem.size);
 	endpoint->ring.index = 0;
 	endpoint->ring.cycle = 1;
 	endpoint->ring.trbs[XHCI_RING_TRBS - 1].parameter =
@@ -873,7 +913,7 @@ xhci_configure_endpoints(xhci_state_t *state, usb_device_t *dev,
 	input = xhci_context(device->input_ctx, ctx_size, 0);
 	input[0] = drop_mask;
 	input[1] = 1U | add_mask;
-	if (xhci_fill_endpoint_contexts(device, dev, ctx_size,
+	if (xhci_fill_endpoint_contexts(state, device, dev, ctx_size,
 	    add_mask) != 0) {
 		return (-1);
 	}
@@ -999,17 +1039,40 @@ xhci_transfer_wait(xhci_state_t *state, xhci_endpoint_t *endpoint,
 	return (0);
 }
 
+static u64
+xhci_ring_put_segs(xhci_ring_t *ring, const dma_seg_t *segs, u32 nsegs)
+{
+	u64	last;
+	u32	control;
+	u32	index;
+
+	last = 0;
+	for (index = 0; index < nsegs; index++) {
+		control = XHCI_TRB_TYPE_NORMAL << XHCI_TRB_TYPE_SHIFT;
+		if (index + 1 < nsegs) {
+			control |= XHCI_TRB_CH;
+		} else {
+			control |= XHCI_TRB_IOC;
+		}
+		last = xhci_ring_put(ring, segs[index].phys,
+		    (u32)segs[index].len, control);
+	}
+	return (last);
+}
+
 static int
 xhci_normal_transfer_locked(xhci_state_t *state, usb_device_t *dev,
     usb_endpoint_t *ep, void *data, u32 *length, u32 timeout)
 {
+	const dma_seg_t	*segs;
 	xhci_device_t	*device;
 	xhci_endpoint_t	*endpoint;
-	u64		phys;
+	dma_map_t	map;
 	u64		last;
-	u32		left;
-	u32		chunk;
+	u32		nsegs;
+	u32		direction;
 	u8		ep_id;
+	int		status;
 
 	if (dev->slot_id == 0 || (device = state->slots[dev->slot_id]) == NULL ||
 	    (ep_id = xhci_endpoint_id(ep)) == 0 || ep_id >= 32 ||
@@ -1017,31 +1080,34 @@ xhci_normal_transfer_locked(xhci_state_t *state, usb_device_t *dev,
 		return (-1);
 	}
 	endpoint = &device->eps[ep_id];
-	left = *length;
-	phys = xhci_phys(data);
-	if (phys == 0) {
+	if (dma_map_create(state->xfer_tag, 0, &map) != 0) {
 		return (-1);
 	}
-	last = 0;
-	while (left != 0) {
-		chunk = PAGE_SIZE - (phys & (PAGE_SIZE - 1));
-		if (chunk > left) {
-			chunk = left;
-		}
-		last = xhci_ring_put(&endpoint->ring, phys, chunk,
-		    XHCI_TRB_TYPE_NORMAL << XHCI_TRB_TYPE_SHIFT);
-		left -= chunk;
-		phys = xhci_phys((u8 *)data + (*length - left));
-		if (left != 0 && phys == 0) {
-			return (-1);
-		}
+	direction = (ep->address & USB_DIR_IN) ? DMA_F_READ : DMA_F_WRITE;
+	if (dma_map_load(&map, data, *length, direction) != 0) {
+		dma_map_destroy(&map);
+		return (-1);
 	}
-	endpoint->ring.trbs[(last - endpoint->ring.phys) / sizeof(xhci_trb_t)].
-	    control |= XHCI_TRB_IOC;
+	segs = dma_map_segs(&map, &nsegs);
+	if (segs == NULL || nsegs == 0) {
+		dma_map_unload(&map);
+		dma_map_destroy(&map);
+		return (-1);
+	}
+
+	dma_sync(&map, (direction == DMA_F_READ) ? DMA_SYNC_PREREAD :
+	    DMA_SYNC_PREWRITE);
+	last = xhci_ring_put_segs(&endpoint->ring, segs, nsegs);
 	*(volatile u32 *)(state->doorbell + (u32)dev->slot_id * 4) =
 	    (u32)ep_id;
-	return (xhci_transfer_wait(state, endpoint, last, dev->slot_id, timeout,
-	    length));
+	status = xhci_transfer_wait(state, endpoint, last, dev->slot_id, timeout,
+	    length);
+	
+	dma_sync(&map, (direction == DMA_F_READ) ? DMA_SYNC_POSTREAD :
+	    DMA_SYNC_POSTWRITE);
+	dma_map_unload(&map);
+	dma_map_destroy(&map);
+	return (status);
 }
 
 static int
@@ -1065,18 +1131,48 @@ static int
 xhci_control_locked(xhci_state_t *state, usb_device_t *dev,
     const usb_setup_t *setup, void *data, u16 length, u32 timeout)
 {
+	const dma_seg_t	*segs;
 	xhci_device_t	*device;
 	xhci_endpoint_t	*endpoint;
-	u64		phys;
+	dma_map_t	map;
 	u64		last;
 	u32		control;
 	u32		done;
+	u32		direction;
+	u32		nsegs;
+	u32		index;
+	int		status;
+	u8		loaded;
 
 	if (dev == NULL || setup == NULL || dev->slot_id == 0 ||
 	    (device = state->slots[dev->slot_id]) == NULL) {
 		return (-1);
 	}
 	endpoint = &device->eps[1];
+	loaded = 0;
+	segs = NULL;
+	nsegs = 0;
+	direction = (setup->bmRequestType & USB_DIR_IN) ? DMA_F_READ :
+	    DMA_F_WRITE;
+
+	if (length != 0) {
+		if (data == NULL || dma_map_create(state->xfer_tag, 0, &map) != 0) {
+			return (-1);
+		}
+		if (dma_map_load(&map, data, length, direction) != 0) {
+			dma_map_destroy(&map);
+			return (-1);
+		}
+		loaded = 1;
+		segs = dma_map_segs(&map, &nsegs);
+		if (segs == NULL || nsegs == 0) {
+			dma_map_unload(&map);
+			dma_map_destroy(&map);
+			return (-1);
+		}
+		dma_sync(&map, (direction == DMA_F_READ) ? DMA_SYNC_PREREAD :
+		    DMA_SYNC_PREWRITE);
+	}
 	control = (XHCI_TRB_TYPE_SETUP << XHCI_TRB_TYPE_SHIFT) | XHCI_TRB_IDT;
 	control |= XHCI_TRB_IOC;
 	if (length != 0) {
@@ -1085,14 +1181,19 @@ xhci_control_locked(xhci_state_t *state, usb_device_t *dev,
 	}
 	(void)xhci_ring_put(&endpoint->ring, *(const u64 *)setup, 8, control);
 	last = 0;
-	if (length != 0) {
-		phys = xhci_phys(data);
-		if (phys == 0) {
-			return (-1);
+
+	for (index = 0; index < nsegs; index++) {
+		control = (index == 0) ?
+		    (XHCI_TRB_TYPE_DATA << XHCI_TRB_TYPE_SHIFT) :
+		    (XHCI_TRB_TYPE_NORMAL << XHCI_TRB_TYPE_SHIFT);
+		if (direction == DMA_F_READ) {
+			control |= XHCI_TRB_DIR_IN;
 		}
-		(void)xhci_ring_put(&endpoint->ring, phys, length,
-		    (XHCI_TRB_TYPE_DATA << XHCI_TRB_TYPE_SHIFT) |
-		    ((setup->bmRequestType & USB_DIR_IN) ? XHCI_TRB_DIR_IN : 0));
+		if (index + 1 < nsegs) {
+			control |= XHCI_TRB_CH;
+		}
+		(void)xhci_ring_put(&endpoint->ring, segs[index].phys,
+		    (u32)segs[index].len, control);
 	}
 	last = xhci_ring_put(&endpoint->ring, 0, 0,
 	    (XHCI_TRB_TYPE_STATUS << XHCI_TRB_TYPE_SHIFT) | XHCI_TRB_IOC |
@@ -1102,14 +1203,21 @@ xhci_control_locked(xhci_state_t *state, usb_device_t *dev,
 	*(volatile u32 *)(state->doorbell + (u32)dev->slot_id * 4) =
 	    1U;
 	done = length;
-	if (xhci_transfer_wait(state, endpoint, last, dev->slot_id, timeout,
-	    &done) != 0) {
+	status = xhci_transfer_wait(state, endpoint, last, dev->slot_id, timeout,
+	    &done);
+	if (status != 0) {
 		usb_log_printf("xhci: slot %u control transfer failed "
 		    "req=0x%x\n",
 		    dev->slot_id, setup->bRequest);
-		return (-1);
 	}
-	return (0);
+	if (loaded) {
+		
+		dma_sync(&map, (direction == DMA_F_READ) ? DMA_SYNC_POSTREAD :
+		    DMA_SYNC_POSTWRITE);
+		dma_map_unload(&map);
+		dma_map_destroy(&map);
+	}
+	return (status);
 }
 
 static int
@@ -1143,24 +1251,45 @@ xhci_interrupt_locked(xhci_state_t *state, usb_device_t *dev,
     usb_endpoint_t *ep, void *data, u32 length, usb_complete_t complete,
     void *arg)
 {
+	const dma_seg_t	*segs;
 	xhci_device_t	*device;
 	xhci_endpoint_t	*endpoint;
 	u64		trb;
+	u32		nsegs;
+	u32		direction;
 	u8		ep_id;
 
-	if (dev == NULL || ep == NULL || data == NULL ||
+	if (dev == NULL || ep == NULL || data == NULL || length == 0 ||
 	    complete == NULL || dev->slot_id == 0 ||
 	    (device = state->slots[dev->slot_id]) == NULL ||
 	    (ep_id = xhci_endpoint_id(ep)) == 0 || ep_id >= 32) {
 		return (-1);
 	}
 	endpoint = &device->eps[ep_id];
-	if (endpoint->active) {
+	if (endpoint->active || endpoint->map_live) {
 		return (-1);
 	}
-	trb = xhci_ring_put(&endpoint->ring, xhci_phys(data), length,
-	    (XHCI_TRB_TYPE_NORMAL << XHCI_TRB_TYPE_SHIFT) | XHCI_TRB_IOC);
+
+	if (endpoint->map.tag == NULL &&
+	    dma_map_create(state->xfer_tag, 0, &endpoint->map) != 0) {
+		return (-1);
+	}
+	direction = (ep->address & USB_DIR_IN) ? DMA_F_READ : DMA_F_WRITE;
+	if (dma_map_load(&endpoint->map, data, length, direction) != 0) {
+		return (-1);
+	}
+	segs = dma_map_segs(&endpoint->map, &nsegs);
+	if (segs == NULL || nsegs == 0) {
+		dma_map_unload(&endpoint->map);
+		return (-1);
+	}
+	endpoint->map_live = 1;
+	dma_sync(&endpoint->map, (direction == DMA_F_READ) ? DMA_SYNC_PREREAD :
+	    DMA_SYNC_PREWRITE);
+	trb = xhci_ring_put_segs(&endpoint->ring, segs, nsegs);
 	if (trb == 0) {
+		dma_map_unload(&endpoint->map);
+		endpoint->map_live = 0;
 		return (-1);
 	}
 	endpoint->complete = complete;
@@ -1220,6 +1349,14 @@ xhci_handle_transfer_event(xhci_state_t *state, const xhci_trb_t *event)
 	}
 	residual = event->status & 0xFFFFFF;
 	endpoint->active = 0;
+
+	if (endpoint->map_live) {
+		dma_sync(&endpoint->map,
+		    (endpoint->map.flags & DMA_F_READ) ? DMA_SYNC_POSTREAD :
+		    DMA_SYNC_POSTWRITE);
+		dma_map_unload(&endpoint->map);
+		endpoint->map_live = 0;
+	}
 	endpoint->complete(device->usb, endpoint->buffer,
 	    residual <= endpoint->length ? endpoint->length - residual : 0,
 	    (((event->status >> 24) & 0xFF) == XHCI_CC_SUCCESS ||
@@ -1379,16 +1516,60 @@ xhci_reset(xhci_state_t *state)
 	return (xhci_wait32(status, XHCI_USBSTS_CNR, 0, 1000000));
 }
 
-static u64
-xhci_phys(void *ptr)
+static void
+xhci_tags_destroy(xhci_state_t *state)
 {
-	u64	phys;
-
-	phys = pmap_extract((u64)ptr & ~((u64)PAGE_SIZE - 1));
-	if (phys == 0) {
-		return (0);
+	if (state->xfer_tag != NULL) {
+		dma_tag_destroy(state->xfer_tag);
+		state->xfer_tag = NULL;
 	}
-	return (phys | ((u64)ptr & (PAGE_SIZE - 1)));
+	if (state->ring_tag != NULL) {
+		dma_tag_destroy(state->ring_tag);
+		state->ring_tag = NULL;
+	}
+	if (state->ctx_tag != NULL) {
+		dma_tag_destroy(state->ctx_tag);
+		state->ctx_tag = NULL;
+	}
+	if (state->tag != NULL) {
+		dma_tag_destroy(state->tag);
+		state->tag = NULL;
+	}
+}
+
+
+static int
+xhci_tags_create(xhci_state_t *state)
+{
+	u64	highaddr;
+	u32	hcc;
+
+	hcc = *(volatile u32 *)(state->cap + XHCI_HCCPARAMS1);
+	highaddr = (hcc & XHCI_HCC_AC64) ? DMA_HIGHADDR_ANY : XHCI_DMA32_MAX;
+	if (dma_tag_create(dma_tag_root(), 1, DMA_BOUNDARY_NONE, 0, highaddr, 0,
+	    1, DMA_SEGSZ_MAX, 0, "xhci", &state->tag) != 0) {
+		return (-1);
+	}
+	if (dma_tag_create(state->tag, XHCI_CTX_ALIGN, DMA_BOUNDARY_NONE, 0,
+	    DMA_HIGHADDR_ANY, 0, 1, DMA_SEGSZ_MAX, 0, "xhci-ctx",
+	    &state->ctx_tag) != 0) {
+		goto fail;
+	}
+
+	if (dma_tag_create(state->tag, PAGE_SIZE, XHCI_RING_BOUNDARY, 0,
+	    DMA_HIGHADDR_ANY, 0, 1, DMA_SEGSZ_MAX, 0, "xhci-ring",
+	    &state->ring_tag) != 0) {
+		goto fail;
+	}
+	if (dma_tag_create(state->tag, 1, DMA_BOUNDARY_NONE, 0,
+	    DMA_HIGHADDR_ANY, XHCI_XFER_MAX, XHCI_XFER_SEGS, XHCI_XFER_SEGSZ, 0,
+	    "xhci-xfer", &state->xfer_tag) != 0) {
+		goto fail;
+	}
+	return (0);
+fail:
+	xhci_tags_destroy(state);
+	return (-1);
 }
 
 static int
@@ -1396,61 +1577,49 @@ xhci_setup_rings(xhci_state_t *state)
 {
 	volatile u32	*iman;
 	volatile u64	*reg64;
-	void		*buf;
 	u32		hcs2;
 	u32		value;
 	u32		num_sp;
 	u32		sp_index;
 
-	state->dcbaa = kmem_alloc_aligned((state->max_slots + 1) * 8,
-	    64);
-	state->command_ring.trbs = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
-	state->events = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
-	state->erst = kmem_alloc_aligned(64, 64);
-	if (state->dcbaa == NULL || state->command_ring.trbs == NULL ||
-	    state->events == NULL || state->erst == NULL) {
+	if (dma_mem_alloc(state->ctx_tag, ((u64)state->max_slots + 1) * 8, 0,
+	    &state->dcbaa_mem) != 0 || xhci_ring_create(state->ring_tag,
+	    &state->command_ring) != 0 || dma_mem_alloc(state->ring_tag,
+	    XHCI_RING_TRBS * sizeof(xhci_trb_t), 0, &state->events_mem) != 0 ||
+	    dma_mem_alloc(state->ctx_tag, sizeof(xhci_erst_t), 0,
+	    &state->erst_mem) != 0) {
 		return (-1);
 	}
-	memset(state->dcbaa, 0, (state->max_slots + 1) * 8);
-	memset(state->command_ring.trbs, 0, PAGE_SIZE);
-	memset(state->events, 0, PAGE_SIZE);
-	memset(state->erst, 0, 64);
-	state->dcbaa_phys = xhci_phys(state->dcbaa);
+	state->dcbaa = state->dcbaa_mem.virt;
+	state->dcbaa_phys = state->dcbaa_mem.phys;
+	state->events = state->events_mem.virt;
+	state->events_phys = state->events_mem.phys;
+	state->erst = state->erst_mem.virt;
+	state->erst_phys = state->erst_mem.phys;
 	hcs2 = *(volatile u32 *)(state->cap + 0x08);
 	num_sp = (((hcs2 >> 27) & 0x1F) << 5) | ((hcs2 >> 21) & 0x1F);
 	if (num_sp != 0) {
-		state->scratch = kmem_alloc_aligned(num_sp * 8, 64);
-		state->scratch_bufs = kmem_alloc(num_sp * sizeof(void *));
-		if (state->scratch == NULL || state->scratch_bufs == NULL) {
+		if (dma_mem_alloc(state->ctx_tag, (u64)num_sp * 8, 0,
+		    &state->scratch_mem) != 0) {
 			return (-1);
 		}
-		memset(state->scratch, 0, num_sp * 8);
-		memset(state->scratch_bufs, 0, num_sp * sizeof(void *));
+		state->scratch = state->scratch_mem.virt;
+		state->scratch_phys = state->scratch_mem.phys;
+		state->scratch_bufs = kmem_calloc(num_sp, sizeof(dma_mem_t));
+		if (state->scratch_bufs == NULL) {
+			return (-1);
+		}
 		state->scratch_count = num_sp;
-		state->scratch_phys = xhci_phys(state->scratch);
-		if (state->scratch_phys == 0) {
-			return (-1);
-		}
 		for (sp_index = 0; sp_index < num_sp; sp_index++) {
-			buf = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
-			if (buf == NULL) {
+			
+			if (dma_mem_alloc(state->ring_tag, PAGE_SIZE, 0,
+			    &state->scratch_bufs[sp_index]) != 0) {
 				return (-1);
 			}
-			memset(buf, 0, PAGE_SIZE);
-			state->scratch_bufs[sp_index] = buf;
-			state->scratch[sp_index] = xhci_phys(buf);
-			if (state->scratch[sp_index] == 0) {
-				return (-1);
-			}
+			state->scratch[sp_index] =
+			    state->scratch_bufs[sp_index].phys;
 		}
 		state->dcbaa[0] = state->scratch_phys;
-	}
-	state->command_ring.phys = xhci_phys(state->command_ring.trbs);
-	state->events_phys = xhci_phys(state->events);
-	state->erst_phys = xhci_phys(state->erst);
-	if (state->dcbaa_phys == 0 || state->command_ring.phys == 0 ||
-	    state->events_phys == 0 || state->erst_phys == 0) {
-		return (-1);
 	}
 	state->command_ring.index = 0;
 	state->command_ring.cycle = 1;
@@ -1540,11 +1709,15 @@ xhci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	rtsoff = *(volatile u32 *)(state->cap + XHCI_RTSOFF) & ~0x1FU;
 	state->doorbell = state->cap + dboff;
 	state->runtime = state->cap + rtsoff;
+	if (xhci_tags_create(state) != 0) {
+		kmem_free(state);
+		return (-1);
+	}
 	if (state->max_slots == 0 || state->max_ports == 0 ||
 	    state->max_slots > 255 || state->max_ports > USB_MAX_PORTS ||
 	    dboff >= bar.size || rtsoff >= bar.size ||
 	    xhci_reset(state) != 0 || xhci_setup_rings(state) != 0) {
-		kmem_free(state);
+		xhci_state_destroy(state);
 		return (-1);
 	}
 	state->usb.bus_device = device_add_child(state->nb_dev, "usb", -1);
@@ -1589,17 +1762,17 @@ xhci_state_destroy(xhci_state_t *state)
 	}
 	if (state->scratch_bufs != NULL) {
 		for (index = 0; index < (int)state->scratch_count; index++) {
-			kmem_free(state->scratch_bufs[index]);
+			dma_mem_free(&state->scratch_bufs[index]);
 		}
 		kmem_free(state->scratch_bufs);
+		state->scratch_bufs = NULL;
 	}
-	if (state->scratch != NULL) {
-		kmem_free(state->scratch);
-	}
-	kmem_free(state->erst);
-	kmem_free(state->events);
-	kmem_free(state->command_ring.trbs);
-	kmem_free(state->dcbaa);
+	dma_mem_free(&state->scratch_mem);
+	dma_mem_free(&state->erst_mem);
+	dma_mem_free(&state->events_mem);
+	xhci_ring_destroy(&state->command_ring);
+	dma_mem_free(&state->dcbaa_mem);
+	xhci_tags_destroy(state);
 	kmem_free(state);
 }
 

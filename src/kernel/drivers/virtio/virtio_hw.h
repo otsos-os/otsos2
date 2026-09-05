@@ -36,9 +36,12 @@ $define %type virtio_pci_common_cfg_t as packed struct with common config regist
 $define %type virtio_gpu_config_t as packed struct with GPU device config
 $define %type virtio_transport_t as enum with PCI transport kind
 $define %type virtio_hw_t as struct with resolved transport state
+$define %type dma_tag_t as opaque pointer to a device DMA constraint set
+$const VIRTIO_LEGACY_RING_MAX as highest physical address a legacy ring may use
 
 $define %func virtio_hw_init as function with args virtio_hw_t *, pci_device_t *
 $define %func virtio_hw_shutdown as procedure with args virtio_hw_t *
+$define %func virtio_dma_tags_destroy as procedure with args virtio_hw_t *
 $define %func virtio_hw_set_status as procedure with args virtio_hw_t *, u8
 $define %func virtio_hw_get_status as function with args virtio_hw_t *
 $define %func virtio_hw_get_features as function with args virtio_hw_t *
@@ -63,6 +66,7 @@ $define %func virtio_hw_read_gpu_config as procedure with args virtio_hw_t *, vi
 /* !SPACE!
 
 $space %export virtio_hw_init, virtio_hw_shutdown
+$space %export virtio_dma_tags_destroy
 $space %export virtio_hw_set_status, virtio_hw_get_status
 $space %export virtio_hw_get_features, virtio_hw_set_features
 $space %export virtio_hw_get_features_hi, virtio_hw_set_features_hi
@@ -80,8 +84,11 @@ $space %export virtio_hw_read_isr, virtio_hw_read_gpu_config
 #ifndef VIRTIO_HW_H
 #define VIRTIO_HW_H
 
+#include <kernel/mm/dma/dma.h>
 #include <kernel/pci/pci.h>
 #include <mlibc/mlibc.h>
+
+#define	VIRTIO_LEGACY_RING_MAX	0xFFFFFFFFFFFULL
 
 #define	PCI_CAP_ID_VNDR		0x09
 #define	PCI_CFG_CAPABILITIES	0x34
@@ -204,12 +211,16 @@ typedef struct {
 	u32			dev_offset;
 	u32			dev_length;
 	virtio_gpu_config_t	*dev_mmio;
+	dma_tag_t		tag;
+	dma_tag_t		ring_tag;
+	dma_tag_t		buf_tag;
 	u32			features;
 	u8			ready;
 } virtio_hw_t;
 
 int	virtio_hw_init(virtio_hw_t *hw, pci_device_t *dev);
 void	virtio_hw_shutdown(virtio_hw_t *hw);
+void	virtio_dma_tags_destroy(virtio_hw_t *hw);
 
 void	virtio_hw_set_status(virtio_hw_t *hw, u8 status);
 u8	virtio_hw_get_status(virtio_hw_t *hw);

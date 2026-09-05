@@ -55,6 +55,12 @@ hive SYSTEM @access(read=user, add=kusr, edit=kusr) {
 		u32 SpinTimeoutKcycles = 200000
 	}
 
+	key Dma {
+		u32 BounceReserveKb = 64
+		u32 BounceMaxKb = 1024
+		bool Verbose = true
+	}
+
 	key Trace {
 		bool Enabled = true
 		u32 RingRecords = 1024

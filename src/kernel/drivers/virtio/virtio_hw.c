@@ -495,6 +495,54 @@ legacy_init(virtio_hw_t *hw)
 	return (0);
 }
 
+void
+virtio_dma_tags_destroy(virtio_hw_t *hw)
+{
+	if (hw == NULL) {
+		return;
+	}
+	if (hw->buf_tag != NULL) {
+		dma_tag_destroy(hw->buf_tag);
+		hw->buf_tag = NULL;
+	}
+	if (hw->ring_tag != NULL) {
+		dma_tag_destroy(hw->ring_tag);
+		hw->ring_tag = NULL;
+	}
+	if (hw->tag != NULL) {
+		dma_tag_destroy(hw->tag);
+		hw->tag = NULL;
+	}
+}
+
+static int
+virtio_dma_tags_create(virtio_hw_t *hw)
+{
+	u64	ring_max;
+
+	ring_max = (hw->transport == VIRTIO_TRANSPORT_LEGACY) ?
+	    VIRTIO_LEGACY_RING_MAX : DMA_HIGHADDR_ANY;
+	if (dma_tag_create(dma_tag_root(), 1, DMA_BOUNDARY_NONE, 0,
+	    DMA_HIGHADDR_ANY, 0, 1, DMA_SEGSZ_MAX, 0, "virtio",
+	    &hw->tag) != 0) {
+		return (-1);
+	}
+
+	if (dma_tag_create(hw->tag, PAGE_SIZE, DMA_BOUNDARY_NONE, 0, ring_max, 0,
+	    1, DMA_SEGSZ_MAX, 0, "virtio-ring", &hw->ring_tag) != 0) {
+		goto fail;
+	}
+	if (dma_tag_create(hw->tag, PAGE_SIZE, DMA_BOUNDARY_NONE, 0,
+	    DMA_HIGHADDR_ANY, 0, 1, DMA_SEGSZ_MAX, 0, "virtio-buf",
+	    &hw->buf_tag) != 0) {
+		goto fail;
+	}
+	return (0);
+fail:
+	virtio_dma_tags_destroy(hw);
+	return (-1);
+}
+
 int
 virtio_hw_init(virtio_hw_t *hw, pci_device_t *dev)
 {
@@ -521,6 +569,11 @@ virtio_hw_init(virtio_hw_t *hw, pci_device_t *dev)
 		}
 	}
 
+	if (virtio_dma_tags_create(hw) != 0) {
+		drivers_log("[VIRTIO] DMA tag setup failed\n");
+		return (-1);
+	}
+
 	virtio_hw_set_status(hw, VIRTIO_STATUS_RESET);
 	virtio_hw_set_status(hw, VIRTIO_STATUS_ACKNOWLEDGE);
 	virtio_hw_set_status(hw, VIRTIO_STATUS_ACKNOWLEDGE |
@@ -539,6 +592,7 @@ virtio_hw_shutdown(virtio_hw_t *hw)
 	}
 	virtio_hw_set_status(hw, VIRTIO_STATUS_RESET);
 	hw->ready = 0;
+	virtio_dma_tags_destroy(hw);
 }
 
 void

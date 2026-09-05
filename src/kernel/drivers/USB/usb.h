@@ -31,13 +31,10 @@ $define %type usb_interface_t as USB interface descriptor state
 $define %type usb_device_t as enumerated USB device state
 $define %type usb_controller_t as USB host-controller state
 $define %type usb_controller_ops_t as host-controller transport callbacks
-$define %type usb_dma_t as contiguous host-controller DMA allocation
 
 $define %func usb_controller_init as function with args usb_controller_t *, ops, void *, device_t, u8
 $define %func usb_controller_scan as procedure with args usb_controller_t *
 $define %func usb_controller_fini as procedure with args usb_controller_t *
-$define %func usb_dma_alloc as function with args usb_dma_t *, u32, u32, u64
-$define %func usb_dma_free as procedure with args usb_dma_t *
 $define %func usb_control_transfer as function with args usb_device_t *, setup, void *, u16, u32
 $define %func usb_bulk_transfer as function with args usb_device_t *, endpoint, void *, u32 *, u32
 $define %func usb_bulk_submit as function with args usb_device_t *, endpoint, void *, u32, callback, void *
@@ -52,7 +49,6 @@ $define %func usb_log_flush as procedure with args void
 /* !SPACE!
 
 $space %export usb_controller_init, usb_controller_scan, usb_controller_fini
-$space %export usb_dma_alloc, usb_dma_free
 $space %export usb_control_transfer, usb_bulk_transfer, usb_interrupt_submit
 $space %export usb_bulk_submit
 $space %export usb_set_interface
@@ -65,6 +61,7 @@ $space %export usb_log_printf, usb_log_flush
 #define KERNEL_DRIVERS_USB_USB_H
 
 #include <kernel/drivers/newbus/newbus.h>
+#include <kernel/mm/dma/dma.h>
 #include <mlibc/mlibc.h>
 
 #define	USB_MAX_PORTS		32
@@ -185,22 +182,12 @@ typedef struct usb_controller {
 	u8				port_count;
 } usb_controller_t;
 
-typedef struct {
-	void	*virt;
-	u64	phys;
-	u32	size;
-	u32	page_count;
-} usb_dma_t;
-
 int	usb_controller_init(usb_controller_t *controller,
     const usb_controller_ops_t *ops, void *priv, device_t bus_device,
     u8 port_count);
 void	usb_controller_scan(usb_controller_t *controller);
 void	usb_controller_fini(usb_controller_t *controller);
 void	usb_controller_port_retry(usb_controller_t *controller, u8 port);
-int	usb_dma_alloc(usb_dma_t *dma, u32 size, u32 alignment,
-	    u64 max_address);
-void	usb_dma_free(usb_dma_t *dma);
 int	usb_control_transfer(usb_device_t *dev, const usb_setup_t *setup,
 	    void *data, u16 length, u32 timeout);
 int	usb_bulk_transfer(usb_device_t *dev, usb_endpoint_t *ep, void *data,

@@ -24,34 +24,51 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef MM_H
-#define MM_H
+/* !DEFINES!
 
-/*
- * otsos2 memory ownership flows strictly in one direction:
- *
- *   bootmem -> vm_phys -> vm_page -> UMA -> kmem -> vm_object/vm_map
- *
- * bootmem discovers RAM and remains available for boot-only metadata. vm_phys
- * owns segmented physical free runs; vm_page adds reference, wire and paging
- * queue policy; UMA creates slab zones directly from wired vm_page runs; kmem
- * selects UMA size classes or a direct contiguous VM run. vm_object and vm_map
- * are clients of that stack, never allocator backends.
- *
- * Initialization order:
- *   1. bootmem_init()
- *   2. vm_page_startup() (initializes vm_phys internally)
- *   3. uma_init()
- *   4. kmem_init()
- *   5. vm_object_init() and VM-map clients
- */
+$define %type u32 as 32 bit unsigned
+$define %type dma_map_t as struct with one loaded buffer and its segments
 
-#include <mm/dma/dma.h>
-#include <mm/kmem.h>
-#include <mm/uma.h>
-#include <mm/vm/pmap.h>
-#include <mm/vm/vm_page.h>
-#include <mm/vm/vm_map.h>
-#include <mm/vm/vm_object.h>
+$define %func dma_sync as procedure with args dma_map_t *, u32
 
-#endif
+*/
+
+/* !SPACE!
+
+$space %export dma_sync
+
+*/
+
+#include <mm/dma/dma_internal.h>
+#include <mlibc/mlibc.h>
+
+
+void
+dma_sync(dma_map_t *map, u32 op)
+{
+	if (map == NULL || map->segs == NULL || map->nsegs == 0) {
+		return;
+	}
+
+	if ((op & DMA_SYNC_PREWRITE) != 0) {
+		if ((map->flags & DMA_F_WRITE) != 0) {
+			dma_bounce_copy_in(map);
+		}
+		__asm__ volatile("sfence" ::: "memory");
+	}
+
+	if ((op & DMA_SYNC_PREREAD) != 0) {
+		__asm__ volatile("mfence" ::: "memory");
+	}
+
+	if ((op & DMA_SYNC_POSTREAD) != 0) {
+		__asm__ volatile("lfence" ::: "memory");
+		if ((map->flags & DMA_F_READ) != 0) {
+			dma_bounce_copy_out(map);
+		}
+	}
+
+	if ((op & DMA_SYNC_POSTWRITE) != 0) {
+		__asm__ volatile("" ::: "memory");
+	}
+}

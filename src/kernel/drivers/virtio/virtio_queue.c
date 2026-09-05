@@ -38,8 +38,8 @@ $define %type virtio_hw_t as struct with resolved transport state
 $define %func desc_table_size as function with args u16
 $define %func avail_ring_size as function with args u16
 $define %func used_ring_size as function with args u16
-$define %func virtio_virt_to_phys as function with args void *
-$define %func virtio_vq_create as function with args virtio_vq_t *, u16
+$define %type dma_mem_t as struct with a coherent device-visible allocation
+$define %func virtio_vq_create as function with args virtio_vq_t *, virtio_hw_t *, u16
 $define %func virtio_vq_destroy as procedure with args virtio_vq_t *
 $define %func virtio_vq_bind as procedure with args virtio_vq_t *, virtio_hw_t *, u16
 $define %func virtio_vq_alloc_chain as function with args virtio_vq_t *, u16
@@ -54,7 +54,6 @@ $define %func virtio_vq_send_recv as function with args virtio_vq_t *, const voi
 /* !SPACE!
 
 $space %internal desc_table_size, avail_ring_size, used_ring_size
-$space %export virtio_virt_to_phys
 $space %export virtio_vq_create, virtio_vq_destroy, virtio_vq_bind
 $space %export virtio_vq_alloc_chain, virtio_vq_set_desc
 $space %export virtio_vq_kick, virtio_vq_poll, virtio_vq_free_chain
@@ -64,30 +63,12 @@ $space %export virtio_vq_send_recv
 
 #include <kernel/drivers/virtio/virtio_queue.h>
 #include <kernel/drivers/virtio/virtio_hw.h>
-#include <kernel/mm/vm/pmap.h>
+#include <kernel/mm/dma/dma.h>
+#include <kernel/mm/vm/vm_page.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 
 #define	VIRTIO_VQ_POLL_LIMIT	2000000
-
-u64
-virtio_virt_to_phys(void *vaddr)
-{
-	u64	page_virt, page_phys;
-
-	page_virt = (u64)vaddr & ~((u64)PAGE_SIZE - 1);
-	page_phys = pmap_extract(page_virt);
-	if (page_phys == 0) {
-		if ((u64)vaddr >= KERNEL_VMA) {
-			return ((u64)vaddr - KERNEL_VMA);
-		}
-		if ((u64)vaddr >= DMAP_BASE) {
-			return ((u64)vaddr - DMAP_BASE);
-		}
-		return (0);
-	}
-	return (page_phys | ((u64)vaddr & (PAGE_SIZE - 1)));
-}
 
 static u32
 desc_table_size(u16 qsize)
@@ -109,14 +90,18 @@ used_ring_size(u16 qsize)
 }
 
 int
-virtio_vq_create(virtio_vq_t *vq, u16 queue_size)
+virtio_vq_create(virtio_vq_t *vq, virtio_hw_t *hw, u16 queue_size)
 {
 	u32	desc_sz, avail_sz, used_sz, total, offset;
 	void	*mem;
 	u64	mem_phys;
 	u16	i;
 
-	if (!vq || queue_size == 0) {
+	if (!vq || !hw || queue_size == 0) {
+		return (-1);
+	}
+	if (hw->ring_tag == NULL || hw->buf_tag == NULL) {
+		drivers_log("[VIRTQ] transport has no DMA tags\n");
 		return (-1);
 	}
 
@@ -129,14 +114,12 @@ virtio_vq_create(virtio_vq_t *vq, u16 queue_size)
 	total = desc_sz + 16 + avail_sz + PAGE_SIZE + used_sz;
 	total = (total + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
 
-	mem = kmem_alloc_aligned(total, PAGE_SIZE);
-	if (!mem) {
-		drivers_log("[VIRTQ] alloc failed\n");
+	if (dma_mem_alloc(hw->ring_tag, total, 0, &vq->ring_mem) != 0) {
+		drivers_log("[VIRTQ] ring alloc failed (%u bytes)\n", total);
 		return (-1);
 	}
-	memset(mem, 0, total);
-
-	mem_phys = virtio_virt_to_phys(mem);
+	mem = vq->ring_mem.virt;
+	mem_phys = vq->ring_mem.phys;
 
 	offset = 0;
 
@@ -155,24 +138,22 @@ virtio_vq_create(virtio_vq_t *vq, u16 queue_size)
 	vq->size = queue_size;
 	vq->backing = mem;
 	vq->backing_size = total;
+	vq->hw = hw;
 
-	vq->dma_cmd = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
-	vq->dma_resp = kmem_alloc_aligned(PAGE_SIZE, PAGE_SIZE);
-	if (!vq->dma_cmd || !vq->dma_resp) {
+	if (dma_mem_alloc(hw->buf_tag, PAGE_SIZE, 0, &vq->cmd_mem) != 0 ||
+	    dma_mem_alloc(hw->buf_tag, PAGE_SIZE, 0, &vq->resp_mem) != 0) {
 		drivers_log("[VIRTQ] DMA scratch alloc "
 		    "failed\n");
-		kmem_free(mem);
-		if (vq->dma_cmd) {
-			kmem_free(vq->dma_cmd);
-		}
-		if (vq->dma_resp) {
-			kmem_free(vq->dma_resp);
-		}
+		dma_mem_free(&vq->resp_mem);
+		dma_mem_free(&vq->cmd_mem);
+		dma_mem_free(&vq->ring_mem);
 		memset(vq, 0, sizeof(*vq));
 		return (-1);
 	}
-	vq->dma_cmd_phys = virtio_virt_to_phys(vq->dma_cmd);
-	vq->dma_resp_phys = virtio_virt_to_phys(vq->dma_resp);
+	vq->dma_cmd = vq->cmd_mem.virt;
+	vq->dma_resp = vq->resp_mem.virt;
+	vq->dma_cmd_phys = vq->cmd_mem.phys;
+	vq->dma_resp_phys = vq->resp_mem.phys;
 
 	for (i = 0; i < queue_size; i++) {
 		vq->desc[i].next = (i + 1 < queue_size) ?
@@ -192,13 +173,9 @@ virtio_vq_destroy(virtio_vq_t *vq)
 	if (!vq || !vq->backing) {
 		return;
 	}
-	if (vq->dma_cmd) {
-		kmem_free(vq->dma_cmd);
-	}
-	if (vq->dma_resp) {
-		kmem_free(vq->dma_resp);
-	}
-	kmem_free(vq->backing);
+	dma_mem_free(&vq->resp_mem);
+	dma_mem_free(&vq->cmd_mem);
+	dma_mem_free(&vq->ring_mem);
 	memset(vq, 0, sizeof(*vq));
 }
 

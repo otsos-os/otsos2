@@ -15,6 +15,14 @@ mm/
     vm_page.h/.c    — physical page frame allocator
     vm_map.h/.c     — virtual memory map (per-process VMA tracking)
     vm_object.h/.c  — VM objects (anonymous / file-backed memory)
+  dma/
+    dma.h           — public DMA API (the only header drivers include)
+    dma.md          — DMA framework documentation
+    dma_tag.c       — tag tree and constraint inheritance
+    dma_mem.c       — coherent contiguous allocation
+    dma_map.c       — buffer mapping / scatter-gather segments
+    dma_bounce.c    — bounce page pool
+    dma_sync.c      — device/CPU ownership transfer
 ```
 
 ## Modules
@@ -96,6 +104,25 @@ Radix nodes come from a dedicated UMA zone, avoiding page-run waste.
 - `vm_object_ref(obj)` / `vm_object_unref(obj)` — lifetime control
 - Types: `VM_OBJ_ANON`, `VM_OBJ_FILE`, `VM_OBJ_GEM`, `VM_OBJ_SHM`
 
+### dma — Device DMA Framework
+
+The single path from a kernel buffer to a device-visible physical address,
+modelled on FreeBSD `bus_dma(9)`.  A client of the ownership chain above, never
+a layer beneath it.  See `dma/dma.md` for the full description.
+
+- `dma_tag_create(parent, ...)` — device constraints; children may only tighten
+- `dma_mem_alloc(tag, size, flags, mem)` — coherent contiguous memory for rings
+- `dma_map_load(map, buf, len, dir)` — describe a buffer as segments, bounce
+  only what violates the tag
+- `dma_sync(map, op)` — barriers plus bounce copies; not optional
+- `dma_dump()` — tags, pool usage, failures split by cause
+
+No driver builds a device address by hand.  `pmap_extract()`,
+`vm_page_alloc_contig()` and `DMAP_BASE` arithmetic are off limits to
+consumers; the per-driver DMA helpers that used to do this (`usb_dma_t`,
+`xhci_phys()`, `virtio_virt_to_phys()`) were removed outright with no
+compatibility shims.
+
 ## Compatibility
 
 Old headers (`kernel/mmu.h`, `mlibc/memory.h`) are now thin
@@ -111,5 +138,6 @@ kmain() {
     pmap_init();     // page tables
     vm_page_init();  // physical page allocator
     uma_init();      // zone allocator
+    dma_init();      // DMA framework (after kmem, before vm_map_module_init)
 }
 ```

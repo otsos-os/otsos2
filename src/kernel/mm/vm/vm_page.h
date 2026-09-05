@@ -38,7 +38,7 @@ $define %func vm_page_startup as procedure with args void
 $define %func vm_page_alloc as function with args u32
 $define %func vm_page_free as procedure with args vm_page_t *
 $define %func vm_page_alloc_phys as function with args u32
-$define %func vm_page_alloc_contig as function with args u32, u64, u64
+$define %func vm_page_alloc_contig as function with args u32, u64, u64, u64
 $define %func vm_page_free_phys as function with args u64
 $define %func vm_page_free_contig as procedure with args u64, u32
 $define %func vm_page_reserve_range as procedure with args u64, u64
@@ -132,7 +132,7 @@ vm_page_t	*vm_page_alloc(u32 flags);
 void		vm_page_free(vm_page_t *page);
 u64		vm_page_alloc_phys(u32 flags);
 u64		vm_page_alloc_contig(u32 page_total, u64 alignment,
-		    u64 max_address);
+		    u64 low, u64 high);
 int		vm_page_free_phys(u64 phys_addr);
 void		vm_page_free_contig(u64 phys_addr, u32 page_total);
 void		vm_page_reserve_range(u64 phys_start, u64 size);

@@ -182,7 +182,7 @@ kmem_alloc_large(size_t size, size_t align)
 		return (NULL);
 	}
 	phys = vm_page_alloc_contig((u32)pages, align > PAGE_SIZE ? align : PAGE_SIZE,
-	    0);
+	    0, 0);
 	if (phys == 0) {
 		return (NULL);
 	}

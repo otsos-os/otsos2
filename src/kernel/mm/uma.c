@@ -173,7 +173,7 @@ uma_slab_create(uma_zone_t zone)
 	u64		 i;
 
 	phys = vm_page_alloc_contig((u32)(zone->slab_bytes / UMA_PAGE_SIZE),
-	    zone->slab_bytes, 0);
+	    zone->slab_bytes, 0, 0);
 	if (phys == 0) {
 		return (NULL);
 	}

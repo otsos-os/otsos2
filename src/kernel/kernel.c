@@ -600,6 +600,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	vm_page_startup();
 	uma_init();
 	kmem_init();
+	dma_init();
 	vm_map_module_init();
 	vm_object_init();
 
@@ -770,6 +771,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 		sync_configure();
 		(void)cm_update_consumer(CM_CONSUMER_INPUT, 0);
 		(void)cm_update_consumer(CM_CONSUMER_NET, 0);
+		(void)cm_update_consumer(CM_CONSUMER_DMA, 0);
 	}
 
 	status_line("kmem heap", heap_ok);

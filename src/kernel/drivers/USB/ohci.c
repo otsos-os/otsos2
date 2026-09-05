@@ -12,12 +12,17 @@ $define %type ohci_hcca_t as OHCI host controller communications area
 $define %type ohci_ed_t as OHCI endpoint descriptor
 $define %type ohci_td_t as OHCI transfer descriptor
 $define %type ohci_state_t as OHCI controller state
+$define %type dma_tag_t as opaque pointer to a device DMA constraint set
+$define %type dma_mem_t as struct with a coherent device-visible allocation
+$define %func ohci_tags_create as function with args ohci_state_t *
+$define %func ohci_tags_destroy as procedure with args ohci_state_t *
 $define %func ohci_pci_register as function with args void
 
 */
 
 /* !SPACE!
 
+$space %internal ohci_tags_create, ohci_tags_destroy
 $space %internal ohci_wait, ohci_transfer, ohci_poll
 $space %internal ohci_pci_probe, ohci_pci_remove
 $space %export ohci_pci_register
@@ -27,6 +32,7 @@ $space %export ohci_pci_register
 #include <kernel/drivers/USB/ohci.h>
 #include <kernel/drivers/USB/usb.h>
 #include <kernel/drivers/newbus/newbus.h>
+#include <kernel/mm/dma/dma.h>
 #include <kernel/mm/kmem.h>
 #include <kernel/mm/vm/pmap.h>
 #include <kernel/pci/pci.h>
@@ -36,6 +42,12 @@ $space %export ohci_pci_register
 #define OHCI_MAX	8
 #define OHCI_MAX_REQ	32
 #define OHCI_DMA_MAX	0xffffffffULL
+#define OHCI_HCCA_ALIGN		256
+#define OHCI_DESC_ALIGN		16
+#define OHCI_PAYLOAD_ALIGN	4096
+#define OHCI_PAYLOAD_MAX	8192
+#define OHCI_SETUP_BYTES	8
+#define OHCI_PAYLOAD_TAG_MAX	(OHCI_PAYLOAD_MAX + OHCI_SETUP_BYTES)
 
 #define OHCI_REV	0x00
 #define OHCI_CONTROL	0x04
@@ -121,8 +133,8 @@ typedef struct {
 	usb_device_t *dev;
 	usb_endpoint_t *ep;
 	void *data;
-	usb_dma_t desc_dma;
-	usb_dma_t payload_dma;
+	dma_mem_t desc_dma;
+	dma_mem_t payload_dma;
 	ohci_ed_t *ed;
 	ohci_td_t *td;
 	u32 length;
@@ -136,8 +148,12 @@ typedef struct {
 	pci_device_t *pci;
 	device_t nb_dev;
 	volatile u8 *regs;
-	usb_dma_t hcca_dma;
-	usb_dma_t list_dma;
+	dma_tag_t tag;
+	dma_tag_t hcca_tag;
+	dma_tag_t desc_tag;
+	dma_tag_t payload_tag;
+	dma_mem_t hcca_dma;
+	dma_mem_t list_dma;
 	ohci_hcca_t *hcca;
 	ohci_ed_t *control_ed;
 	ohci_ed_t *bulk_ed;
@@ -153,6 +169,52 @@ typedef struct {
 } ohci_state_t;
 
 static ohci_state_t *ohci_states[OHCI_MAX];
+
+static void
+ohci_tags_destroy(ohci_state_t *st)
+{
+	if (st->payload_tag != NULL) {
+		dma_tag_destroy(st->payload_tag);
+		st->payload_tag = NULL;
+	}
+	if (st->desc_tag != NULL) {
+		dma_tag_destroy(st->desc_tag);
+		st->desc_tag = NULL;
+	}
+	if (st->hcca_tag != NULL) {
+		dma_tag_destroy(st->hcca_tag);
+		st->hcca_tag = NULL;
+	}
+	if (st->tag != NULL) {
+		dma_tag_destroy(st->tag);
+		st->tag = NULL;
+	}
+}
+
+
+static int
+ohci_tags_create(ohci_state_t *st)
+{
+	if (dma_tag_create(dma_tag_root(), 1, DMA_BOUNDARY_NONE, 0,
+	    OHCI_DMA_MAX, 0, 1, DMA_SEGSZ_MAX, 0, "ohci", &st->tag) != 0)
+		return (-1);
+	if (dma_tag_create(st->tag, OHCI_HCCA_ALIGN, DMA_BOUNDARY_NONE, 0,
+	    DMA_HIGHADDR_ANY, sizeof(ohci_hcca_t), 1, DMA_SEGSZ_MAX, 0,
+	    "ohci-hcca", &st->hcca_tag) != 0)
+		goto fail;
+	if (dma_tag_create(st->tag, OHCI_DESC_ALIGN, DMA_BOUNDARY_NONE, 0,
+	    DMA_HIGHADDR_ANY, 0, 1, DMA_SEGSZ_MAX, 0, "ohci-desc",
+	    &st->desc_tag) != 0)
+		goto fail;
+	if (dma_tag_create(st->tag, OHCI_PAYLOAD_ALIGN, DMA_BOUNDARY_NONE, 0,
+	    DMA_HIGHADDR_ANY, OHCI_PAYLOAD_TAG_MAX, 1, DMA_SEGSZ_MAX, 0,
+	    "ohci-payload", &st->payload_tag) != 0)
+		goto fail;
+	return (0);
+fail:
+	ohci_tags_destroy(st);
+	return (-1);
+}
 
 static void
 ohci_periodic_rebuild(ohci_state_t *st)
@@ -189,7 +251,7 @@ static int
 ohci_transfer(ohci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
     const usb_setup_t *setup, void *data, u32 *length, u32 timeout)
 {
-	usb_dma_t dma, payload;
+	dma_mem_t dma, payload;
 	ohci_ed_t *ed;
 	ohci_td_t *td;
 	u64 td_phys, payload_phys;
@@ -198,15 +260,15 @@ ohci_transfer(ohci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
 
 	memset(&dma, 0, sizeof(dma));
 	memset(&payload, 0, sizeof(payload));
-	if (*length > 8192) {
+	if (*length > OHCI_PAYLOAD_MAX) {
 		return (-1);
 	}
 	count = setup != NULL ? ((*length != 0) ? 3 : 2) : 1;
-	if (usb_dma_alloc(&dma, sizeof(*ed) + (count + 1) * sizeof(*td), 16,
-	    OHCI_DMA_MAX) != 0) return (-1);
-	if ((*length != 0 || setup != NULL) && usb_dma_alloc(&payload,
-	    *length + (setup != NULL ? 8 : 0), 4096,
-	    OHCI_DMA_MAX) != 0) goto fail;
+	if (dma_mem_alloc(st->desc_tag, sizeof(*ed) + (count + 1) * sizeof(*td),
+	    0, &dma) != 0) return (-1);
+	if ((*length != 0 || setup != NULL) && dma_mem_alloc(st->payload_tag,
+	    *length + (setup != NULL ? OHCI_SETUP_BYTES : 0), 0,
+	    &payload) != 0) goto fail;
 	ed = dma.virt;
 	td = (ohci_td_t *)((u8 *)dma.virt + sizeof(*ed));
 	td_phys = dma.phys + sizeof(*ed);
@@ -214,14 +276,15 @@ ohci_transfer(ohci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
 	payload_phys = payload.phys;
 	if (*length != 0 && (setup == NULL ||
 	    (setup->bmRequestType & USB_DIR_IN) == 0))
-		memcpy(payload_ptr + (setup != NULL ? 8 : 0), data, *length);
+		memcpy(payload_ptr + (setup != NULL ? OHCI_SETUP_BYTES : 0), data,
+		    *length);
 	if (setup != NULL) {
 		memcpy(payload_ptr, setup, sizeof(*setup));
 		info = OHCI_TD_DP_SETUP;
 		td[0].info = info | OHCI_TD_T_DATA0 |
 		    (OHCI_CC_NOTACCESSED << 28);
 		td[0].cbp = (u32)payload_phys;
-		td[0].be = (u32)(payload_phys + 7);
+		td[0].be = (u32)(payload_phys + OHCI_SETUP_BYTES - 1);
 		td[0].next = count > 1 ? td_phys + sizeof(*td) : td_phys +
 		    2 * sizeof(*td);
 		if (*length != 0) {
@@ -229,8 +292,9 @@ ohci_transfer(ohci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
 			    OHCI_TD_DP_OUT;
 			td[1].info = info | OHCI_TD_T_DATA1 |
 			    (OHCI_CC_NOTACCESSED << 28);
-			td[1].cbp = (u32)(payload_phys + 8);
-			td[1].be = (u32)(payload_phys + 8 + *length - 1);
+			td[1].cbp = (u32)(payload_phys + OHCI_SETUP_BYTES);
+			td[1].be = (u32)(payload_phys + OHCI_SETUP_BYTES +
+			    *length - 1);
 			td[1].next = td_phys + 2 * sizeof(*td);
 		}
 		info = (setup->bmRequestType & USB_DIR_IN) ? OHCI_TD_DP_OUT :
@@ -297,7 +361,8 @@ ohci_transfer(ohci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
 	if (*length != 0 && ((setup != NULL &&
 	    (setup->bmRequestType & USB_DIR_IN)) || (setup == NULL &&
 	    (ep->address & USB_DIR_IN))))
-		memcpy(data, payload_ptr + (setup != NULL ? 8 : 0), actual);
+		memcpy(data, payload_ptr + (setup != NULL ? OHCI_SETUP_BYTES : 0),
+		    actual);
 	*length = actual;
 	if (cc != OHCI_CC_NOERROR && st->error_logs < 16) {
 		st->error_logs++;
@@ -309,10 +374,10 @@ ohci_transfer(ohci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
 		    *(volatile u32 *)(st->regs + (setup != NULL ?
 		    OHCI_CTRL_CURRENT : OHCI_BULK_CURRENT)));
 	}
-	usb_dma_free(&payload); usb_dma_free(&dma);
+	dma_mem_free(&payload); dma_mem_free(&dma);
 	return (cc == OHCI_CC_NOERROR ? 0 : -1);
 fail:
-	usb_dma_free(&payload); usb_dma_free(&dma); return (-1);
+	dma_mem_free(&payload); dma_mem_free(&dma); return (-1);
 }
 
 static int ohci_port_connected(void *arg, u8 port, u8 *speed)
@@ -374,12 +439,13 @@ static int ohci_submit(void *arg, usb_device_t *d, usb_endpoint_t *e, void *b,
 	for (i = 0; i < OHCI_MAX_REQ; i++) if (!st->requests[i].used) {
 		request = &st->requests[i];
 		memset(request, 0, sizeof(*request));
-		if (usb_dma_alloc(&request->desc_dma,
-		    sizeof(ohci_ed_t) + 2 * sizeof(ohci_td_t), 16,
-		    OHCI_DMA_MAX) != 0 || usb_dma_alloc(&request->payload_dma,
-		    n, 4096, OHCI_DMA_MAX) != 0) {
-			usb_dma_free(&request->payload_dma);
-			usb_dma_free(&request->desc_dma);
+		if (dma_mem_alloc(st->desc_tag,
+		    sizeof(ohci_ed_t) + 2 * sizeof(ohci_td_t), 0,
+		    &request->desc_dma) != 0 ||
+		    dma_mem_alloc(st->payload_tag, n, 0,
+		    &request->payload_dma) != 0) {
+			dma_mem_free(&request->payload_dma);
+			dma_mem_free(&request->desc_dma);
 			return (-1);
 		}
 		request->ed = request->desc_dma.virt;
@@ -450,8 +516,8 @@ static void ohci_poll(void *arg)
 			    completed.length);
 		if (cc == OHCI_CC_NOERROR)
 			completed.ep->toggle ^= 1;
-		usb_dma_free(&completed.payload_dma);
-		usb_dma_free(&completed.desc_dma);
+		dma_mem_free(&completed.payload_dma);
+		dma_mem_free(&completed.desc_dma);
 		completed.complete(completed.dev, completed.data,
 		    cc == OHCI_CC_NOERROR ? completed.length : 0,
 		    cc == OHCI_CC_NOERROR ? 0 : -1, completed.arg);
@@ -494,8 +560,10 @@ static int ohci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	*(volatile u32 *)(st->regs + OHCI_CMD) = OHCI_CMD_RESET;
 	if (ohci_wait((volatile u32 *)(st->regs + OHCI_CMD), OHCI_CMD_RESET, 0,
 	    1000000) != 0) goto fail;
-	if (usb_dma_alloc(&st->hcca_dma, 256, 256, OHCI_DMA_MAX) != 0 ||
-	    usb_dma_alloc(&st->list_dma, 64, 16, OHCI_DMA_MAX) != 0) goto fail;
+	if (ohci_tags_create(st) != 0) goto fail;
+	if (dma_mem_alloc(st->hcca_tag, sizeof(ohci_hcca_t), 0,
+	    &st->hcca_dma) != 0 || dma_mem_alloc(st->desc_tag,
+	    2 * sizeof(ohci_ed_t), 0, &st->list_dma) != 0) goto fail;
 	st->hcca=st->hcca_dma.virt; st->control_ed=st->list_dma.virt;
 	st->bulk_ed=(ohci_ed_t *)((u8 *)st->list_dma.virt+sizeof(ohci_ed_t));
 	for (i=0;i<32;i++) st->hcca->interrupt[i]=0;
@@ -533,8 +601,9 @@ fail:
 	} else if (st->usb.bus_device != NULL) {
 		(void)device_delete_child(st->nb_dev, st->usb.bus_device);
 	}
-	usb_dma_free(&st->list_dma);
-	usb_dma_free(&st->hcca_dma);
+	dma_mem_free(&st->list_dma);
+	dma_mem_free(&st->hcca_dma);
+	ohci_tags_destroy(st);
 	kmem_free(st);
 	return (-1);
 }
@@ -547,7 +616,9 @@ static void ohci_pci_remove(pci_device_t *pdev)
 	    st->irq_res->rid,st->irq_res);
 	usb_controller_fini(&st->usb); *(volatile u32 *)(st->regs+OHCI_CONTROL)=0;
 	for(i=0;i<OHCI_MAX;i++) if(ohci_states[i]==st) ohci_states[i]=NULL;
-	usb_dma_free(&st->list_dma); usb_dma_free(&st->hcca_dma); pdev->driver_data=NULL; kmem_free(st);
+	dma_mem_free(&st->list_dma); dma_mem_free(&st->hcca_dma);
+	ohci_tags_destroy(st);
+	pdev->driver_data=NULL; kmem_free(st);
 }
 static const pci_match_t ohci_matches[]={{PCI_ANY_ID,PCI_ANY_ID,0x0c,0x03,0x10}};
 static pci_driver_t ohci_driver={.name="ohci",.matches=ohci_matches,.match_count=1,

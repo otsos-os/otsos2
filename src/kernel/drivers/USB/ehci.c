@@ -12,12 +12,17 @@ $define %type ehci_qtd_t as EHCI queue transfer descriptor
 $define %type ehci_qh_t as EHCI queue head
 $define %type ehci_request_t as deferred USB transfer
 $define %type ehci_state_t as EHCI controller state
+$define %type dma_tag_t as opaque pointer to a device DMA constraint set
+$define %type dma_mem_t as struct with a coherent device-visible allocation
+$define %func ehci_tags_create as function with args ehci_state_t *
+$define %func ehci_tags_destroy as procedure with args ehci_state_t *
 $define %func ehci_pci_register as function with args void
 
 */
 
 /* !SPACE!
 
+$space %internal ehci_tags_create, ehci_tags_destroy
 $space %internal ehci_wait, ehci_transfer, ehci_poll
 $space %internal ehci_pci_probe, ehci_pci_remove
 $space %export ehci_pci_register
@@ -27,6 +32,7 @@ $space %export ehci_pci_register
 #include <kernel/drivers/USB/ehci.h>
 #include <kernel/drivers/USB/usb.h>
 #include <kernel/drivers/newbus/newbus.h>
+#include <kernel/mm/dma/dma.h>
 #include <kernel/mm/kmem.h>
 #include <kernel/mm/vm/pmap.h>
 #include <kernel/pci/pci.h>
@@ -36,6 +42,12 @@ $space %export ehci_pci_register
 #define EHCI_MAX_CONTROLLERS	8
 #define EHCI_MAX_REQUESTS	32
 #define EHCI_DMA_MAX		0xffffffffULL
+#define EHCI_QTD_PAGE		4096
+#define EHCI_QTD_PAGES		5
+#define EHCI_DESC_ALIGN		32
+#define EHCI_FLIST_ENTRIES	1024
+#define EHCI_FLIST_ALIGN	4096
+#define EHCI_FLIST_BYTES	(EHCI_FLIST_ENTRIES * 4)
 
 #define EHCI_CAPLENGTH		0x00
 #define EHCI_HCSPARAMS		0x04
@@ -107,8 +119,12 @@ typedef struct {
 	device_t	nb_dev;
 	volatile u8	*cap;
 	volatile u8	*op;
-	usb_dma_t	async_dma;
-	usb_dma_t	periodic_dma;
+	dma_tag_t	tag;
+	dma_tag_t	desc_tag;
+	dma_tag_t	flist_tag;
+	dma_tag_t	payload_tag;
+	dma_mem_t	async_dma;
+	dma_mem_t	periodic_dma;
 	ehci_qh_t	*async_head;
 	u32		*frame_list;
 	ehci_request_t	requests[EHCI_MAX_REQUESTS];
@@ -125,6 +141,53 @@ static ehci_state_t *ehci_states[EHCI_MAX_CONTROLLERS];
 
 static int ehci_transfer(ehci_state_t *, usb_device_t *, usb_endpoint_t *,
     const usb_setup_t *, void *, u32 *, u32, int);
+
+
+static void
+ehci_tags_destroy(ehci_state_t *st)
+{
+	if (st->payload_tag != NULL) {
+		dma_tag_destroy(st->payload_tag);
+		st->payload_tag = NULL;
+	}
+	if (st->flist_tag != NULL) {
+		dma_tag_destroy(st->flist_tag);
+		st->flist_tag = NULL;
+	}
+	if (st->desc_tag != NULL) {
+		dma_tag_destroy(st->desc_tag);
+		st->desc_tag = NULL;
+	}
+	if (st->tag != NULL) {
+		dma_tag_destroy(st->tag);
+		st->tag = NULL;
+	}
+}
+
+static int
+ehci_tags_create(ehci_state_t *st)
+{
+
+	if (dma_tag_create(dma_tag_root(), 1, DMA_BOUNDARY_NONE, 0,
+	    EHCI_DMA_MAX, 0, 1, DMA_SEGSZ_MAX, 0, "ehci", &st->tag) != 0)
+		return (-1);
+	if (dma_tag_create(st->tag, EHCI_DESC_ALIGN, DMA_BOUNDARY_NONE, 0,
+	    DMA_HIGHADDR_ANY, 0, 1, DMA_SEGSZ_MAX, 0, "ehci-desc",
+	    &st->desc_tag) != 0)
+		goto fail;
+	if (dma_tag_create(st->tag, EHCI_FLIST_ALIGN, DMA_BOUNDARY_NONE, 0,
+	    DMA_HIGHADDR_ANY, EHCI_FLIST_BYTES, 1, DMA_SEGSZ_MAX, 0,
+	    "ehci-flist", &st->flist_tag) != 0)
+		goto fail;
+	if (dma_tag_create(st->tag, EHCI_QTD_PAGE, DMA_BOUNDARY_NONE, 0,
+	    DMA_HIGHADDR_ANY, (u64)EHCI_QTD_PAGES * EHCI_QTD_PAGE, 1,
+	    DMA_SEGSZ_MAX, 0, "ehci-payload", &st->payload_tag) != 0)
+		goto fail;
+	return (0);
+fail:
+	ehci_tags_destroy(st);
+	return (-1);
+}
 
 static int
 ehci_wait(volatile u32 *reg, u32 mask, u32 value, u32 limit)
@@ -153,9 +216,11 @@ ehci_qtd_buffer(ehci_qtd_t *qtd, u64 phys, u32 length)
 
 	qtd->buffer[0] = (u32)phys;
 	qtd->buffer_hi[0] = phys >> 32;
-	for (i = 1; i < 5 && length > i * 4096; i++) {
-		qtd->buffer[i] = (u32)((phys & ~0xfffULL) + i * 4096);
-		qtd->buffer_hi[i] = ((phys & ~0xfffULL) + i * 4096) >> 32;
+	for (i = 1; i < 5 && length > i * EHCI_QTD_PAGE; i++) {
+		qtd->buffer[i] = (u32)((phys & ~(u64)(EHCI_QTD_PAGE - 1)) +
+		    i * EHCI_QTD_PAGE);
+		qtd->buffer_hi[i] = ((phys & ~(u64)(EHCI_QTD_PAGE - 1)) +
+		    i * EHCI_QTD_PAGE) >> 32;
 	}
 }
 
@@ -164,7 +229,7 @@ ehci_transfer(ehci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
     const usb_setup_t *setup, void *data, u32 *length, u32 timeout,
     int periodic)
 {
-	usb_dma_t dma, payload;
+	dma_mem_t dma, payload;
 	ehci_qtd_t *td;
 	ehci_qh_t *qh;
 	u64 base;
@@ -174,16 +239,16 @@ ehci_transfer(ehci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
 
 	memset(&dma, 0, sizeof(dma));
 	memset(&payload, 0, sizeof(payload));
-	if (*length > 5 * 4096 - 4095) {
+	if (*length > EHCI_QTD_PAGES * EHCI_QTD_PAGE - (EHCI_QTD_PAGE - 1)) {
 		return (-1);
 	}
 	count = setup == NULL ? 1 : ((*length != 0) ? 3 : 2);
-	if (usb_dma_alloc(&dma, sizeof(*qh) + count * sizeof(*td), 32,
-	    EHCI_DMA_MAX) != 0)
+	if (dma_mem_alloc(st->desc_tag, sizeof(*qh) + count * sizeof(*td), 0,
+	    &dma) != 0)
 		return (-1);
-	if (usb_dma_alloc(&payload, *length + (setup != NULL ? 8 : 0), 4096,
-	    EHCI_DMA_MAX) != 0) {
-		usb_dma_free(&dma);
+	if (dma_mem_alloc(st->payload_tag, *length + (setup != NULL ? 8 : 0), 0,
+	    &payload) != 0) {
+		dma_mem_free(&dma);
 		return (-1);
 	}
 	if (*length != 0 && (setup == NULL ||
@@ -231,7 +296,7 @@ ehci_transfer(ehci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
 	qh->overlay.next = (u32)base;
 	qh->overlay.alt_next = EHCI_LINK_TERM;
 	if (periodic) {
-		for (i = 0; i < 1024; i++)
+		for (i = 0; i < EHCI_FLIST_ENTRIES; i++)
 			st->frame_list[i] = (u32)dma.phys | EHCI_LINK_QH;
 		*(volatile u32 *)(st->op + EHCI_PERIODIC) =
 		    (u32)st->periodic_dma.phys;
@@ -249,7 +314,8 @@ ehci_transfer(ehci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
 	}
 	if (periodic) {
 		*(volatile u32 *)(st->op + EHCI_USBCMD) &= ~EHCI_CMD_PSE;
-		for (i = 0; i < 1024; i++) st->frame_list[i] = EHCI_LINK_TERM;
+		for (i = 0; i < EHCI_FLIST_ENTRIES; i++)
+			st->frame_list[i] = EHCI_LINK_TERM;
 	} else {
 		st->async_head->hlink = (u32)st->async_dma.phys | EHCI_LINK_QH;
 	}
@@ -263,8 +329,8 @@ ehci_transfer(ehci_state_t *st, usb_device_t *dev, usb_endpoint_t *ep,
 		memcpy(data, (u8 *)payload.virt + (setup != NULL ? 8 : 0),
 		    actual);
 	*length = actual;
-	usb_dma_free(&payload);
-	usb_dma_free(&dma);
+	dma_mem_free(&payload);
+	dma_mem_free(&dma);
 	return ((token & (EHCI_QTD_ACTIVE | EHCI_QTD_HALTED | EHCI_QTD_DBE |
 	    EHCI_QTD_BABBLE | EHCI_QTD_XACT)) == 0 ? 0 : -1);
 }
@@ -452,15 +518,17 @@ ehci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	*(volatile u32 *)(st->op + EHCI_USBCMD) = EHCI_CMD_RESET;
 	if (ehci_wait((volatile u32 *)(st->op + EHCI_USBCMD), EHCI_CMD_RESET,
 	    0, 1000000) != 0) goto fail;
-	if (usb_dma_alloc(&st->async_dma, sizeof(ehci_qh_t), 32,
-	    EHCI_DMA_MAX) != 0 || usb_dma_alloc(&st->periodic_dma, 4096, 4096,
-	    EHCI_DMA_MAX) != 0) goto fail;
+	if (ehci_tags_create(st) != 0) goto fail;
+	if (dma_mem_alloc(st->desc_tag, sizeof(ehci_qh_t), 0,
+	    &st->async_dma) != 0 || dma_mem_alloc(st->flist_tag,
+	    EHCI_FLIST_BYTES, 0, &st->periodic_dma) != 0) goto fail;
 	st->async_head = st->async_dma.virt; st->frame_list = st->periodic_dma.virt;
 	st->async_head->hlink = (u32)st->async_dma.phys | EHCI_LINK_QH;
 	st->async_head->epchar = 1U << 15;
 	st->async_head->overlay.next = EHCI_LINK_TERM;
 	st->async_head->overlay.alt_next = EHCI_LINK_TERM;
-	for (i = 0; i < 1024; i++) st->frame_list[i] = EHCI_LINK_TERM;
+	for (i = 0; i < EHCI_FLIST_ENTRIES; i++)
+		st->frame_list[i] = EHCI_LINK_TERM;
 	*(volatile u32 *)(st->op + EHCI_ASYNC) = (u32)st->async_dma.phys;
 	*(volatile u32 *)(st->op + EHCI_PERIODIC) = (u32)st->periodic_dma.phys;
 	*(volatile u32 *)(st->op + EHCI_USBINTR) = EHCI_STS_INT | EHCI_STS_ERR |
@@ -498,8 +566,9 @@ fail:
 	} else if (st->usb.bus_device != NULL) {
 		(void)device_delete_child(st->nb_dev, st->usb.bus_device);
 	}
-	usb_dma_free(&st->periodic_dma);
-	usb_dma_free(&st->async_dma);
+	dma_mem_free(&st->periodic_dma);
+	dma_mem_free(&st->async_dma);
+	ehci_tags_destroy(st);
 	kmem_free(st);
 	return (-1);
 }
@@ -520,7 +589,8 @@ ehci_pci_remove(pci_device_t *pdev)
 	*(volatile u32 *)(st->op + EHCI_USBCMD) = 0;
 	for (i = 0; i < EHCI_MAX_CONTROLLERS; i++)
 		if (ehci_states[i] == st) ehci_states[i] = NULL;
-	usb_dma_free(&st->periodic_dma); usb_dma_free(&st->async_dma);
+	dma_mem_free(&st->periodic_dma); dma_mem_free(&st->async_dma);
+	ehci_tags_destroy(st);
 	pdev->driver_data = NULL; kmem_free(st);
 }
 

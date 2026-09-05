@@ -70,6 +70,7 @@ Monolithic kernel with the following rough layers:
   `vm_pager.c` consume that stack and must not reintroduce an allocator beneath it.
   `vm_object` stores owned pages in a four-level radix tree; `vm_map` is a
   standalone RB-tree-backed address space
+- `mm/dma/` — the single kernel DMA framework inspired by FreeBSD `bus_dma(9)`
 - `drivers/` — storage, filesystem, video, keyboard, timer, ACPI, power, PCI,
   watchdog, PMU. Early serial console setup goes through `console_early_init()`;
   UART's full driver attach is a newbus ISA module. UART probing uses a
@@ -511,6 +512,7 @@ User need to test, dont run test manually, ask user.
 - `/dev/fb0` follows the same root privilege check in its vnode operations and
   native open path; POSIX mode is `0600`, and POSIX `mmap()` maps the device via
   a device-backed VM object.
+- **DMA goes through `mm/dma` and nowhere else.**
 
 ## Dependencies Between Modules
 

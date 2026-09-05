@@ -37,6 +37,7 @@ $define %type virtio_net_hdr_t as packed VirtIO network packet header
 $define %type virtio_net_state_t as VirtIO network driver state
 $define %type virtio_hw_t as shared VirtIO PCI transport state
 $define %type virtio_vq_t as shared VirtIO split virtqueue state
+$define %type dma_mem_t as struct with a coherent device-visible allocation
 $define %type pci_device_t as struct with PCI device info
 $define %type pci_match_t as struct with PCI match criteria
 $define %type pci_driver_t as struct with PCI driver
@@ -71,7 +72,7 @@ $space %export virtio_net_pci_register
 #include <kernel/drivers/net/virtio-net/virtio_net.h>
 #include <kernel/drivers/virtio/virtio_pci.h>
 #include <kernel/drivers/virtio/virtio_queue.h>
-#include <kernel/mm/vm/pmap.h>
+#include <kernel/mm/dma/dma.h>
 #include <kernel/mm/kmem.h>
 #include <kernel/pci/pci.h>
 #include <kernel/net/net.h>
@@ -112,6 +113,8 @@ typedef struct {
 	virtio_hw_t		hw;
 	virtio_vq_t		rx_vq;
 	virtio_vq_t		tx_vq;
+	dma_mem_t		rx_mem;
+	dma_mem_t		tx_mem;
 	u8			*rx_buffers;
 	u8			*tx_buffers;
 	u16			rx_slot[VIRTIO_NET_QUEUE_SIZE];
@@ -152,7 +155,7 @@ virtio_net_setup_queue(virtio_vq_t *vq, virtio_hw_t *hw, u16 index)
 	if (qsize > VIRTIO_NET_QUEUE_SIZE) {
 		qsize = VIRTIO_NET_QUEUE_SIZE;
 	}
-	if (virtio_vq_create(vq, qsize) != 0) {
+	if (virtio_vq_create(vq, hw, qsize) != 0) {
 		return (-1);
 	}
 	virtio_vq_bind(vq, hw, index);
@@ -238,8 +241,8 @@ virtio_net_post_rx(virtio_net_state_t *st, u16 slot)
 	if (head == (u16)-1) {
 		return (-1);
 	}
-	virtio_vq_set_desc(vq, head, virtio_virt_to_phys(
-	    st->rx_buffers + (u64)slot * VIRTIO_NET_RX_BUFFER_SIZE),
+	virtio_vq_set_desc(vq, head, st->rx_mem.phys +
+	    (u64)slot * VIRTIO_NET_RX_BUFFER_SIZE,
 	    VIRTIO_NET_RX_BUFFER_SIZE, VIRTQ_DESC_F_WRITE, 0);
 	st->rx_slot[head] = slot;
 	virtio_vq_kick(vq, head);
@@ -289,15 +292,13 @@ virtio_net_destroy(virtio_net_state_t *st)
 	if (st->ndev_registered) {
 		netdev_unregister(&st->ndev);
 	}
-	virtio_pci_shutdown(&st->hw);
 	virtio_vq_destroy(&st->rx_vq);
 	virtio_vq_destroy(&st->tx_vq);
-	if (st->rx_buffers) {
-		kmem_free(st->rx_buffers);
-	}
-	if (st->tx_buffers) {
-		kmem_free(st->tx_buffers);
-	}
+	dma_mem_free(&st->rx_mem);
+	dma_mem_free(&st->tx_mem);
+	st->rx_buffers = NULL;
+	st->tx_buffers = NULL;
+	virtio_pci_shutdown(&st->hw);
 	kmem_free(st);
 }
 
@@ -332,7 +333,8 @@ virtio_net_ndev_transmit(netdev_t *ndev, const u8 *frame, u16 len)
 	    (u64)slot * VIRTIO_NET_TX_BUFFER_SIZE);
 	memset(hdr, 0, sizeof(*hdr));
 	memcpy((u8 *)hdr + VIRTIO_NET_HDR_SIZE, frame, len);
-	virtio_vq_set_desc(&st->tx_vq, head, virtio_virt_to_phys(hdr),
+	virtio_vq_set_desc(&st->tx_vq, head, st->tx_mem.phys +
+	    (u64)slot * VIRTIO_NET_TX_BUFFER_SIZE,
 	    VIRTIO_NET_HDR_SIZE + len, 0, 0);
 	virtio_vq_kick(&st->tx_vq, head);
 	virtio_hw_notify_queue(&st->hw, VIRTIO_NET_TX_QUEUE);
@@ -457,17 +459,15 @@ virtio_net_pci_probe(pci_device_t *dev, const pci_match_t *match)
 
 	buffer_size = (u64)VIRTIO_NET_QUEUE_SIZE *
 	    VIRTIO_NET_RX_BUFFER_SIZE;
-	st->rx_buffers = kmem_alloc_aligned(buffer_size, PAGE_SIZE);
-	st->tx_buffers = kmem_alloc_aligned((u64)VIRTIO_NET_QUEUE_SIZE *
-	    VIRTIO_NET_TX_BUFFER_SIZE, PAGE_SIZE);
-	if (!st->rx_buffers || !st->tx_buffers) {
+	if (dma_mem_alloc(st->hw.buf_tag, buffer_size, 0, &st->rx_mem) != 0 ||
+	    dma_mem_alloc(st->hw.buf_tag, (u64)VIRTIO_NET_QUEUE_SIZE *
+	    VIRTIO_NET_TX_BUFFER_SIZE, 0, &st->tx_mem) != 0) {
 		drivers_log("[VIRTIO_NET] buffer allocation failed\n");
 		virtio_net_destroy(st);
 		return (-1);
 	}
-	memset(st->rx_buffers, 0, buffer_size);
-	memset(st->tx_buffers, 0, (u64)VIRTIO_NET_QUEUE_SIZE *
-	    VIRTIO_NET_TX_BUFFER_SIZE);
+	st->rx_buffers = st->rx_mem.virt;
+	st->tx_buffers = st->tx_mem.virt;
 
 	for (i = 0; i < st->rx_vq.size; i++) {
 		if (virtio_net_post_rx(st, i) != 0) {

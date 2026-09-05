@@ -226,6 +226,12 @@ IOAPIC_O = ../bin/ioapic.o
 STDLIB_O = ../bin/stdlib.o
 KMEM_O = ../bin/kmem.o
 UMA_O = ../bin/uma.o
+DMA_O = ../bin/dma.o
+DMA_TAG_O = ../bin/dma_tag.o
+DMA_MEM_O = ../bin/dma_mem.o
+DMA_MAP_O = ../bin/dma_map.o
+DMA_BOUNCE_O = ../bin/dma_bounce.o
+DMA_SYNC_O = ../bin/dma_sync.o
 PMAP_O = ../bin/pmap.o
 VM_PHYS_O = ../bin/vm_phys.o
 VM_PAGE_O = ../bin/vm_page.o
@@ -414,7 +420,7 @@ ET_CLOCKSOURCE_O = ../bin/et_clocksource.o
 CMOS_RTC_O = ../bin/cmos_rtc.o
 
 OBJ_NO_KSYMTAB = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDIO_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) $(IRQ_O) \
-      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(PMAP_O) $(VM_PHYS_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)       $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(I8042_O) $(INPUT_CORE_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(EVR_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(API_NET_O) $(API_REG_O) $(API_TRACE_O) $(IPC_O) $(API_IPC_O) $(PIPE_O) $(DATA_DIR_O) $(CLONE_O) $(SYSCALL_O) \
+      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(DMA_O) $(DMA_TAG_O) $(DMA_MEM_O) $(DMA_MAP_O) $(DMA_BOUNCE_O) $(DMA_SYNC_O) $(PMAP_O) $(VM_PHYS_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)     $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(I8042_O) $(INPUT_CORE_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(EVR_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(API_NET_O) $(API_REG_O) $(API_TRACE_O) $(IPC_O) $(API_IPC_O) $(PIPE_O) $(DATA_DIR_O) $(CLONE_O) $(SYSCALL_O) \
       $(KOFO_O) $(ENTITY_O) $(ENTITY_HANDLE_O) $(ENTITY_NS_O) $(API_ENTITY_O) $(API_ENTITY_IO_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(SESSION_O) $(THREAD_O) $(APC_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(FS_META_O) $(MOUNT_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(TRACE_O) $(TRACE_PMU_O) $(PMU_O) \
@@ -1143,6 +1149,35 @@ $(KMEM_O): kernel/mm/kmem.c kernel/mm/kmem.h kernel/mm/uma.h kernel/mm/vm/vm_pag
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(UMA_O): kernel/mm/uma.c kernel/mm/uma.h kernel/mm/vm/vm_page.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+DMA_HEADERS = kernel/mm/dma/dma.h kernel/mm/dma/dma_internal.h \
+	kernel/sync/sync.h
+
+$(DMA_O): kernel/mm/dma/dma.c $(DMA_HEADERS) kernel/cm/cm.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DMA_TAG_O): kernel/mm/dma/dma_tag.c $(DMA_HEADERS) kernel/mm/kmem.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DMA_MEM_O): kernel/mm/dma/dma_mem.c $(DMA_HEADERS) kernel/mm/vm/vm_page.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DMA_MAP_O): kernel/mm/dma/dma_map.c $(DMA_HEADERS) kernel/mm/vm/pmap.h \
+	kernel/mm/kmem.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DMA_BOUNCE_O): kernel/mm/dma/dma_bounce.c $(DMA_HEADERS) \
+	kernel/mm/vm/vm_page.h kernel/mm/kmem.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(DMA_SYNC_O): kernel/mm/dma/dma_sync.c $(DMA_HEADERS)
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

@@ -45,7 +45,7 @@ $define %func vm_page_startup as procedure with args void
 $define %func vm_page_alloc as function with args u32
 $define %func vm_page_free as procedure with args vm_page_t *
 $define %func vm_page_alloc_phys as function with args u32
-$define %func vm_page_alloc_contig as function with args u32, u64, u64
+$define %func vm_page_alloc_contig as function with args u32, u64, u64, u64
 $define %func vm_page_free_phys as function with args u64
 $define %func vm_page_free_contig as procedure with args u64, u32
 $define %func vm_page_reserve_range as procedure with args u64, u64
@@ -346,10 +346,10 @@ vm_page_alloc_phys(u32 flags)
 }
 
 u64
-vm_page_alloc_contig(u32 page_total, u64 alignment, u64 max_address)
+vm_page_alloc_contig(u32 page_total, u64 alignment, u64 low, u64 high)
 {
 	vm_page_t	*page;
-	u64		 high, i, pa;
+	u64		 i, pa;
 
 	if (page_total == 0) {
 		return (0);
@@ -357,10 +357,15 @@ vm_page_alloc_contig(u32 page_total, u64 alignment, u64 max_address)
 	if (alignment < PAGE_SIZE) {
 		alignment = PAGE_SIZE;
 	}
-	high = max_address != 0 ? max_address : 0xFFFFFFFFFFFFFFFFULL;
+	if (high == 0) {
+		high = 0xFFFFFFFFFFFFFFFFULL;
+	}
+	if (low > high) {
+		return (0);
+	}
 
 	spin_lock(&vm_page_spin);
-	page = vm_phys_alloc_contig(page_total, alignment, 0, high);
+	page = vm_phys_alloc_contig(page_total, alignment, low, high);
 	if (page == NULL) {
 		spin_unlock(&vm_page_spin);
 		return (0);

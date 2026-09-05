@@ -35,9 +35,9 @@ $define %type virtq_used_elem_t as packed struct with used ring element
 $define %type virtq_used_t as packed struct with used ring header
 $define %type virtio_vq_t as struct with virtqueue runtime state
 $define %type virtio_hw_t as struct with resolved transport state
+$define %type dma_mem_t as struct with a coherent device-visible allocation
 
-$define %func virtio_virt_to_phys as function with args void *
-$define %func virtio_vq_create as function with args virtio_vq_t *, u16
+$define %func virtio_vq_create as function with args virtio_vq_t *, virtio_hw_t *, u16
 $define %func virtio_vq_destroy as procedure with args virtio_vq_t *
 $define %func virtio_vq_bind as procedure with args virtio_vq_t *, virtio_hw_t *, u16
 $define %func virtio_vq_alloc_chain as function with args virtio_vq_t *, u16
@@ -51,7 +51,6 @@ $define %func virtio_vq_send_recv as function with args virtio_vq_t *, const voi
 
 /* !SPACE!
 
-$space %export virtio_virt_to_phys
 $space %export virtio_vq_create, virtio_vq_destroy, virtio_vq_bind
 $space %export virtio_vq_alloc_chain, virtio_vq_set_desc
 $space %export virtio_vq_kick, virtio_vq_poll, virtio_vq_free_chain
@@ -107,6 +106,9 @@ typedef struct {
 	u64			phys_desc;
 	u64			phys_avail;
 	u64			phys_used;
+	dma_mem_t		ring_mem;
+	dma_mem_t		cmd_mem;
+	dma_mem_t		resp_mem;
 	void			*backing;
 	u64			backing_size;
 	void			*dma_cmd;
@@ -117,8 +119,7 @@ typedef struct {
 	u16			queue_index;
 } virtio_vq_t;
 
-u64	virtio_virt_to_phys(void *vaddr);
-int	virtio_vq_create(virtio_vq_t *vq, u16 queue_size);
+int	virtio_vq_create(virtio_vq_t *vq, virtio_hw_t *hw, u16 queue_size);
 void	virtio_vq_destroy(virtio_vq_t *vq);
 void	virtio_vq_bind(virtio_vq_t *vq, virtio_hw_t *hw,
     u16 queue_index);
