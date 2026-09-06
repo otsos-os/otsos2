@@ -635,7 +635,7 @@ nvme_ns_attach(nvme_ctrl_t *ctrl)
 		if (nvme_ns_setup(ctrl, &ctrl->ns[attached], nsid) != 0) {
 			continue;
 		}
-		if (disk_register(&ctrl->ns[attached].disk) != 0) {
+		if (disk_register(&ctrl->ns[attached].disk) < 0) {
 			drivers_log("[NVME] nsid %u: disk_register failed\n",
 			    nsid);
 			continue;
