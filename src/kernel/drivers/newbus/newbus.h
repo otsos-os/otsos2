@@ -70,8 +70,12 @@ $define %func newbus_config_driver_get_u32 as function with args const char *, c
 $define %func newbus_config_driver_get_string as function with args const char *, const char *, char *, u32, const char *
 $define %func bus_alloc_resource as function with args device_t, int, int *, u64, u64, u32
 $define %func bus_setup_intr as function with args device_t, resource_t *, newbus_intr_handler_t, void *, void **
+$define %func bus_intr_resource as function with args void *
 $define %func bus_msi_ops_register as procedure with args const newbus_msi_ops_t *
 $define %type newbus_msi_ops_t as bus MSI program/teardown callbacks
+$define %func bus_get_dma_tag as function with args device_t
+$define %func device_set_dma_tag as procedure with args device_t, dma_tag_t
+$define %const NEWBUS_DMA_TAG_DEPTH as ceiling on the parent walk for a DMA tag
 $define %func bus_setup_poll as function with args device_t, u32, newbus_poll_handler_t, void *, void **
 $define %func newbus_poll_dispatch as procedure with args u32
 $define %func newbus_entity_init as procedure with args void
@@ -105,8 +109,9 @@ $space %export newbus_config_probe_allowed
 $space %export newbus_config_driver_get_bool
 $space %export newbus_config_driver_get_u32
 $space %export newbus_config_driver_get_string
-$space %export bus_alloc_resource, bus_setup_intr
+$space %export bus_alloc_resource, bus_setup_intr, bus_intr_resource
 $space %export bus_msi_ops_register
+$space %export bus_get_dma_tag, device_set_dma_tag
 $space %export bus_setup_poll, newbus_poll_dispatch
 $space %export newbus_entity_init, newbus_entity_device_sync
 $space %export newbus_interface_read_entity, newbus_interface_write_entity
@@ -120,10 +125,12 @@ $space %export newbus_interface_ioctl_entity, newbus_interface_stat_entity
 #include <mlibc/mlibc.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/entity/entity.h>
+#include <mm/dma/dma.h>
 
 #define	NEWBUS_MAX_DEVICES		256
 #define	NEWBUS_MAX_DRIVERS		256
-#define	NEWBUS_MAX_RESOURCES		16
+#define	NEWBUS_MAX_MSI_ENTRIES		32
+#define	NEWBUS_MAX_RESOURCES		40
 #define	NEWBUS_MAX_FAILED_MODULES	8
 #define	NEWBUS_MAX_INTR_HANDLERS	128
 #define	NEWBUS_MAX_POLL_HOOKS		128
@@ -198,8 +205,8 @@ typedef void				(newbus_poll_handler_t)(void *);
 
 typedef struct newbus_msi_ops {
 	int	(*allowed)(void);
-	int	(*program)(device_t dev, u8 vector, u8 dest_apic_id);
-	void	(*teardown)(device_t dev);
+	int	(*program)(device_t dev, u32 entry, u8 vector, u8 dest_apic_id);
+	void	(*teardown)(device_t dev, u32 entry);
 } newbus_msi_ops_t;
 
 typedef struct newbus_bootinfo {
@@ -245,6 +252,7 @@ struct newbus_device {
 	const newbus_module_t	*module;
 	void			*softc;
 	void			*ivars;
+	dma_tag_t		dma_tag;
 	const newbus_module_t	*failed_modules[NEWBUS_MAX_FAILED_MODULES];
 	int			failed_module_count;
 	int			index;
@@ -345,6 +353,11 @@ device_t	device_add_child(device_t parent, const char *name, int unit);
 int		device_delete_child(device_t parent, device_t child);
 device_t	device_find_child(device_t parent, const char *name, int unit);
 device_t	device_get_parent(device_t dev);
+
+#define	NEWBUS_DMA_TAG_DEPTH	16
+
+dma_tag_t	bus_get_dma_tag(device_t dev);
+void		device_set_dma_tag(device_t dev, dma_tag_t tag);
 device_t	device_get_child(device_t dev);
 device_t	device_get_next(device_t dev);
 const char	*device_get_name(device_t dev);
@@ -389,6 +402,7 @@ int		bus_setup_intr(device_t dev, resource_t *res,
 int		bus_teardown_intr(device_t dev, resource_t *res,
 		    void *cookie);
 int		bus_intr_is_msi(void *cookie);
+resource_t	*bus_intr_resource(void *cookie);
 
 void		bus_msi_ops_register(const newbus_msi_ops_t *ops);
 

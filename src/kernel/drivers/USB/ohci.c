@@ -161,6 +161,7 @@ typedef struct {
 	usb_controller_t usb;
 	void *irq_cookie;
 	resource_t *irq_res;
+	resource_t *irq_intr_res;
 	u8 ports;
 	u8 next_address;
 	u8 busy;
@@ -195,7 +196,7 @@ ohci_tags_destroy(ohci_state_t *st)
 static int
 ohci_tags_create(ohci_state_t *st)
 {
-	if (dma_tag_create(dma_tag_root(), 1, DMA_BOUNDARY_NONE, 0,
+	if (dma_tag_create(bus_get_dma_tag(st->nb_dev), 1, DMA_BOUNDARY_NONE, 0,
 	    OHCI_DMA_MAX, 0, 1, DMA_SEGSZ_MAX, 0, "ohci", &st->tag) != 0)
 		return (-1);
 	if (dma_tag_create(st->tag, OHCI_HCCA_ALIGN, DMA_BOUNDARY_NONE, 0,
@@ -583,6 +584,8 @@ static int ohci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	rid=0; st->irq_res=bus_alloc_resource_any(st->nb_dev,SYS_RES_IRQ,&rid,RF_ACTIVE);
 	if (st->irq_res==NULL || bus_setup_intr(st->nb_dev,st->irq_res,ohci_intr,st,
 	    &st->irq_cookie)!=0) goto fail;
+	st->irq_intr_res = bus_intr_resource(st->irq_cookie);
+	if (st->irq_intr_res == NULL) st->irq_intr_res = st->irq_res;
 	pdev->driver_data=st; ohci_states[slot]=st; return (0);
 fail:
 	if (st->regs != NULL) {
@@ -590,7 +593,8 @@ fail:
 		*(volatile u32 *)(st->regs + OHCI_CONTROL) = 0;
 	}
 	if (st->irq_cookie != NULL) {
-		bus_teardown_intr(st->nb_dev, st->irq_res, st->irq_cookie);
+		bus_teardown_intr(st->nb_dev, st->irq_intr_res != NULL ?
+		    st->irq_intr_res : st->irq_res, st->irq_cookie);
 	}
 	if (st->irq_res != NULL) {
 		bus_release_resource(st->nb_dev, SYS_RES_IRQ,
@@ -611,7 +615,8 @@ static void ohci_pci_remove(pci_device_t *pdev)
 {
 	ohci_state_t *st=pdev->driver_data; int i;
 	if (st==NULL) return; *(volatile u32 *)(st->regs+OHCI_INT_DISABLE)=0xFFFFFFFF;
-	if (st->irq_cookie) bus_teardown_intr(st->nb_dev,st->irq_res,st->irq_cookie);
+	if (st->irq_cookie) bus_teardown_intr(st->nb_dev,st->irq_intr_res,
+	    st->irq_cookie);
 	if (st->irq_res) bus_release_resource(st->nb_dev,SYS_RES_IRQ,
 	    st->irq_res->rid,st->irq_res);
 	usb_controller_fini(&st->usb); *(volatile u32 *)(st->regs+OHCI_CONTROL)=0;

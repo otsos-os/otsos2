@@ -26,18 +26,16 @@
 
 /* !DEFINES!
 
-$define %type u32 as 32 bit unsigned
-$define %type u8 as 8 bit unsigned
-
-$define %func pata_read_sector as procedure with args u32, u8 *
-$define %func pata_write_sector as procedure with args u32, u8 *
-$define %func pata_identify as procedure with args u16 *
+$const IDE_* as primary ATA channel register ports, command bytes and
+    status/error bits
+$const PATA_SECTOR_SIZE as bytes moved by one READ SECTORS or WRITE SECTORS
+$const PATA_SECTOR_WORDS as 16 bit PIO transfers making up one sector
 
 */
 
 /* !SPACE!
 
-$space %export pata_read_sector, pata_write_sector, pata_identify
+$space %none
 
 */
 
@@ -60,13 +58,15 @@ $space %export pata_read_sector, pata_write_sector, pata_identify
 #define	IDE_CMD_READ		0x20
 #define	IDE_CMD_WRITE		0x30
 #define	IDE_CMD_IDENTIFY	0xEC
+#define	IDE_CMD_FLUSH_CACHE	0xE7
 
 #define	IDE_STATUS_BSY		0x80
 #define	IDE_STATUS_DRQ		0x08
 #define	IDE_STATUS_ERR		0x01
 
-void	pata_read_sector(u32 lba, u8 *buffer);
-void	pata_write_sector(u32 lba, u8 *buffer);
-void	pata_identify(u16 *target_buf);
+#define	IDE_ERROR_UNC		0x40
+#define	IDE_ERROR_IDNF		0x10
+#define	PATA_SECTOR_SIZE	512
+#define	PATA_SECTOR_WORDS	(PATA_SECTOR_SIZE / 2)
 
 #endif

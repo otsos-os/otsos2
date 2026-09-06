@@ -150,6 +150,14 @@ typedef struct pci_device {
   u8 irq_line;
   u8 irq_pin;
 
+  /*
+   * Count of MSI-X table entries currently programmed.  Teardown of one
+   * vector must not disable the capability while others are still live, so
+   * the disable is deferred until this reaches zero.  Mutated only from the
+   * bus MSI callbacks, which run single-threaded during attach and detach.
+   */
+  u16 msix_live;
+
   pci_driver_t *driver;
   void *driver_data;
   device_t nb_device;

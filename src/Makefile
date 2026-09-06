@@ -25,6 +25,9 @@ CFLAGS += $(KSHELL_DEFINES)
 include kernel/drivers/disk/disk.mk
 CFLAGS += $(DISK_DEFINES)
 
+include kernel/drivers/disk/nvme/nvme.mk
+CFLAGS += $(NVME_DEFINES)
+
 KERNEL_BIN = ../bin/kernel.bin
 ISO_IMAGE = ../otsos.iso
 MAKEISO = ../tools/makeiso.py
@@ -191,6 +194,7 @@ HANDLERS_O = ../bin/handlers_c.o
 PANIC_O = ../bin/panic.o
 CONSOLE_O = ../bin/console_console.o
 DISK_O = ../bin/disk.o
+BIO_O = ../bin/bio.o
 RAMDISK_O = ../bin/ramdisk.o
 CHAINFS_O = ../bin/chainfs.o
 HIVEFS_O = ../bin/hivefs.o
@@ -420,7 +424,7 @@ ET_CLOCKSOURCE_O = ../bin/et_clocksource.o
 CMOS_RTC_O = ../bin/cmos_rtc.o
 
 OBJ_NO_KSYMTAB = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDIO_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) $(IRQ_O) \
-      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(DMA_O) $(DMA_TAG_O) $(DMA_MEM_O) $(DMA_MAP_O) $(DMA_BOUNCE_O) $(DMA_SYNC_O) $(PMAP_O) $(VM_PHYS_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)     $(VM_PAGER_O) $(DISK_OBJ) $(DISK_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(I8042_O) $(INPUT_CORE_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(EVR_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(API_NET_O) $(API_REG_O) $(API_TRACE_O) $(IPC_O) $(API_IPC_O) $(PIPE_O) $(DATA_DIR_O) $(CLONE_O) $(SYSCALL_O) \
+      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(DMA_O) $(DMA_TAG_O) $(DMA_MEM_O) $(DMA_MAP_O) $(DMA_BOUNCE_O) $(DMA_SYNC_O) $(PMAP_O) $(VM_PHYS_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)     $(VM_PAGER_O) $(DISK_OBJ) $(NVME_OBJ) $(DISK_O) $(BIO_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(I8042_O) $(INPUT_CORE_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(EVR_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(API_NET_O) $(API_REG_O) $(API_TRACE_O) $(IPC_O) $(API_IPC_O) $(PIPE_O) $(DATA_DIR_O) $(CLONE_O) $(SYSCALL_O) \
       $(KOFO_O) $(ENTITY_O) $(ENTITY_HANDLE_O) $(ENTITY_NS_O) $(API_ENTITY_O) $(API_ENTITY_IO_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(SESSION_O) $(THREAD_O) $(APC_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(FS_META_O) $(MOUNT_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(TRACE_O) $(TRACE_PMU_O) $(PMU_O) \
@@ -1843,6 +1847,11 @@ $(DISK_O): kernel/drivers/disk/disk.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+$(BIO_O): kernel/drivers/disk/bio.c kernel/drivers/disk/bio.h \
+    kernel/drivers/disk/disk.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
 $(RAMDISK_O): kernel/drivers/disk/ramdisk/ramdisk.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
@@ -1890,6 +1899,11 @@ $(DISK_IMG):
 	@mkdir -p $(dir $(DISK_IMG))
 	@dd if=/dev/zero of=$(DISK_IMG) bs=1M count=16 2>/dev/null
 
+$(NVME_IMG):
+	@echo "  IMG     $(NVME_IMG)"
+	@mkdir -p $(dir $(NVME_IMG))
+	@dd if=/dev/zero of=$(NVME_IMG) bs=1M count=$(NVME_IMG_MB) 2>/dev/null
+
 OVMF ?= /usr/share/ovmf/OVMF.fd
 
 run: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
@@ -1919,6 +1933,10 @@ run_usb: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 run_usb_ohci: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (OHCI USB controller)"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device pci-ohci -device usb-kbd -device usb-mouse -netdev user,id=net0 -device usb-net,netdev=net0 -device i6300esb -watchdog-action reset $(QEMU_MEM_OPTS)
+
+run_nvme: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
+	@echo "  RUN     QEMU (NVMe controller)"
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,if=none,id=nvme0 -device nvme,drive=nvme0,serial=nvme0,max_ioqpairs=8,msix_qsize=16 -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset -smp 2 $(QEMU_MEM_OPTS)
 
 virtio_nodis: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (virtio-gpu, virtio-net, terminal)"

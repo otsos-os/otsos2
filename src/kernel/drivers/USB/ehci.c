@@ -131,6 +131,7 @@ typedef struct {
 	usb_controller_t usb;
 	void		*irq_cookie;
 	resource_t	*irq_res;
+	resource_t	*irq_intr_res;
 	u8		ports;
 	u8		next_address;
 	u8		busy;
@@ -168,7 +169,7 @@ static int
 ehci_tags_create(ehci_state_t *st)
 {
 
-	if (dma_tag_create(dma_tag_root(), 1, DMA_BOUNDARY_NONE, 0,
+	if (dma_tag_create(bus_get_dma_tag(st->nb_dev), 1, DMA_BOUNDARY_NONE, 0,
 	    EHCI_DMA_MAX, 0, 1, DMA_SEGSZ_MAX, 0, "ehci", &st->tag) != 0)
 		return (-1);
 	if (dma_tag_create(st->tag, EHCI_DESC_ALIGN, DMA_BOUNDARY_NONE, 0,
@@ -545,6 +546,8 @@ ehci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 	    RF_ACTIVE);
 	if (st->irq_res == NULL || bus_setup_intr(st->nb_dev, st->irq_res,
 	    ehci_intr, st, &st->irq_cookie) != 0) goto fail;
+	st->irq_intr_res = bus_intr_resource(st->irq_cookie);
+	if (st->irq_intr_res == NULL) st->irq_intr_res = st->irq_res;
 	pdev->driver_data = st; ehci_states[index] = st;
 	return (0);
 fail:
@@ -555,7 +558,8 @@ fail:
 		    EHCI_STS_HALT, EHCI_STS_HALT, 1000000);
 	}
 	if (st->irq_cookie != NULL) {
-		bus_teardown_intr(st->nb_dev, st->irq_res, st->irq_cookie);
+		bus_teardown_intr(st->nb_dev, st->irq_intr_res != NULL ?
+		    st->irq_intr_res : st->irq_res, st->irq_cookie);
 	}
 	if (st->irq_res != NULL) {
 		bus_release_resource(st->nb_dev, SYS_RES_IRQ,
@@ -581,7 +585,7 @@ ehci_pci_remove(pci_device_t *pdev)
 
 	st = pdev->driver_data; if (st == NULL) return;
 	*(volatile u32 *)(st->op + EHCI_USBINTR) = 0;
-	if (st->irq_cookie) bus_teardown_intr(st->nb_dev, st->irq_res,
+	if (st->irq_cookie) bus_teardown_intr(st->nb_dev, st->irq_intr_res,
 	    st->irq_cookie);
 	if (st->irq_res) bus_release_resource(st->nb_dev, SYS_RES_IRQ,
 	    st->irq_res->rid, st->irq_res);

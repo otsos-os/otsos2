@@ -9,7 +9,7 @@ DISK_OBJ = ../bin/pata.o
 
 ../bin/pata.o: kernel/drivers/disk/pata/pata.c \
     kernel/drivers/disk/pata/pata.h kernel/drivers/disk/disk.h \
-    kernel/drivers/fs/chainFS/chainfs.h
+    kernel/drivers/disk/bio.h kernel/drivers/fs/chainFS/chainfs.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

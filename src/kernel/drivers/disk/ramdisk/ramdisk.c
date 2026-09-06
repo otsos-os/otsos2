@@ -28,25 +28,30 @@
 
 $define %type u32 as 32 bit unsigned
 $define %type u8 as 8 bit unsigned
+$define %type u64 as 64 bit unsigned
 $define %type int as 32 bit signed
-$define %type disk_t as struct with name, type, sector_size, sectors, ops
+$define %type disk_t as struct with one registered block device and its geometry
+$define %type bio_t as struct with one block request, its status and callback
 
 $define %func ramdisk_block_ptr as function with args ramdisk_priv_t *, u32, int
-$define %func ramdisk_read_sector as procedure with args disk_t *, u32, u8 *
-$define %func ramdisk_write_sector as procedure with args disk_t *, u32, u8 *
+$define %func ramdisk_transfer as function with args disk_t *, bio_t *
+$define %func ramdisk_submit as function with args disk_t *, bio_t *
 $define %func ramdisk_init as procedure with args void *, u32
+
+$const RAMDISK_MAX_IO_SECTORS as ceiling on sectors in one ramdisk request
 
 */
 
 /* !SPACE!
 
-$space %internal ramdisk_block_ptr, ramdisk_read_sector, ramdisk_write_sector
+$space %internal ramdisk_block_ptr, ramdisk_transfer, ramdisk_submit
 $space %export ramdisk_init
 
 */
 
 #include "ramdisk.h"
 #include "../disk.h"
+#include <kernel/drivers/disk/bio.h>
 #include <kernel/drivers/newbus/newbus.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -55,6 +60,8 @@ $space %export ramdisk_init
 #define BLOCK_SIZE		(1 << BLOCK_SHIFT)
 #define SECTORS_PER_BLOCK	(BLOCK_SIZE / 512)
 #define RAMDISK_GROW_BYTES	(96U * 1024U * 1024U)
+
+#define RAMDISK_MAX_IO_SECTORS	2048
 
 typedef struct {
 	u8	*pool;
@@ -98,67 +105,89 @@ ramdisk_block_ptr(ramdisk_priv_t *priv, u32 bi, int create)
 	return (block);
 }
 
-static void
-ramdisk_read_sector(disk_t *self, u32 lba, u8 *buffer)
+static u32
+ramdisk_transfer(disk_t *self, bio_t *bio)
 {
 	ramdisk_priv_t	*priv;
-	u8		*block;
-	u32		bi, off;
+	u8		*block, *buf;
+	u64		lba;
+	u32		i, bi, off, writing;
 
 	priv = (ramdisk_priv_t *)self->private_data;
-	if (!priv || !priv->pool) {
-		return;
+	if (priv == NULL || priv->pool == NULL) {
+		return (bio->nsectors);
 	}
-	bi = lba / SECTORS_PER_BLOCK;
+	buf = (u8 *)bio->buf;
+	writing = (bio->cmd == BIO_WRITE) ? 1 : 0;
 
-	if (bi >= priv->max_blocks) {
-		memset(buffer, 0, self->sector_size);
-		return;
+	for (i = 0; i < bio->nsectors; i++) {
+		lba = bio->lba + (u64)i;
+		bi = (u32)(lba / SECTORS_PER_BLOCK);
+
+		if (bi >= priv->max_blocks) {
+			if (writing != 0) {
+				drivers_log("[RAMDISK] write at lba=%u past "
+				    "capacity (%u blocks)\n", (u32)lba,
+				    priv->max_blocks);
+			}
+			return (bio->nsectors - i);
+		}
+
+	
+		block = ramdisk_block_ptr(priv, bi, (int)writing);
+		off = (u32)(lba % SECTORS_PER_BLOCK) * self->sector_size;
+
+		if (block == NULL) {
+			if (writing != 0) {
+				drivers_log("[RAMDISK] failed to grow at "
+				    "lba=%u (block %u)\n", (u32)lba, bi);
+				return (bio->nsectors - i);
+			}
+			memset(buf, 0, self->sector_size);
+		} else if (writing != 0) {
+			memcpy(block + off, buf, self->sector_size);
+			if (bi >= priv->touched_blocks) {
+				priv->touched_blocks = bi + 1;
+			}
+		} else {
+			memcpy(buf, block + off, self->sector_size);
+		}
+		buf += self->sector_size;
 	}
-
-	block = ramdisk_block_ptr(priv, bi, 0);
-	if (!block) {
-		memset(buffer, 0, self->sector_size);
-		return;
-	}
-
-	off = (lba % SECTORS_PER_BLOCK) * self->sector_size;
-	memcpy(buffer, block + off, self->sector_size);
+	return (0);
 }
 
-static void
-ramdisk_write_sector(disk_t *self, u32 lba, u8 *buffer)
+static int
+ramdisk_submit(disk_t *self, bio_t *bio)
 {
-	ramdisk_priv_t	*priv;
-	u8		*block;
-	u32		bi, off;
+	u32	resid;
 
-	priv = (ramdisk_priv_t *)self->private_data;
-	if (!priv || !priv->pool) {
-		return;
-	}
-	bi = lba / SECTORS_PER_BLOCK;
-
-	if (bi >= priv->max_blocks) {
-		drivers_log("[RAMDISK] Write at lba=%u exceeds "
-		    "capacity (%u blocks)\n", lba, priv->max_blocks);
-		return;
+	if (self == NULL || bio == NULL) {
+		return (-1);
 	}
 
-	block = ramdisk_block_ptr(priv, bi, 1);
-	if (!block) {
-		drivers_log("[RAMDISK] Failed to grow at lba=%u "
-		    "(block %u)\n", lba, bi);
-		return;
-	}
+	switch (bio->cmd) {
+	case BIO_READ:
+	case BIO_WRITE:
+		resid = ramdisk_transfer(self, bio);
+		
+		bio_done(bio, resid == 0 ? BIO_STATUS_OK : BIO_STATUS_IOERR,
+		    resid);
+		return (0);
+	case BIO_FLUSH:
 
-	if (bi >= priv->touched_blocks) {
-		priv->touched_blocks = bi + 1;
+		bio_done(bio, BIO_STATUS_OK, 0);
+		return (0);
+	default:
+		return (-1);
 	}
-
-	off = (lba % SECTORS_PER_BLOCK) * self->sector_size;
-	memcpy(block + off, buffer, self->sector_size);
 }
+
+static const disk_ops_t ramdisk_ops = {
+	.submit		= ramdisk_submit,
+	
+	.timeout	= NULL,
+};
 
 void
 ramdisk_init(void *pool, u32 pool_size)
@@ -196,14 +225,16 @@ ramdisk_init(void *pool, u32 pool_size)
 		}
 	}
 
+	memset(&ram_disk, 0, sizeof(ram_disk));
 	strcpy(ram_disk.name, "ramdisk0");
 	ram_disk.type = DISK_TYPE_RAM;
 	ram_disk.sector_size = 512;
-	ram_disk.total_sectors = priv->max_blocks *
+	ram_disk.total_sectors = (u64)priv->max_blocks *
 	    SECTORS_PER_BLOCK;
+	ram_disk.max_io_sectors = RAMDISK_MAX_IO_SECTORS;
+	ram_disk.flags = DISK_F_NO_FLUSH;
 	ram_disk.private_data = priv;
-	ram_disk.read_sector = ramdisk_read_sector;
-	ram_disk.write_sector = ramdisk_write_sector;
+	ram_disk.ops = &ramdisk_ops;
 
 	disk_register(&ram_disk);
 

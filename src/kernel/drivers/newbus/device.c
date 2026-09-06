@@ -42,6 +42,8 @@ $define %func device_delete_child as function with args device_t, device_t
 $define %func newbus_configure_pass as procedure with args int
 $define %func newbus_reprobe as procedure with args void
 $define %func newbus_shutdown as procedure with args void
+$define %func bus_get_dma_tag as function with args device_t
+$define %func device_set_dma_tag as procedure with args device_t, dma_tag_t
 
 */
 
@@ -57,6 +59,7 @@ $space %export device_delete_child
 $space %export newbus_device_find_name, newbus_device_find_nameunit
 $space %export newbus_configure_pass, newbus_configure
 $space %export newbus_reprobe, newbus_shutdown
+$space %export bus_get_dma_tag, device_set_dma_tag
 
 */
 
@@ -392,6 +395,35 @@ device_t
 device_get_parent(device_t dev)
 {
 	return (dev == NULL ? NULL : dev->parent);
+}
+
+void
+device_set_dma_tag(device_t dev, dma_tag_t tag)
+{
+	if (dev == NULL) {
+		return;
+	}
+	dev->dma_tag = tag;
+}
+
+dma_tag_t
+bus_get_dma_tag(device_t dev)
+{
+	device_t	p;
+	int		depth;
+
+
+	if (dev == NULL) {
+		return (dma_tag_root());
+	}
+	p = dev->parent;
+	for (depth = 0; p != NULL && depth < NEWBUS_DMA_TAG_DEPTH; depth++) {
+		if (p->dma_tag != NULL) {
+			return (p->dma_tag);
+		}
+		p = p->parent;
+	}
+	return (dma_tag_root());
 }
 
 device_t

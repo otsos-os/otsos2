@@ -91,7 +91,7 @@ static void
 pci_bus_add_resources(device_t child, pci_device_t *pdev)
 {
   pci_bar_t bar;
-  int i;
+  int i, vectors;
 
   for (i = 0; i < pci_get_bar_count(pdev); i++) {
     if (pci_read_bar(pdev, (u8)i, &bar) != 0 || bar.base == 0 ||
@@ -108,8 +108,24 @@ pci_bus_add_resources(device_t child, pci_device_t *pdev)
     bus_set_resource(child, SYS_RES_IRQ, 0, pdev->irq_line, 1,
         RF_SHAREABLE | RF_IRQ_LEVEL | RF_IRQ_ACTIVE_LOW | RF_IRQ_GSI);
   }
-  if (pci_msi_supported(pdev) || pci_msix_supported(pdev)) {
-    bus_set_resource(child, SYS_RES_IRQ, PCI_MSI_RID, 0, 1, RF_IRQ_MSI);
+  vectors = 0;
+  if (pci_msix_supported(pdev)) {
+    vectors = pci_msix_vector_count(pdev);
+    if (vectors < 0) {
+      vectors = 0;
+    }
+    if (vectors > NEWBUS_MAX_MSI_ENTRIES) {
+      vectors = NEWBUS_MAX_MSI_ENTRIES;
+    }
+  }
+  if (vectors == 0 && pci_msi_supported(pdev)) {
+    vectors = 1;
+  }
+  for (i = 0; i < vectors; i++) {
+    if (bus_set_resource(child, SYS_RES_IRQ, PCI_MSI_RID + i, (u64)i, 1,
+            RF_IRQ_MSI) != 0) {
+      break;
+    }
   }
 }
 
@@ -139,7 +155,7 @@ pci_bus_msi_allowed(void)
 }
 
 static int
-pci_bus_msi_program(device_t dev, u8 vector, u8 dest_apic_id)
+pci_bus_msi_program(device_t dev, u32 entry, u8 vector, u8 dest_apic_id)
 {
   pci_device_t *pdev;
 
@@ -148,17 +164,19 @@ pci_bus_msi_program(device_t dev, u8 vector, u8 dest_apic_id)
     return (-1);
   }
   if (pci_msix_policy_enabled() && pci_msix_supported(pdev) &&
-      pci_msix_enable(pdev, 0, vector, dest_apic_id) == 0) {
+      entry <= 0xFFFFU &&
+      pci_msix_enable(pdev, (u16)entry, vector, dest_apic_id) == 0) {
+    pdev->msix_live++;
     return (0);
   }
-  if (!pci_msi_policy_enabled()) {
+  if (entry != 0 || !pci_msi_policy_enabled()) {
     return (-1);
   }
   return (pci_msi_enable(pdev, vector, dest_apic_id));
 }
 
 static void
-pci_bus_msi_teardown(device_t dev)
+pci_bus_msi_teardown(device_t dev, u32 entry)
 {
   pci_device_t *pdev;
 
@@ -166,8 +184,15 @@ pci_bus_msi_teardown(device_t dev)
   if (pdev == NULL) {
     return;
   }
-  if (pci_msix_supported(pdev)) {
-    pci_msix_disable(pdev);
+  if (pdev->msix_live > 0 && pci_msix_supported(pdev)) {
+    if (entry <= 0xFFFFU) {
+      pci_msix_mask(pdev, (u16)entry, 1);
+    }
+    pdev->msix_live--;
+    if (pdev->msix_live == 0) {
+      pci_msix_disable(pdev);
+    }
+    return;
   }
   if (pci_msi_supported(pdev)) {
     pci_msi_disable(pdev);
@@ -180,6 +205,23 @@ static const newbus_msi_ops_t pci_bus_msi_ops = {
     .teardown = pci_bus_msi_teardown,
 };
 
+static dma_tag_t pci_dma_tag;
+
+static void
+pci_bus_dma_tag_create(device_t dev)
+{
+  if (pci_dma_tag != NULL) {
+    device_set_dma_tag(dev, pci_dma_tag);
+    return;
+  }
+  if (dma_tag_create(dma_tag_root(), 1, DMA_BOUNDARY_NONE, 0,
+      DMA_HIGHADDR_ANY, 0, 0, DMA_SEGSZ_MAX, 0, "pci", &pci_dma_tag) != 0) {
+    printk("[PCI] DMA tag creation failed; children inherit the root tag\n");
+    return;
+  }
+  device_set_dma_tag(dev, pci_dma_tag);
+}
+
 static int
 pci_bus_attach(device_t dev)
 {
@@ -191,6 +233,7 @@ pci_bus_attach(device_t dev)
   if (!pci_config_present()) {
     return (-1);
   }
+  pci_bus_dma_tag_create(dev);
   bus_msi_ops_register(&pci_bus_msi_ops);
   devices = pci_scan();
   printk("[PCI] scan complete: %d device(s)\n", devices);

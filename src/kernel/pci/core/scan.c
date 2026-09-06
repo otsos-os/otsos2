@@ -148,6 +148,7 @@ static void pci_clear_devices(void) {
     pci_devices[i].driver = NULL;
     pci_devices[i].driver_data = NULL;
     pci_devices[i].nb_device = NULL;
+    pci_devices[i].msix_live = 0;
   }
   pci_device_count_val = 0;
 }

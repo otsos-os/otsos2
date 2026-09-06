@@ -27,19 +27,13 @@
 /* !DEFINES!
 
 $define %type u32 as 32 bit unsigned
-$define %type u8 as 8 bit unsigned
-$define %type int as 32 bit signed
-$define %type disk_t as struct with name, type, sector_size, sectors, ops
 
-$define %func ramdisk_read_sector as procedure with args disk_t *, u32, u8 *
-$define %func ramdisk_write_sector as procedure with args disk_t *, u32, u8 *
 $define %func ramdisk_init as procedure with args void *, u32
 
 */
 
 /* !SPACE!
 
-$space %internal ramdisk_read_sector, ramdisk_write_sector
 $space %export ramdisk_init
 
 */

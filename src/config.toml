@@ -11,6 +11,9 @@ type = "musl"
 [disk.pata]
 enabled = false
 
+[disk.nvme]
+enabled = true
+
 [kshell]
 enabled = true
 

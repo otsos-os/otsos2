@@ -109,6 +109,7 @@ $space %export virtio_hw_read_isr, virtio_hw_read_gpu_config
 */
 
 #include <kernel/drivers/virtio/virtio_hw.h>
+#include <kernel/drivers/newbus/newbus.h>
 #include <kernel/pci/utils/bar.h>
 #include <kernel/pci/utils/io.h>
 #include <kernel/mm/vm/pmap.h>
@@ -522,9 +523,9 @@ virtio_dma_tags_create(virtio_hw_t *hw)
 
 	ring_max = (hw->transport == VIRTIO_TRANSPORT_LEGACY) ?
 	    VIRTIO_LEGACY_RING_MAX : DMA_HIGHADDR_ANY;
-	if (dma_tag_create(dma_tag_root(), 1, DMA_BOUNDARY_NONE, 0,
-	    DMA_HIGHADDR_ANY, 0, 1, DMA_SEGSZ_MAX, 0, "virtio",
-	    &hw->tag) != 0) {
+	if (dma_tag_create(bus_get_dma_tag(hw->pci_dev->nb_device), 1,
+	    DMA_BOUNDARY_NONE, 0, DMA_HIGHADDR_ANY, 0, 1, DMA_SEGSZ_MAX, 0,
+	    "virtio", &hw->tag) != 0) {
 		return (-1);
 	}
 

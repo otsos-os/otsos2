@@ -233,6 +233,7 @@ typedef struct {
 	xhci_ring_t	command_ring;
 	xhci_device_t	*slots[256];
 	resource_t		*irq_res;
+	resource_t		*irq_intr_res;
 	void			*irq_cookie;
 	usb_controller_t	usb;
 	u8			irq_msi;
@@ -1546,8 +1547,9 @@ xhci_tags_create(xhci_state_t *state)
 
 	hcc = *(volatile u32 *)(state->cap + XHCI_HCCPARAMS1);
 	highaddr = (hcc & XHCI_HCC_AC64) ? DMA_HIGHADDR_ANY : XHCI_DMA32_MAX;
-	if (dma_tag_create(dma_tag_root(), 1, DMA_BOUNDARY_NONE, 0, highaddr, 0,
-	    1, DMA_SEGSZ_MAX, 0, "xhci", &state->tag) != 0) {
+
+	if (dma_tag_create(bus_get_dma_tag(state->nb_dev), 1, DMA_BOUNDARY_NONE,
+	    0, highaddr, 0, 1, DMA_SEGSZ_MAX, 0, "xhci", &state->tag) != 0) {
 		return (-1);
 	}
 	if (dma_tag_create(state->tag, XHCI_CTX_ALIGN, DMA_BOUNDARY_NONE, 0,
@@ -1742,6 +1744,10 @@ xhci_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 		xhci_state_destroy(state);
 		return (-1);
 	}
+	state->irq_intr_res = bus_intr_resource(state->irq_cookie);
+	if (state->irq_intr_res == NULL) {
+		state->irq_intr_res = state->irq_res;
+	}
 	state->irq_msi = (u8)(bus_intr_is_msi(state->irq_cookie) != 0);
 	pdev->driver_data = state;
 	xhci_states[index] = state;
@@ -1787,9 +1793,10 @@ xhci_pci_remove(pci_device_t *pdev)
 		return;
 	}
 	if (state->irq_cookie != NULL) {
-		bus_teardown_intr(state->nb_dev, state->irq_res,
+		bus_teardown_intr(state->nb_dev, state->irq_intr_res,
 		    state->irq_cookie);
 		state->irq_cookie = NULL;
+		state->irq_intr_res = NULL;
 	}
 	if (state->irq_res != NULL) {
 		bus_release_resource(state->nb_dev, SYS_RES_IRQ,
