@@ -92,6 +92,11 @@ Monolithic kernel with the following rough layers:
   native-ABI-only, is not mounted in VFS, and is invisible to the POSIX
   personality, which keeps using `/dev`. Entity handles to an interface pin
   it so a KOFO module cannot be unloaded while the entity is referenced.
+  A driver may register an interface in any pass: the entity subsystem only
+  comes up at `NEWBUS_PASS_CORE`, so a registration before that leaves the slot
+  unbound and `newbus_entity_init()` sweeps the pending slots once entities
+  exist. Do not "fix" an invisible interface by moving its driver to a later
+  pass — that hides an ordering bug the sweep already solves.
   I/O on these entities goes through the entity arch ops table
   (`entity_arch_io_register`) and the native entity syscalls
   `entityRead`/`entityWrite`/`entitySeek`/`entityIoctl`.
@@ -109,6 +114,7 @@ Monolithic kernel with the following rough layers:
   parsing, endpoint contracts and USB-interface newbus children; host
   controllers and class drivers remain separate modules.  USB interfaces are
   dynamically enumerated, so their newbus drivers must support reprobe/hot-plug.
+- `drivers/firmware/` — the platform firmware driver. (uefi/bios abstraction)
 - `drivers/acpi/` — ACPI tables plus a from-scratch AML interpreter.
 - `drivers/pmu/` — CPU performance monitoring driver. Owns CPUID/MSR PMU
   detection, counter programming, per-CPU counter state, and `drivers_log`

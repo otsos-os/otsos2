@@ -45,6 +45,8 @@ $define %func mb2_add_mmap_entries as function with args mb2_builder_t *, const 
 $define %func mb2_add_framebuffer as function with args mb2_builder_t *, const mb2_framebuffer_t *
 $define %func mb2_add_module as function with args mb2_builder_t *, u32, u32, const char *
 $define %func mb2_add_acpi as function with args mb2_builder_t *, const void *, u32, int
+$define %func mb2_add_efi64 as function with args mb2_builder_t *, u64
+$define %func mb2_add_smbios as function with args mb2_builder_t *, const void *, u32, u8, u8
 $define %func mb2_builder_finish as function with args mb2_builder_t *
 
 */
@@ -56,7 +58,7 @@ $space %export mb2_builder_init, mb2_add_bootloader_name
 $space %export mb2_add_basic_meminfo, mb2_add_simple_mmap
 $space %export mb2_add_mmap_entries
 $space %export mb2_add_framebuffer, mb2_add_module, mb2_builder_finish
-$space %export mb2_add_acpi
+$space %export mb2_add_acpi, mb2_add_efi64, mb2_add_smbios
 
 */
 
@@ -71,6 +73,8 @@ $space %export mb2_add_acpi
 #define MB2_TAG_FRAMEBUFFER	8
 #define MB2_TAG_ACPI_OLD	14
 #define MB2_TAG_ACPI_NEW	15
+#define MB2_TAG_SMBIOS		13
+#define MB2_TAG_EFI64		12
 #define MB2_MEMORY_AVAILABLE	1
 #define MB2_FB_RGB		1
 
@@ -258,6 +262,44 @@ mb2_add_acpi(mb2_builder_t *b, const void *rsdp, u32 size, int is_new)
 		return (-1);
 	}
 	bl_memcpy((u8 *)tag + 8, rsdp, size);
+	return (0);
+}
+
+int
+mb2_add_efi64(mb2_builder_t *b, u64 system_table)
+{
+	mb2_tag_t	*tag;
+
+	if (system_table == 0) {
+		return (-1);
+	}
+	tag = (mb2_tag_t *)tag_alloc(b, MB2_TAG_EFI64, 16);
+	if (!tag) {
+		return (-1);
+	}
+	*(u64 *)((u8 *)tag + 8) = system_table;
+	return (0);
+}
+
+
+int
+mb2_add_smbios(mb2_builder_t *b, const void *entry, u32 size, u8 major,
+    u8 minor)
+{
+	mb2_tag_t	*tag;
+	u8		*p;
+
+	if (!entry || size < 24) {
+		return (-1);
+	}
+	tag = (mb2_tag_t *)tag_alloc(b, MB2_TAG_SMBIOS, 16 + size);
+	if (!tag) {
+		return (-1);
+	}
+	p = (u8 *)tag + 8;
+	p[0] = major;
+	p[1] = minor;
+	bl_memcpy((u8 *)tag + 16, entry, size);
 	return (0);
 }
 

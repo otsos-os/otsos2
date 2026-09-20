@@ -159,10 +159,8 @@ inst_boot_draw(inst_ctx_t *ctx, const tui_rect_t *rect, int focused)
 
 	tui_move(row, rect->col);
 	tui_attr(theme->text_fg, theme->win_bg);
-	tui_field(" Space toggles. Both is the usual answer: the firmware "
-	    "picks.", rect->width);
+	tui_field(" Space toggles.", rect->width);
 
-	
 	row += 2;
 	tui_move(row, rect->col);
 	tui_attr(theme->dim_fg, theme->win_bg);
@@ -215,16 +213,6 @@ inst_boot_key(inst_ctx_t *ctx, const tui_key_t *key)
 
 
 static int
-inst_boot_enter(inst_ctx_t *ctx)
-{
-	if (ctx->want_bios == 0 && ctx->want_uefi == 0) {
-		ctx->want_bios = inst_boot_have(ctx, INST_BOOT_BIOS);
-		ctx->want_uefi = inst_boot_have(ctx, INST_BOOT_UEFI);
-	}
-	return (0);
-}
-
-static int
 inst_boot_ready(inst_ctx_t *ctx)
 {
 	return (ctx->want_bios != 0 || ctx->want_uefi != 0);
@@ -255,7 +243,6 @@ inst_boot_summary(inst_ctx_t *ctx, char *out, size_t size)
 const inst_section_t	inst_sec_boot = {
 	.title		= "Boot",
 	.summary	= inst_boot_summary,
-	.enter		= inst_boot_enter,
 	.draw		= inst_boot_draw,
 	.key		= inst_boot_key,
 	.ready		= inst_boot_ready,

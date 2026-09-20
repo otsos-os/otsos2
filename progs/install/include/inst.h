@@ -43,6 +43,7 @@ $define %func inst_fail as procedure with args inst_ctx_t *, const char *, ...
 $define %func inst_error as function with args const inst_ctx_t *
 $define %func inst_error_clear as procedure with args inst_ctx_t *
 $define %func inst_module_by_role as function with args const inst_plan_t *, const char *
+$define %func inst_fw_origin as function with args void
 $define %func inst_size_label as procedure with args char *, size_t, uint64_t, uint32_t
 $define %func inst_sectors as function with args uint64_t, uint32_t
 $define %func inst_bytes as function with args uint64_t, uint32_t
@@ -54,7 +55,7 @@ $define %func inst_bytes as function with args uint64_t, uint32_t
 $space %export inst_module_t, inst_plan_t, inst_cand_t, inst_slice_t
 $space %export inst_target_t, inst_progress_fn, inst_ctx_t
 $space %export inst_fail, inst_error, inst_error_clear
-$space %export inst_module_by_role, inst_size_label
+$space %export inst_module_by_role, inst_size_label, inst_fw_origin
 $space %export inst_sectors, inst_bytes
 
 */
@@ -142,6 +143,8 @@ void		inst_error_clear(inst_ctx_t *ctx);
 
 const inst_module_t	*inst_module_by_role(const inst_plan_t *plan,
 			    const char *role);
+
+unsigned int	inst_fw_origin(void);
 
 void		inst_size_label(char *out, size_t size, uint64_t sectors,
 		    uint32_t sector_size);

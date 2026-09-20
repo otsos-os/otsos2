@@ -306,6 +306,14 @@ PMU_O = ../bin/pmu.o
 ACPI_O = ../bin/acpi.o
 ACPI_TABLES_O = ../bin/acpi_tables.o
 ACPI_PRT_O = ../bin/acpi_prt.o
+FW_HANDOFF_O = ../bin/fw_handoff.o
+FW_SMBIOS_O = ../bin/fw_smbios.o
+FW_RSDP_O = ../bin/fw_rsdp.o
+FW_CORE_O = ../bin/fw_core.o
+FW_API_O = ../bin/fw_api.o
+FW_UEFI_O = ../bin/fw_uefi.o
+FW_BIOS_O = ../bin/fw_bios.o
+FW_BIOS_LEGACY_O = ../bin/fw_bios_legacy.o
 AML_O = ../bin/aml.o
 AML_BUS_O = ../bin/aml_bus.o
 AML_OBJECT_O = ../bin/aml_object.o
@@ -439,6 +447,8 @@ OBJ_NO_KSYMTAB = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UAR
       $(TRACE_O) $(TRACE_PMU_O) $(PMU_O) \
       $(UNAME_O) $(MEMINFO_O) $(CPUINFO_O) \
       $(ACPI_O) $(ACPI_TABLES_O) $(ACPI_PRT_O) \
+      $(FW_HANDOFF_O) $(FW_SMBIOS_O) $(FW_RSDP_O) $(FW_CORE_O) $(FW_API_O) \
+      $(FW_UEFI_O) $(FW_BIOS_O) $(FW_BIOS_LEGACY_O) \
       $(AML_O) $(AML_BUS_O) $(AML_OBJECT_O) $(AML_NAMESPACE_O) $(AML_PARSE_O) $(AML_REGION_O) $(AML_EXEC_O) $(AML_OP_O) $(AML_NAMED_O) $(AML_RESOURCE_O) \
       $(SMP_O) $(SMP_ASM_O) $(PCPU_O) \
       $(SYNC_O) $(SYNC_CRITICAL_O) $(SYNC_SPINLOCK_O) $(SYNC_MUTEX_O) $(SYNC_RWLOCK_O) $(SYNC_WITNESS_O) \
@@ -1408,7 +1418,7 @@ $(USERSPACE_ASM_O): userland/userspace.asm
 	@echo "  AS      $<"
 	@$(AS) -f $(NASM_FORMAT) -g -F dwarf $< -o $@
 
-$(ACPI_O): kernel/drivers/acpi/acpi.c kernel/drivers/acpi/acpi.h
+$(ACPI_O): kernel/drivers/acpi/acpi.c kernel/drivers/acpi/acpi.h kernel/drivers/firmware/firmware.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1459,6 +1469,40 @@ $(AML_RESOURCE_O): kernel/drivers/acpi/aml_resource.c $(AML_HEADERS)
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(ACPI_PRT_O): kernel/drivers/acpi/prt.c kernel/drivers/acpi/prt.h kernel/drivers/acpi/aml.h kernel/drivers/acpi/acpi.h kernel/pci/pci.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+FW_HEADERS = kernel/drivers/firmware/firmware.h kernel/drivers/newbus/newbus.h
+
+$(FW_HANDOFF_O): kernel/drivers/firmware/handoff.c $(FW_HEADERS) kernel/multiboot2.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(FW_SMBIOS_O): kernel/drivers/firmware/smbios.c $(FW_HEADERS)
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(FW_RSDP_O): kernel/drivers/firmware/rsdp.c $(FW_HEADERS)
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(FW_CORE_O): kernel/drivers/firmware/core.c $(FW_HEADERS)
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(FW_API_O): kernel/drivers/firmware/api.c $(FW_HEADERS) kernel/api/firmware_abi.h kernel/useraddr.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(FW_UEFI_O): kernel/drivers/firmware/uefi/uefi.c $(FW_HEADERS)
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(FW_BIOS_O): kernel/drivers/firmware/bios/bios.c $(FW_HEADERS) kernel/drivers/firmware/bios/legacy.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(FW_BIOS_LEGACY_O): kernel/drivers/firmware/bios/legacy.c $(FW_HEADERS) kernel/drivers/firmware/bios/legacy.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -1526,7 +1570,7 @@ $(NEWBUS_NEXUS_O): kernel/drivers/newbus/nexus.c kernel/drivers/newbus/newbus.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(NEWBUS_PLATFORM_O): kernel/drivers/newbus/platform.c kernel/drivers/newbus/newbus.h kernel/drivers/acpi/acpi.h kernel/interrupts/apic/lapic.h kernel/interrupts/apic/ioapic.h kernel/smp/smp.h
+$(NEWBUS_PLATFORM_O): kernel/drivers/newbus/platform.c kernel/drivers/newbus/newbus.h kernel/drivers/acpi/acpi.h kernel/drivers/firmware/firmware.h kernel/interrupts/apic/lapic.h kernel/interrupts/apic/ioapic.h kernel/smp/smp.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

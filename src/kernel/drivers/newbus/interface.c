@@ -41,6 +41,7 @@ $define %func newbus_interface_open as function with args device_t, const char *
 $define %func newbus_interface_close as procedure with args int
 $define %func newbus_interface_name_valid as function with args const char *
 $define %func newbus_interface_entity_bind as function with args int
+$define %func newbus_interface_entity_sweep as procedure with args void
 $define %func newbus_interface_entity_release as procedure with args entity id
 $define %func newbus_device_entity_release as procedure with args entity id
 $define %func newbus_entity_device_sync as procedure with args device_t
@@ -56,6 +57,7 @@ $define %func newbus_interface_stat_entity as function with args entity id, size
 
 $space %internal newbus_interface_name_valid
 $space %internal newbus_interface_entity_bind
+$space %internal newbus_interface_entity_sweep
 $space %internal newbus_interface_entity_release
 $space %internal newbus_device_entity_release
 $space %export newbus_interface_register, newbus_interface_unregister
@@ -178,6 +180,26 @@ newbus_interface_entity_bind(int index)
 	return (0);
 }
 
+static void
+newbus_interface_entity_sweep(void)
+{
+	int	i;
+
+	if (!entity_is_initialized()) {
+		return;
+	}
+	for (i = 0; i < NEWBUS_MAX_INTERFACES; i++) {
+		if (!newbus_interface_slots[i].used ||
+		    newbus_interface_slots[i].entity != 0) {
+			continue;
+		}
+		if (newbus_interface_entity_bind(i) != 0) {
+			continue;
+		}
+		newbus_entity_device_sync(newbus_interface_slots[i].dev);
+	}
+}
+
 void
 newbus_entity_device_sync(device_t dev)
 {
@@ -237,6 +259,7 @@ newbus_entity_init(void)
 	entity_arch_release_register(ENTITY_ARCH_NB_DEVICE,
 	    newbus_device_entity_release);
 	newbus_entity_initialized = 1;
+	newbus_interface_entity_sweep();
 }
 
 int
@@ -278,9 +301,8 @@ newbus_interface_register(device_t dev, const newbus_interface_t *iface)
 	newbus_interface_slots[i].used = 1;
 	smp_unlock();
 	if (newbus_interface_entity_bind(i) != 0) {
-		drivers_log("[NEWBUS] interface %s on %s has no entity; "
-		    "raw fallback\n", iface->name,
-		    device_get_nameunit(dev));
+		drivers_log("[NEWBUS] interface %s on %s entity deferred\n",
+		    iface->name, device_get_nameunit(dev));
 	}
 	newbus_entity_device_sync(dev);
 	drivers_log("[NEWBUS] interface %s on %s\n", iface->name,

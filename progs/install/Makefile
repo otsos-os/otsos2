@@ -26,7 +26,7 @@ LIBDISK = $(LIBDISK_DIR)/lib/libdisk.a
 INSTALL_BIN = install
 
 SRC = src/main.c src/error.c src/geom.c src/walk.c src/plan.c src/scan.c src/layout.c \
-	src/format.c src/copy.c src/boot.c src/verify.c \
+	src/format.c src/copy.c src/boot.c src/verify.c src/firmware.c \
 	src/ui.c src/ui_disk.c src/ui_layout.c src/ui_boot.c \
 	src/ui_confirm.c src/ui_run.c
 OBJ = $(SRC:%.c=build/%.o)

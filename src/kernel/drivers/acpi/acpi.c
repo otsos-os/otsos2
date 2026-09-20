@@ -43,12 +43,10 @@ $define %func validate_checksum as function with args const void *, u32
 $define %func acpi_validate_checksum as function with args acpi_sdt_header_t *
 $define %func sig_match as function with args const char *, const char *
 $define %func validate_rsdp as function with args acpi_rsdp_v1_t *
-$define %func scan_for_rsdp as function with args u64, u64
-$define %func find_rsdp_bios as function with args void
 $define %func parse_rsdt as procedure with args acpi_rsdt_t *
 $define %func parse_xsdt as procedure with args acpi_xsdt_t *
 $define %func acpi_init_from_rsdp as function with args void *
-$define %func acpi_init_from_multiboot2 as function with args void *
+$define %func acpi_init_from_firmware as function with args void
 $define %func acpi_find_table as function with args const char *
 $define %func acpi_table_foreach as function with args const char *, int (*)(acpi_sdt_header_t *, void *), void *
 $define %func acpi_get_fadt as function with args void
@@ -61,10 +59,9 @@ $define %func acpi_get_revision as function with args void
 /* !SPACE!
 
 $space %internal validate_checksum, sig_match, validate_rsdp
-$space %internal scan_for_rsdp, find_rsdp_bios
 $space %internal parse_rsdt, parse_xsdt
 $space %export acpi_validate_checksum, acpi_init_from_rsdp
-$space %export acpi_init_from_multiboot2, acpi_find_table
+$space %export acpi_init_from_firmware, acpi_find_table
 $space %export acpi_table_foreach
 $space %export acpi_get_fadt, acpi_get_madt
 $space %export acpi_is_initialized, acpi_get_revision
@@ -72,7 +69,7 @@ $space %export acpi_is_initialized, acpi_get_revision
 */
 
 #include <kernel/drivers/acpi/acpi.h>
-#include <kernel/multiboot2.h>
+#include <kernel/drivers/firmware/firmware.h>
 #include <kernel/panic.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
@@ -145,40 +142,6 @@ validate_rsdp(acpi_rsdp_v1_t *rsdp)
 	}
 
 	return (0);
-}
-
-static acpi_rsdp_v1_t *
-scan_for_rsdp(u64 start, u64 end)
-{
-	u64			addr;
-	acpi_rsdp_v1_t		*candidate;
-
-	for (addr = start; addr < end; addr += 16) {
-		candidate = (acpi_rsdp_v1_t *)addr;
-		if (validate_rsdp(candidate) == 0) {
-			return (candidate);
-		}
-	}
-	return (NULL);
-}
-
-static acpi_rsdp_v1_t *
-find_rsdp_bios(void)
-{
-	u16			ebda_seg;
-	u64			ebda_addr;
-	acpi_rsdp_v1_t		*rsdp;
-
-	ebda_seg = *(u16 *)0x040E;
-	ebda_addr = (u64)ebda_seg << 4;
-	if (ebda_addr) {
-		rsdp = scan_for_rsdp(ebda_addr, ebda_addr + 1024);
-		if (rsdp) {
-			return (rsdp);
-		}
-	}
-
-	return (scan_for_rsdp(0x000E0000, 0x00100000));
 }
 
 static void
@@ -317,43 +280,16 @@ acpi_init_from_rsdp(void *rsdp_ptr)
 }
 
 int
-acpi_init_from_multiboot2(void *mb2_info)
+acpi_init_from_firmware(void)
 {
-	multiboot2_info_t	*mb;
-	multiboot2_tag_t	*tag_new, *tag_old;
-	acpi_rsdp_v1_t		*rsdp;
+	const fw_desc_t	*fw;
 
-	mb = (multiboot2_info_t *)mb2_info;
-
-	tag_new = multiboot2_find_tag(mb,
-	    MULTIBOOT2_TAG_TYPE_ACPI_NEW);
-	if (tag_new) {
-		void	*rsdp_ptr;
-
-		rsdp_ptr = (void *)((u8 *)tag_new + 8);
-		drivers_log("[ACPI] found ACPI_NEW multiboot2 tag\n");
-		return (acpi_init_from_rsdp(rsdp_ptr));
+	fw = fw_desc();
+	if (fw == NULL || fw->acpi_rsdp == 0) {
+		panic("[ACPI] no RSDP from firmware\n");
+		return (-1);
 	}
-
-	tag_old = multiboot2_find_tag(mb,
-	    MULTIBOOT2_TAG_TYPE_ACPI_OLD);
-	if (tag_old) {
-		void	*rsdp_ptr;
-
-		rsdp_ptr = (void *)((u8 *)tag_old + 8);
-		drivers_log("[ACPI] found ACPI_OLD multiboot2 tag\n");
-		return (acpi_init_from_rsdp(rsdp_ptr));
-	}
-
-	drivers_log("[ACPI] no multiboot2 ACPI tag, scanning "
-	    "BIOS area...\n");
-	rsdp = find_rsdp_bios();
-	if (rsdp) {
-		return (acpi_init_from_rsdp(rsdp));
-	}
-
-	panic("[ACPI] RSDP not found!\n");
-	return (-1);
+	return (acpi_init_from_rsdp((void *)fw->acpi_rsdp));
 }
 
 acpi_sdt_header_t *

@@ -34,6 +34,7 @@ $define %type inst_ctx_t as one installer run
 $define %func inst_top_level as function with args const char *, char *, size_t
 $define %func inst_tree_add as function with args inst_ctx_t *, const char *
 $define %func inst_module_read as function with args const char *, inst_module_t *
+$define %func inst_boot_default as function with args inst_ctx_t *
 $define %func inst_plan_load as function with args inst_ctx_t *
 
 */
@@ -41,6 +42,7 @@ $define %func inst_plan_load as function with args inst_ctx_t *
 /* !SPACE!
 
 $space %internal inst_top_level, inst_tree_add, inst_module_read
+$space %internal inst_boot_default
 $space %export inst_plan_load
 
 */
@@ -49,6 +51,8 @@ $space %export inst_plan_load
 #include <native.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <kernel/api/firmware_abi.h>
 
 #include "inst.h"
 #include "plan.h"
@@ -136,6 +140,28 @@ inst_module_read(const char *name, inst_module_t *mod)
 
 	(void)snprintf(mod->name, sizeof(mod->name), "%s", name);
 	return (0);
+}
+
+static void
+inst_boot_default(inst_ctx_t *ctx)
+{
+	int	have_bios;
+	int	have_uefi;
+
+	have_bios = inst_module_by_role(&ctx->plan, INST_ROLE_STAGE1) != NULL &&
+	    inst_module_by_role(&ctx->plan, INST_ROLE_STAGE2) != NULL;
+	have_uefi = inst_module_by_role(&ctx->plan, INST_ROLE_UEFI) != NULL;
+
+	switch (inst_fw_origin()) {
+	case FWIOC_ORIGIN_BIOS:
+		ctx->want_bios = have_bios;
+		break;
+	case FWIOC_ORIGIN_UEFI:
+		ctx->want_uefi = have_uefi;
+		break;
+	default:
+		break;
+	}
 }
 
 int
@@ -232,5 +258,7 @@ inst_plan_load(inst_ctx_t *ctx)
 		    INST_ROLE_CMSEED);
 		return (-1);
 	}
+
+	inst_boot_default(ctx);
 	return (0);
 }

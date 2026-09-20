@@ -144,6 +144,13 @@ const AcpiRsdp = struct {
 	is_new: bool,
 };
 
+const SmbiosEntry = struct {
+	ptr: [*]const u8,
+	size: u32,
+	major: u8,
+	minor: u8,
+};
+
 extern fn uefi_outb(port: u16, value: u8) callconv(.c) void;
 extern fn uefi_inb(port: u16) callconv(.c) u8;
 extern fn uefi_jump32(entry: u32, magic: u32, info: u32) callconv(.c) noreturn;
@@ -161,6 +168,8 @@ extern fn mb2_add_mmap_entries(b: *Mb2Builder, entries: [*]const Mb2MmapEntry, c
 extern fn mb2_add_framebuffer(b: *Mb2Builder, fb: *const Mb2Framebuffer) callconv(.c) c_int;
 extern fn mb2_add_module(b: *Mb2Builder, start: u32, end: u32, name: [*:0]const u8) callconv(.c) c_int;
 extern fn mb2_add_acpi(b: *Mb2Builder, rsdp: ?*const anyopaque, size: u32, is_new: c_int) callconv(.c) c_int;
+extern fn mb2_add_efi64(b: *Mb2Builder, system_table: u64) callconv(.c) c_int;
+extern fn mb2_add_smbios(b: *Mb2Builder, entry: ?*const anyopaque, size: u32, major: u8, minor: u8) callconv(.c) c_int;
 extern fn mb2_builder_finish(b: *Mb2Builder) callconv(.c) u32;
 
 extern fn cfsr_mount(vol: *CfsrVolume, read: *const fn (?*anyopaque, u64, u32, ?*anyopaque) callconv(.c) c_int, ctx: ?*anyopaque, base_lba: u64, max_run: u32) callconv(.c) c_int;
@@ -249,6 +258,21 @@ fn boot() !void {
 	puts("[UEFI] ACPI RSDP ");
 	puthex(@intCast(@intFromPtr(rsdp.ptr)));
 	puts("\n");
+	if (mb2_add_efi64(&mb, @intFromPtr(uefi.system_table)) != 0) {
+		return BootError.OutOfMemory;
+	}
+
+	
+	if (findSmbios()) |sm| {
+		if (mb2_add_smbios(&mb, sm.ptr, sm.size, sm.major,
+			sm.minor) != 0)
+		{
+			return BootError.OutOfMemory;
+		}
+		puts("[UEFI] SMBIOS ");
+		puthex(@intCast(@intFromPtr(sm.ptr)));
+		puts("\n");
+	}
 
 	if (mb2_builder_finish(&mb) == 0) {
 		return BootError.OutOfMemory;
@@ -683,6 +707,44 @@ fn findAcpiRsdp() !AcpiRsdp {
 	}
 
 	return old orelse BootError.AcpiNotFound;
+}
+
+fn findSmbios() ?SmbiosEntry {
+	const table = uefi.system_table.configuration_table;
+	const count = uefi.system_table.number_of_table_entries;
+	var i: usize = 0;
+	var old: ?SmbiosEntry = null;
+
+	while (i < count) : (i += 1) {
+		const entry = table[i];
+		const raw: [*]const u8 = @ptrCast(entry.vendor_table);
+		if (guidEq(entry.vendor_guid, ConfigurationTable.smbios3_table_guid)) {
+			return .{
+				.ptr = raw,
+				.size = anchorLen(raw[6], 24),
+				.major = raw[7],
+				.minor = raw[8],
+			};
+		}
+		if (guidEq(entry.vendor_guid, ConfigurationTable.smbios_table_guid)) {
+			old = .{
+				.ptr = raw,
+				.size = anchorLen(raw[5], 31),
+				.major = raw[6],
+				.minor = raw[7],
+			};
+		}
+	}
+
+	return old;
+}
+
+
+fn anchorLen(reported: u8, nominal: u32) u32 {
+	if (reported < 24 or reported > 64) {
+		return nominal;
+	}
+	return reported;
 }
 
 fn rsdpSize(rsdp: [*]const u8) u32 {

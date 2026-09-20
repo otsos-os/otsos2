@@ -41,6 +41,8 @@ $define %func mb2_add_mmap_entries as function with args mb2_builder_t *, const 
 $define %func mb2_add_framebuffer as function with args mb2_builder_t *, const mb2_framebuffer_t *
 $define %func mb2_add_module as function with args mb2_builder_t *, u32, u32, const char *
 $define %func mb2_add_acpi as function with args mb2_builder_t *, const void *, u32, int
+$define %func mb2_add_efi64 as function with args mb2_builder_t *, u64
+$define %func mb2_add_smbios as function with args mb2_builder_t *, const void *, u32, u8, u8
 $define %func mb2_builder_finish as function with args mb2_builder_t *
 
 */
@@ -52,7 +54,7 @@ $space %export mb2_builder_init, mb2_add_bootloader_name
 $space %export mb2_add_basic_meminfo, mb2_add_simple_mmap
 $space %export mb2_add_mmap_entries
 $space %export mb2_add_framebuffer, mb2_add_module, mb2_builder_finish
-$space %export mb2_add_acpi
+$space %export mb2_add_acpi, mb2_add_efi64, mb2_add_smbios
 
 */
 
@@ -90,6 +92,9 @@ int	mb2_add_module(mb2_builder_t *b, u32 start, u32 end,
 	    const char *name);
 int	mb2_add_acpi(mb2_builder_t *b, const void *rsdp, u32 size,
 	    int is_new);
+int	mb2_add_efi64(mb2_builder_t *b, u64 system_table);
+int	mb2_add_smbios(mb2_builder_t *b, const void *entry, u32 size,
+	    u8 major, u8 minor);
 u32	mb2_builder_finish(mb2_builder_t *b);
 
 #endif

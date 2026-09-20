@@ -49,11 +49,10 @@ $space %internal platform_smp_attach
 */
 
 #include <kernel/drivers/acpi/acpi.h>
+#include <kernel/drivers/firmware/firmware.h>
 #include <kernel/drivers/newbus/newbus.h>
 #include <kernel/interrupts/apic/ioapic.h>
 #include <kernel/interrupts/apic/lapic.h>
-#include <kernel/multiboot.h>
-#include <kernel/multiboot2.h>
 #include <kernel/smp/smp.h>
 
 static void
@@ -68,12 +67,11 @@ fw_acpi_identify(driver_t *driver, device_t parent)
 static int
 fw_acpi_probe(device_t dev)
 {
-	const newbus_bootinfo_t	*boot;
+	const fw_desc_t	*fw;
 
 	(void)dev;
-	boot = newbus_get_bootinfo();
-	if (boot == NULL || boot->magic != MULTIBOOT2_BOOTLOADER_MAGIC ||
-	    boot->mb2 == NULL) {
+	fw = fw_desc();
+	if (fw == NULL || fw->acpi_rsdp == 0) {
 		return (-1);
 	}
 	return (100);
@@ -82,14 +80,8 @@ fw_acpi_probe(device_t dev)
 static int
 fw_acpi_attach(device_t dev)
 {
-	const newbus_bootinfo_t	*boot;
-
 	(void)dev;
-	boot = newbus_get_bootinfo();
-	if (boot == NULL || boot->mb2 == NULL) {
-		return (-1);
-	}
-	return (acpi_init_from_multiboot2(boot->mb2));
+	return (acpi_init_from_firmware());
 }
 
 static void
@@ -206,7 +198,7 @@ static driver_t smp_driver = {
 };
 
 FIRMWARE_DRIVER_MODULE(acpi, acpi_driver, acpi_devclass,
-    NEWBUS_PASS_FIRMWARE, NEWBUS_ORDER_FIRST);
+    NEWBUS_PASS_FIRMWARE, NEWBUS_ORDER_MIDDLE);
 PLATFORM_DRIVER_MODULE(lapic, lapic_driver, lapic_devclass,
     NEWBUS_PASS_INTERRUPT, NEWBUS_ORDER_FIRST);
 PLATFORM_DRIVER_MODULE(ioapic, ioapic_driver, ioapic_devclass,
