@@ -548,7 +548,7 @@ chainfs_vnode_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
 	end_pos = write_off + (u32)count;
 	new_size = (end_pos > old_size) ? end_pos : old_size;
 	if (new_size == 0) {
-		result = chainfs_write_file(path, (const u8 *)"", 0);
+		result = chainfs_write_file(path, (const u8 *)"", 0, 0);
 		return (result == 0 ? 0 : result);
 	}
 
@@ -568,7 +568,7 @@ chainfs_vnode_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
 	}
 
 	memcpy(new_data + write_off, buf, (unsigned long)count);
-	result = chainfs_write_file(path, new_data, new_size);
+	result = chainfs_write_file(path, new_data, new_size, new_size);
 	kmem_free(new_data);
 
 	if (result != 0) {
@@ -887,7 +887,7 @@ chainfs_back_create_file(const char *path)
 	if (!chainfs_back_ready()) {
 		return (-API_ERR_IO);
 	}
-	return (chainfs_write_file(path, (const u8 *)"", 0));
+	return (chainfs_write_file(path, (const u8 *)"", 0, 0));
 }
 
 static int
@@ -938,7 +938,7 @@ chainfs_back_rename(const char *oldpath, const char *newpath)
 		return (-API_ERR_IS_DIR);
 	}
 	if (entry.size == 0) {
-		ret = chainfs_write_file(newpath, (const u8 *)"", 0);
+		ret = chainfs_write_file(newpath, (const u8 *)"", 0, 0);
 		if (ret != 0) {
 			return (ret);
 		}
@@ -956,7 +956,7 @@ chainfs_back_rename(const char *oldpath, const char *newpath)
 		kmem_free(buf);
 		return (ret);
 	}
-	ret = chainfs_write_file(newpath, buf, entry.size);
+	ret = chainfs_write_file(newpath, buf, entry.size, entry.size);
 	if (ret != 0) {
 		kmem_free(buf);
 		return (ret);
@@ -990,7 +990,7 @@ chainfs_back_truncate(const char *path, u64 length)
 		return (-API_ERR_IS_DIR);
 	}
 	if (length == 0) {
-		return (chainfs_write_file(path, (const u8 *)"", 0));
+		return (chainfs_write_file(path, (const u8 *)"", 0, 0));
 	}
 	if (length == entry.size) {
 		return (0);
@@ -1012,7 +1012,7 @@ chainfs_back_truncate(const char *path, u64 length)
 		}
 	}
 
-	ret = chainfs_write_file(path, buf, (u32)length);
+	ret = chainfs_write_file(path, buf, (u32)length, (u32)length);
 	if (ret != 0) {
 		kmem_free(buf);
 		return (ret);
@@ -1067,7 +1067,7 @@ chainfs_back_write_file(const char *path, const u8 *data, u32 size)
 	if (!chainfs_back_ready()) {
 		return (-API_ERR_IO);
 	}
-	return (chainfs_write_file(path, data, size));
+	return (chainfs_write_file(path, data, size, size));
 }
 
 static int

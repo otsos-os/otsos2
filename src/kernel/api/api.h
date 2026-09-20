@@ -963,6 +963,8 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs);
 int api_fs_chdir(const char *path);
 int api_fs_getcwd(char *buf, u32 size);
 int api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries);
+int api_fs_listdir_at(const char *path, u32 offset, struct api_dirent *buf,
+    u32 max_entries);
 int api_fs_stat(const char *path, struct api_fs_stat *buf);
 int api_fs_rename(const char *oldpath, const char *newpath);
 int api_fs_unlink(const char *path);

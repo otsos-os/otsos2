@@ -41,6 +41,7 @@ $define %func shmGet as function with args uint64_t, size_t, uint32_t, int *
 $define %func shmMap as function with args int, void *, size_t, uint32_t, uint32_t
 $define %func shmCtl as function with args int, int, void *
 $define %func shmClose as function with args int
+$define %func fsListdirAt as function with args const char *, uint32_t, api_dirent *, uint32_t
 $define %func regOpen as function with args const char *, const char *, uint32_t
 $define %func regGet as function with args int, api_reg_value *
 $define %func regUpd as function with args uint32_t
@@ -79,7 +80,8 @@ $space %export termRead, termReadFlags, termWrite, termPrint, termMouse
 $space %export ptyOpen
 $space %export dataOpen, dataClose, dataRead, dataWrite, dataReadFull
 $space %export dataWriteFull, dataSeek, dataPipe, dataDir
-$space %export fsChdir, fsGetcwd, fsListdir, fsStat, fsRename, fsUnlink
+$space %export fsChdir, fsGetcwd, fsListdir, fsListdirAt
+$space %export fsStat, fsRename, fsUnlink
 $space %export fsMnt, fsUmnt
 $space %export procSpawn, procSpawnAbi, procSpawnNative, procSpawnPty, procWait
 $space %export procTryWait, procOpen, procClose, procExitCode
@@ -247,6 +249,7 @@ struct api_winsize {
 #define CALL_FS_CHDIR		0x206
 #define CALL_FS_GETCWD		0x207
 #define CALL_FS_LISTDIR		0x208
+#define CALL_FS_LISTDIR_AT	0x211
 #define CALL_FS_STAT		0x209
 #define CALL_FS_RENAME		0x20A
 #define CALL_FS_UNLINK		0x20B
@@ -1416,6 +1419,8 @@ int	dataDir(uint32_t op, const char *path, const char *newpath);
 int	fsChdir(const char *path);
 int	fsGetcwd(char *buf, size_t size);
 int	fsListdir(const char *path, struct api_dirent *buf, uint32_t max_entries);
+int	fsListdirAt(const char *path, uint32_t offset, struct api_dirent *buf,
+	    uint32_t max_entries);
 int	fsStat(const char *path, struct api_fs_stat *buf);
 int	fsRename(const char *oldpath, const char *newpath);
 int	fsUnlink(const char *path);

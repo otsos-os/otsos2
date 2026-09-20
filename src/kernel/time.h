@@ -110,6 +110,23 @@ extern volatile u64	time_second;
 extern volatile u64	time_uptime;
 extern struct timehands	*timehands;
 
+#define	CALENDAR_EPOCH_YEAR	1970U
+
+struct calendar_time {
+	u32	year;
+	u8	month;
+	u8	mday;
+	u8	hour;
+	u8	min;
+	u8	sec;
+	u8	pad[2];
+};
+
+int	calendar_is_leap_year(u32 year);
+u32	calendar_days_in_month(u32 year, u32 month);
+u64	calendar_to_epoch(const struct calendar_time *ct);
+void	calendar_from_epoch(u64 seconds, struct calendar_time *ct);
+
 void	time_init(void);
 void	time_tick(void);
 void	time_windup_current(void);

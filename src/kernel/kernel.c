@@ -48,6 +48,7 @@ $define %func enable_sse as procedure with args void
 $define %func kernel_ensure_parent_dirs as function with args const char *
 $define %func kernel_install_module_cb as procedure with args const char *, const char *, void *
 $define %func kernel_install_registry_module_cb as function with args const char *, void *
+$define %func kernel_load_root_init as function with args void **, u32 *
 $define %func kmain as start with args u64, u64, u64, u64
 
 */
@@ -59,6 +60,7 @@ $space %internal mb2_find_module, mb2_total_modules_size, status_line
 $space %internal timer_sanity_check, net_test, enable_sse
 $space %internal kernel_ensure_parent_dirs, kernel_install_module_cb
 $space %internal kernel_install_registry_module_cb
+$space %internal kernel_load_root_init
 $space %export kmain
 
 */
@@ -68,6 +70,7 @@ $space %export kmain
 #include <kernel/cm/cm.h>
 #include <kernel/drivers/acpi/acpi.h>
 #include <kernel/drivers/disk/disk.h>
+#include <kernel/drivers/fs/chainFS/chainfs.h>
 #include <kernel/drivers/fs/vfs/vfs.h>
 #include <kernel/drivers/keyboard/keyboard.h>
 #include <kernel/drivers/newbus/newbus.h>
@@ -115,6 +118,8 @@ static u32	boot_magic;
 static int	is_multiboot2;
 
 #define BOOT_FLAG_DISABLE_APIC	0x00000001ULL
+#define KERNEL_INIT_PATH	"/bin/init"
+#define KERNEL_INIT_MAX		(16U * 1024U * 1024U)
 
 static void
 debug_multiboot_info(multiboot_info_t *mb_info)
@@ -316,6 +321,7 @@ static void
 kernel_install_module_cb(const char *name, const char *dest, void *ctx)
 {
 	module_copy_ctx_t	*c;
+	vnode_t			*existing;
 	void			*mod;
 	u32			sz;
 	int			res;
@@ -339,6 +345,18 @@ kernel_install_module_cb(const char *name, const char *dest, void *ctx)
 		return;
 	}
 
+	if (strcmp(name, "init") == 0) {
+		c->init_mod = mod;
+		c->init_sz = sz;
+	}
+
+	if (!chainfs_root_is_ramdisk()) {
+		if (vfs_resolve(dest, &existing) == 0) {
+			vnode_release(existing);
+			return;
+		}
+	}
+
 	if (kernel_ensure_parent_dirs(dest) != 0) {
 		printk("[KERNEL] Failed to create parent directories "
 		    "for %s\n", dest);
@@ -352,11 +370,6 @@ kernel_install_module_cb(const char *name, const char *dest, void *ctx)
 	} else {
 		printk("[KERNEL] Failed to install %s from module "
 		    "'%s'\n", dest, name);
-	}
-
-	if (strcmp(name, "init") == 0) {
-		c->init_mod = mod;
-		c->init_sz = sz;
 	}
 }
 
@@ -386,6 +399,64 @@ kernel_install_registry_module_cb(const char *name, void *ctx)
 	}
 
 	kernel_install_module_cb(name, dest, ctx);
+	return (0);
+}
+
+
+static int
+kernel_load_root_init(void **out, u32 *out_sz)
+{
+	vnode_t		*vn;
+	void		*buf;
+	posix_stat_t	st;
+	u32		size, got;
+	int		ret;
+
+	*out = NULL;
+	*out_sz = 0;
+
+	if (vfs_resolve(KERNEL_INIT_PATH, &vn) != 0 || vn == NULL) {
+		printk("[KERNEL] %s missing on root filesystem\n",
+		    KERNEL_INIT_PATH);
+		return (-1);
+	}
+	if (vn->type == VDIR) {
+		vnode_release(vn);
+		printk("[KERNEL] %s is a directory\n", KERNEL_INIT_PATH);
+		return (-1);
+	}
+	ret = vnode_stat(vn, &st);
+	vnode_release(vn);
+	if (ret != 0) {
+		printk("[KERNEL] cannot stat %s\n", KERNEL_INIT_PATH);
+		return (-1);
+	}
+
+
+	if (st.st_size <= 0 || (u64)st.st_size > KERNEL_INIT_MAX) {
+		printk("[KERNEL] %s has unusable size %ld\n",
+		    KERNEL_INIT_PATH, (long)st.st_size);
+		return (-1);
+	}
+	size = (u32)st.st_size;
+
+	buf = kmem_alloc(size);
+	if (buf == NULL) {
+		printk("[KERNEL] no memory for %s (%u bytes)\n",
+		    KERNEL_INIT_PATH, size);
+		return (-1);
+	}
+	got = 0;
+	ret = vfs_read_file_full(KERNEL_INIT_PATH, (u8 *)buf, size, &got);
+	if (ret != 0 || got != size) {
+		kmem_free(buf);
+		printk("[KERNEL] short read on %s (%u/%u)\n",
+		    KERNEL_INIT_PATH, got, size);
+		return (-1);
+	}
+
+	*out = buf;
+	*out_sz = size;
 	return (0);
 }
 
@@ -600,9 +671,9 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	vm_page_startup();
 	uma_init();
 	kmem_init();
-	dma_init();
 	vm_map_module_init();
 	vm_object_init();
+	dma_init();
 
 	stdio_init();
 	memset(&nb_boot, 0, sizeof(nb_boot));
@@ -630,7 +701,7 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 	module_pool_sz += 1024 * 1024;
 	module_pool_sz = (module_pool_sz + PAGE_SIZE - 1) &
 	    ~(PAGE_SIZE - 1);
-	module_pool = bootmem_alloc(module_pool_sz, PAGE_SIZE);
+	module_pool = kmem_alloc_aligned(module_pool_sz, PAGE_SIZE);
 	if (module_pool) {
 		printk("[BOOT] module pool allocated: %u bytes "
 		    "at %p\n", module_pool_sz, module_pool);
@@ -821,7 +892,11 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 
 		api_init();
 
-		if (cm_is_initialized()) {
+
+		if (!chainfs_root_is_ramdisk()) {
+			printk("[KERNEL] installed root, skipping module "
+			    "install pass\n");
+		} else if (cm_is_initialized()) {
 			if (cm_foreach_key("BOOT", "Modules",
 			    kernel_install_registry_module_cb, &mod_ctx) != 0) {
 				printk("[KERNEL] Cannot read registry "
@@ -843,16 +918,22 @@ kmain(u64 magic, u64 addr, u64 boot_option, u64 boot_flags)
 
 		terminal_power_suspend_all();
 
+
+		if (mod_ctx.init_mod == NULL || mod_ctx.init_sz == 0) {
+			(void)kernel_load_root_init(&mod_ctx.init_mod,
+			    &mod_ctx.init_sz);
+		}
+
 		if (mod_ctx.init_mod && mod_ctx.init_sz > 0) {
-			printk("[KERNEL] Found init module "
+			printk("[KERNEL] Found init "
 			    "at %p, size %d. Starting init...\n",
 			    mod_ctx.init_mod, mod_ctx.init_sz);
 			userspace_load_init(mod_ctx.init_mod,
 			    (u64)mod_ctx.init_sz);
 		} else {
-			printk("[KERNEL] Init module not "
-			    "found! Falling back to kernel "
-			    "loop...\n");
+			printk("[KERNEL] init not found as module "
+			    "or at " KERNEL_INIT_PATH "! Falling back "
+			    "to kernel loop...\n");
 			while (1) {
 				c = keyboard_getchar();
 				if (c) {

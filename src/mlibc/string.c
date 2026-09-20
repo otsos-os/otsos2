@@ -191,3 +191,31 @@ void *memcpy(void *dest, const void *src, unsigned long n) {
   }
   return dest;
 }
+
+int memcmp(const void *s1, const void *s2, unsigned long n) {
+  const unsigned char *a = (const unsigned char *)s1;
+  const unsigned char *b = (const unsigned char *)s2;
+  unsigned long i;
+
+  for (i = 0; i < n; i++) {
+    if (a[i] != b[i])
+      return (int)a[i] - (int)b[i];
+  }
+  return 0;
+}
+
+void *memmove(void *dest, const void *src, unsigned long n) {
+  return memcpy(dest, src, n);
+}
+
+void *memchr(const void *s, int c, unsigned long n) {
+  const unsigned char *p = (const unsigned char *)s;
+  unsigned char v = (unsigned char)c;
+  unsigned long i;
+
+  for (i = 0; i < n; i++) {
+    if (p[i] == v)
+      return (void *)(p + i);
+  }
+  return 0;
+}

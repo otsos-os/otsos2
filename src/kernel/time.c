@@ -347,6 +347,87 @@ time_set_offset(s64 offset)
 	time_zone_offset = offset;
 }
 
+int
+calendar_is_leap_year(u32 year)
+{
+	return ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0));
+}
+
+u32
+calendar_days_in_month(u32 year, u32 month)
+{
+	static const u32	days[] = { 31, 28, 31, 30, 31, 30,
+	    31, 31, 30, 31, 30, 31 };
+
+	if (month < 1 || month > 12) {
+		return (0);
+	}
+	if (month == 2 && calendar_is_leap_year(year)) {
+		return (29);
+	}
+	return (days[month - 1]);
+}
+
+u64
+calendar_to_epoch(const struct calendar_time *ct)
+{
+	u64	days;
+	u32	y;
+
+	if (ct == NULL || ct->year < CALENDAR_EPOCH_YEAR || ct->month < 1 ||
+	    ct->month > 12 || ct->mday < 1) {
+		return (0);
+	}
+	days = 0;
+	for (y = CALENDAR_EPOCH_YEAR; y < ct->year; y++) {
+		days += calendar_is_leap_year(y) ? 366 : 365;
+	}
+	for (y = 1; y < ct->month; y++) {
+		days += calendar_days_in_month(ct->year, y);
+	}
+	days += ct->mday - 1;
+	return (days * 86400ULL + ct->hour * 3600ULL + ct->min * 60ULL +
+	    ct->sec);
+}
+
+void
+calendar_from_epoch(u64 seconds, struct calendar_time *ct)
+{
+	u64	days;
+	u32	secs;
+	u32	len;
+
+	if (ct == NULL) {
+		return;
+	}
+	days = seconds / 86400ULL;
+	secs = (u32)(seconds % 86400ULL);
+	ct->hour = (u8)(secs / 3600);
+	ct->min = (u8)((secs % 3600) / 60);
+	ct->sec = (u8)(secs % 60);
+	ct->year = CALENDAR_EPOCH_YEAR;
+	for (;;) {
+		len = calendar_is_leap_year(ct->year) ? 366 : 365;
+		if (days < len) {
+			break;
+		}
+		days -= len;
+		ct->year++;
+	}
+	ct->month = 1;
+	for (;;) {
+		len = calendar_days_in_month(ct->year, ct->month);
+		if (len == 0 || days < len) {
+			break;
+		}
+		days -= len;
+		ct->month++;
+	}
+	ct->mday = (u8)(days + 1);
+	ct->pad[0] = 0;
+	ct->pad[1] = 0;
+}
+
 void
 time_init(void)
 {

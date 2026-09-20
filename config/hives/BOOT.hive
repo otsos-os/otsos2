@@ -1,6 +1,32 @@
 # Initial boot registry hive.
 
 hive BOOT @access(read=user, add=kusr, edit=kusr) {
+	key Modules.kernel {
+		string Dest = "/system/init/kernel.bin"
+		string Role = "kernel"
+	}
+
+	key Modules.cmseed {
+		string Dest = "/system/init/cmseed"
+		string Role = "cmseed"
+	}
+
+
+	key Modules.stage1 {
+		string Dest = "/system/init/stage1.bin"
+		string Role = "bios-stage1"
+	}
+
+	key Modules.stage2 {
+		string Dest = "/system/init/stage2.bin"
+		string Role = "bios-stage2"
+	}
+
+	key Modules.bootx64 {
+		string Dest = "/system/init/BOOTX64.EFI"
+		string Role = "uefi-loader"
+	}
+
 	key Modules.init {
 		string Dest = "/bin/init"
 	}
@@ -83,6 +109,10 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 
 	key Modules.regedit {
 		string Dest = "/bin/regedit"
+	}
+
+	key Modules.install {
+		string Dest = "/bin/install"
 	}
 
 	key Modules.cursord {

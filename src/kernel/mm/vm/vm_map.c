@@ -109,7 +109,9 @@ $space %export vm_map_fork, vm_map_fault, vm_cow_fault
 #include <mm/vm/vm_map.h>
 #include <mm/vm/vm_object.h>
 #include <mm/vm/vm_page.h>
+#include <kernel/smp/pcpu.h>
 #include <mlibc/mlibc.h>
+#include <mlibc/stdio.h>
 
 #define VM_MAP_PAGE_SIZE	4096
 static uma_zone_t	vm_map_entry_zone;
@@ -623,12 +625,37 @@ vm_map_insert_locked(vm_map_t *map, u64 start, u64 end, u32 prot,
     u32 flags, u32 gem_handle, vm_object_t *object, u64 object_offset)
 {
 	vm_map_entry_t	*entry;
+	uma_stat_t	st;
+	u32		cpu;
 
-	if (object == NULL || !vm_map_range_free_locked(map, start, end, NULL)) {
+	if (object == NULL) {
+		printk("[VM] insert: object=NULL start=%llx end=%llx\n",
+		    (unsigned long long)start, (unsigned long long)end);
+		return (-1);
+	}
+	if (!vm_map_range_free_locked(map, start, end, NULL)) {
+		printk("[VM] insert: range not free start=%llx end=%llx "
+		    "map=[%llx,%llx] nent=%u\n",
+		    (unsigned long long)start, (unsigned long long)end,
+		    (unsigned long long)map->min_addr,
+		    (unsigned long long)map->max_addr,
+		    (unsigned)map->entry_count);
 		return (-1);
 	}
 	entry = vm_map_entry_alloc();
 	if (entry == NULL) {
+		cpu = pcpu_current()->cpu_index;
+		memset(&st, 0, sizeof(st));
+		if (vm_map_entry_zone != NULL) {
+			(void)uma_zone_stats(vm_map_entry_zone, &st);
+		}
+		printk("[VM] insert: entry alloc NULL zone=%p cpu=%u "
+		    "item=%u slabs=%u free=%u allocs=%u fails=%u\n",
+		    (void *)vm_map_entry_zone, cpu,
+		    (unsigned)st.item_size, (unsigned)st.slabs,
+		    (unsigned)st.items_free, (unsigned)st.allocs,
+		    (unsigned)st.fails);
+		uma_dump();
 		return (-1);
 	}
 	entry->start = start;
@@ -679,6 +706,12 @@ vm_map_module_init(void)
 	    UMA_ALIGN_CACHE, 0);
 	vm_map_zone = uma_zcreate("vm_map", sizeof(vm_map_t), UMA_ALIGN_CACHE,
 	    0);
+	if (vm_map_entry_zone != NULL) {
+		(void)uma_prealloc(vm_map_entry_zone, 32);
+	}
+	if (vm_map_zone != NULL) {
+		(void)uma_prealloc(vm_map_zone, 8);
+	}
 }
 
 int
@@ -852,15 +885,28 @@ vm_map_create_user_stack(vm_map_t *map)
 
 	if (map == NULL || !vm_map_range_free(map, VM_MAP_STACK_LIMIT,
 	    VM_MAP_STACK_END, NULL)) {
+		printk("[VM] user stack: range busy min=%llx max=%llx\n",
+		    (unsigned long long)(map != NULL ? map->min_addr : 0),
+		    (unsigned long long)(map != NULL ? map->max_addr : 0));
 		return (-1);
 	}
 	object = vm_object_create(VM_OBJ_ANON, VM_MAP_STACK_MAX, NULL);
 	if (object == NULL) {
+		printk("[VM] user stack: object create failed size=%llu\n",
+		    (unsigned long long)VM_MAP_STACK_MAX);
 		return (-1);
 	}
+	printk("[VM] user stack: insert [%llx,%llx) map=[%llx,%llx) obj=%p pages=%llu\n",
+	    (unsigned long long)VM_MAP_STACK_LIMIT,
+	    (unsigned long long)VM_MAP_STACK_END,
+	    (unsigned long long)map->min_addr,
+	    (unsigned long long)map->max_addr,
+	    (void *)object,
+	    (unsigned long long)object->page_count);
 	if (vm_map_insert(map, VM_MAP_STACK_LIMIT, VM_MAP_STACK_END,
 	    API_MAP_READ | API_MAP_WRITE, API_MAP_PRIVATE | API_MAP_ANON, 0,
 	    object, 0) != 0) {
+		printk("[VM] user stack: map insert failed\n");
 		vm_object_unref(object);
 		return (-1);
 	}
@@ -869,12 +915,16 @@ vm_map_create_user_stack(vm_map_t *map)
 	    va += VM_MAP_PAGE_SIZE) {
 		page = vm_page_alloc_phys(VM_ALLOC_ZERO);
 		if (page == 0) {
+			printk("[VM] user stack: page alloc failed va=%llx\n",
+			    (unsigned long long)va);
 			vm_map_remove_range(map, VM_MAP_STACK_LIMIT, VM_MAP_STACK_END);
 			return (-1);
 		}
 		pmap_enter(va, page, PTE_PRESENT | PTE_RW | PTE_USER | PTE_NX);
 		index = (va - VM_MAP_STACK_LIMIT) / VM_MAP_PAGE_SIZE;
 		if (vm_object_set_page(object, index, page) != 0) {
+			printk("[VM] user stack: set_page failed va=%llx idx=%llu\n",
+			    (unsigned long long)va, (unsigned long long)index);
 			pmap_remove(va);
 			vm_page_free_phys(page);
 			vm_map_remove_range(map, VM_MAP_STACK_LIMIT, VM_MAP_STACK_END);

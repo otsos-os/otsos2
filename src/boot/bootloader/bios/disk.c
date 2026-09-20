@@ -32,12 +32,16 @@ $define %type int as 32 bit signed
 
 $define %func bios_read_sectors as function with args u32, u32, u32
 $define %func bios_disk_read as function with args u32, u32, void *
+$define %func bios_disk_select as procedure with args u32
+$define %func bios_disk_current as function with args void
+$define %func bios_disk_present as function with args u32
 
 */
 
 /* !SPACE!
 
-$space %export bios_disk_read
+$space %export bios_disk_read, bios_disk_select, bios_disk_current
+$space %export bios_disk_present
 
 */
 
@@ -48,6 +52,32 @@ $space %export bios_disk_read
 #define BIOS_READ_CHUNK		32U
 
 extern int	bios_read_sectors(u32 lba, u32 sectors, u32 dst);
+extern u8	bios_disk_drive;
+
+void
+bios_disk_select(u32 drive)
+{
+	bios_disk_drive = (u8)drive;
+}
+
+u32
+bios_disk_current(void)
+{
+	return ((u32)bios_disk_drive);
+}
+
+int
+bios_disk_present(u32 drive)
+{
+	u8	saved;
+	int	rc;
+
+	saved = bios_disk_drive;
+	bios_disk_drive = (u8)drive;
+	rc = bios_read_sectors(0, 1, BIOS_BOUNCE_ADDR);
+	bios_disk_drive = saved;
+	return (rc == 0 ? 0 : -1);
+}
 
 int
 bios_disk_read(u32 lba, u32 sectors, void *dst)

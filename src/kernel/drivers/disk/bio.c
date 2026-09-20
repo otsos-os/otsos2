@@ -37,6 +37,8 @@ $define %type disk_t as struct with one registered block device and its geometry
 $define %func bio_now_ns as function with args void
 $define %func bio_fail as function with args bio_t *, int
 $define %func bio_account_done as procedure with args bio_t *
+$define %func bio_complete as procedure with args bio_t *, int, u32
+$define %func bio_force_timeout as procedure with args bio_t *
 $define %func bio_rw_sync as function with args disk_t *, u64, u32, void *, u32
 $define %func bio_init as procedure with args bio_t *, disk_t *, u32
 $define %func bio_submit as function with args bio_t *
@@ -49,13 +51,12 @@ $define %func bio_status_name as function with args int
 $define %func bio_stats as procedure with args bio_stat_t *
 $define %func bio_dump as procedure with args void
 
-$const BIO_ABORT_GRACE_NS as wait granted to an accepted abort before griping
-
 */
 
 /* !SPACE!
 
-$space %internal bio_now_ns, bio_fail, bio_account_done, bio_rw_sync
+$space %internal bio_now_ns, bio_fail, bio_account_done, bio_complete
+$space %internal bio_force_timeout, bio_rw_sync
 $space %export bio_init, bio_submit, bio_done, bio_wait
 $space %export bio_read, bio_write, bio_flush
 $space %export bio_status_name, bio_stats, bio_dump
@@ -65,14 +66,17 @@ $space %export bio_status_name, bio_stats, bio_dump
 #include <kernel/drivers/disk/bio.h>
 #include <kernel/drivers/disk/disk.h>
 #include <kernel/drivers/newbus/newbus.h>
-#include <kernel/process.h>
+#include <kernel/event/event.h>
+#include <kernel/sync/sync.h>
+#include <kernel/thread.h>
 #include <kernel/time.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdio.h>
 
-#define	BIO_ABORT_GRACE_NS	2000000000ULL
-
 static bio_stat_t	bio_g;
+
+static spin_t		bio_wait_lock =
+			    SPIN_INITIALIZER("bio_wait", LO_BIO);
 
 static u64
 bio_now_ns(void)
@@ -249,14 +253,12 @@ bio_account_done(bio_t *bio)
 	}
 }
 
-void
-bio_done(bio_t *bio, int status, u32 resid)
-{
-	u32	flags;
 
-	if (bio == NULL) {
-		return;
-	}
+static void
+bio_complete(bio_t *bio, int status, u32 resid)
+{
+	bio_done_fn	cb;
+	u32		flags;
 
 	flags = __atomic_load_n(&bio->flags, __ATOMIC_ACQUIRE);
 	if ((flags & BIO_F_DONE) != 0) {
@@ -280,28 +282,49 @@ bio_done(bio_t *bio, int status, u32 resid)
 	flags &= ~BIO_F_INFLIGHT;
 	flags |= BIO_F_DONE;
 	__atomic_store_n(&bio->flags, flags, __ATOMIC_RELEASE);
+	proc_wakeup(bio);
 
-	if (bio->done != NULL) {
-		bio->done(bio);
+	cb = bio->done;
+	if (cb != NULL) {
+
+		spin_unlock(&bio_wait_lock);
+		cb(bio);
+		spin_lock(&bio_wait_lock);
 	}
+}
+
+void
+bio_done(bio_t *bio, int status, u32 resid)
+{
+	if (bio == NULL) {
+		return;
+	}
+	spin_lock(&bio_wait_lock);
+	bio_complete(bio, status, resid);
+	spin_unlock(&bio_wait_lock);
+}
+
+
+static void
+bio_force_timeout(bio_t *bio)
+{
+	disk_t	*disk;
+
+	disk = bio->disk;
+	printk("bio: %s cmd %u lba %u timed out\n",
+	    disk != NULL ? disk->name : "?", bio->cmd, (u32)bio->lba);
+	bio_complete(bio, BIO_STATUS_TIMEOUT, bio->nsectors);
 }
 
 int
 bio_wait(bio_t *bio, u64 timeout_ns)
 {
 	disk_t	*disk;
-	u64	now, deadline, grumbled;
+	u64	now, deadline;
 	u32	flags;
-	int	aborting, error;
+	int	status;
 
 	if (bio == NULL) {
-		return (BIO_STATUS_INVAL);
-	}
-	flags = __atomic_load_n(&bio->flags, __ATOMIC_ACQUIRE);
-	if ((flags & BIO_F_DONE) != 0) {
-		return (bio->status);
-	}
-	if ((flags & BIO_F_INFLIGHT) == 0) {
 		return (BIO_STATUS_INVAL);
 	}
 
@@ -310,42 +333,44 @@ bio_wait(bio_t *bio, u64 timeout_ns)
 		timeout_ns = BIO_TIMEOUT_DEFAULT_NS;
 	}
 	deadline = bio_now_ns() + timeout_ns;
-	grumbled = 0;
-	aborting = 0;
 
+	spin_lock(&bio_wait_lock);
 	for (;;) {
-		if ((__atomic_load_n(&bio->flags, __ATOMIC_ACQUIRE) &
-		    BIO_F_DONE) != 0) {
-			return (bio->status);
+		flags = __atomic_load_n(&bio->flags, __ATOMIC_ACQUIRE);
+		if ((flags & BIO_F_DONE) != 0) {
+			status = bio->status;
+			spin_unlock(&bio_wait_lock);
+			return (status);
+		}
+		if ((flags & BIO_F_INFLIGHT) == 0) {
+			spin_unlock(&bio_wait_lock);
+			return (BIO_STATUS_INVAL);
 		}
 
 		now = bio_now_ns();
 		if (now >= deadline) {
-			if (aborting == 0) {
-				aborting = 1;
-				error = -1;
-				if (disk != NULL && disk->ops != NULL &&
-				    disk->ops->timeout != NULL) {
-					error = disk->ops->timeout(disk, bio);
-				}
-				if (error != 0) {
-					printk("bio: %s cmd %u lba %u timed "
-					    "out and cannot be aborted; "
-					    "waiting to avoid a stale write\n",
-					    disk != NULL ? disk->name : "?",
-					    bio->cmd, (u32)bio->lba);
-				}
-				grumbled = now + BIO_ABORT_GRACE_NS;
-			} else if (now >= grumbled) {
-				printk("bio: %s abort did not complete cmd %u "
-				    "lba %u within grace\n",
-				    disk != NULL ? disk->name : "?",
-				    bio->cmd, (u32)bio->lba);
-				grumbled = now + BIO_ABORT_GRACE_NS;
+			spin_unlock(&bio_wait_lock);
+			if (disk != NULL && disk->ops != NULL &&
+			    disk->ops->timeout != NULL) {
+				(void)disk->ops->timeout(disk, bio);
 			}
+			spin_lock(&bio_wait_lock);
+			flags = __atomic_load_n(&bio->flags, __ATOMIC_ACQUIRE);
+			if ((flags & BIO_F_DONE) == 0) {
+				bio_force_timeout(bio);
+			}
+			continue;
 		}
 
-		process_yield();
+		if (thread_current() == NULL) {
+			spin_unlock(&bio_wait_lock);
+			__asm__ volatile("sti; hlt" ::: "memory");
+			spin_lock(&bio_wait_lock);
+			continue;
+		}
+
+		proc_sleep_interlock(bio, &bio_wait_lock);
+		spin_lock(&bio_wait_lock);
 	}
 }
 

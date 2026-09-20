@@ -43,6 +43,7 @@ FETCH_BIN = $(PROGS_DIR)/fetch
 SHELL_BIN = $(PROGS_DIR)/sh
 OVEN_BIN = $(PROGS_DIR)/oven
 REGEDIT_BIN = $(PROGS_DIR)/regedit/regedit
+INSTALL_BIN = $(PROGS_DIR)/install/install
 CURSORD_BIN = $(PROGS_DIR)/demons/cursord
 SRAPI_DEMO_BIN = $(PROGS_DIR)/srapi_demo
 SWM_BIN = $(PROGS_DIR)/GUI/swm/swm
@@ -108,6 +109,7 @@ BIOS_BUILD_DIR = ../bin/bootloader/bios
 UEFI_BUILD_DIR = ../bin/bootloader/uefi
 BIOS_STAGE2_AREA_SECTORS = 256
 BIOS_STAGE1_MAX_SECTORS = 60
+BIOS_STAGE1_CODE_MAX = 440
 BIOS_LAYOUT_LBA = 257
 BIOS_BOOTPACK_LBA = 258
 BIOS_STAGE1_OBJ = $(BIOS_BUILD_DIR)/stage1.o
@@ -138,12 +140,16 @@ BIOS_STAGE2_OBJS = \
 	$(BIOS_BUILD_DIR)/lib_string.o \
 	$(BIOS_BUILD_DIR)/lib_bootpack.o \
 	$(BIOS_BUILD_DIR)/lib_elf64.o \
-	$(BIOS_BUILD_DIR)/lib_multiboot2.o
+	$(BIOS_BUILD_DIR)/lib_multiboot2.o \
+	$(BIOS_BUILD_DIR)/lib_cfsread.o \
+	$(BIOS_BUILD_DIR)/lib_gptread.o
 UEFI_LIB_OBJS = \
 	$(UEFI_BUILD_DIR)/lib_string.obj \
 	$(UEFI_BUILD_DIR)/lib_bootpack.obj \
 	$(UEFI_BUILD_DIR)/lib_elf64.obj \
-	$(UEFI_BUILD_DIR)/lib_multiboot2.obj
+	$(UEFI_BUILD_DIR)/lib_multiboot2.obj \
+	$(UEFI_BUILD_DIR)/lib_cfsread.obj \
+	$(UEFI_BUILD_DIR)/lib_gptread.obj
 
 ifeq ($(LIBC_ENABLED),true)
 ISO_MUSL_TEST_DEP = $(MUSL_TEST_BIN)
@@ -195,6 +201,9 @@ PANIC_O = ../bin/panic.o
 CONSOLE_O = ../bin/console_console.o
 DISK_O = ../bin/disk.o
 BIO_O = ../bin/bio.o
+BLOCKDEV_O = ../bin/blockdev.o
+GPT_O = ../bin/gpt.o
+FAT32_O = ../bin/fat32.o
 RAMDISK_O = ../bin/ramdisk.o
 CHAINFS_O = ../bin/chainfs.o
 HIVEFS_O = ../bin/hivefs.o
@@ -424,7 +433,7 @@ ET_CLOCKSOURCE_O = ../bin/et_clocksource.o
 CMOS_RTC_O = ../bin/cmos_rtc.o
 
 OBJ_NO_KSYMTAB = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UART_O) $(STDIO_O) $(BOOTMEM_O) $(IDT_ASM_O) $(IDT_C_O) $(PIC_O) $(IRQ_O) \
-      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(DMA_O) $(DMA_TAG_O) $(DMA_MEM_O) $(DMA_MAP_O) $(DMA_BOUNCE_O) $(DMA_SYNC_O) $(PMAP_O) $(VM_PHYS_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)     $(VM_PAGER_O) $(DISK_OBJ) $(NVME_OBJ) $(DISK_O) $(BIO_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(I8042_O) $(INPUT_CORE_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(EVR_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(API_NET_O) $(API_REG_O) $(API_TRACE_O) $(IPC_O) $(API_IPC_O) $(PIPE_O) $(DATA_DIR_O) $(CLONE_O) $(SYSCALL_O) \
+      $(HANDLERS_O) $(PANIC_O) $(KMEM_O) $(UMA_O) $(DMA_O) $(DMA_TAG_O) $(DMA_MEM_O) $(DMA_MAP_O) $(DMA_BOUNCE_O) $(DMA_SYNC_O) $(PMAP_O) $(VM_PHYS_O) $(VM_PAGE_O) $(VM_MAP_O) $(VM_OBJECT_O)     $(VM_PAGER_O) $(DISK_OBJ) $(NVME_OBJ) $(DISK_O) $(BIO_O) $(BLOCKDEV_O) $(GPT_O) $(FAT32_O) $(RAMDISK_O) $(CHAINFS_O) $(CONSOLE_O) $(TERMINAL_O) $(PTY_O) $(I8042_O) $(INPUT_CORE_O) $(PS2_O) $(KEYBOARD_O) $(KEYMAP_O) $(MOUSE_PS2_O) $(FONT_O) $(EVR_O) $(DRM_CORE_O) $(DRM_GEM_O) $(DRM_OBJ_O) $(DRM_AUTH_O) $(DRM_INIT_O) $(DRM_FBDEV_O) $(DRM_KMS_FB_O) $(DRM_KMS_PLANE_O) $(DRM_KMS_CRTC_O) $(DRM_KMS_CONN_O) $(DRM_KMS_ATOMIC_O) $(KMS_CONSOLE_O)       $(DRM_RAPI_O) $(TIMER_O) $(EVENTTIMER_O) $(PIT_O) $(APIC_TIMER_O) $(LAPIC_O) $(IOAPIC_O) $(STDLIB_O) $(WRITE_O) $(READ_O) $(OPEN_O) $(CLOSE_O) $(LSEEK_O) $(WAIT_O) $(MMAP_O) $(SHM_O) $(API_NET_O) $(API_REG_O) $(API_TRACE_O) $(IPC_O) $(API_IPC_O) $(PIPE_O) $(DATA_DIR_O) $(CLONE_O) $(SYSCALL_O) \
       $(KOFO_O) $(ENTITY_O) $(ENTITY_HANDLE_O) $(ENTITY_NS_O) $(API_ENTITY_O) $(API_ENTITY_IO_O) \
       $(GDT_O) $(GDT_ASM_O) $(PROCESS_O) $(COPY_O) $(SPAWN_O) $(SESSION_O) $(THREAD_O) $(APC_O) $(CHDIR_O) $(GETCWD_O) $(LISTDIR_O) $(FS_META_O) $(MOUNT_O) $(PROCLIST_O) $(ELF_O) $(USERSPACE_O) $(USERSPACE_ASM_O) $(SYSCALL_ASM_O) $(USERADDR_O) $(SCHEDULER_O) \
       $(TRACE_O) $(TRACE_PMU_O) $(PMU_O) \
@@ -570,6 +579,11 @@ $(OVEN_BIN): $(LIBC_DEPS)
 $(REGEDIT_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
 	@echo "  MAKE    progs/regedit"
 	@$(MAKE) -C $(PROGS_DIR) regedit/regedit LIBC_ENABLED=$(LIBC_ENABLED)
+
+.PHONY: $(INSTALL_BIN)
+$(INSTALL_BIN): $(NATIVE_CRT0) $(NATIVE_SO)
+	@echo "  MAKE    progs/install"
+	@$(MAKE) -C $(PROGS_DIR) install/install LIBC_ENABLED=$(LIBC_ENABLED)
 
 .PHONY: $(CURSORD_BIN)
 $(CURSORD_BIN): $(LIBC_DEPS)
@@ -802,16 +816,28 @@ $(BIOS_STAGE1_BIN): boot/bootloader/bios/stage1.S $(BIOS_STAGE2_BIN) | $(BIOS_BU
 	if [ $$stage1_size -ne 512 ]; then \
 		echo "  BIOS    stage1 bad size: $$stage1_size"; \
 		exit 1; \
+	fi; \
+	code_end=$$($(NM) $(BIOS_STAGE1_ELF) | \
+	    awk '$$3 == "stage1_end" { print strtonum("0x" $$1) }'); \
+	if [ -z "$$code_end" ] || [ $$code_end -gt $(BIOS_STAGE1_CODE_MAX) ]; \
+	then \
+		echo "  BIOS    stage1 code too large: $$code_end"; \
+		exit 1; \
 	fi
 
-$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(REGEDIT_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SWM_BIN) $(DE_BIN) $(BROWSER_BIN) $(TCLIENT_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(HELLO_DRIVER_KOFO) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_DOOM_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
+$(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(BIOS_STAGE1_BIN) $(BIOS_STAGE2_BIN) $(UEFI_BOOTX64) $(INIT_BIN) $(YES_BIN) $(FETCH_BIN) $(SHELL_BIN) $(YABOX_BINS) $(OVEN_BIN) $(REGEDIT_BIN) $(INSTALL_BIN) $(CURSORD_BIN) $(POWERD_BIN) $(SRAPI_DEMO_BIN) $(SWM_BIN) $(DE_BIN) $(BROWSER_BIN) $(TCLIENT_BIN) $(SHMTEST_BIN) $(UDP_ECHO_BIN) $(TCP_ECHO_BIN) $(SEND_BIN) $(SSH_BIN) $(DHCPC_BIN) $(DHCPD_BIN) $(POSIX_HELLO_BIN) $(TOOLCHAIN_AS_BIN) $(TOOLCHAIN_LD_BIN) $(HELLO_DRIVER_KOFO) $(ISO_MUSL_TEST_DEP) $(ISO_LUA_DEP) $(ISO_CPYTHON_DEP) $(ISO_DOOM_DEP) $(ISO_LDSO_DEP) $(ISO_DRLD_DEP) $(ISO_NATIVE_SO_DEP) | $(BIOS_BUILD_DIR)
 	@rm -rf $(BIOS_PAYLOAD_DIR)
 	@mkdir -p $(BIOS_PAYLOAD_DIR)
-	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel.bin
+	@cp $(KERNEL_BIN) $(BIOS_PAYLOAD_DIR)/kernel
 	@cp $(CMSEED_BIN) $(BIOS_PAYLOAD_DIR)/cmseed
 	@for m in $(MULTIBOOT_MODULES); do \
 		src=""; \
 		case $$m in \
+			kernel) src=$(KERNEL_BIN);; \
+			cmseed) src=$(CMSEED_BIN);; \
+			stage1) src=$(BIOS_STAGE1_BIN);; \
+			stage2) src=$(BIOS_STAGE2_BIN);; \
+			bootx64) src=$(UEFI_BOOTX64);; \
 			init) src=$(INIT_BIN);; \
 			yes) src=$(YES_BIN);; \
 			fetch) src=$(FETCH_BIN);; \
@@ -819,6 +845,7 @@ $(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(INIT_BIN) $
 			ls|cat|touch|pwd|whoami|rm|mkdir|rmdir|cp|mv|mmod|unzip|profile|lse|ecat) src=$(YABOX_DIR)/$$m;; \
 			oven) src=$(OVEN_BIN);; \
 			regedit) src=$(REGEDIT_BIN);; \
+			install) src=$(INSTALL_BIN);; \
 			cursord) src=$(CURSORD_BIN);; \
 			srapi_demo) src=$(SRAPI_DEMO_BIN);; \
 			swm) src=$(SWM_BIN);; \
@@ -1852,6 +1879,26 @@ $(BIO_O): kernel/drivers/disk/bio.c kernel/drivers/disk/bio.h \
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+$(BLOCKDEV_O): kernel/drivers/disk/blockdev.c \
+    kernel/drivers/disk/blockdev.h kernel/drivers/disk/disk.h \
+    kernel/drivers/disk/bio.h kernel/drivers/disk/gpt.h \
+    kernel/drivers/fs/chainFS/chainfs.h \
+    kernel/drivers/fs/fat32/fat32.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(GPT_O): kernel/drivers/disk/gpt.c kernel/drivers/disk/gpt.h \
+    kernel/drivers/disk/disk.h kernel/drivers/disk/bio.h \
+    kernel/drivers/disk/blockdev.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(FAT32_O): kernel/drivers/fs/fat32/fat32.c \
+    kernel/drivers/fs/fat32/fat32.h kernel/drivers/disk/disk.h \
+    kernel/drivers/disk/bio.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
 $(RAMDISK_O): kernel/drivers/disk/ramdisk/ramdisk.c
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
@@ -1897,7 +1944,7 @@ $(BOOTMEM_O): kernel/bootmem.c kernel/bootmem.h kernel/multiboot.h kernel/multib
 $(DISK_IMG):
 	@echo "  IMG     $(DISK_IMG)"
 	@mkdir -p $(dir $(DISK_IMG))
-	@dd if=/dev/zero of=$(DISK_IMG) bs=1M count=16 2>/dev/null
+	@dd if=/dev/zero of=$(DISK_IMG) bs=1M count=512 2>/dev/null
 
 $(NVME_IMG):
 	@echo "  IMG     $(NVME_IMG)"
@@ -1909,6 +1956,10 @@ OVMF ?= /usr/share/ovmf/OVMF.fd
 run: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (UEFI)"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset -smp 2 $(QEMU_MEM_OPTS)
+
+run_nvme_disk: check_run_tools $(DISK_IMG)
+	@echo "  RUN     QEMU (NVMe, disk)"
+	@$(QEMU) -drive file=$(DISK_IMG),format=raw,if=none,id=nvme0 -device nvme,drive=nvme0,serial=nvme0,max_ioqpairs=8,msix_qsize=16 -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset -smp 2 $(QEMU_MEM_OPTS)
 
 kvm: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU/KVM (UEFI)"

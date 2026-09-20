@@ -32,11 +32,13 @@
  *
  *   bootmem -> vm_phys -> vm_page -> UMA -> kmem -> vm_object/vm_map
  *
- * bootmem discovers RAM and remains available for boot-only metadata. vm_phys
- * owns segmented physical free runs; vm_page adds reference, wire and paging
- * queue policy; UMA creates slab zones directly from wired vm_page runs; kmem
- * selects UMA size classes or a direct contiguous VM run. vm_object and vm_map
- * are clients of that stack, never allocator backends.
+ * bootmem discovers RAM and hands remaining free runs to vm_phys at
+ * vm_page_startup, then retires: leftover bootmem ranges are not a second
+ * allocator. vm_phys owns segmented physical free runs; vm_page adds
+ * reference, wire and paging queue policy; UMA creates slab zones directly
+ * from wired vm_page runs; kmem selects UMA size classes or a direct
+ * contiguous VM run. vm_object and vm_map are clients of that stack, never
+ * allocator backends. Late boot buffers (module pool) go through kmem.
  *
  * Initialization order:
  *   1. bootmem_init()

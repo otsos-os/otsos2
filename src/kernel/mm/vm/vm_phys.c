@@ -44,6 +44,8 @@ $define %func vm_phys_split_to as procedure with args vm_page_t *, int, int
 $define %func vm_phys_alloc_order as function with args int
 $define %func vm_phys_free_block as procedure with args vm_page_t *, int
 $define %func vm_phys_free_isolate as procedure with args vm_page_t *
+$define %func vm_phys_steal_free as function with args vm_page_t *
+$define %func vm_phys_alloc_contig_run as function with args u64, u64, u64, u64
 $define %func vm_phys_init as procedure with args void
 $define %func vm_phys_set_page_array as procedure with args vm_page_t *, u64
 $define %func vm_phys_add_seg as function with args u64, u64
@@ -66,7 +68,8 @@ $define %func vm_phys_dump as procedure with args void
 $space %internal vm_phys_freelist_insert, vm_phys_freelist_remove
 $space %internal vm_phys_seg_of, vm_phys_block_valid, vm_phys_page_at
 $space %internal vm_phys_mark_alloc, vm_phys_split_to, vm_phys_alloc_order
-$space %internal vm_phys_free_block, vm_phys_free_isolate
+$space %internal vm_phys_free_block, vm_phys_free_isolate, vm_phys_steal_free
+$space %internal vm_phys_alloc_contig_run
 $space %export vm_phys_init, vm_phys_set_page_array
 $space %export vm_phys_add_seg, vm_phys_exclude, vm_phys_free_range
 $space %export vm_phys_alloc, vm_phys_free
@@ -363,6 +366,67 @@ vm_phys_free_isolate(vm_page_t *page)
 	}
 }
 
+
+static int
+vm_phys_steal_free(vm_page_t *page)
+{
+	vm_phys_seg_t	*seg;
+	vm_page_t	*head, *other;
+	u64		 target, head_pfn, cur, half;
+	int		 k, order;
+
+	seg = vm_phys_seg_of(page);
+	if (seg == NULL || (page->flags & PG_FREE) == 0) {
+		return (-1);
+	}
+	target = page->phys_addr >> PAGE_SHIFT;
+
+	head = NULL;
+	order = 0;
+	if (page->order != VM_FREEORDER_NONE) {
+		head = page;
+		order = (int)page->order;
+		head_pfn = target;
+	} else {
+		head_pfn = target;
+		for (k = 1; k < VM_NFREEORDER; k++) {
+			head_pfn = target & ~(((u64)1 << k) - 1);
+			other = vm_phys_page_at(seg, head_pfn);
+			if (other->order == (u8)k) {
+				head = other;
+				order = k;
+				break;
+			}
+		}
+	}
+	if (head == NULL) {
+		return (-1);
+	}
+
+	vm_phys_freelist_remove(head);
+
+	cur = head_pfn;
+	while (order > 0) {
+		half = (u64)1 << (order - 1);
+		if (target >= cur + half) {
+			other = vm_phys_page_at(seg, cur);
+			cur += half;
+		} else {
+			other = vm_phys_page_at(seg, cur + half);
+		}
+		other->order = VM_FREEORDER_NONE;
+		other->flags = (u16)(other->flags | PG_FREE);
+		vm_phys_freelist_insert(other, order - 1);
+		order--;
+	}
+
+	vm_phys_mark_alloc(page, 1);
+	if (vm_phys_free_pages > 0) {
+		vm_phys_free_pages--;
+	}
+	return (0);
+}
+
 void
 vm_phys_init(void)
 {
@@ -544,6 +608,59 @@ vm_phys_free(vm_page_t *page)
 	vm_phys_free_block(page, 0);
 }
 
+static vm_page_t *
+vm_phys_alloc_contig_run(u64 page_total, u64 alignment, u64 low, u64 high)
+{
+	vm_phys_seg_t	*seg;
+	vm_page_t	*page, *p;
+	u64		 align_pages, pfn, end_pfn, i, n;
+	u32		 s;
+
+	align_pages = alignment >> PAGE_SHIFT;
+	if (align_pages == 0) {
+		align_pages = 1;
+	}
+
+	for (s = 0; s < vm_phys_seg_count; s++) {
+		seg = &vm_phys_segs[s];
+		pfn = (seg->start + alignment - 1) / alignment * alignment;
+		pfn >>= PAGE_SHIFT;
+		end_pfn = seg->end >> PAGE_SHIFT;
+		while (pfn + page_total <= end_pfn) {
+			u64	base;
+
+			base = pfn << PAGE_SHIFT;
+			if (base < low || base + (page_total << PAGE_SHIFT) - 1 > high) {
+				pfn += align_pages;
+				continue;
+			}
+			page = vm_phys_page_at(seg, pfn);
+			for (i = 0; i < page_total; i++) {
+				p = &page[i];
+				if ((p->flags & PG_FREE) == 0 ||
+				    (p->flags & PG_EXCLUDED) != 0) {
+					break;
+				}
+			}
+			if (i != page_total) {
+				pfn += i + 1;
+				pfn = (pfn + align_pages - 1) & ~(align_pages - 1);
+				continue;
+			}
+			for (n = 0; n < page_total; n++) {
+				if (vm_phys_steal_free(&page[n]) != 0) {
+					for (i = 0; i < n; i++) {
+						vm_phys_free_block(&page[i], 0);
+					}
+					return (NULL);
+				}
+			}
+			return (page);
+		}
+	}
+	return (NULL);
+}
+
 vm_page_t *
 vm_phys_alloc_contig(u64 page_total, u64 alignment, u64 low, u64 high)
 {
@@ -559,7 +676,8 @@ vm_phys_alloc_contig(u64 page_total, u64 alignment, u64 low, u64 high)
 	order = 0;
 	while (((u64)1 << order) < page_total) {
 		if (++order >= VM_NFREEORDER) {
-			return (NULL);
+			return (vm_phys_alloc_contig_run(page_total, alignment,
+			    low, high));
 		}
 	}
 
@@ -589,7 +707,7 @@ vm_phys_alloc_contig(u64 page_total, u64 alignment, u64 low, u64 high)
 			return (page);
 		}
 	}
-	return (NULL);
+	return (vm_phys_alloc_contig_run(page_total, alignment, low, high));
 }
 
 void

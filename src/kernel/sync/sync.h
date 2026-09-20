@@ -81,6 +81,7 @@ $const LO_APC as lock order level of the APC pool lock
 $const LO_SCHED as lock order level of the scheduler lock
 $const LO_PROC as lock order level of the process table lock
 $const LO_EVENT as lock order level of the kqueue lock
+$const LO_BIO as lock order level of the block-layer wait interlock
 $const LO_THREAD as lock order level of the thread table and thread state lock
 $const LO_HANDLE as lock order level of the entity handle table lock
 $const LO_ENTITY as lock order level of the entity store lock
@@ -129,6 +130,7 @@ $space %export sync_init, sync_configure
 #define	LO_APC		36
 #define	LO_PROC		40
 #define	LO_EVENT	48
+#define	LO_BIO		52
 #define	LO_THREAD	56
 #define	LO_HANDLE	60
 #define	LO_ENTITY	64

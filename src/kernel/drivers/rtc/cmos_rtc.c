@@ -62,43 +62,6 @@ cmos_read(u8 reg)
 	return (inb(CMOS_DATA));
 }
 
-static int
-is_leap_year(u32 year)
-{
-	return ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0));
-}
-
-static u32
-days_in_month(u32 year, u32 month)
-{
-	static const u32	days[] = { 31, 28, 31, 30, 31, 30,
-		    31, 31, 30, 31, 30, 31 };
-
-	if (month == 2 && is_leap_year(year)) {
-		return (29);
-	}
-	return (days[month - 1]);
-}
-
-static u64
-epoch_seconds_from_date(u32 year, u32 month, u32 day,
-    u32 hour, u32 min, u32 sec)
-{
-	u64	days;
-	u32	y;
-
-	days = 0;
-	for (y = 1970; y < year; y++) {
-		days += is_leap_year(y) ? 366 : 365;
-	}
-	for (y = 1; y < month; y++) {
-		days += days_in_month(year, y);
-	}
-	days += day - 1;
-
-	return (days * 86400ULL + hour * 3600ULL + min * 60ULL + sec);
-}
-
 static void
 read_cmos_fields(u8 *sec, u8 *min, u8 *hour,
     u8 *mday, u8 *month, u8 *year, u8 *century)
@@ -164,6 +127,7 @@ cmos_rtc_read_time(struct bintime *bt)
 	u32	full_year;
 	u64	epoch_sec;
 	int	i;
+	struct calendar_time	ct;
 
 	if (bt == NULL) {
 		return (-1);
@@ -198,7 +162,7 @@ cmos_rtc_read_time(struct bintime *bt)
 	}
 
 	full_year = (u32)century * 100 + (u32)year;
-	if (full_year < 1970) {
+	if (full_year < CALENDAR_EPOCH_YEAR) {
 		drivers_log("[RTC] CMOS year %u is before 1970, "
 		    "falling back to epoch\n", full_year);
 		bt->sec = 0;
@@ -206,8 +170,13 @@ cmos_rtc_read_time(struct bintime *bt)
 		return (-1);
 	}
 
-	epoch_sec = epoch_seconds_from_date(full_year, month, mday,
-	    hour, min, sec);
+	ct.year = full_year;
+	ct.month = month;
+	ct.mday = mday;
+	ct.hour = hour;
+	ct.min = min;
+	ct.sec = sec;
+	epoch_sec = calendar_to_epoch(&ct);
 
 	bt->sec = epoch_sec;
 	bt->frac = 0;

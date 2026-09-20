@@ -65,17 +65,20 @@ $space %export disk_capacity_bytes, disk_dump
 
 #include <mlibc/mlibc.h>
 #define	DISK_NAME_MAX	32
-#define	DISK_MAX	8
+#define	DISK_MAX	32
 #define	DISK_F_READONLY	0x0001
 #define	DISK_F_NO_FLUSH	0x0002
+#define	DISK_F_SLICE	0x0004
 
 struct disk;
 struct bio;
+struct newbus_device;
 
 typedef enum {
 	DISK_TYPE_PATA,
 	DISK_TYPE_NVME,
 	DISK_TYPE_RAM,
+	DISK_TYPE_SLICE,
 	DISK_TYPE_UNKNOWN
 } disk_type_t;
 
@@ -88,7 +91,10 @@ typedef struct disk {
 	char			name[DISK_NAME_MAX];
 	const disk_ops_t	*ops;
 	void			*private_data;
+	struct newbus_device	*dev;
+	struct disk		*parent;
 	u64			total_sectors;
+	u64			base_lba;
 	u32			sector_size;
 	u32			max_io_sectors;
 	disk_type_t		type;

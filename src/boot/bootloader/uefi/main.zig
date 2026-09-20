@@ -1,11 +1,14 @@
 const std = @import("std");
 const uefi = std.os.uefi;
 
+const BlockIo = uefi.protocol.BlockIo;
 const BootServices = uefi.tables.BootServices;
 const ConfigurationTable = uefi.tables.ConfigurationTable;
+const DevicePath = uefi.protocol.DevicePath;
 const File = uefi.protocol.File;
 const Guid = uefi.Guid;
 const GraphicsOutput = uefi.protocol.GraphicsOutput;
+const Handle = uefi.Handle;
 const LoadedImage = uefi.protocol.LoadedImage;
 const SimpleFileSystem = uefi.protocol.SimpleFileSystem;
 const MemoryMapSlice = uefi.tables.MemoryMapSlice;
@@ -18,6 +21,17 @@ const BOOTPACK_MAX_SIZE: usize = 0x04000000;
 const MMAP_BUF_SIZE: usize = 0x00010000;
 const MB2_MMAP_ENTRY_MAX: usize = 512;
 const LOW_MAX_ADDR: usize = 0xeffff000;
+
+const CFSR_BLOCK_SIZE: u32 = 512;
+const CFSR_TYPE_FILE: u8 = 0;
+const CFS_MAX_RUN: u32 = 64;
+const CFS_KERNEL_PATH = "/system/init/kernel.bin";
+
+const CFS_CMSEED_PATH = "/system/init/cmseed";
+const CFS_CMSEED_NAME = "cmseed";
+const BOOTPACK_KERNEL_NAME = "kernel";
+
+const CFS_STAGE_MIN_ADDR: usize = 0x01000000;
 
 const MB2_BOOTLOADER_MAGIC: u32 = 0x36d76289;
 const COM1: u16 = 0x3f8;
@@ -76,6 +90,49 @@ const ModuleCtx = struct {
 	failed: bool,
 };
 
+const CfsrEntry = extern struct {
+	status: u8,
+	type: u8,
+	name: [30]u8,
+	size: u32 align(1),
+	start_block: u32 align(1),
+	parent_block: u32 align(1),
+	nlink: u32 align(1),
+	reserved: [12]u8,
+};
+
+const CfsrVolume = extern struct {
+	read: ?*const fn (?*anyopaque, u64, u32, ?*anyopaque) callconv(.c) c_int,
+	ctx: ?*anyopaque,
+	base_lba: u64,
+	block_count: u32,
+	file_table_blocks: u32,
+	block_map_blocks: u32,
+	root_dir_block: u32,
+	data_area_start: u32,
+	map_cached: u32,
+	max_run: u32,
+	sector: [CFSR_BLOCK_SIZE]u8,
+	map: [CFSR_BLOCK_SIZE]u8,
+};
+
+const GptrPart = extern struct {
+	first_lba: u64,
+	last_lba: u64,
+	index: u32,
+};
+
+const BlockCtx = struct {
+	io: *BlockIo,
+	media_id: u32,
+	base_lba: u64,
+};
+
+const CfsBoot = struct {
+	stage: usize,
+	size: u32,
+};
+
 const FileImage = struct {
 	addr: usize,
 	size: usize,
@@ -106,6 +163,12 @@ extern fn mb2_add_module(b: *Mb2Builder, start: u32, end: u32, name: [*:0]const 
 extern fn mb2_add_acpi(b: *Mb2Builder, rsdp: ?*const anyopaque, size: u32, is_new: c_int) callconv(.c) c_int;
 extern fn mb2_builder_finish(b: *Mb2Builder) callconv(.c) u32;
 
+extern fn cfsr_mount(vol: *CfsrVolume, read: *const fn (?*anyopaque, u64, u32, ?*anyopaque) callconv(.c) c_int, ctx: ?*anyopaque, base_lba: u64, max_run: u32) callconv(.c) c_int;
+extern fn cfsr_lookup(vol: *CfsrVolume, path: [*:0]const u8, out: *CfsrEntry) callconv(.c) c_int;
+extern fn cfsr_read(vol: *CfsrVolume, entry: *const CfsrEntry, dst: ?*anyopaque, limit: u32, out_size: ?*u32) callconv(.c) c_int;
+extern fn gptr_find(read: *const fn (?*anyopaque, u64, u32, ?*anyopaque) callconv(.c) c_int, ctx: ?*anyopaque, type_guid: [*]const u8, out: *GptrPart) callconv(.c) c_int;
+extern const gptr_type_otsos: [16]u8;
+
 pub fn main() uefi.Status {
 	serialInit();
 	puts("[UEFI] OTSOS UEFI loader\n");
@@ -121,25 +184,53 @@ pub fn main() uefi.Status {
 fn boot() !void {
 	const bs = uefi.system_table.boot_services orelse return BootError.NoBootServices;
 
-	const root = try openRoot(bs);
-	const bootpack = try readBootpack(bs, root);
-	var pack: Bootpack = undefined;
-	bootpack_init(&pack, @ptrFromInt(bootpack.addr), @intCast(bootpack.size));
-
-	var kernel: BootpackFile = undefined;
-	if (bootpack_find(&pack, "kernel.bin", &kernel) != 0) {
-		return BootError.KernelNotFound;
-	}
-
 	const mmap_buf = try bs.allocatePool(.loader_data, MMAP_BUF_SIZE);
 	const fb = try setupFramebuffer(bs);
 	const mb2_addr = try allocLowPages(bs, MB2_INFO_CAP);
+
+	var mb: Mb2Builder = undefined;
+	mb2_builder_init(&mb, @ptrFromInt(mb2_addr), MB2_INFO_CAP);
+
+	
+	var kernel: CfsBoot = undefined;
+	var pack: Bootpack = undefined;
+
+	const own_disk = ownDiskHandle(bs);
+	var installed = false;
+	if (own_disk) |handle| {
+		installed = mountRootOnDisk(bs, handle);
+		if (installed) {
+			puts("[UEFI] booting installed root on own device\n");
+		}
+	}
+	if (installed) {
+		kernel = try loadCfsKernel(bs);
+		try loadCfsCmseed(bs, &mb);
+	} else if (loadLive(bs, &mb, &pack)) |live| {
+		kernel = live;
+	} else |live_err| {
+		switch (live_err) {
+			BootError.NoFilesystem,
+			BootError.NoDeviceHandle,
+			BootError.FileReadFailed,
+			BootError.BadBootpack,
+			BootError.KernelNotFound,
+			=> {},
+			else => return live_err,
+		}
+		if (!mountInstalledRoot(bs, own_disk)) {
+			puts("[UEFI] Kernel not found\n");
+			return BootError.KernelNotFound;
+		}
+		installed = true;
+		kernel = try loadCfsKernel(bs);
+		try loadCfsCmseed(bs, &mb);
+	}
+
 	const mmap = try getMemoryMap(bs, mmap_buf);
 	const mem = memoryInfo(mmap);
 	const rsdp = try findAcpiRsdp();
 
-	var mb: Mb2Builder = undefined;
-	mb2_builder_init(&mb, @ptrFromInt(mb2_addr), MB2_INFO_CAP);
 	if (mb2_add_bootloader_name(&mb, "OTSOS UEFI bootloader") != 0) {
 		return BootError.OutOfMemory;
 	}
@@ -159,13 +250,6 @@ fn boot() !void {
 	puthex(@intCast(@intFromPtr(rsdp.ptr)));
 	puts("\n");
 
-	var mod_ctx = ModuleCtx{
-		.mb = &mb,
-		.failed = false,
-	};
-	if (bootpack_foreach(&pack, moduleCallback, &mod_ctx) != 0 or mod_ctx.failed) {
-		return BootError.ModuleLoadFailed;
-	}
 	if (mb2_builder_finish(&mb) == 0) {
 		return BootError.OutOfMemory;
 	}
@@ -175,7 +259,9 @@ fn boot() !void {
 
 	var entry: u64 = 0;
 	var kernel_end: u64 = 0;
-	if (elf64_load_kernel(kernel.data, kernel.size, &entry, &kernel_end) != 0) {
+	if (elf64_load_kernel(@ptrFromInt(kernel.stage), kernel.size, &entry,
+		&kernel_end) != 0)
+	{
 		puts("[UEFI] panic: KernelLoadFailed\n");
 		uefi_halt();
 	}
@@ -184,6 +270,229 @@ fn boot() !void {
 	puts("\n");
 
 	uefi_jump32(@intCast(entry), MB2_BOOTLOADER_MAGIC, @intCast(mb2_addr));
+}
+
+
+var cfs_vol: CfsrVolume = undefined;
+var cfs_ctx: BlockCtx = undefined;
+var scan_ctx: BlockCtx = undefined;
+
+var own_path_buf: [1024]u8 align(8) = @splat(0);
+
+fn blockRead(ctx: ?*anyopaque, lba: u64, count: u32, dst: ?*anyopaque) callconv(.c) c_int {
+	const c: *BlockCtx = @ptrCast(@alignCast(ctx orelse return -1));
+	const out: [*]u8 = @ptrCast(dst orelse return -1);
+
+	if (count == 0) {
+		return -1;
+	}
+
+	if (c.io.media.block_size != CFSR_BLOCK_SIZE) {
+		return -1;
+	}
+	const bytes: usize = @as(usize, count) * CFSR_BLOCK_SIZE;
+	c.io.readBlocks(c.media_id, c.base_lba + lba, out[0..bytes]) catch {
+		return -1;
+	};
+	return 0;
+}
+
+fn ownDiskHandle(bs: *BootServices) ?Handle {
+	const loaded = (bs.handleProtocol(LoadedImage, uefi.handle) catch
+		return null) orelse return null;
+	const dev = loaded.device_handle orelse return null;
+	const path = (bs.handleProtocol(DevicePath, dev) catch return null) orelse
+		return null;
+
+	
+	const size = path.size();
+	if (size > own_path_buf.len) {
+		return null;
+	}
+	const src: [*]const u8 = @ptrCast(path);
+	@memcpy(own_path_buf[0..size], src[0..size]);
+
+	const copy: *DevicePath = @ptrCast(&own_path_buf);
+	var node: *DevicePath = copy;
+	var prev: ?*DevicePath = null;
+	while (node.next()) |nxt| {
+		prev = node;
+		node = @constCast(nxt);
+	}
+	
+	const last = prev orelse return null;
+	last.type = .end;
+	last.subtype = 0xff;
+	last.length = 4;
+
+	const found = (bs.locateDevicePath(copy, BlockIo) catch return null) orelse
+		return null;
+	return found[1];
+}
+
+fn mountRootOnDisk(bs: *BootServices, handle: Handle) bool {
+	const io = (bs.handleProtocol(BlockIo, handle) catch return false) orelse
+		return false;
+	const media = io.media;
+	if (!media.media_present or media.block_size != CFSR_BLOCK_SIZE) {
+		return false;
+	}
+
+	scan_ctx = .{
+		.io = io,
+		.media_id = media.media_id,
+		.base_lba = 0,
+	};
+	var part: GptrPart = undefined;
+	if (gptr_find(blockRead, &scan_ctx, &gptr_type_otsos, &part) != 0) {
+		return false;
+	}
+	cfs_ctx = .{
+		.io = io,
+		.media_id = media.media_id,
+		.base_lba = 0,
+	};
+	if (cfsr_mount(&cfs_vol, blockRead, &cfs_ctx, part.first_lba,
+		CFS_MAX_RUN) != 0)
+	{
+		return false;
+	}
+	puts("[UEFI] chainfs root at lba ");
+	puthex(@truncate(part.first_lba));
+	puts("\n");
+	return true;
+}
+
+
+fn mountInstalledRoot(bs: *BootServices, skip: ?Handle) bool {
+	const handles = (bs.locateHandleBuffer(.{ .by_protocol = &BlockIo.guid }) catch
+		return false) orelse return false;
+
+	for (handles) |handle| {
+		if (skip) |own| {
+			if (handle == own) {
+				continue;
+			}
+		}
+		const io = (bs.handleProtocol(BlockIo, handle) catch continue) orelse
+			continue;
+		const media = io.media;
+		if (!media.media_present or media.block_size != CFSR_BLOCK_SIZE) {
+			continue;
+		}
+
+		if (!media.logical_partition) {
+			if (mountRootOnDisk(bs, handle)) {
+				return true;
+			}
+			continue;
+		}
+
+		cfs_ctx = .{
+			.io = io,
+			.media_id = media.media_id,
+			.base_lba = 0,
+		};
+		if (cfsr_mount(&cfs_vol, blockRead, &cfs_ctx, 0, CFS_MAX_RUN) == 0) {
+			puts("[UEFI] chainfs root on partition handle\n");
+			return true;
+		}
+	}
+	return false;
+}
+
+fn loadLive(bs: *BootServices, mb: *Mb2Builder, pack: *Bootpack) !CfsBoot {
+	const root = try openRoot(bs);
+	const bootpack = try readBootpack(bs, root);
+	bootpack_init(pack, @ptrFromInt(bootpack.addr), @intCast(bootpack.size));
+
+	var image: BootpackFile = undefined;
+	if (bootpack_find(pack, BOOTPACK_KERNEL_NAME, &image) != 0) {
+		return BootError.KernelNotFound;
+	}
+
+	var mod_ctx = ModuleCtx{
+		.mb = mb,
+		.failed = false,
+	};
+	if (bootpack_foreach(pack, moduleCallback, &mod_ctx) != 0 or mod_ctx.failed) {
+		return BootError.ModuleLoadFailed;
+	}
+	puts("[UEFI] live boot from own device\n");
+	return .{
+		.stage = @intFromPtr(image.data),
+		.size = image.size,
+	};
+}
+
+fn stagePages(bs: *BootServices, size: u32) !usize {
+	const pages = (@as(usize, size) + 4095) / 4096;
+	const max: [*]align(4096) Page = @ptrFromInt(LOW_MAX_ADDR);
+	const mem = bs.allocatePages(.{ .max_address = max }, .loader_data, pages) catch {
+		return BootError.OutOfMemory;
+	};
+	const addr = @intFromPtr(mem.ptr);
+
+	if (addr < CFS_STAGE_MIN_ADDR) {
+		return BootError.OutOfMemory;
+	}
+	return addr;
+}
+
+fn loadCfsKernel(bs: *BootServices) !CfsBoot {
+	var file: CfsrEntry = undefined;
+
+	if (cfsr_lookup(&cfs_vol, CFS_KERNEL_PATH, &file) != 0) {
+		return BootError.KernelNotFound;
+	}
+	if (file.type != CFSR_TYPE_FILE or file.size == 0) {
+		return BootError.KernelNotFound;
+	}
+	const addr = try stagePages(bs, file.size);
+	var got: u32 = 0;
+	if (cfsr_read(&cfs_vol, &file, @ptrFromInt(addr), file.size, &got) != 0 or
+		got != file.size)
+	{
+		return BootError.FileReadFailed;
+	}
+	puts("[UEFI] chainfs kernel ");
+	puthex(file.size);
+	puts(" bytes\n");
+	return .{
+		.stage = addr,
+		.size = file.size,
+	};
+}
+
+
+fn loadCfsCmseed(bs: *BootServices, mb: *Mb2Builder) !void {
+	var file: CfsrEntry = undefined;
+
+	if (cfsr_lookup(&cfs_vol, CFS_CMSEED_PATH, &file) != 0) {
+		return BootError.ModuleLoadFailed;
+	}
+	if (file.type != CFSR_TYPE_FILE or file.size == 0) {
+		return BootError.ModuleLoadFailed;
+	}
+
+	const addr = try stagePages(bs, file.size);
+	var got: u32 = 0;
+	if (cfsr_read(&cfs_vol, &file, @ptrFromInt(addr), file.size,
+		&got) != 0 or got != file.size)
+	{
+		return BootError.FileReadFailed;
+	}
+	if (addr + file.size > std.math.maxInt(u32)) {
+		return BootError.ModuleLoadFailed;
+	}
+	if (mb2_add_module(mb, @intCast(addr), @intCast(addr + file.size),
+		CFS_CMSEED_NAME) != 0)
+	{
+		return BootError.ModuleLoadFailed;
+	}
+	puts("[UEFI] module cmseed ");
+	puthex(file.size);
+	puts(" bytes\n");
 }
 
 fn openRoot(bs: *BootServices) !*File {
@@ -453,9 +762,6 @@ fn loadModule(file: *const BootpackFile, name: [*:0]const u8, ctx: *ModuleCtx) !
 
 fn moduleCallback(file: *const BootpackFile, arg: ?*anyopaque) callconv(.c) c_int {
 	const ctx: *ModuleCtx = @ptrCast(@alignCast(arg.?));
-	if (cstrEq(file.name, "kernel.bin")) {
-		return 0;
-	}
 	const name: [*:0]const u8 = @ptrCast(file.name);
 	loadModule(file, name, ctx) catch {
 		ctx.failed = true;

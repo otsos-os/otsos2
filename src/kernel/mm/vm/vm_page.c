@@ -305,6 +305,7 @@ vm_page_startup(void)
 
 	vm_page_ready = 1;
 	bootmem_set_reserve_cb(vm_page_reserve_cb);
+	bootmem_retire();
 
 	printk("vm_page: %u pages managed in %u segments (%u KiB of page "
 	    "array)\n", (u32)vm_page_count_total(), n, (u32)(bytes / 1024));

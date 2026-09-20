@@ -38,6 +38,9 @@ $define %func bios_console_putc as procedure with args char
 $define %func bios_console_puts as procedure with args const char *
 $define %func bios_console_puthex as procedure with args u32
 $define %func bios_disk_read as function with args u32, u32, void *
+$define %func bios_disk_select as procedure with args u32
+$define %func bios_disk_current as function with args void
+$define %func bios_disk_present as function with args u32
 $define %func bios_halt as procedure with args void
 $define %func bios_jump_kernel as procedure with args u32, u32, u32
 
@@ -48,6 +51,7 @@ $define %func bios_jump_kernel as procedure with args u32, u32, u32
 $space %export bios_boot_info_t, bios_mmap_entry_t, bios_layout_t
 $space %export bios_console_init, bios_console_putc, bios_console_puts
 $space %export bios_console_puthex, bios_disk_read
+$space %export bios_disk_select, bios_disk_current, bios_disk_present
 $space %export bios_halt, bios_jump_kernel
 
 */
@@ -62,6 +66,8 @@ $space %export bios_halt, bios_jump_kernel
 #define BIOS_LAYOUT_LBA		257U
 #define BIOS_BOOTPACK_LBA	258U
 #define BIOS_E820_MAX		64U
+#define BIOS_DRIVE_FIRST	0x80U
+#define BIOS_DRIVE_LAST		0x8FU
 
 typedef struct {
 	u32	boot_drive;
@@ -98,6 +104,9 @@ void	bios_console_putc(char c);
 void	bios_console_puts(const char *str);
 void	bios_console_puthex(u32 value);
 int	bios_disk_read(u32 lba, u32 sectors, void *dst);
+void	bios_disk_select(u32 drive);
+u32	bios_disk_current(void);
+int	bios_disk_present(u32 drive);
 void	bios_halt(void);
 void	bios_jump_kernel(u32 entry, u32 magic, u32 info);
 

@@ -33,12 +33,26 @@
 #endif
 
 #define STAGE2_SEG	0x0800
+#define PARAM_MAGIC	0x31534f4f
 
 _start:
-	ljmp	$0x07c0, $stage1_start
+	jmp	stage1_start
+	nop
 
+.org 0x08
+stage1_params:
+	.long	PARAM_MAGIC
+	.long	1
+	.long	0
+	.word	STAGE2_SECTORS
+	.word	0
+
+.org 0x18
 stage1_start:
 	cli
+	ljmp	$0x07c0, $stage1_flat
+
+stage1_flat:
 	movw	%cs, %ax
 	movw	%ax, %ds
 	movw	%ax, %es
@@ -47,114 +61,151 @@ stage1_start:
 	sti
 
 	movb	%dl, boot_drive
-	call	serial_init
-	movw	$msg_start, %si
-	call	puts
-	movw	$msg_drive, %si
-	call	puts
-	movb	boot_drive, %al
-	call	print_hex8
-	movw	$msg_crlf, %si
-	call	puts
+	movb	$'1', %al
+	call	putc
 
-	movw	$STAGE2_SECTORS, sectors_left
+	movl	stage1_params + 4, %eax
+	movl	%eax, lba_lo
+	movl	stage1_params + 8, %eax
+	movl	%eax, lba_hi
+	movw	stage1_params + 12, %ax
+	movw	%ax, sectors_left
 	movw	$STAGE2_SEG, load_seg
-	movb	$2, sector_no
 
 read_loop:
 	movw	sectors_left, %ax
 	testw	%ax, %ax
 	jz	boot_stage2
 
+	movl	lba_lo, %eax
+	movl	%eax, dap_lba_lo
+	movl	lba_hi, %eax
+	movl	%eax, dap_lba_hi
+	movw	$1, dap_count
+	movw	$0, dap_offset
 	movw	load_seg, %ax
-	movw	%ax, %es
-	xorw	%bx, %bx
+	movw	%ax, dap_segment
 
 	movb	boot_drive, %dl
-	movb	$0x02, %ah
-	movb	$1, %al
-	movb	$0, %ch
-	movb	sector_no, %cl
-	movb	$0, %dh
+	movw	$dap, %si
+	movb	$0x42, %ah
 	int	$0x13
+	jnc	read_done
+	call	read_chs
 	jc	disk_error
 
+read_done:
 	decw	sectors_left
 	addw	$0x20, load_seg
-	incb	sector_no
+	incl	lba_lo
+	jnz	read_loop
+	incl	lba_hi
 	jmp	read_loop
 
 boot_stage2:
 	movb	boot_drive, %dl
 	ljmp	$STAGE2_SEG, $0x0000
 
+read_chs:
+	pushw	%bx
+	pushw	%cx
+	pushw	%dx
+
+	cmpl	$0, lba_hi
+	jne	chs_fail
+
+	movb	chs_spt, %al
+	testb	%al, %al
+	jnz	chs_have_geom
+
+	movb	boot_drive, %dl
+	movb	$0x08, %ah
+	int	$0x13
+	jc	chs_defaults
+	movb	%cl, %al
+	andb	$0x3f, %al
+	testb	%al, %al
+	jz	chs_defaults
+	movb	%al, chs_spt
+	movb	%dh, %al
+	incb	%al
+	movb	%al, chs_heads
+	jmp	chs_have_geom
+
+chs_defaults:
+	movb	$63, chs_spt
+	movb	$16, chs_heads
+
+chs_have_geom:
+	movl	lba_lo, %eax
+	movzbl	chs_spt, %ebx
+	xorl	%edx, %edx
+	divl	%ebx
+	movb	%dl, %cl
+	incb	%cl
+
+	movzbl	chs_heads, %ebx
+	xorl	%edx, %edx
+	divl	%ebx
+	movb	%dl, %dh
+
+	cmpl	$1023, %eax
+	ja	chs_fail
+
+	movb	%al, %ch
+	shrw	$8, %ax
+	andb	$0x03, %al
+	shlb	$6, %al
+	orb	%al, %cl
+
+	movw	load_seg, %ax
+	movw	%ax, %es
+	xorw	%bx, %bx
+	movb	boot_drive, %dl
+	movw	$0x0201, %ax
+	int	$0x13
+	jc	chs_fail
+
+	popw	%dx
+	popw	%cx
+	popw	%bx
+	clc
+	ret
+
+chs_fail:
+	popw	%dx
+	popw	%cx
+	popw	%bx
+	stc
+	ret
+
 disk_error:
 	movb	%ah, disk_status
 	movw	$msg_disk_error, %si
 	call	puts
-	movw	$msg_drive, %si
-	call	puts
 	movb	boot_drive, %al
 	call	print_hex8
-	movw	$msg_sector, %si
-	call	puts
-	movb	sector_no, %al
-	call	print_hex8
-	movw	$msg_error, %si
-	call	puts
 	movb	disk_status, %al
 	call	print_hex8
-	movw	$msg_crlf, %si
-	call	puts
 1:
 	cli
 	hlt
 	jmp	1b
 
-serial_init:
-	movw	$0x3f9, %dx
-	xorb	%al, %al
-	outb	%al, %dx
-	movw	$0x3fb, %dx
-	movb	$0x80, %al
-	outb	%al, %dx
-	movw	$0x3f8, %dx
-	movb	$0x03, %al
-	outb	%al, %dx
-	movw	$0x3f9, %dx
-	xorb	%al, %al
-	outb	%al, %dx
-	movw	$0x3fb, %dx
-	movb	$0x03, %al
-	outb	%al, %dx
-	movw	$0x3fa, %dx
-	movb	$0xc7, %al
-	outb	%al, %dx
-	movw	$0x3fc, %dx
-	movb	$0x0b, %al
-	outb	%al, %dx
-	ret
-
-serial_putc:
-	pushw	%dx
-	pushw	%ax
-1:
-	movw	$0x3fd, %dx
-	inb	%dx, %al
-	testb	$0x20, %al
-	jz	1b
-	popw	%ax
-	movw	$0x3f8, %dx
-	outb	%al, %dx
-	popw	%dx
-	ret
-
 putc:
-	call	serial_putc
+	pushw	%ax
+	pushw	%dx
+	xorw	%dx, %dx
+	movb	$0x01, %ah
+	int	$0x14
+	popw	%dx
+	popw	%ax
+	pushw	%ax
 	movb	$0x0e, %ah
-	movb	$0x00, %bh
 	movb	$0x07, %bl
+	xorb	%bh, %bh
 	int	$0x10
+	popw	%ax
 	ret
 
 puts:
@@ -184,29 +235,42 @@ print_nibble:
 	addb	$48, %al
 	jmp	putc
 
-msg_start:
-	.asciz	"OTSOS BIOS stage1\r\n"
 msg_disk_error:
-	.asciz	"disk read failed\r\n"
-msg_drive:
-	.asciz	" drive="
-msg_sector:
-	.asciz	" sector="
-msg_error:
-	.asciz	" err="
-msg_crlf:
-	.asciz	"\r\n"
+	.asciz	"\r\nE13 "
+
+dap:
+	.byte	0x10
+	.byte	0
+dap_count:
+	.word	0
+dap_offset:
+	.word	0
+dap_segment:
+	.word	0
+dap_lba_lo:
+	.long	0
+dap_lba_hi:
+	.long	0
 
 boot_drive:
+	.byte	0
+disk_status:
+	.byte	0
+chs_spt:
+	.byte	0
+chs_heads:
 	.byte	0
 sectors_left:
 	.word	0
 load_seg:
 	.word	0
-sector_no:
-	.byte	0
-disk_status:
-	.byte	0
+lba_lo:
+	.long	0
+lba_hi:
+	.long	0
+
+.global stage1_end
+stage1_end:
 
 .org 510
 	.word	0xaa55

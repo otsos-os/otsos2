@@ -237,6 +237,9 @@ kmem_alloc_internal(size_t size, size_t align)
 	}
 	if (align <= KMEM_ALIGN && size <= KMEM_SMALL_MAX - sizeof(kmem_hdr_t)) {
 		ptr = kmem_alloc_small(size);
+		if (ptr == NULL) {
+			ptr = kmem_alloc_large(size, PAGE_SIZE);
+		}
 	} else {
 		ptr = kmem_alloc_large(size, align);
 	}

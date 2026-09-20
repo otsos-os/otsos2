@@ -123,6 +123,7 @@ struct pata_dummy_area {
 
 static struct pata_dummy_area	pata_dummy_area;
 static disk_t			pata_disk;
+static device_t	pata_dev;
 
 static void
 pata_guard_init(void)
@@ -435,6 +436,7 @@ pata_identify(void)
 	pata_disk.ops = &pata_ops;
 	pata_disk.private_data = NULL;
 
+	pata_disk.dev = pata_dev;
 	if (disk_register(&pata_disk) >= 0) {
 		pata_registered = 1;
 	}
@@ -462,7 +464,7 @@ pata_probe_newbus(device_t dev)
 static int
 pata_attach_newbus(device_t dev)
 {
-	(void)dev;
+	pata_dev = dev;
 	pata_identify();
 	return (0);
 }

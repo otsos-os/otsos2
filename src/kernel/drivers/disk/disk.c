@@ -58,6 +58,8 @@ $space %export disk_capacity_bytes, disk_dump
 
 #include "disk.h"
 #include <kernel/drivers/disk/bio.h>
+#include <kernel/drivers/disk/blockdev.h>
+#include <kernel/drivers/disk/gpt.h>
 #include <kernel/drivers/newbus/newbus.h>
 #include <mlibc/mlibc.h>
 #include <mlibc/stdio.h>
@@ -76,6 +78,8 @@ disk_type_name(disk_type_t type)
 		return ("nvme");
 	case DISK_TYPE_RAM:
 		return ("ram");
+	case DISK_TYPE_SLICE:
+		return ("slice");
 	default:
 		return ("unknown");
 	}
@@ -147,7 +151,12 @@ disk_register(disk_t *disk)
 	    disk->sector_size,
 	    (u32)(disk_capacity_bytes(disk) >> 20), disk->max_io_sectors,
 	    (disk->flags & DISK_F_READONLY) != 0 ? ", read-only" : "");
-	return (disk_count_val++);
+	disk_count_val++;
+	blockdev_publish(disk);
+	if ((disk->flags & DISK_F_SLICE) == 0 && gpt_probe(disk) == 0) {
+		(void)gpt_rescan(disk);
+	}
+	return (disk->index);
 }
 
 int
@@ -158,11 +167,15 @@ disk_unregister(disk_t *disk)
 	if (disk == NULL) {
 		return (-1);
 	}
+	if ((disk->flags & DISK_F_SLICE) == 0) {
+		gpt_detach(disk);
+	}
 	for (i = 0; i < disk_count_val; i++) {
 		if (disks[i] != disk) {
 			continue;
 		}
-		
+		blockdev_revoke(disk);
+
 		for (j = i; j < disk_count_val - 1; j++) {
 			disks[j] = disks[j + 1];
 			disks[j]->index = j;

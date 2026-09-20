@@ -124,6 +124,7 @@ $space %export vfs_is_initialized
 #define POSIX_S_IFREG	0x8000
 #define POSIX_S_IFDIR	0x4000
 #define POSIX_S_IFCHR	0x2000
+#define POSIX_S_IFBLK	0x6000
 #define POSIX_S_IFIFO	0x1000
 #define POSIX_S_IFLNK	0xA000
 #define POSIX_S_IFSOCK	0xC000

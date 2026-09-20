@@ -25,6 +25,7 @@ static bootmem_range_t free_ranges[BOOTMEM_MAX_RANGES];
 static u32 free_count;
 static u64 highest_addr;
 static int initialized;
+static int retired;
 static void (*reserve_cb)(u64 phys_start, u64 size);
 static spin_t bootmem_spin = SPIN_INITIALIZER("bootmem", LO_BOOTMEM);
 
@@ -177,6 +178,7 @@ void bootmem_init(u64 magic, u64 info_addr, u64 kernel_start, u64 kernel_end) {
   free_count = 0;
   highest_addr = 0;
   initialized = 0;
+  retired = 0;
 
   if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
     multiboot2_info_t *mb = (multiboot2_info_t *)info_addr;
@@ -196,11 +198,18 @@ void bootmem_init(u64 magic, u64 info_addr, u64 kernel_start, u64 kernel_end) {
               bootmem_free_bytes() / 1024);
 }
 
+void bootmem_retire(void) {
+  spin_lock(&bootmem_spin);
+  free_count = 0;
+  retired = 1;
+  spin_unlock(&bootmem_spin);
+}
+
 void *bootmem_alloc(u64 size, u64 align) {
   void (*cb)(u64, u64);
   u64 got = 0;
 
-  if (!initialized)
+  if (!initialized || retired)
     return NULL;
   if (align < PAGE_SIZE)
     align = PAGE_SIZE;

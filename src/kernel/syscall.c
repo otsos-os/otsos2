@@ -207,6 +207,10 @@ void syscall_handler(registers_t *regs) {
     regs->rax = (u64)api_fs_listdir((const char *)arg1,
                                 (struct api_dirent *)arg2, (u32)arg3);
     break;
+  case CALL_FS_LISTDIR_AT:
+    regs->rax = (u64)api_fs_listdir_at((const char *)arg1, (u32)arg2,
+                                (struct api_dirent *)arg3, (u32)arg4);
+    break;
   case CALL_FS_STAT:
     regs->rax = (u64)api_fs_stat((const char *)arg1,
                                 (struct api_fs_stat *)arg2);

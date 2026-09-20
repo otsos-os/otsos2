@@ -73,6 +73,7 @@ typedef struct {
 } ramdisk_priv_t;
 
 static disk_t		ram_disk;
+static device_t	ramdisk_dev;
 
 static u8 *
 ramdisk_block_ptr(ramdisk_priv_t *priv, u32 bi, int create)
@@ -236,6 +237,7 @@ ramdisk_init(void *pool, u32 pool_size)
 	ram_disk.private_data = priv;
 	ram_disk.ops = &ramdisk_ops;
 
+	ram_disk.dev = ramdisk_dev;
 	disk_register(&ram_disk);
 
 	drivers_log("[RAMDISK] Initialized: pool %u bytes "
@@ -274,7 +276,7 @@ ramdisk_attach(device_t dev)
 {
 	const newbus_bootinfo_t	*boot;
 
-	(void)dev;
+	ramdisk_dev = dev;
 	boot = newbus_get_bootinfo();
 	if (boot == NULL) {
 		return (-1);

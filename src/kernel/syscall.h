@@ -64,6 +64,7 @@ $space %export syscall_init, syscall_handler, syscall_is_initialized
 #define	CALL_DATA_SEEK		0x204
 #define	CALL_DATA_PIPE		0x205
 #define	CALL_DATA_DIR		0x210
+#define	CALL_FS_LISTDIR_AT	0x211
 #define	CALL_FS_CHDIR		0x206
 #define	CALL_FS_GETCWD		0x207
 #define	CALL_FS_LISTDIR		0x208

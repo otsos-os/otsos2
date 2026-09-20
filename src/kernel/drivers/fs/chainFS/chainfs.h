@@ -37,6 +37,7 @@ $define %type chainfs_t as struct with superblock, data area, dir, sector buffer
 $define %type disk_t as struct with name, type, sector_size, sectors, ops
 
 $define %func chainfs_init as function with args disk_t *
+$define %func chainfs_root_disk as function with args void
 $define %func chainfs_format as function with args u32, u32
 $define %func chainfs_read_file as function with args const char *, u8 *, u32, u32 *
 $define %func chainfs_read_file_range as function with args const char *, u8 *, u32, u32, u32 *
@@ -64,7 +65,8 @@ $define %func chainfs_free_block_chain as procedure with args u32
 
 /* !SPACE!
 
-$space %export chainfs_init, chainfs_format, chainfs_read_file
+$space %export chainfs_init, chainfs_root_disk
+$space %export chainfs_format, chainfs_read_file
 $space %export chainfs_read_file_range, chainfs_write_file
 $space %export chainfs_symlink, chainfs_link, chainfs_readlink
 $space %export chainfs_delete_file, chainfs_get_file_list
@@ -97,6 +99,7 @@ $space %export g_chainfs, g_chainfs_phys
 #define	CHAINFS_TYPE_DIR	1
 #define	CHAINFS_TYPE_SYMLINK	2
 #define	CHAINFS_TYPE_SOCK	3
+#define	CHAINFS_MAP_NONE		0xFFFFFFFFU
 
 typedef struct {
 	u32	magic;
@@ -127,6 +130,14 @@ typedef struct {
 	u32			current_dir_block;
 	u8			sector_buffer[CHAINFS_BLOCK_SIZE];
 	disk_t			*disk;
+	u8			map_buffer[CHAINFS_BLOCK_SIZE];
+	u32			map_cached;
+	u32			map_dirty;
+	u32			alloc_hint;
+	u32			seek_entry_block;
+	u32			seek_entry_offset;
+	u32			seek_block_index;
+	u32			seek_block;
 } chainfs_t;
 
 extern chainfs_t	g_chainfs;
@@ -134,12 +145,22 @@ extern u64		g_chainfs_phys;
 
 int	chainfs_init(disk_t *disk);
 int	chainfs_format(u32 total_blocks, u32 max_files);
+int	chainfs_format_disk(disk_t *disk, u64 total_blocks, u32 max_files);
+int	chainfs_probe_sector(const void *sector);
+int	chainfs_root_is_ramdisk(void);
+disk_t	*chainfs_root_disk(void);
+int	chainfs_ctx_enter(chainfs_t *ctx, disk_t *disk);
+int	chainfs_sync(void);
+void	chainfs_ctx_leave(chainfs_t *ctx);
 int	chainfs_read_file(const char *filename, u8 *buffer,
 	    u32 buffer_size, u32 *bytes_read);
 int	chainfs_read_file_range(const char *filename, u8 *buffer,
 	    u32 buffer_size, u32 offset, u32 *bytes_read);
 int	chainfs_write_file(const char *filename,
-	    const u8 *data, u32 size);
+	    const u8 *data, u32 size, u32 alloc_size);
+int	chainfs_write_file_range(const char *filename,
+	    const u8 *data, u32 size, u32 offset);
+int	chainfs_truncate(const char *filename, u32 size);
 int	chainfs_symlink(const char *target, const char *linkpath);
 int	chainfs_link(const char *oldpath, const char *newpath);
 int	chainfs_readlink(const char *path, char *buf, u32 bufsize);

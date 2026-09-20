@@ -42,6 +42,7 @@ $define %func uma_slab_create as function with args uma_zone_t
 $define %func uma_slab_pop as function with args uma_zone_t, uma_slab_t *
 $define %func uma_slab_push as procedure with args uma_zone_t, uma_slab_t *, void *
 $define %func uma_slab_release as procedure with args uma_zone_t, uma_slab_t *
+$define %func uma_zone_reclaim_empty as function with args uma_zone_t
 $define %func uma_refill as function with args uma_zone_t, void **, u32
 $define %func uma_drain_items as procedure with args uma_zone_t, void **, u32
 $define %func uma_cache_of as function with args uma_zone_t
@@ -67,11 +68,12 @@ $define %func uma_dump as procedure with args void
 
 $space %internal uma_intr_save, uma_intr_restore, uma_align_ok, uma_slab_of
 $space %internal uma_slab_create, uma_slab_pop, uma_slab_push, uma_slab_release
+$space %internal uma_zone_reclaim_empty
 $space %internal uma_refill, uma_drain_items, uma_cache_of, uma_zone_geometry
 $space %internal uma_zone_bootstrap, uma_zone_drain_local, uma_zone_empty
 $space %internal uma_registry_remove
 $space %export uma_init, uma_zcreate, uma_zdestroy, uma_zalloc, uma_zfree
-$space %export uma_zfind, uma_zone_item_size, uma_zone_stats, uma_reclaim, uma_dump
+$space %export uma_zfind, uma_zone_item_size, uma_zone_stats, uma_reclaim, uma_dump, uma_prealloc
 
 */
 
@@ -123,6 +125,7 @@ struct uma_zone {
 	u64		 frees;
 	u64		 fails;
 	u64		 slab_count;
+	u32		 reserve;
 	spin_t		 spin;
 	int		 alive;
 	uma_zone_t	 registry_next;
@@ -134,7 +137,10 @@ static spin_t		uma_registry_spin =
 static uma_zone_t	uma_zones;
 static u32		uma_zone_count;
 static int		uma_ready;
+static int		uma_reclaim_busy;
 static struct uma_zone	uma_zone_store;
+
+u64	uma_reclaim(void);
 
 static u64
 uma_intr_save(void)
@@ -283,19 +289,74 @@ uma_slab_release(uma_zone_t zone, uma_slab_t *slab)
 }
 
 static u32
-uma_refill(uma_zone_t zone, void **items, u32 want)
+uma_zone_free_items(uma_zone_t zone)
 {
 	uma_slab_t	*slab;
 	u32		 n;
 
 	n = 0;
+	for (slab = zone->partial; slab != NULL; slab = slab->next) {
+		n += slab->items_free;
+	}
+	return (n);
+}
+
+static u64
+uma_zone_reclaim_empty(uma_zone_t zone)
+{
+	uma_slab_t	*slab;
+	uma_slab_t	*next;
+	u64		 bytes;
+	u32		 free_items;
+
+	bytes = 0;
+	free_items = uma_zone_free_items(zone);
+	for (slab = zone->partial; slab != NULL; slab = next) {
+		next = slab->next;
+		if (slab->items_free != slab->items_total) {
+			continue;
+		}
+		if (free_items < slab->items_total ||
+		    free_items - slab->items_total < zone->reserve) {
+			continue;
+		}
+		free_items -= slab->items_total;
+		bytes += zone->slab_bytes;
+		uma_slab_release(zone, slab);
+	}
+	return (bytes);
+}
+
+static u32
+uma_refill(uma_zone_t zone, void **items, u32 want)
+{
+	uma_slab_t	*slab;
+	u32		 n;
+	int		 retried;
+
+	n = 0;
+	retried = 0;
 	spin_lock(&zone->spin);
 	while (n < want) {
 		slab = zone->partial;
 		if (slab == NULL) {
 			slab = uma_slab_create(zone);
+			if (slab == NULL && retried == 0) {
+				spin_unlock(&zone->spin);
+				(void)uma_reclaim();
+				retried = 1;
+				spin_lock(&zone->spin);
+				continue;
+			}
 			if (slab == NULL) {
 				zone->fails++;
+				printk("[UMA] keg grow fail zone=%s item=%u slab=%llu "
+				    "slabs=%u reserve=%u fails=%u\n",
+				    zone->name, (unsigned)zone->item_size,
+				    (unsigned long long)zone->slab_bytes,
+				    (unsigned)zone->slab_count,
+				    (unsigned)zone->reserve,
+				    (unsigned)zone->fails);
 				break;
 			}
 		}
@@ -341,13 +402,20 @@ uma_zone_geometry(uma_zone_t zone, size_t item_size)
 
 	bytes = UMA_PAGE_SIZE;
 	order = 0;
-	while ((bytes - UMA_SLAB_HDR) / item_size < UMA_SLAB_MIN_ITEMS &&
+	
+	while ((bytes - UMA_SLAB_HDR) / item_size < 1 &&
 	    order < UMA_SLAB_MAX_ORDER) {
 		bytes <<= 1;
 		order++;
 	}
-	if ((bytes - UMA_SLAB_HDR) / item_size < UMA_SLAB_MIN_ITEMS) {
+	if ((bytes - UMA_SLAB_HDR) / item_size < 1) {
 		return (-1);
+	}
+	while ((bytes - UMA_SLAB_HDR) / item_size < UMA_SLAB_MIN_ITEMS &&
+	    order < UMA_SLAB_MAX_ORDER &&
+	    (bytes << 1) <= UMA_PAGE_SIZE) {
+		bytes <<= 1;
+		order++;
 	}
 	zone->order = order;
 	zone->slab_bytes = bytes;
@@ -452,11 +520,7 @@ uma_zalloc(uma_zone_t zone, u32 flags)
 
 	irq_flags = uma_intr_save();
 	cache = uma_cache_of(zone);
-	if (cache == NULL) {
-		uma_intr_restore(irq_flags);
-		return (NULL);
-	}
-	if (cache->count != 0) {
+	if (cache != NULL && cache->count != 0) {
 		item = cache->items[--cache->count];
 		uma_intr_restore(irq_flags);
 	} else {
@@ -468,16 +532,21 @@ uma_zalloc(uma_zone_t zone, u32 flags)
 		item = items[--got];
 		irq_flags = uma_intr_save();
 		cache = uma_cache_of(zone);
-		if (cache == NULL) {
+		if (cache != NULL) {
+			for (i = 0; i < got; i++) {
+				if (cache->count >= UMA_CACHE_ITEMS) {
+					break;
+				}
+				cache->items[cache->count++] = items[i];
+			}
+			uma_intr_restore(irq_flags);
+			if (i < got) {
+				uma_drain_items(zone, &items[i], got - i);
+			}
+		} else {
 			uma_intr_restore(irq_flags);
 			uma_drain_items(zone, items, got);
-			uma_drain_items(zone, &item, 1);
-			return (NULL);
 		}
-		for (i = 0; i < got; i++) {
-			cache->items[cache->count++] = items[i];
-		}
-		uma_intr_restore(irq_flags);
 	}
 
 	if ((flags & M_ZERO) != 0 || (zone->flags & M_ZERO) != 0) {
@@ -686,7 +755,54 @@ uma_zone_stats(uma_zone_t zone, uma_stat_t *out)
 u64
 uma_reclaim(void)
 {
-	return (0);
+	uma_zone_t	zone;
+	u64		bytes;
+
+	bytes = 0;
+	if (uma_reclaim_busy) {
+		return (0);
+	}
+	uma_reclaim_busy = 1;
+	spin_lock(&uma_registry_spin);
+	for (zone = uma_zones; zone != NULL; zone = zone->registry_next) {
+		if (!zone->alive) {
+			continue;
+		}
+		spin_unlock(&uma_registry_spin);
+		uma_zone_drain_local(zone);
+		spin_lock(&zone->spin);
+		bytes += uma_zone_reclaim_empty(zone);
+		spin_unlock(&zone->spin);
+		spin_lock(&uma_registry_spin);
+	}
+	spin_unlock(&uma_registry_spin);
+	uma_reclaim_busy = 0;
+	return (bytes);
+}
+
+
+u32
+uma_prealloc(uma_zone_t zone, u32 items)
+{
+	u32	got;
+
+	if (zone == NULL || !zone->alive || items == 0 ||
+	    zone->items_per_slab == 0) {
+		return (0);
+	}
+	got = 0;
+	spin_lock(&zone->spin);
+	while (got < items) {
+		if (uma_slab_create(zone) == NULL) {
+			break;
+		}
+		got += zone->items_per_slab;
+	}
+	if (got > zone->reserve) {
+		zone->reserve = got;
+	}
+	spin_unlock(&zone->spin);
+	return (got);
 }
 
 void

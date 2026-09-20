@@ -49,6 +49,7 @@ stage2_entry:
 
 	movzbl	%dl, %eax
 	movl	%eax, bios_boot_info + BOOT_INFO_DRIVE
+	movb	%dl, bios_disk_drive
 
 	call	enable_a20
 	call	detect_memory
@@ -265,7 +266,7 @@ real_read_entry:
 	movw	%ax, %es
 	movw	%ax, %ss
 	movw	$0xfc00, %sp
-	movb	bios_boot_info + BOOT_INFO_DRIVE, %dl
+	movb	bios_disk_drive, %dl
 	movw	$bios_disk_packet, %si
 	movb	$0x42, %ah
 	int	$0x13
@@ -293,7 +294,7 @@ real_read_chs:
 	pushw	%dx
 	pushw	%di
 
-	movb	bios_boot_info + BOOT_INFO_DRIVE, %dl
+	movb	bios_disk_drive, %dl
 	movb	$0x08, %ah
 	int	$0x13
 	jc	chs_defaults
@@ -335,7 +336,7 @@ chs_have_geom:
 	orb	%al, %cl
 
 	movb	chs_head, %dh
-	movb	bios_boot_info + BOOT_INFO_DRIVE, %dl
+	movb	bios_disk_drive, %dl
 	movw	bios_disk_packet + 4, %bx
 	movw	bios_disk_packet + 6, %es
 	movb	bios_disk_packet + 2, %al
@@ -483,6 +484,10 @@ chs_sector:
 	.byte	0
 chs_head:
 	.byte	0
+
+.global bios_disk_drive
+bios_disk_drive:
+	.byte	0x80
 bios_disk_packet:
 	.byte	0x10
 	.byte	0

@@ -128,7 +128,7 @@ vfs_core_identify(driver_t *driver, device_t parent)
 {
 	(void)driver;
 	if (device_find_child(parent, "vfs_core", 0) == NULL) {
-		device_add_child(parent, "vfs_core", 0);
+		(void)device_add_child(parent, "vfs_core", 0);
 	}
 }
 

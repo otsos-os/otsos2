@@ -102,8 +102,10 @@ copy_dirent_to_user(struct api_dirent *dst, const vfs_dirent_t *src)
 	dst->type = api_fs_dtype(src->type);
 }
 
+
 int
-api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries)
+api_fs_listdir_at(const char *path, u32 offset, struct api_dirent *buf,
+    u32 max_entries)
 {
 	vfs_dirent_t	entries[API_FS_LISTDIR_BATCH];
 	vnode_t		*vn;
@@ -159,7 +161,12 @@ api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries)
 		}
 
 		count = 0;
-		ret = vnode_listdir(vn, listed, entries, want, &count);
+
+		if (offset > 0xFFFFFFFFU - listed) {
+			vnode_release(vn);
+			return (-API_ERR_BAD_VALUE);
+		}
+		ret = vnode_listdir(vn, offset + listed, entries, want, &count);
 		if (ret != 0) {
 			vnode_release(vn);
 			return (ret);
@@ -179,4 +186,10 @@ api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries)
 
 	vnode_release(vn);
 	return ((int)listed);
+}
+
+int
+api_fs_listdir(const char *path, struct api_dirent *buf, u32 max_entries)
+{
+	return (api_fs_listdir_at(path, 0, buf, max_entries));
 }

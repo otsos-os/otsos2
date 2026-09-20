@@ -3,6 +3,7 @@
 $define %type api_fs_stat as struct with native file metadata
 $define %type api_dirent as struct with native directory entry
 $define %func fsStat as function with args const char *, api_fs_stat *
+$define %func fsListdirAt as function with args const char *, uint32_t, api_dirent *, uint32_t
 $define %func fsMnt as function with args const char *, const char *, const char *, uint64_t, const void *
 $define %func fsUmnt as function with args const char *, uint64_t
 
@@ -10,7 +11,8 @@ $define %func fsUmnt as function with args const char *, uint64_t
 
 /* !SPACE!
 
-$space %export fsChdir, fsGetcwd, fsListdir, fsStat, fsRename, fsUnlink
+$space %export fsChdir, fsGetcwd, fsListdir, fsListdirAt
+$space %export fsStat, fsRename, fsUnlink
 $space %export fsLinkNew, fsLinkGo, fsMnt, fsUmnt
 
 */
@@ -41,6 +43,14 @@ fsListdir(const char *path, struct api_dirent *buf, uint32_t max_entries)
 {
 	return (__sysret_int(__syscall3(CALL_FS_LISTDIR, (long)path,
 	    (long)buf, (long)max_entries)));
+}
+
+int
+fsListdirAt(const char *path, uint32_t offset, struct api_dirent *buf,
+    uint32_t max_entries)
+{
+	return (__sysret_int(__syscall4(CALL_FS_LISTDIR_AT, (long)path,
+	    (long)offset, (long)buf, (long)max_entries)));
 }
 
 int

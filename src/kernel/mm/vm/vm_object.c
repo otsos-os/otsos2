@@ -264,8 +264,10 @@ vm_object_init(void)
 		printk("vm_object: cannot create radix node zone\n");
 		return;
 	}
-	printk("vm_object: radix index initialized (%u-way, %d levels)\n",
-	    VM_RADIX_SLOTS, VM_RADIX_LEVELS);
+	(void)uma_prealloc(vm_radix_zone, 16);
+	printk("vm_object: radix zone=%p slot=%p item=%zu (%u-way, %d levels)\n",
+	    (void *)vm_radix_zone, (void *)&vm_radix_zone,
+	    sizeof(vm_radix_node_t), VM_RADIX_SLOTS, VM_RADIX_LEVELS);
 }
 
 vm_object_t *
@@ -398,12 +400,20 @@ vm_object_set_page(vm_object_t *obj, u64 index, u64 phys)
 {
 	vm_page_t	*page;
 	vm_page_t	*old;
+	uma_stat_t	st;
+	uma_zone_t	found;
 
 	if (obj == NULL || index >= obj->page_count || phys == 0) {
+		printk("[VM] set_page: bad args obj=%p idx=%llu count=%llu phys=%llx\n",
+		    (void *)obj, (unsigned long long)index,
+		    (unsigned long long)(obj != NULL ? obj->page_count : 0),
+		    (unsigned long long)phys);
 		return (-1);
 	}
 	page = vm_page_lookup_phys(phys);
 	if (page == NULL) {
+		printk("[VM] set_page: lookup_phys miss phys=%llx idx=%llu\n",
+		    (unsigned long long)phys, (unsigned long long)index);
 		return (-1);
 	}
 	spin_lock(&obj->spin);
@@ -414,10 +424,13 @@ vm_object_set_page(vm_object_t *obj, u64 index, u64 phys)
 	}
 	if (page->object != NULL && page->object != obj) {
 		spin_unlock(&obj->spin);
+		printk("[VM] set_page: page owned phys=%llx obj=%p holder=%p\n",
+		    (unsigned long long)phys, (void *)obj, (void *)page->object);
 		return (-1);
 	}
 	if (vm_radix_insert_locked(obj, index, page) != 0) {
 		spin_unlock(&obj->spin);
+
 		return (-1);
 	}
 	page->object = obj;

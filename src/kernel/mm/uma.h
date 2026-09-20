@@ -60,7 +60,7 @@ $const UMA_DESTROY_BUSY as destruction refused because the zone is not quiescent
 $space %export uma_init, uma_zcreate, uma_zdestroy
 $space %export uma_zalloc, uma_zfree, uma_zfind
 $space %export uma_zone_item_size, uma_zone_stats
-$space %export uma_reclaim, uma_dump
+$space %export uma_reclaim, uma_dump, uma_prealloc
 
 */
 
@@ -113,5 +113,6 @@ size_t		uma_zone_item_size(uma_zone_t zone);
 int		uma_zone_stats(uma_zone_t zone, uma_stat_t *out);
 u64		uma_reclaim(void);
 void		uma_dump(void);
+u32		uma_prealloc(uma_zone_t zone, u32 items);
 
 #endif

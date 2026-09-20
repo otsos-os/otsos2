@@ -45,6 +45,7 @@ $define %func terminal_mouse_blink_interval as function with args void
 $define %func terminal_mouse_cell_from_pixel as function with args int, int, int
 $define %func terminal_mouse_update as function with args int, int, int, int, int
 $define %func terminal_set_hw_cursor as procedure with args const state ptr
+$define %func terminal_ansi_index as function with args int
 $define %func terminal_ansi_sgr as procedure with args state ptr, int ptr, int
 $define %func terminal_erase_line as procedure with args state ptr, int, int
 $define %func terminal_erase_display as procedure with args state ptr, int, int
@@ -100,7 +101,8 @@ $define %func terminal_get_default_tty as function with args void
 $space %internal terminal_state_is_valid, terminal_con, terminal_draw_cell
 $space %internal terminal_redraw_cell, terminal_mouse_blink_interval
 $space %internal terminal_mouse_cell_from_pixel
-$space %internal terminal_set_hw_cursor, terminal_ansi_sgr
+$space %internal terminal_set_hw_cursor, terminal_ansi_index
+$space %internal terminal_ansi_sgr
 $space %internal terminal_erase_line, terminal_erase_display
 $space %internal terminal_ansi_param, terminal_ansi_execute
 $space %internal terminal_redraw, terminal_scroll, terminal_putc_internal
@@ -173,6 +175,7 @@ typedef struct {
 	u8		color;
 	u32		fg_rgb;
 	int		ansi_state;
+	int		ansi_bold;
 	int		ansi_params[8];
 	int		ansi_param_count;
 	int		ansi_cur_param;
@@ -384,23 +387,48 @@ terminal_set_hw_cursor(const terminal_state_t *tty)
 	(void)tty;
 }
 
+
+static int
+terminal_ansi_index(int base)
+{
+	switch (base) {
+	case 0:
+		return (0x00);
+	case 1:
+		return (0x04);
+	case 2:
+		return (0x02);
+	case 3:
+		return (0x0E);
+	case 4:
+		return (0x01);
+	case 5:
+		return (0x05);
+	case 6:
+		return (0x03);
+	case 7:
+		return (0x0F);
+	}
+	return (-1);
+}
+
 static void
 terminal_ansi_sgr(terminal_state_t *tty, int params[], int count)
 {
 	terminal_state_t *self;
 	int		  i;
 	int		  code;
+	int		  idx;
 	int		  r;
 	int		  g;
 	int		  b;
-	u8		  color_idx;
 
 	self = tty;
 	i = 0;
 	while (i < count) {
 		code = params[i];
 
-		if (code == 38 && i + 3 < count && params[i + 1] == 2) {
+		if (code == 38 && i + 4 < count && params[i + 1] == 2) {
 			r = params[i + 2];
 			g = params[i + 3];
 			b = params[i + 4];
@@ -409,73 +437,76 @@ terminal_ansi_sgr(terminal_state_t *tty, int params[], int count)
 			continue;
 		}
 
-		if (code == 39) {
+		if (code == 0) {
 			self->fg_rgb = 0xFFFFFFFF;
 			self->color = terminal_default_color;
+			self->ansi_bold = 0;
 			i++;
 			continue;
 		}
 
-		color_idx = terminal_default_color;
-		switch (code) {
-		case 0:
-			color_idx = terminal_default_color;
-			break;
-		case 30:
-			color_idx = 0x00;
-			break;
-		case 31:
-			color_idx = 0x04;
-			break;
-		case 32:
-			color_idx = 0x02;
-			break;
-		case 33:
-			color_idx = 0x0E;
-			break;
-		case 34:
-			color_idx = 0x01;
-			break;
-		case 35:
-			color_idx = 0x05;
-			break;
-		case 36:
-			color_idx = 0x03;
-			break;
-		case 37:
-			color_idx = 0x0F;
-			break;
-		case 90:
-			color_idx = 0x08;
-			break;
-		case 91:
-			color_idx = 0x0C;
-			break;
-		case 92:
-			color_idx = 0x0A;
-			break;
-		case 93:
-			color_idx = 0x0E;
-			break;
-		case 94:
-			color_idx = 0x09;
-			break;
-		case 95:
-			color_idx = 0x0D;
-			break;
-		case 96:
-			color_idx = 0x0B;
-			break;
-		case 97:
-			color_idx = 0x0F;
-			break;
-		default:
+		if (code == 1) {
+			self->ansi_bold = 1;
 			i++;
 			continue;
 		}
-		self->fg_rgb = 0xFFFFFFFF;
-		self->color = color_idx;
+
+		if (code == 22) {
+			self->ansi_bold = 0;
+			i++;
+			continue;
+		}
+
+		if (code == 39) {
+			self->fg_rgb = 0xFFFFFFFF;
+			self->color = (u8)((self->color & 0xF0) |
+			    (terminal_default_color & 0x0F));
+			i++;
+			continue;
+		}
+
+		if (code == 49) {
+			self->color = (u8)((self->color & 0x0F) |
+			    (terminal_default_color & 0xF0));
+			i++;
+			continue;
+		}
+
+		idx = -1;
+		if (code >= 30 && code <= 37) {
+			idx = terminal_ansi_index(code - 30);
+		} else if (code >= 90 && code <= 97) {
+			idx = terminal_ansi_index(code - 90);
+			if (idx >= 0) {
+				idx |= 0x08;
+			}
+		}
+		if (idx >= 0) {
+
+			self->fg_rgb = 0xFFFFFFFF;
+			self->color = (u8)((self->color & 0xF0) | (u8)idx);
+			i++;
+			continue;
+		}
+
+		idx = -1;
+		if (code >= 40 && code <= 47) {
+			idx = terminal_ansi_index(code - 40);
+		} else if (code >= 100 && code <= 107) {
+			idx = terminal_ansi_index(code - 100);
+			if (idx >= 0) {
+				idx |= 0x08;
+			}
+		}
+		if (idx >= 0) {
+			self->color = (u8)((self->color & 0x0F) |
+			    (u8)((idx & 0x0F) << 4));
+		}
 		i++;
+	}
+
+	if (self->ansi_bold) {
+		self->color |= 0x08;
 	}
 }
 
@@ -767,6 +798,10 @@ terminal_putc_internal(terminal_state_t *tty, char c, int active)
 		}
 		self->ansi_state = 0;
 	} else if (self->ansi_state == 2) {
+		if (c == '?' && self->ansi_param_count == 0 &&
+		    self->ansi_cur_param == 0) {
+			return;
+		}
 		if (c >= '0' && c <= '9') {
 			self->ansi_cur_param = self->ansi_cur_param * 10 + (c - '0');
 			return;
@@ -1188,6 +1223,7 @@ terminal_init(void)
 		term->mouse_next_tick = 0;
 		term->color = terminal_default_color;
 		term->ansi_state = 0;
+		term->ansi_bold = 0;
 		term->fg_rgb = 0xFFFFFFFF;
 		term->ansi_params[0] = 0;
 		term->ansi_params[1] = 0;
@@ -1422,6 +1458,7 @@ terminal_clear_active(void)
 	term->cursor_x = 0;
 	term->cursor_y = 0;
 	term->ansi_state = 0;
+	term->ansi_bold = 0;
 	term->fg_rgb = 0xFFFFFFFF;
 	term->ansi_params[0] = 0;
 	term->ansi_params[1] = 0;
@@ -1860,6 +1897,7 @@ terminal_reset_one(int index)
 	term->color = terminal_default_color;
 	term->fg_rgb = 0xFFFFFFFF;
 	term->ansi_state = 0;
+	term->ansi_bold = 0;
 	term->ansi_param_count = 0;
 	term->ansi_cur_param = 0;
 	for (i = 0; i < 8; i++) {
