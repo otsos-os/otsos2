@@ -93,6 +93,11 @@ bios_detect(const fw_handoff_t *h, fw_desc_t *out)
 			(void)fw_smbios_parse(anchor, 64, &out->smbios);
 		}
 	}
+
+	if (fw_smbios_bios_vendor(&out->smbios, out->vendor,
+	    sizeof(out->vendor)) != 0) {
+		strncpy(out->vendor, BIOS_VENDOR, sizeof(out->vendor) - 1);
+	}
 	return (0);
 }
 

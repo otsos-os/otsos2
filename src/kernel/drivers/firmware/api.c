@@ -34,6 +34,8 @@ $define %type newbus_interface_t as named driver I/O interface table
 $define %func fw_abi_origin as function with args fw_origin_t
 $define %func fw_abi_caps as function with args u32
 $define %func fw_copyout as function with args void *, const void *, u32
+$define %func fw_format_info as function with args const fw_desc_t *, char *, size_t
+$define %func fw_read as function with args device_t, void *, u64, u64
 $define %func fw_ioctl_info as function with args const fw_desc_t *, void *
 $define %func fw_ioctl_smbios as function with args const fw_desc_t *, void *
 $define %func fw_ioctl as function with args device_t, u64, void *
@@ -44,6 +46,7 @@ $define %func fw_entity_attach as function with args device_t
 /* !SPACE!
 
 $space %internal fw_abi_origin, fw_abi_caps, fw_copyout
+$space %internal fw_format_info, fw_read
 $space %internal fw_ioctl_info, fw_ioctl_smbios, fw_ioctl
 $space %export fw_entity_attach
 
@@ -139,6 +142,74 @@ fw_ioctl_smbios(const fw_desc_t *fw, void *arg)
 }
 
 
+static size_t
+fw_format_info(const fw_desc_t *fw, char *buf, size_t max_size)
+{
+	int	len, total;
+
+	total = 0;
+	len = snprintf(buf + total, max_size - total,
+	    "origin: %s\nvendor: %s\n",
+	    fw_origin_name(fw->origin),
+	    fw->vendor[0] != '\0' ? fw->vendor : "unknown");
+	if (len > 0) {
+		total += len;
+	}
+	if (fw->origin == FW_ORIGIN_UEFI) {
+		len = snprintf(buf + total, max_size - total,
+		    "revision: %u.%u\nsystab: 0x%llx\n",
+		    (unsigned int)(fw->efi.revision >> 16),
+		    (unsigned int)(fw->efi.revision & 0xffff),
+		    (unsigned long long)fw->efi.system_table);
+		if (len > 0) {
+			total += len;
+		}
+	}
+	if (fw->caps & FW_CAP_SMBIOS) {
+		len = snprintf(buf + total, max_size - total,
+		    "smbios: %u.%u (entry: 0x%llx, table: 0x%llx)\n",
+		    (unsigned int)fw->smbios.major,
+		    (unsigned int)fw->smbios.minor,
+		    (unsigned long long)fw->smbios.entry,
+		    (unsigned long long)fw->smbios.table);
+		if (len > 0) {
+			total += len;
+		}
+	}
+	if (fw->caps & FW_CAP_ACPI) {
+		len = snprintf(buf + total, max_size - total,
+		    "acpi_rsdp: 0x%llx\n",
+		    (unsigned long long)fw->acpi_rsdp);
+		if (len > 0) {
+			total += len;
+		}
+	}
+	return ((size_t)total);
+}
+
+static int
+fw_read(device_t dev, void *buf, u64 count, u64 offset)
+{
+	const fw_desc_t	*fw;
+	char		text[512];
+	size_t		len;
+
+	(void)dev;
+	fw = fw_desc();
+	if (fw == NULL || buf == NULL || count == 0) {
+		return (-1);
+	}
+	len = fw_format_info(fw, text, sizeof(text));
+	if (offset >= len) {
+		return (0);
+	}
+	if (count > len - offset) {
+		count = len - offset;
+	}
+	memcpy(buf, text + offset, (unsigned long)count);
+	return ((int)count);
+}
+
 static int
 fw_ioctl(device_t dev, u64 cmd, void *arg)
 {
@@ -162,7 +233,7 @@ fw_ioctl(device_t dev, u64 cmd, void *arg)
 
 static const newbus_interface_t fw_interface = {
 	.name = FWIOC_IFACE_NAME,
-	.read = NULL,
+	.read = fw_read,
 	.write = NULL,
 	.ioctl = fw_ioctl,
 	.stat = NULL,

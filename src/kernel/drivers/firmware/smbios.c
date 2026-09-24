@@ -32,13 +32,15 @@ $define %func sm_checksum_ok as function with args const u8 *, u32
 $define %func sm_parse_v3 as function with args const u8 *, u32, fw_smbios_t *
 $define %func sm_parse_v2 as function with args const u8 *, u32, fw_smbios_t *
 $define %func fw_smbios_parse as function with args const void *, u32, fw_smbios_t *
+$define %func fw_smbios_string as function with args const u8 *, const u8 *, u8
+$define %func fw_smbios_bios_vendor as function with args const fw_smbios_t *, char *, u32
 
 */
 
 /* !SPACE!
 
-$space %internal sm_checksum_ok, sm_parse_v3, sm_parse_v2
-$space %export fw_smbios_parse
+$space %internal sm_checksum_ok, sm_parse_v3, sm_parse_v2, fw_smbios_string
+$space %export fw_smbios_parse, fw_smbios_bios_vendor
 
 */
 
@@ -62,6 +64,13 @@ $space %export fw_smbios_parse
 
 #define	SM_LEN_MIN		24
 #define	SM_LEN_MAX		64
+#define	SM_ADDR_LIMIT		0x100000000ULL
+
+#define	SM_TYPE_BIOS_INFO	0
+#define	SM_TYPE_END		127
+#define	SM_HDR_LEN_MIN		4
+#define	SM_T0_HDR_MIN		5
+#define	SM_T0_VENDOR_OFF	4
 
 
 static int
@@ -143,4 +152,77 @@ fw_smbios_parse(const void *anchor, u32 size, fw_smbios_t *out)
 	}
 	*out = tmp;
 	return (0);
+}
+
+static const char *
+fw_smbios_string(const u8 *str_section, const u8 *table_end, u8 str_num)
+{
+	const u8	*curr;
+	u8		idx;
+
+	if (str_section >= table_end || str_num == 0) {
+		return (NULL);
+	}
+	curr = str_section;
+	idx = 1;
+	while (curr < table_end && *curr != '\0') {
+		if (idx == str_num) {
+			return ((const char *)curr);
+		}
+		while (curr < table_end && *curr != '\0') {
+			curr++;
+		}
+		if (curr < table_end && *curr == '\0') {
+			curr++;
+			idx++;
+		}
+	}
+	return (NULL);
+}
+
+int
+fw_smbios_bios_vendor(const fw_smbios_t *sm, char *out_vendor, u32 max_len)
+{
+	const u8	*curr;
+	const u8	*end;
+	const char	*vstr;
+	u8		type, len, v_idx;
+
+	if (sm == NULL || sm->table == 0 || sm->table >= SM_ADDR_LIMIT ||
+	    sm->table_length == 0 || out_vendor == NULL || max_len == 0) {
+		return (-1);
+	}
+	curr = (const u8 *)(unsigned long)sm->table;
+	end = curr + sm->table_length;
+
+	while (curr + SM_HDR_LEN_MIN <= end) {
+		type = curr[0];
+		len = curr[1];
+
+		if (type == SM_TYPE_END) {
+			break;
+		}
+		if (len < SM_HDR_LEN_MIN || curr + len > end) {
+			break;
+		}
+		if (type == SM_TYPE_BIOS_INFO) {
+			if (len >= SM_T0_HDR_MIN) {
+				v_idx = curr[SM_T0_VENDOR_OFF];
+				vstr = fw_smbios_string(curr + len, end,
+				    v_idx);
+				if (vstr != NULL && vstr[0] != '\0') {
+					strncpy(out_vendor, vstr, max_len - 1);
+					out_vendor[max_len - 1] = '\0';
+					return (0);
+				}
+			}
+		}
+
+		curr += len;
+		while (curr + 1 < end && (curr[0] != '\0' || curr[1] != '\0')) {
+			curr++;
+		}
+		curr += 2;
+	}
+	return (-1);
 }

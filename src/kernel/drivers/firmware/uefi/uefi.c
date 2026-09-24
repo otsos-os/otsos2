@@ -32,6 +32,7 @@ $define %type fw_handoff_t as raw boot-time facts handed over by the loader
 
 $define %func uefi_present as function with args const fw_handoff_t *
 $define %func uefi_revision as function with args u64
+$define %func uefi_systab_vendor as function with args u64, char *, u32
 $define %func uefi_detect as function with args const fw_handoff_t *, fw_desc_t *
 $define %func uefi_identify as procedure with args driver_t *, device_t
 $define %func uefi_probe as function with args device_t
@@ -41,7 +42,7 @@ $define %func uefi_attach as function with args device_t
 
 /* !SPACE!
 
-$space %internal uefi_present, uefi_revision, uefi_detect
+$space %internal uefi_present, uefi_revision, uefi_systab_vendor, uefi_detect
 $space %internal uefi_identify, uefi_probe, uefi_attach
 
 */
@@ -52,8 +53,9 @@ $space %internal uefi_identify, uefi_probe, uefi_attach
 
 #define	UEFI_SYSTAB_SIGNATURE	0x5453595320494249ULL
 #define	UEFI_SYSTAB_REV_OFF	8
+#define	UEFI_SYSTAB_VENDOR_OFF	16
 #define	UEFI_IDENTITY_LIMIT	0x100000000ULL
-#define	UEFI_VENDOR		"UEFI"
+#define	UEFI_VENDOR_DEFAULT	"UEFI"
 
 static int
 uefi_present(const fw_handoff_t *h)
@@ -77,6 +79,32 @@ uefi_revision(u64 systab)
 }
 
 static int
+uefi_systab_vendor(u64 systab, char *out_vendor, u32 max_len)
+{
+	const u16	*wstr;
+	u64		vendor_ptr;
+	u32		i;
+
+	if (systab == 0 || systab >= UEFI_IDENTITY_LIMIT ||
+	    out_vendor == NULL || max_len == 0) {
+		return (-1);
+	}
+	vendor_ptr = *(const u64 *)((const u8 *)systab +
+	    UEFI_SYSTAB_VENDOR_OFF);
+	if (vendor_ptr == 0 || vendor_ptr >= UEFI_IDENTITY_LIMIT) {
+		return (-1);
+	}
+	wstr = (const u16 *)(unsigned long)vendor_ptr;
+	i = 0;
+	while (i + 1 < max_len && wstr[i] != 0) {
+		out_vendor[i] = (char)(wstr[i] & 0x7f);
+		i++;
+	}
+	out_vendor[i] = '\0';
+	return (i > 0 ? 0 : -1);
+}
+
+static int
 uefi_detect(const fw_handoff_t *h, fw_desc_t *out)
 {
 	if (!uefi_present(h) || out == NULL) {
@@ -86,8 +114,6 @@ uefi_detect(const fw_handoff_t *h, fw_desc_t *out)
 	out->origin = FW_ORIGIN_UEFI;
 	out->efi.system_table = h->efi_system_table;
 	out->efi.revision = uefi_revision(h->efi_system_table);
-	strncpy(out->vendor, UEFI_VENDOR, sizeof(out->vendor) - 1);
-
 
 	if (h->acpi_rsdp != 0 &&
 	    fw_rsdp_checksum_ok((const void *)h->acpi_rsdp)) {
@@ -96,6 +122,15 @@ uefi_detect(const fw_handoff_t *h, fw_desc_t *out)
 	if (h->smbios_entry != NULL) {
 		(void)fw_smbios_parse(h->smbios_entry, h->smbios_size,
 		    &out->smbios);
+	}
+
+	if (fw_smbios_bios_vendor(&out->smbios, out->vendor,
+	    sizeof(out->vendor)) != 0) {
+		if (uefi_systab_vendor(h->efi_system_table, out->vendor,
+		    sizeof(out->vendor)) != 0) {
+			strncpy(out->vendor, UEFI_VENDOR_DEFAULT,
+			    sizeof(out->vendor) - 1);
+		}
 	}
 	return (0);
 }

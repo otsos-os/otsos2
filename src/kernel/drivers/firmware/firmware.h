@@ -35,6 +35,7 @@ $define %type fw_provider_t as one firmware family backend
 
 $define %func fw_handoff as function with args void
 $define %func fw_smbios_parse as function with args const void *, u32, fw_smbios_t *
+$define %func fw_smbios_bios_vendor as function with args const fw_smbios_t *, char *, u32
 $define %func fw_bind as function with args device_t, provider, desc
 $define %func fw_desc as function with args void
 $define %func fw_origin_name as function with args fw_origin_t
@@ -45,7 +46,7 @@ $define %func fw_rsdp_checksum_ok as function with args const void *
 
 /* !SPACE!
 
-$space %export fw_handoff, fw_smbios_parse, fw_rsdp_checksum_ok
+$space %export fw_handoff, fw_smbios_parse, fw_smbios_bios_vendor, fw_rsdp_checksum_ok
 $space %export fw_bind, fw_desc, fw_origin_name, fw_entity_attach
 
 */
@@ -111,6 +112,8 @@ typedef struct fw_provider {
 const fw_handoff_t	*fw_handoff(void);
 int			fw_smbios_parse(const void *anchor, u32 size,
 			    fw_smbios_t *out);
+int			fw_smbios_bios_vendor(const fw_smbios_t *sm,
+			    char *out_vendor, u32 max_len);
 int			fw_rsdp_checksum_ok(const void *rsdp);
 int			fw_bind(device_t dev, const fw_provider_t *prov,
 			    const fw_desc_t *desc);
