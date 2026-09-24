@@ -519,6 +519,9 @@ User need to test, dont run test manually, ask user.
   native open path; POSIX mode is `0600`, and POSIX `mmap()` maps the device via
   a device-backed VM object.
 - **DMA goes through `mm/dma` and nowhere else.**
+- Witness lock stacks are maintained even while runtime Witness diagnostics are
+  disabled, because `SYSTEM.Sync.Witness` may be enabled after early boot locks
+  have already been acquired.
 
 ## Dependencies Between Modules
 

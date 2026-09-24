@@ -111,17 +111,17 @@ witness_lock(const char *name, u32 level)
 	pcpu_t	*pc;
 	u32	top;
 
-	if (!witness_on) {
-		return;
-	}
 	pc = pcpu_current();
 	if (pc->witness_depth >= PCPU_WITNESS_DEPTH) {
+		if (!witness_on) {
+			return;
+		}
 		witness_violations++;
 		witness_dump();
 		panic("[WITNESS] lock nesting past %d while taking %s\n",
 		    PCPU_WITNESS_DEPTH, name ? name : "?");
 	}
-	if (pc->witness_depth > 0) {
+	if (witness_on && pc->witness_depth > 0) {
 		top = pc->witness_stack[pc->witness_depth - 1];
 		if (level <= top) {
 			witness_violations++;
@@ -143,16 +143,16 @@ witness_unlock(const char *name, u32 level)
 {
 	pcpu_t	*pc;
 
-	if (!witness_on) {
-		return;
-	}
 	pc = pcpu_current();
 	if (pc->witness_depth == 0) {
+		if (!witness_on) {
+			return;
+		}
 		witness_violations++;
 		panic("[WITNESS] release of %s with empty stack on cpu %u\n",
 		    name ? name : "?", pc->cpu_index);
 	}
-	if (pc->witness_stack[pc->witness_depth - 1] != level) {
+	if (witness_on && pc->witness_stack[pc->witness_depth - 1] != level) {
 		witness_violations++;
 		witness_dump();
 		panic("[WITNESS] out of order release: %s (level %u), "
@@ -176,19 +176,19 @@ witness_sleep_lock(const char *name, u32 level)
 {
 	thread_t	*td;
 
-	if (!witness_on) {
-		return;
-	}
 	td = thread_current();
 	if (td == NULL) {
 		return;
 	}
 	if (td->lock_depth >= THREAD_WITNESS_DEPTH) {
+		if (!witness_on) {
+			return;
+		}
 		witness_violations++;
 		panic("[WITNESS] sleepable lock nesting past %d taking %s\n",
 		    THREAD_WITNESS_DEPTH, name ? name : "?");
 	}
-	if (td->lock_depth > 0 &&
+	if (witness_on && td->lock_depth > 0 &&
 	    level <= td->lock_level[td->lock_depth - 1]) {
 		witness_violations++;
 		panic("[WITNESS] order violation: %s (level %u) after "
@@ -207,19 +207,19 @@ witness_sleep_unlock(const char *name, u32 level)
 {
 	thread_t	*td;
 
-	if (!witness_on) {
-		return;
-	}
 	td = thread_current();
 	if (td == NULL) {
 		return;
 	}
 	if (td->lock_depth == 0) {
+		if (!witness_on) {
+			return;
+		}
 		witness_violations++;
 		panic("[WITNESS] release of %s with empty thread stack "
 		    "on tid %u\n", name ? name : "?", td->tid);
 	}
-	if (td->lock_level[td->lock_depth - 1] != level) {
+	if (witness_on && td->lock_level[td->lock_depth - 1] != level) {
 		witness_violations++;
 		panic("[WITNESS] out of order release: %s (level %u), "
 		    "top is %s (level %u) on tid %u\n", name ? name : "?",
