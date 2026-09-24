@@ -605,6 +605,9 @@ int api_proc_spawn(const struct api_proc_spawn_args *uargs) {
   child->egid = parent->egid;
   child->suid = parent->suid;
   child->sgid = parent->sgid;
+  child->sid = parent->sid;
+  child->pgid = parent->pgid;
+  child->controlling_tty = parent->controlling_tty;
   api_copy_handles(child, parent);
   posix_init_process(child);
   posix_copy_fds(child, parent);

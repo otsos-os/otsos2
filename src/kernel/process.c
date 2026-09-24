@@ -233,9 +233,10 @@ process_create_kernel(const char *name, void (*entry)(void))
 	proc->preferred_cpu = -1;
 	proc->last_cpu = -1;
   proc->personality = PERSONALITY_OTSOS;
-  proc->sid = proc->pid;
-  proc->pgid = proc->pid;
-  proc->is_session_leader = 1;
+	proc->sid = proc->pid;
+	proc->pgid = proc->pid;
+	proc->controlling_tty = -1;
+	proc->is_session_leader = 1;
   proc->uid = 0;
   proc->gid = 0;
   proc->euid = 0;

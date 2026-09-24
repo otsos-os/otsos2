@@ -25,6 +25,7 @@
  */
 
 #include <kernel/console/console.h>
+#include <kernel/console/terminal.h>
 #include <kernel/gdt.h>
 #include <mm/vm/pmap.h>
 #include <mm/vm/vm_map.h>
@@ -193,9 +194,13 @@ process_t *userspace_load_elf(const char *name, void *elf_data, u64 elf_size) {
   new_proc->gid = 0;
   new_proc->euid = 0;
   new_proc->egid = 0;
-  new_proc->suid = 0;
-  new_proc->sgid = 0;
-  if (li.data_end != 0) {
+   new_proc->suid = 0;
+   new_proc->sgid = 0;
+   new_proc->sid = new_proc->pid;
+   new_proc->pgid = new_proc->pid;
+   new_proc->controlling_tty = terminal_get_default_tty();
+   new_proc->is_session_leader = 1;
+   if (li.data_end != 0) {
     new_proc->brk_min = li.data_end;
   } else if (li.load_addr_max != 0) {
     new_proc->brk_min = (li.load_addr_max + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
