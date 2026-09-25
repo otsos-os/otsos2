@@ -65,12 +65,23 @@ inst_disk_row(int index, int width, int selected, void *arg)
 	}
 	cand = &ctx->cands[index];
 
-	if (cand->usable)
-		snprintf(line, sizeof(line), " %-12s %s",
-		    cand->entry.info.name, cand->label);
-	else
-		snprintf(line, sizeof(line), " %-12s %s  (%s)",
-		    cand->entry.info.name, cand->label, cand->reason);
+	if (cand->entry.info.model[0] != '\0') {
+		if (cand->usable)
+			snprintf(line, sizeof(line), " %-12s %-30s %s",
+			    cand->entry.info.name, cand->entry.info.model,
+			    cand->label);
+		else
+			snprintf(line, sizeof(line), " %-12s %-30s %s  (%s)",
+			    cand->entry.info.name, cand->entry.info.model,
+			    cand->label, cand->reason);
+	} else {
+		if (cand->usable)
+			snprintf(line, sizeof(line), " %-12s %s",
+			    cand->entry.info.name, cand->label);
+		else
+			snprintf(line, sizeof(line), " %-12s %s  (%s)",
+			    cand->entry.info.name, cand->label, cand->reason);
+	}
 
 	tui_field(line, width);
 }
@@ -143,12 +154,18 @@ inst_disk_draw(inst_ctx_t *ctx, const tui_rect_t *rect, int focused)
 	tui_field(line, rect->width);
 
 	tui_move(row + 2, rect->col);
+	snprintf(line, sizeof(line), " Model    %s",
+	    cand->entry.info.model[0] != '\0' ?
+	    cand->entry.info.model : "(unknown)");
+	tui_field(line, rect->width);
+
+	tui_move(row + 3, rect->col);
 	snprintf(line, sizeof(line), " Geometry %llu sectors of %u bytes",
 	    (unsigned long long)cand->entry.info.total_sectors,
 	    (unsigned)cand->entry.info.sector_size);
 	tui_field(line, rect->width);
 
-	tui_move(row + 3, rect->col);
+	tui_move(row + 4, rect->col);
 	if (cand->usable) {
 		snprintf(line, sizeof(line), " %s",
 		    (ctx->selected == inst_disk_list.sel) ?

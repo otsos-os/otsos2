@@ -36,6 +36,7 @@ $define %type dioc_bootinst_t as BIOS boot block installation request
 
 $const DIOC_IFACE_NAME as the newbus interface name every block device publishes
 $const DIOC_NAME_MAX as ceiling on a block device name including terminator
+$const DIOC_MODEL_MAX as ceiling on a block device model string including terminator
 
 */
 
@@ -57,6 +58,7 @@ typedef __UINT64_TYPE__	dioc_u64;
 
 #define	DIOC_IFACE_NAME		"block"
 #define	DIOC_NAME_MAX		32
+#define	DIOC_MODEL_MAX		40
 #define	DIOC_GETINFO		0x4401
 #define	DIOC_FLUSH		0x4402
 #define	DIOC_RESCAN		0x4403
@@ -94,6 +96,7 @@ typedef __UINT64_TYPE__	dioc_u64;
 typedef struct dioc_info {
 	char		name[DIOC_NAME_MAX];
 	char		parent[DIOC_NAME_MAX];
+	char		model[DIOC_MODEL_MAX];
 	dioc_u64	total_sectors;
 	dioc_u64	base_lba;
 	dioc_u32	sector_size;

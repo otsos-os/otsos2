@@ -588,6 +588,7 @@ nvme_ns_setup(nvme_ctrl_t *ctrl, nvme_ns_t *ns, u32 nsid)
 
 	snprintf(ns->disk.name, sizeof(ns->disk.name), "nvme%un%u",
 	    ctrl->unit, nsid);
+	strncpy(ns->disk.model, ctrl->model, sizeof(ns->disk.model) - 1);
 	ns->disk.ops = &nvme_disk_ops;
 	ns->disk.private_data = ns;
 	ns->disk.total_sectors = ns->nsze;

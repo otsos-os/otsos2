@@ -91,6 +91,7 @@ ldisk_copy_info(ldisk_info_t *out, const dioc_info_t *in)
 	memset(out, 0, sizeof(*out));
 	memcpy(out->name, in->name, LDISK_NAME_MAX - 1);
 	memcpy(out->parent, in->parent, LDISK_NAME_MAX - 1);
+	memcpy(out->model, in->model, LDISK_MODEL_MAX - 1);
 	out->total_sectors = in->total_sectors;
 	out->base_lba = in->base_lba;
 	out->sector_size = in->sector_size;

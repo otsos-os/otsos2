@@ -198,6 +198,7 @@ blockdev_fill_info(const disk_t *disk, dioc_info_t *info)
 
 	memset(info, 0, sizeof(*info));
 	strncpy(info->name, disk->name, DISK_NAME_MAX - 1);
+	strncpy(info->model, disk->model, DIOC_MODEL_MAX - 1);
 	if (disk->parent != NULL) {
 		strncpy(info->parent, disk->parent->name, DISK_NAME_MAX - 1);
 	}

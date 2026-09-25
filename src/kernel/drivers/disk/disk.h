@@ -45,6 +45,7 @@ $define %func disk_capacity_bytes as function with args const disk_t *
 $define %func disk_dump as procedure with args void
 
 $const DISK_NAME_MAX as ceiling on a block device name including terminator
+$const DISK_MODEL_MAX as ceiling on a block device model string including terminator
 $const DISK_MAX as ceiling on registered block devices
 $const DISK_F_READONLY as flag marking a device that rejects writes
 $const DISK_F_NO_FLUSH as flag marking a device with no volatile write cache
@@ -65,6 +66,7 @@ $space %export disk_capacity_bytes, disk_dump
 
 #include <mlibc/mlibc.h>
 #define	DISK_NAME_MAX	32
+#define	DISK_MODEL_MAX	40
 #define	DISK_MAX	32
 #define	DISK_F_READONLY	0x0001
 #define	DISK_F_NO_FLUSH	0x0002
@@ -89,6 +91,7 @@ typedef struct disk_ops {
 
 typedef struct disk {
 	char			name[DISK_NAME_MAX];
+	char			model[DISK_MODEL_MAX];
 	const disk_ops_t	*ops;
 	void			*private_data;
 	struct newbus_device	*dev;

@@ -46,6 +46,7 @@ $define %func pata_error_status as function with args void
 $define %func pata_read_sector as function with args u32, u8 *
 $define %func pata_write_sector as function with args u32, u8 *
 $define %func pata_cache_flush as function with args void
+$define %func pata_model_from_identify as procedure with args char *, size_t, const u16 *
 $define %func pata_submit as function with args disk_t *, bio_t *
 
 $const PATA_LBA28_MAX as highest sector addressable through the LBA28 registers
@@ -62,7 +63,7 @@ $space %internal debug_chainfs_overlap, debug_chainfs_magic_change
 $space %internal pata_error_status
 $space %internal pata_read_sector, pata_write_sector
 $space %internal pata_cache_flush, pata_submit
-$space %internal pata_identify
+$space %internal pata_model_from_identify, pata_identify
 */
 #include <kernel/drivers/disk/bio.h>
 #include <kernel/drivers/disk/disk.h>
@@ -362,6 +363,33 @@ static const disk_ops_t pata_ops = {
 };
 
 static void
+pata_model_from_identify(char *out, size_t size, const u16 *words)
+{
+	u32	i, j, end;
+	char	lo, hi;
+
+	if (out == NULL || words == NULL || size == 0) {
+		return;
+	}
+	end = 0;
+	for (i = 0, j = 27; i + 1 < size && j <= 46; i += 2, j++) {
+		lo = (char)(words[j] & 0xFF);
+		hi = (char)((words[j] >> 8) & 0xFF);
+		out[i] = hi;
+		if (i + 1 < size - 1) {
+			out[i + 1] = lo;
+		}
+		if (hi != ' ' && hi != '\0') {
+			end = i + 1;
+		}
+		if (lo != ' ' && lo != '\0') {
+			end = i + 2;
+		}
+	}
+	out[end] = '\0';
+}
+
+static void
 pata_identify(void)
 {
 	u64	capacity;
@@ -429,6 +457,8 @@ pata_identify(void)
 
 	memset(&pata_disk, 0, sizeof(pata_disk));
 	strcpy(pata_disk.name, "pata0");
+	pata_model_from_identify(pata_disk.model, sizeof(pata_disk.model),
+	    pata_dummy_area.buffer);
 	pata_disk.type = DISK_TYPE_PATA;
 	pata_disk.sector_size = PATA_SECTOR_SIZE;
 	pata_disk.total_sectors = capacity;

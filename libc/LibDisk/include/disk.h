@@ -85,6 +85,7 @@ $space %export ldisk_chunk_max, ldisk_boot_sector, ldisk_stage2_max
 
 
 #define LDISK_NAME_MAX		DIOC_NAME_MAX
+#define LDISK_MODEL_MAX		DIOC_MODEL_MAX
 #define LDISK_PART_NAME_MAX	DIOC_PART_NAME_MAX
 #define LDISK_FS_PATH_MAX	DIOC_PATH_MAX
 #define LDISK_PATH_MAX		256
@@ -108,6 +109,7 @@ typedef enum ldisk_fs {
 typedef struct ldisk_info {
 	char		name[LDISK_NAME_MAX];
 	char		parent[LDISK_NAME_MAX];
+	char		model[LDISK_MODEL_MAX];
 	uint64_t	total_sectors;
 	uint64_t	base_lba;
 	uint32_t	sector_size;

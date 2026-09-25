@@ -194,6 +194,7 @@ gpt_slice_register(disk_t *parent, const gpt_entry_t *entry, u32 index)
 	slice->parent = parent;
 	slice->entry_index = index;
 	strncpy(slice->disk.name, unitname, DISK_NAME_MAX - 1);
+	strncpy(slice->disk.model, parent->model, DISK_MODEL_MAX - 1);
 	slice->disk.type = DISK_TYPE_SLICE;
 	slice->disk.sector_size = parent->sector_size;
 	slice->disk.total_sectors = sectors;
