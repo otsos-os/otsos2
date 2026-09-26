@@ -91,8 +91,6 @@ usb_log_printf(const char *fmt, ...)
 		memcpy(usb_log_buf + usb_log_len, line, (u32)n);
 		usb_log_len += (u32)n;
 	}
-	(void)vfs_write_file(USB_LOG_PATH, (const u8 *)usb_log_buf,
-	    usb_log_len);
 	return (0);
 }
 
