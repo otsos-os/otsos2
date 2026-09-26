@@ -92,6 +92,7 @@ static int		g_poll_requested;
 static int		g_stack_enabled = 1;
 static u32		g_poll_hz = NET_POLL_HZ_DEFAULT;
 static u8		g_default_ttl = IPV4_TTL_DEFAULT;
+static volatile int	g_cm_apply_pending;
 
 #define	NET_POLL_HZ_MIN	1
 #define	NET_POLL_HZ_MAX	1000
@@ -267,8 +268,9 @@ net_iface_register(net_iface_t *iface, netdev_t *ndev)
 	g_ifaces[g_iface_count] = iface;
 	iface->index = g_iface_count;
 	g_iface_count++;
+
 	if (cm_is_initialized()) {
-		(void)net_cm_update(0);
+		__atomic_store_n(&g_cm_apply_pending, 1, __ATOMIC_RELEASE);
 	}
 
 	drivers_log("[NET] iface %s on %s "
@@ -427,6 +429,12 @@ net_tick(void)
 	if (!g_initialized || !g_stack_enabled) {
 		return;
 	}
+
+	if (__atomic_exchange_n(&g_cm_apply_pending, 0,
+	    __ATOMIC_ACQ_REL) != 0) {
+		(void)net_cm_update(0);
+	}
+
 	if (!timer_is_initialized()) {
 		net_poll_all();
 		return;

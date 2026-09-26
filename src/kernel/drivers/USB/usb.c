@@ -45,7 +45,10 @@ $define %func usb_log_printf as function with args const char *, ...
 $define %func usb_log_flush as procedure with args void
 $define %func usb_logflush_identify as procedure with args driver_t *, device_t
 $define %func usb_logflush_attach as function with args device_t
-
+$define %func usb_defer_reprobe as procedure with args void
+$define %func usb_reprobe_work as procedure with args void *
+$define %func usb_reprobe_init as function with args device_t
+$define %func usb_log_flush_now as procedure with args void
 
 */
 
@@ -59,6 +62,8 @@ $space %export usb_set_interface
 $space %export usb_interface_get
 $space %export usb_log_printf, usb_log_flush
 $space %internal usb_logflush_identify, usb_logflush_attach
+$space %internal usb_defer_reprobe, usb_reprobe_work, usb_reprobe_init
+$space %internal usb_log_flush_now
 */
 
 #include <kernel/drivers/USB/usb.h>
@@ -74,6 +79,14 @@ $space %internal usb_logflush_identify, usb_logflush_attach
 
 static char		usb_log_buf[USB_LOG_SIZE];
 static u32		usb_log_len;
+static volatile int	usb_reprobe_pending;
+static volatile int	usb_log_dirty;
+static void		*usb_reprobe_cookie;
+
+static void	usb_defer_reprobe(void);
+static void	usb_reprobe_work(void *arg);
+static int	usb_reprobe_init(device_t dev);
+static void	usb_log_flush_now(void);
 
 int
 usb_log_printf(const char *fmt, ...)
@@ -96,6 +109,16 @@ usb_log_printf(const char *fmt, ...)
 
 void
 usb_log_flush(void)
+{
+	if (usb_log_len == 0) {
+		return;
+	}
+
+	__atomic_store_n(&usb_log_dirty, 1, __ATOMIC_RELEASE);
+}
+
+static void
+usb_log_flush_now(void)
 {
 	if (usb_log_len == 0) {
 		return;
@@ -464,7 +487,7 @@ usb_enumerate_port(usb_controller_t *controller, u8 port, u8 speed)
 	}
 	controller->ports[port - 1] = dev;
 	kmem_free(config_data);
-	newbus_reprobe();
+	usb_defer_reprobe();
 	return (0);
 }
 
@@ -706,6 +729,39 @@ usb_interface_get(device_t dev)
 }
 
 static void
+usb_defer_reprobe(void)
+{
+	__atomic_store_n(&usb_reprobe_pending, 1, __ATOMIC_RELEASE);
+}
+
+static void
+usb_reprobe_work(void *arg)
+{
+	(void)arg;
+	if (__atomic_exchange_n(&usb_log_dirty, 0,
+	    __ATOMIC_ACQ_REL) != 0) {
+		usb_log_flush_now();
+	}
+	if (__atomic_exchange_n(&usb_reprobe_pending, 0,
+	    __ATOMIC_ACQ_REL) != 0) {
+		newbus_reprobe();
+	}
+}
+
+static int
+usb_reprobe_init(device_t dev)
+{
+	if (usb_reprobe_cookie != NULL) {
+		return (0);
+	}
+	if (bus_setup_poll(dev, NB_POLL_TIMER, usb_reprobe_work,
+	    NULL, &usb_reprobe_cookie) != 0) {
+		return (-1);
+	}
+	return (0);
+}
+
+static void
 usb_logflush_identify(driver_t *driver, device_t parent)
 {
 	(void)driver;
@@ -717,8 +773,12 @@ usb_logflush_identify(driver_t *driver, device_t parent)
 static int
 usb_logflush_attach(device_t dev)
 {
-	(void)dev;
-	usb_log_flush();
+	usb_log_flush_now();
+	if (usb_reprobe_init(dev) != 0) {
+		drivers_log("[USB] deferred reprobe poll hook "
+		    "registration failed\n");
+		return (-1);
+	}
 	return (0);
 }
 
