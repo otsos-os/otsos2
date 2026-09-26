@@ -89,7 +89,8 @@ $space %export g_chainfs, g_chainfs_phys
 #include <mlibc/mlibc.h>
 
 #define	CHAINFS_MAGIC		0xCAFEBABE
-#define	CHAINFS_BLOCK_SIZE	512
+#define	CHAINFS_CLUSTER_SIZE	4096
+#define	CHAINFS_CLUSTER_SHIFT	12
 #define	CHAINFS_MAX_FILENAME	31
 #define	CHAINFS_EOF_MARKER	0xFFFFFFFF
 #define	CHAINFS_FREE_BLOCK	0x00000000
@@ -128,9 +129,9 @@ typedef struct {
 	chainfs_superblock_t	superblock;
 	u32			data_area_start;
 	u32			current_dir_block;
-	u8			sector_buffer[CHAINFS_BLOCK_SIZE];
+	u8			sector_buffer[CHAINFS_CLUSTER_SIZE];
 	disk_t			*disk;
-	u8			map_buffer[CHAINFS_BLOCK_SIZE];
+	u8			map_buffer[CHAINFS_CLUSTER_SIZE];
 	u32			map_cached;
 	u32			map_dirty;
 	u32			alloc_hint;
@@ -138,6 +139,10 @@ typedef struct {
 	u32			seek_entry_offset;
 	u32			seek_block_index;
 	u32			seek_block;
+	u32			sectors_per_cluster;
+	u32			entries_per_cluster;
+	u8			*file_table; 
+	u8			*file_table_dirty;
 } chainfs_t;
 
 extern chainfs_t	g_chainfs;
@@ -190,6 +195,10 @@ int	chainfs_find_in_directory(u32 dir_block, const char *name,
 int	chainfs_find_file(const char *filename,
 	    chainfs_file_entry_t *entry, u32 *entry_block,
 	    u32 *entry_offset);
+int	chainfs_split_parent(const char *path, u32 *parent_block,
+	    char *leaf_out);
+int	chainfs_read_entry_at(u32 entry_block, u32 entry_offset,
+	    chainfs_file_entry_t *out);
 int	chainfs_find_free_file_entry(u32 *entry_block,
 	    u32 *entry_offset);
 int	chainfs_find_free_blocks(u32 count, u32 *blocks);

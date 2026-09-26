@@ -22,7 +22,8 @@ const MMAP_BUF_SIZE: usize = 0x00010000;
 const MB2_MMAP_ENTRY_MAX: usize = 512;
 const LOW_MAX_ADDR: usize = 0xeffff000;
 
-const CFSR_BLOCK_SIZE: u32 = 512;
+const CFSR_CLUSTER_SIZE: u32 = 4096;
+const CFSR_SECTORS_PER_CLUSTER: u32 = 8;
 const CFSR_TYPE_FILE: u8 = 0;
 const CFS_MAX_RUN: u32 = 64;
 const CFS_KERNEL_PATH = "/system/init/kernel.bin";
@@ -112,8 +113,9 @@ const CfsrVolume = extern struct {
 	data_area_start: u32,
 	map_cached: u32,
 	max_run: u32,
-	sector: [CFSR_BLOCK_SIZE]u8,
-	map: [CFSR_BLOCK_SIZE]u8,
+	sectors_per_cluster: u32,
+	sector: [CFSR_CLUSTER_SIZE]u8,
+	map: [CFSR_CLUSTER_SIZE]u8,
 };
 
 const GptrPart = extern struct {
@@ -311,10 +313,10 @@ fn blockRead(ctx: ?*anyopaque, lba: u64, count: u32, dst: ?*anyopaque) callconv(
 		return -1;
 	}
 
-	if (c.io.media.block_size != CFSR_BLOCK_SIZE) {
+	if (c.io.media.block_size != 512) {
 		return -1;
 	}
-	const bytes: usize = @as(usize, count) * CFSR_BLOCK_SIZE;
+	const bytes: usize = @as(usize, count) * 512;
 	c.io.readBlocks(c.media_id, c.base_lba + lba, out[0..bytes]) catch {
 		return -1;
 	};
@@ -358,7 +360,7 @@ fn mountRootOnDisk(bs: *BootServices, handle: Handle) bool {
 	const io = (bs.handleProtocol(BlockIo, handle) catch return false) orelse
 		return false;
 	const media = io.media;
-	if (!media.media_present or media.block_size != CFSR_BLOCK_SIZE) {
+	if (!media.media_present or media.block_size != 512) {
 		return false;
 	}
 
@@ -401,7 +403,7 @@ fn mountInstalledRoot(bs: *BootServices, skip: ?Handle) bool {
 		const io = (bs.handleProtocol(BlockIo, handle) catch continue) orelse
 			continue;
 		const media = io.media;
-		if (!media.media_present or media.block_size != CFSR_BLOCK_SIZE) {
+		if (!media.media_present or media.block_size != 512) {
 			continue;
 		}
 

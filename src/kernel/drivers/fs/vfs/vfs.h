@@ -172,6 +172,8 @@ typedef struct vnode {
 	u32		mount_id;
 	char		name[32];
 	void		*data;
+	u32		fs_entry_block;
+	u32		fs_entry_offset;
 	int		(*read_fn)(struct vnode *, void *, u64, u64);
 	int		(*write_fn)(struct vnode *, const void *, u64, u64);
 	int		(*stat_fn)(struct vnode *, posix_stat_t *);

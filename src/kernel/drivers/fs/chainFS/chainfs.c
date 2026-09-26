@@ -50,6 +50,10 @@ $define %func chainfs_free_block_chain as procedure with args u32
 $define %func chainfs_read_file as function with args const char *, u8 *, u32, u32 *
 $define %func chainfs_read_file_range as function with args const char *, u8 *, u32, u32, u32 *
 $define %func chainfs_write_file as function with args const char *, const u8 *, u32, u32
+$define %func chainfs_write_file_range as function with args const char *, const u8 *, u32, u32
+$define %func chainfs_truncate as function with args const char *, u32
+$define %func chainfs_split_parent as function with args const char *, u32 *, char *
+$define %func chainfs_read_entry_at as function with args u32, u32, chainfs_file_entry_t *
 $define %func chainfs_link as function with args const char *, const char *
 $define %func chainfs_delete_file as function with args const char *
 $define %func chainfs_get_file_list as function with args chainfs_file_entry_t *, u32, u32 *
@@ -71,7 +75,11 @@ $define %func chainfs_live_boot as function with args void
 /* !SPACE!
 
 $space %internal cfs_sector_read, cfs_sector_write
+$space %internal cfs_sectors_read, cfs_sectors_write
+$space %internal cfs_cluster_read, cfs_cluster_write
+$space %internal cfs_name_eq, cfs_file_table_flush, cfs_map_load, cfs_map_flush
 $space %internal read_entry_by_index, split_path, chainfs_live_boot
+$space %export chainfs_split_parent, chainfs_read_entry_at
 $space %export chainfs_init, chainfs_root_disk, chainfs_format
 $space %export chainfs_find_file
 $space %export chainfs_find_free_file_entry, chainfs_read_block_map_entry
@@ -107,43 +115,25 @@ static mtx_t		chainfs_ctx_lock;
 static int		chainfs_ctx_lock_ready;
 
 #define	ENTRIES_PER_BLOCK \
-    (CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t))
+    (CHAINFS_CLUSTER_SIZE / sizeof(chainfs_file_entry_t))
 #define	CHAINFS_BOOT_MAX_FILES	4096
 #define	CFS_FORMAT_BATCH		64U
-#define	CFS_SECTORS_PER_IO	1
 #define	CFS_MAX_RUN_SECTORS	256U
 #define	CFS_LIVE_MODULE		"init"
 
-static int
-cfs_sector_read(u32 sector, u8 *buffer)
-{
-	int	error;
+/*
+ * ChainFS addresses allocation units (clusters) of CHAINFS_CLUSTER_SIZE
+ * bytes.  A cluster occupies sectors_per_cluster device sectors, where
+ * sectors_per_cluster = CHAINFS_CLUSTER_SIZE / disk->sector_size.  The
+ * on-disk layout (superblock, file table, block map, data area) is expressed
+ * in clusters, so cluster k begins at device LBA k * sectors_per_cluster.
+ *
+ * The I/O helpers below accept a CLUSTER index and translate it to a device
+ * LBA internally.  Every cluster I/O moves CHAINFS_CLUSTER_SIZE bytes.
+ */
 
-	error = bio_read(cfs->disk, (u64)sector, CFS_SECTORS_PER_IO,
-	    buffer);
-	if (error != BIO_STATUS_OK) {
-		drivers_log("[CHAINFS] read sector %u failed: %s\n", sector,
-		    bio_status_name(error));
-	}
-	return (error);
-}
-
-static int
-cfs_sector_write(u32 sector, const u8 *buffer)
-{
-	int	error;
-
-	error = bio_write(cfs->disk, (u64)sector, CFS_SECTORS_PER_IO,
-	    buffer);
-	if (error != BIO_STATUS_OK) {
-		drivers_log("[CHAINFS] write sector %u failed: %s\n", sector,
-		    bio_status_name(error));
-	}
-	return (error);
-}
-
-static int	cfs_split_parent(const char *path, u32 *parent_block,
-		    char *leaf_out);
+int	chainfs_split_parent(const char *path, u32 *parent_block,
+	    char *leaf_out);
 
 static int
 cfs_io_limit(void)
@@ -160,48 +150,158 @@ cfs_io_limit(void)
 	return ((int)limit);
 }
 
+/* Read a contiguous run of clusters starting at cluster index `cluster`. */
 static int
-cfs_sectors_read(u32 sector, u32 count, u8 *buffer)
+cfs_sectors_read(u32 cluster, u32 count, u8 *buffer)
 {
-	u32	chunk, limit;
+	u32	limit, chunk, done;
+	u64	lba;
 	int	error;
 
 	limit = (u32)cfs_io_limit();
-	while (count > 0) {
-		chunk = count > limit ? limit : count;
-		error = bio_read(cfs->disk, (u64)sector, chunk, buffer);
+	lba = (u64)cluster * cfs->sectors_per_cluster;
+	done = 0;
+	while (done < count) {
+		chunk = count - done;
+		if (chunk > limit) {
+			chunk = limit;
+		}
+		error = bio_read(cfs->disk, lba,
+		    chunk * cfs->sectors_per_cluster, buffer);
 		if (error != BIO_STATUS_OK) {
-			drivers_log("[CHAINFS] read %u+%u failed: %s\n",
-			    sector, chunk, bio_status_name(error));
+			drivers_log("[CHAINFS] read cluster %u+%u failed: %s\n",
+			    cluster + done, chunk, bio_status_name(error));
 			return (error);
 		}
-		buffer += (u64)chunk * CHAINFS_BLOCK_SIZE;
-		sector += chunk;
-		count -= chunk;
+		buffer += (u64)chunk * CHAINFS_CLUSTER_SIZE;
+		lba += (u64)chunk * cfs->sectors_per_cluster;
+		done += chunk;
 	}
 	return (BIO_STATUS_OK);
 }
 
+/* Write a contiguous run of clusters starting at cluster index `cluster`. */
 static int
-cfs_sectors_write(u32 sector, u32 count, const u8 *buffer)
+cfs_sectors_write(u32 cluster, u32 count, const u8 *buffer)
 {
-	u32	chunk, limit;
+	u32	limit, chunk, done;
+	u64	lba;
 	int	error;
 
 	limit = (u32)cfs_io_limit();
-	while (count > 0) {
-		chunk = count > limit ? limit : count;
-		error = bio_write(cfs->disk, (u64)sector, chunk, buffer);
+	lba = (u64)cluster * cfs->sectors_per_cluster;
+	done = 0;
+	while (done < count) {
+		chunk = count - done;
+		if (chunk > limit) {
+			chunk = limit;
+		}
+		error = bio_write(cfs->disk, lba,
+		    chunk * cfs->sectors_per_cluster, buffer);
 		if (error != BIO_STATUS_OK) {
-			drivers_log("[CHAINFS] write %u+%u failed: %s\n",
-			    sector, chunk, bio_status_name(error));
+			drivers_log("[CHAINFS] write cluster %u+%u failed: %s\n",
+			    cluster + done, chunk, bio_status_name(error));
 			return (error);
 		}
-		buffer += (u64)chunk * CHAINFS_BLOCK_SIZE;
-		sector += chunk;
-		count -= chunk;
+		buffer += (u64)chunk * CHAINFS_CLUSTER_SIZE;
+		lba += (u64)chunk * cfs->sectors_per_cluster;
+		done += chunk;
 	}
 	return (BIO_STATUS_OK);
+}
+
+/* Read a single cluster into buffer (buffer is CHAINFS_CLUSTER_SIZE bytes). */
+static int
+cfs_cluster_read(u32 cluster, u8 *buffer)
+{
+	return (cfs_sectors_read(cluster, 1, buffer));
+}
+
+/* Write a single cluster from buffer (buffer is CHAINFS_CLUSTER_SIZE bytes). */
+static int
+cfs_cluster_write(u32 cluster, const u8 *buffer)
+{
+	return (cfs_sectors_write(cluster, 1, buffer));
+}
+
+/*
+ * Single-cluster read/write.  These keep the historical `sector` name to
+ * minimise churn at call sites, but each operates on one CHAINFS_CLUSTER_SIZE
+ * unit addressed by cluster index.
+ *
+ * File-table clusters (index [1, 1+file_table_blocks)) are served from the
+ * in-memory cache; writes go to the cache and set the per-cluster dirty bit.
+ * All other clusters go straight to the disk.
+ */
+static int
+cfs_sector_read(u32 cluster, u8 *buffer)
+{
+	u32	ft_off;
+
+	if (cluster >= 1 &&
+	    cluster < 1 + cfs->superblock.file_table_block_count &&
+	    cfs->file_table != NULL) {
+		ft_off = (cluster - 1) * CHAINFS_CLUSTER_SIZE;
+		memcpy(buffer, cfs->file_table + ft_off,
+		    CHAINFS_CLUSTER_SIZE);
+		return (BIO_STATUS_OK);
+	}
+	return (cfs_cluster_read(cluster, buffer));
+}
+
+static int
+cfs_sector_write(u32 cluster, const u8 *buffer)
+{
+	u32	ft_off;
+
+	if (cluster >= 1 &&
+	    cluster < 1 + cfs->superblock.file_table_block_count &&
+	    cfs->file_table != NULL) {
+		ft_off = (cluster - 1) * CHAINFS_CLUSTER_SIZE;
+		memcpy(cfs->file_table + ft_off, buffer,
+		    CHAINFS_CLUSTER_SIZE);
+		cfs->file_table_dirty[cluster - 1] = 1;
+		return (BIO_STATUS_OK);
+	}
+	return (cfs_cluster_write(cluster, buffer));
+}
+
+/* Write back any dirty file-table clusters to the backing disk. */
+static int
+cfs_file_table_flush(void)
+{
+	u32	cluster;
+	u32	count;
+	int	error;
+
+	if (cfs->file_table == NULL || cfs->file_table_dirty == NULL) {
+		return (0);
+	}
+	count = cfs->superblock.file_table_block_count;
+	for (cluster = 0; cluster < count; cluster++) {
+		if (cfs->file_table_dirty[cluster] == 0) {
+			continue;
+		}
+		error = cfs_cluster_write(1 + cluster,
+		    cfs->file_table + (u64)cluster * CHAINFS_CLUSTER_SIZE);
+		if (error != BIO_STATUS_OK) {
+			return (-API_ERR_IO);
+		}
+		cfs->file_table_dirty[cluster] = 0;
+	}
+	return (0);
+}
+
+static int	cfs_map_flush(void);
+
+/* Flush both the block map and the file-table cache (metadata). */
+static int
+cfs_flush_metadata(void)
+{
+	if (cfs_map_flush() != 0) {
+		return (-API_ERR_IO);
+	}
+	return (cfs_file_table_flush());
 }
 
 static void
@@ -261,6 +361,9 @@ chainfs_sync(void)
 	int	ret;
 
 	ret = cfs_map_flush();
+	if (ret == 0) {
+		ret = cfs_file_table_flush();
+	}
 	if (cfs->disk != NULL) {
 		(void)bio_flush(cfs->disk);
 	}
@@ -271,18 +374,35 @@ int
 chainfs_init(disk_t *disk)
 {
 	chainfs_superblock_t	*sb;
+	u64			ft_bytes;
+	u64			ft_dirty_bytes;
+	u32			spc;
 
 	if (!disk) {
 		drivers_log("ChainFS: init failed, disk is NULL\n");
 		return (-1);
 	}
+	if (disk->sector_size == 0 ||
+	    CHAINFS_CLUSTER_SIZE % disk->sector_size != 0) {
+		drivers_log("ChainFS: sector size %u does not divide %u\n",
+		    disk->sector_size, CHAINFS_CLUSTER_SIZE);
+		return (-1);
+	}
+	spc = CHAINFS_CLUSTER_SIZE / disk->sector_size;
+
 	cfs->disk = disk;
+	cfs->sectors_per_cluster = spc;
+	cfs->entries_per_cluster =
+	    CHAINFS_CLUSTER_SIZE / sizeof(chainfs_file_entry_t);
 	cfs_map_invalidate();
 	drivers_log("ChainFS: Initializing... "
 	    "(ctx at %p, disk: %s)\n",
 	    cfs, disk ? disk->name : "NULL");
 
-	cfs_sector_read(0, cfs->sector_buffer);
+	if (cfs_cluster_read(0, cfs->sector_buffer) != BIO_STATUS_OK) {
+		drivers_log("ChainFS: superblock read failed\n");
+		return (-1);
+	}
 
 	sb = (chainfs_superblock_t *)cfs->sector_buffer;
 
@@ -303,6 +423,31 @@ chainfs_init(disk_t *disk)
 	    cfs->superblock.root_dir_block;
 	cfs->alloc_hint = 0;
 	cfs_map_invalidate();
+
+	/*
+	 * Load the whole file table into a writable cache so metadata lookups
+	 * (find_in_directory, list_dir, find_free_file_entry) never re-read the
+	 * disk per cluster.  A per-cluster dirty byte flushes only clusters that
+	 * changed.
+	 */
+	ft_bytes = (u64)cfs->superblock.file_table_block_count *
+	    CHAINFS_CLUSTER_SIZE;
+	ft_dirty_bytes = cfs->superblock.file_table_block_count;
+	cfs->file_table = kmem_alloc((u32)ft_bytes);
+	cfs->file_table_dirty = kmem_alloc((u32)ft_dirty_bytes);
+	if (cfs->file_table == NULL || cfs->file_table_dirty == NULL) {
+		if (cfs == &g_chainfs) {
+			g_chainfs_phys = 0;
+		}
+		return (-API_ERR_NO_MEMORY);
+	}
+	memset(cfs->file_table_dirty, 0, (u32)ft_dirty_bytes);
+	if (cfs_sectors_read(1, cfs->superblock.file_table_block_count,
+	    cfs->file_table) != BIO_STATUS_OK) {
+		drivers_log("ChainFS: file table load failed\n");
+		return (-API_ERR_IO);
+	}
+
 	if (cfs == &g_chainfs) {
 		g_chainfs_phys = pmap_extract((u64)&g_chainfs);
 		drivers_log("[CHAINFS] g_chainfs phys=%p\n",
@@ -310,16 +455,17 @@ chainfs_init(disk_t *disk)
 	}
 
 	drivers_log("ChainFS: Initialized successfully\n");
-	drivers_log("  Total blocks: %u\n",
+	drivers_log("  Total clusters: %u\n",
 	    cfs->superblock.block_count);
-	drivers_log("  File table blocks: %u\n",
+	drivers_log("  File table clusters: %u\n",
 	    cfs->superblock.file_table_block_count);
-	drivers_log("  Block map blocks: %u\n",
+	drivers_log("  Block map clusters: %u\n",
 	    cfs->superblock.block_map_block_count);
 	drivers_log("  Data area start: %u\n",
 	    cfs->data_area_start);
 	drivers_log("  Root directory block: %u\n",
 	    cfs->superblock.root_dir_block);
+	drivers_log("  Sectors per cluster: %u\n", spc);
 
 	return (0);
 }
@@ -350,17 +496,27 @@ chainfs_probe_sector(const void *sector)
 	return (0);
 }
 
+/*
+ * Fill `count` contiguous CLUSTERS starting at cluster index `cluster` with
+ * either a zero pattern or the CHAINFS_CLUSTER_SIZE byte pattern in `pattern`.
+ */
 static int
-cfs_fill_range(disk_t *disk, u64 lba, u64 count, const u8 *pattern)
+cfs_fill_range(disk_t *disk, u64 cluster, u64 count, const u8 *pattern)
 {
 	u8	*buf;
+	u32	spc;
 	u32	batch;
 	u32	chunk;
 	u32	i;
+	u64	lba;
 
 	if (count == 0) {
 		return (BIO_STATUS_OK);
 	}
+	if (disk == NULL || disk->sector_size == 0) {
+		return (BIO_STATUS_NODEV);
+	}
+	spc = CHAINFS_CLUSTER_SIZE / disk->sector_size;
 	batch = disk->max_io_sectors;
 	if (batch > CFS_FORMAT_BATCH) {
 		batch = CFS_FORMAT_BATCH;
@@ -368,33 +524,34 @@ cfs_fill_range(disk_t *disk, u64 lba, u64 count, const u8 *pattern)
 	if (batch == 0) {
 		batch = 1;
 	}
-	buf = kmem_alloc(batch * CHAINFS_BLOCK_SIZE);
+	buf = kmem_alloc(batch * CHAINFS_CLUSTER_SIZE);
 	while (buf == NULL && batch > 1) {
 		batch /= 2;
-		buf = kmem_alloc(batch * CHAINFS_BLOCK_SIZE);
+		buf = kmem_alloc(batch * CHAINFS_CLUSTER_SIZE);
 	}
 	if (buf == NULL) {
 		return (BIO_STATUS_NOMEM);
 	}
 	for (i = 0; i < batch; i++) {
 		if (pattern != NULL) {
-			memcpy(buf + (u64)i * CHAINFS_BLOCK_SIZE, pattern,
-			    CHAINFS_BLOCK_SIZE);
+			memcpy(buf + (u64)i * CHAINFS_CLUSTER_SIZE, pattern,
+			    CHAINFS_CLUSTER_SIZE);
 		} else {
-			memset(buf + (u64)i * CHAINFS_BLOCK_SIZE, 0,
-			    CHAINFS_BLOCK_SIZE);
+			memset(buf + (u64)i * CHAINFS_CLUSTER_SIZE, 0,
+			    CHAINFS_CLUSTER_SIZE);
 		}
 	}
+	lba = cluster * spc;
 	while (count > 0) {
 		int	error;
 
 		chunk = count > batch ? batch : (u32)count;
-		error = bio_write(disk, lba, chunk, buf);
+		error = bio_write(disk, lba, (u32)((u64)chunk * spc), buf);
 		if (error != BIO_STATUS_OK) {
 			kmem_free(buf);
 			return (error);
 		}
-		lba += chunk;
+		lba += (u64)chunk * spc;
 		count -= chunk;
 	}
 	kmem_free(buf);
@@ -412,6 +569,7 @@ chainfs_format_disk(disk_t *disk, u64 total_blocks, u32 max_files)
 	u32	*block_map;
 	u8	*buffer;
 	u32	blocks;
+	u32	spc;
 	u32	i;
 	int	error;
 
@@ -419,17 +577,20 @@ chainfs_format_disk(disk_t *disk, u64 total_blocks, u32 max_files)
 		drivers_log("ChainFS: format failed, disk is NULL\n");
 		return (-1);
 	}
-	if (disk->sector_size != CHAINFS_BLOCK_SIZE) {
+	if (disk->sector_size == 0 ||
+	    CHAINFS_CLUSTER_SIZE % disk->sector_size != 0) {
 		drivers_log("ChainFS: %s sector size %u unsupported\n",
 		    disk->name, disk->sector_size);
 		return (-1);
 	}
+	spc = CHAINFS_CLUSTER_SIZE / disk->sector_size;
 	if ((disk->flags & DISK_F_READONLY) != 0) {
 		drivers_log("ChainFS: %s is read-only\n", disk->name);
 		return (-1);
 	}
-	if (total_blocks == 0 || total_blocks > disk->total_sectors) {
-		total_blocks = disk->total_sectors;
+	if (total_blocks == 0 ||
+	    total_blocks > disk->total_sectors / spc) {
+		total_blocks = disk->total_sectors / spc;
 	}
 	if (total_blocks > 0xFFFFFFFFULL) {
 		total_blocks = 0xFFFFFFFFULL;
@@ -445,7 +606,7 @@ chainfs_format_disk(disk_t *disk, u64 total_blocks, u32 max_files)
 	}
 
 	entries_per_block =
-	    CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t);
+	    CHAINFS_CLUSTER_SIZE / sizeof(chainfs_file_entry_t);
 	file_table_blocks =
 	    (max_files + entries_per_block - 1) / entries_per_block;
 	if (file_table_blocks >= (blocks - 2)) {
@@ -455,7 +616,7 @@ chainfs_format_disk(disk_t *disk, u64 total_blocks, u32 max_files)
 	}
 
 	data_blocks = blocks - 1 - file_table_blocks;
-	map_entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(u32);
+	map_entries_per_block = CHAINFS_CLUSTER_SIZE / sizeof(u32);
 	block_map_blocks =
 	    (data_blocks + map_entries_per_block - 1) /
 	    map_entries_per_block;
@@ -464,7 +625,7 @@ chainfs_format_disk(disk_t *disk, u64 total_blocks, u32 max_files)
 		return (-1);
 	}
 
-	buffer = kmem_alloc(CHAINFS_BLOCK_SIZE);
+	buffer = kmem_alloc(CHAINFS_CLUSTER_SIZE);
 	if (buffer == NULL) {
 		return (-1);
 	}
@@ -480,14 +641,14 @@ chainfs_format_disk(disk_t *disk, u64 total_blocks, u32 max_files)
 	sb.total_files = max_files;
 	sb.root_dir_block = 0;
 
-	memset(buffer, 0, CHAINFS_BLOCK_SIZE);
+	memset(buffer, 0, CHAINFS_CLUSTER_SIZE);
 	*((chainfs_superblock_t *)buffer) = sb;
-	error = bio_write(disk, 0, 1, buffer);
+	error = bio_write(disk, 0, spc, buffer);
 	if (error != BIO_STATUS_OK) {
 		goto fail;
 	}
 
-	memset(buffer, 0, CHAINFS_BLOCK_SIZE);
+	memset(buffer, 0, CHAINFS_CLUSTER_SIZE);
 	entries = (chainfs_file_entry_t *)buffer;
 	entries[0].status = 1;
 	entries[0].type = CHAINFS_TYPE_DIR;
@@ -497,7 +658,7 @@ chainfs_format_disk(disk_t *disk, u64 total_blocks, u32 max_files)
 	entries[0].start_block = 0;
 	entries[0].parent_block = 0xFFFFFFFF;
 	entries[0].nlink = 1;
-	error = bio_write(disk, 1, 1, buffer);
+	error = bio_write(disk, spc, spc, buffer);
 	if (error != BIO_STATUS_OK) {
 		goto fail;
 	}
@@ -507,7 +668,7 @@ chainfs_format_disk(disk_t *disk, u64 total_blocks, u32 max_files)
 		goto fail;
 	}
 
-	memset(buffer, 0, CHAINFS_BLOCK_SIZE);
+	memset(buffer, 0, CHAINFS_CLUSTER_SIZE);
 	block_map = (u32 *)buffer;
 	for (i = 0; i < map_entries_per_block; i++) {
 		block_map[i] = CHAINFS_FREE_BLOCK;
@@ -565,29 +726,29 @@ chainfs_find_file(const char *filename, chainfs_file_entry_t *entry,
 int
 chainfs_find_free_file_entry(u32 *entry_block, u32 *entry_offset)
 {
-	u32			entries_per_block, block, i;
 	chainfs_file_entry_t	*entries;
+	u32			total_slots, i;
 
 	if (cfs->superblock.magic != CHAINFS_MAGIC) {
 		return (-API_ERR_IO);
 	}
-	entries_per_block =
-	    CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t);
+	if (entry_block == NULL || entry_offset == NULL ||
+	    cfs->file_table == NULL) {
+		return (-API_ERR_BAD_VALUE);
+	}
 
-	for (block = 1;
-	    block < 1 + cfs->superblock.file_table_block_count;
-	    block++) {
-		cfs_sector_read(block,
-		    cfs->sector_buffer);
-		entries = (chainfs_file_entry_t *)
-		    cfs->sector_buffer;
+	total_slots = cfs->superblock.file_table_block_count *
+	    cfs->entries_per_cluster;
+	if (total_slots > cfs->superblock.total_files) {
+		total_slots = cfs->superblock.total_files;
+	}
+	entries = (chainfs_file_entry_t *)cfs->file_table;
 
-		for (i = 0; i < entries_per_block; i++) {
-			if (entries[i].status == 0) {
-				*entry_block = block;
-				*entry_offset = i;
-				return (0);
-			}
+	for (i = 0; i < total_slots; i++) {
+		if (entries[i].status == 0) {
+			*entry_block = 1 + i / cfs->entries_per_cluster;
+			*entry_offset = i % cfs->entries_per_cluster;
+			return (0);
 		}
 	}
 
@@ -604,7 +765,7 @@ chainfs_read_block_map_entry(u32 block_index, u32 *next_block)
 	if (next_block == NULL) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(u32);
+	entries_per_block = CHAINFS_CLUSTER_SIZE / sizeof(u32);
 	map_block = block_index / entries_per_block;
 	map_offset = block_index % entries_per_block;
 
@@ -626,7 +787,7 @@ chainfs_write_block_map_entry(u32 block_index, u32 next_block)
 	u32	entries_per_block, map_block, map_offset;
 	int	ret;
 
-	entries_per_block = CHAINFS_BLOCK_SIZE / sizeof(u32);
+	entries_per_block = CHAINFS_CLUSTER_SIZE / sizeof(u32);
 	map_block = block_index / entries_per_block;
 	map_offset = block_index % entries_per_block;
 
@@ -683,11 +844,19 @@ void
 chainfs_free_block_chain(u32 start_block)
 {
 	u32	current_block, next_block;
+	u32	total_data_blocks, walked;
 
 	current_block = start_block;
 	cfs->seek_entry_block = CHAINFS_MAP_NONE;
+	total_data_blocks = cfs->superblock.block_count -
+	    cfs->data_area_start;
+	walked = 0;
 
 	while (current_block != CHAINFS_EOF_MARKER) {
+		if (walked++ >= total_data_blocks) {
+			/* Corrupt cyclic chain: stop instead of looping forever. */
+			break;
+		}
 		if (chainfs_read_block_map_entry(current_block,
 		    &next_block) != 0) {
 			break;
@@ -735,7 +904,7 @@ chainfs_read_file(const char *filename, u8 *buffer, u32 buffer_size,
 	while (remaining > 0 && current_block != CHAINFS_EOF_MARKER) {
 		run = 1;
 		last_block = current_block;
-		while ((u64)run * CHAINFS_BLOCK_SIZE < remaining) {
+		while ((u64)run * CHAINFS_CLUSTER_SIZE < remaining) {
 			if (chainfs_read_block_map_entry(last_block,
 			    &next_block) != 0) {
 				return (-API_ERR_IO);
@@ -749,7 +918,7 @@ chainfs_read_file(const char *filename, u8 *buffer, u32 buffer_size,
 		}
 
 		real_sector = cfs->data_area_start + current_block;
-		full = remaining / CHAINFS_BLOCK_SIZE;
+		full = remaining / CHAINFS_CLUSTER_SIZE;
 		if (full > run) {
 			full = run;
 		}
@@ -758,8 +927,8 @@ chainfs_read_file(const char *filename, u8 *buffer, u32 buffer_size,
 			    buffer + copied) != BIO_STATUS_OK) {
 				return (-API_ERR_IO);
 			}
-			copied += full * CHAINFS_BLOCK_SIZE;
-			remaining -= full * CHAINFS_BLOCK_SIZE;
+			copied += full * CHAINFS_CLUSTER_SIZE;
+			remaining -= full * CHAINFS_CLUSTER_SIZE;
 		}
 		if (full < run && remaining > 0) {
 			if (cfs_sector_read(real_sector + full,
@@ -810,7 +979,7 @@ chainfs_truncate(const char *filename, u32 size)
 		return (-API_ERR_BAD_VALUE);
 	}
 
-	ret = cfs_split_parent(filename, &parent_block, file_name);
+	ret = chainfs_split_parent(filename, &parent_block, file_name);
 	if (ret != 0) {
 		return (ret);
 	}
@@ -831,8 +1000,8 @@ chainfs_truncate(const char *filename, u32 size)
 		}
 	}
 
-	blocks_needed = (size + CHAINFS_BLOCK_SIZE - 1) /
-	    CHAINFS_BLOCK_SIZE;
+	blocks_needed = (size + CHAINFS_CLUSTER_SIZE - 1) /
+	    CHAINFS_CLUSTER_SIZE;
 	if (blocks_needed == 0) {
 		blocks_needed = 1;
 	}
@@ -887,7 +1056,7 @@ chainfs_truncate(const char *filename, u32 size)
 
 	kmem_free(allocated_blocks);
 	cfs->seek_entry_block = CHAINFS_MAP_NONE;
-	(void)cfs_map_flush();
+	(void)cfs_flush_metadata();
 	return (0);
 }
 
@@ -962,8 +1131,8 @@ chainfs_write_file_range(const char *filename, const u8 *data, u32 size,
 		return (-API_ERR_BAD_VALUE);
 	}
 
-	block_index = offset / CHAINFS_BLOCK_SIZE;
-	intra = offset % CHAINFS_BLOCK_SIZE;
+	block_index = offset / CHAINFS_CLUSTER_SIZE;
+	intra = offset % CHAINFS_CLUSTER_SIZE;
 	ret = cfs_seek_block(entry_block, entry_offset, entry.start_block,
 	    block_index, &current_block);
 	if (ret != 0) {
@@ -979,7 +1148,7 @@ chainfs_write_file_range(const char *filename, const u8 *data, u32 size,
 		    BIO_STATUS_OK) {
 			return (-API_ERR_IO);
 		}
-		chunk = CHAINFS_BLOCK_SIZE - intra;
+		chunk = CHAINFS_CLUSTER_SIZE - intra;
 		if (chunk > remaining) {
 			chunk = remaining;
 		}
@@ -991,7 +1160,7 @@ chainfs_write_file_range(const char *filename, const u8 *data, u32 size,
 		done += chunk;
 		remaining -= chunk;
 		if (remaining == 0) {
-			(void)cfs_map_flush();
+			(void)cfs_flush_metadata();
 			return (0);
 		}
 		if (chainfs_read_block_map_entry(current_block,
@@ -1010,7 +1179,7 @@ chainfs_write_file_range(const char *filename, const u8 *data, u32 size,
 	while (remaining > 0) {
 		run = 1;
 		last_block = current_block;
-		while ((u64)run * CHAINFS_BLOCK_SIZE < remaining) {
+		while ((u64)run * CHAINFS_CLUSTER_SIZE < remaining) {
 			if (chainfs_read_block_map_entry(last_block,
 			    &next_block) != 0) {
 				return (-API_ERR_IO);
@@ -1024,7 +1193,7 @@ chainfs_write_file_range(const char *filename, const u8 *data, u32 size,
 		}
 
 		real_sector = cfs->data_area_start + current_block;
-		chunk = remaining / CHAINFS_BLOCK_SIZE;
+		chunk = remaining / CHAINFS_CLUSTER_SIZE;
 		if (chunk > run) {
 			chunk = run;
 		}
@@ -1033,8 +1202,8 @@ chainfs_write_file_range(const char *filename, const u8 *data, u32 size,
 			    data + done) != BIO_STATUS_OK) {
 				return (-API_ERR_IO);
 			}
-			done += chunk * CHAINFS_BLOCK_SIZE;
-			remaining -= chunk * CHAINFS_BLOCK_SIZE;
+			done += chunk * CHAINFS_CLUSTER_SIZE;
+			remaining -= chunk * CHAINFS_CLUSTER_SIZE;
 		}
 		if (chunk < run && remaining > 0) {
 			if (cfs_sector_read(real_sector + chunk,
@@ -1070,7 +1239,7 @@ chainfs_write_file_range(const char *filename, const u8 *data, u32 size,
 		cfs->seek_block = current_block;
 	}
 
-	(void)cfs_map_flush();
+	(void)cfs_flush_metadata();
 	return (0);
 }
 
@@ -1108,8 +1277,8 @@ chainfs_read_file_range(const char *filename, u8 *buffer,
 		remaining = buffer_size;
 	}
 
-	block_index = offset / CHAINFS_BLOCK_SIZE;
-	intra_offset = offset % CHAINFS_BLOCK_SIZE;
+	block_index = offset / CHAINFS_CLUSTER_SIZE;
+	intra_offset = offset % CHAINFS_CLUSTER_SIZE;
 
 	ret = cfs_seek_block(entry_block, entry_offset, entry.start_block,
 	    block_index, &current_block);
@@ -1125,7 +1294,7 @@ chainfs_read_file_range(const char *filename, u8 *buffer,
 			return (-API_ERR_IO);
 		}
 
-		to_copy = CHAINFS_BLOCK_SIZE - intra_offset;
+		to_copy = CHAINFS_CLUSTER_SIZE - intra_offset;
 		if (to_copy > remaining) {
 			to_copy = remaining;
 		}
@@ -1165,8 +1334,8 @@ chainfs_read_file_range(const char *filename, u8 *buffer,
 	return (0);
 }
 
-static int
-cfs_split_parent(const char *path, u32 *parent_block, char *leaf_out)
+int
+chainfs_split_parent(const char *path, u32 *parent_block, char *leaf_out)
 {
 	chainfs_file_entry_t	parent_entry;
 	char			parent_path[CHAINFS_MAX_PATH];
@@ -1262,7 +1431,7 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size,
 	    &entry_offset);
 	file_exists = (ret == 0);
 
-	ret = cfs_split_parent(filename, &parent_block, file_name);
+	ret = chainfs_split_parent(filename, &parent_block, file_name);
 	if (ret != 0) {
 		return (ret);
 	}
@@ -1287,8 +1456,8 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size,
 		}
 	}
 
-	blocks_needed = (alloc_size + CHAINFS_BLOCK_SIZE - 1) /
-	    CHAINFS_BLOCK_SIZE;
+	blocks_needed = (alloc_size + CHAINFS_CLUSTER_SIZE - 1) /
+	    CHAINFS_CLUSTER_SIZE;
 	if (blocks_needed == 0) {
 		blocks_needed = 1;
 	}
@@ -1319,7 +1488,7 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size,
 			run++;
 		}
 
-		full = remaining / CHAINFS_BLOCK_SIZE;
+		full = remaining / CHAINFS_CLUSTER_SIZE;
 		if (full > run) {
 			full = run;
 		}
@@ -1330,16 +1499,16 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size,
 				kmem_free(allocated_blocks);
 				return (-API_ERR_IO);
 			}
-			data_offset += full * CHAINFS_BLOCK_SIZE;
-			remaining -= full * CHAINFS_BLOCK_SIZE;
+			data_offset += full * CHAINFS_CLUSTER_SIZE;
+			remaining -= full * CHAINFS_CLUSTER_SIZE;
 		}
 		if (full < run) {
-			for (j = 0; j < CHAINFS_BLOCK_SIZE; j++) {
+			for (j = 0; j < CHAINFS_CLUSTER_SIZE; j++) {
 				cfs->sector_buffer[j] = 0;
 			}
 			to_copy = remaining;
-			if (to_copy > CHAINFS_BLOCK_SIZE) {
-				to_copy = CHAINFS_BLOCK_SIZE;
+			if (to_copy > CHAINFS_CLUSTER_SIZE) {
+				to_copy = CHAINFS_CLUSTER_SIZE;
 			}
 			if (to_copy > 0) {
 				memcpy(cfs->sector_buffer,
@@ -1364,7 +1533,7 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size,
 		}
 		i += full;
 	}
-	if (cfs_map_flush() != 0) {
+	if (cfs_flush_metadata() != 0) {
 		kmem_free(allocated_blocks);
 		return (-API_ERR_IO);
 	}
@@ -1397,6 +1566,9 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size,
 
 	kmem_free(allocated_blocks);
 
+	/* Flush the entry (and any remaining dirty file-table cluster). */
+	(void)cfs_flush_metadata();
+
 	/*drivers_log("ChainFS: Wrote %u bytes to '%s' using "
 	    "%u blocks\n", size, filename, blocks_needed);*/
 	return (0);
@@ -1404,15 +1576,12 @@ chainfs_write_file(const char *filename, const u8 *data, u32 size,
 int
 chainfs_symlink(const char *target, const char *linkpath)
 {
-	chainfs_file_entry_t	entry, parent_entry;
+	chainfs_file_entry_t	entry;
 	u32			entry_block, entry_offset;
-	u32			parent_entry_block, parent_entry_offset;
 	u32			parent_block;
-	u32			i, name_len, path_len, last_slash;
+	u32			i, name_len;
 	u32			target_len;
 	char			file_name[32];
-	char			parent_path[CHAINFS_MAX_PATH];
-	const char		*leaf;
 	chainfs_file_entry_t	*entries;
 	int			ret;
 
@@ -1428,52 +1597,10 @@ chainfs_symlink(const char *target, const char *linkpath)
 		return (-API_ERR_BAD_VALUE);
 	}
 
-	parent_block = cfs->current_dir_block;
-	leaf = linkpath;
-
-	if (strchr(linkpath, '/') != 0) {
-		path_len = strlen(linkpath);
-		last_slash = 0;
-
-		for (i = path_len - 1; i > 0; i--) {
-			if (linkpath[i] == '/') {
-				last_slash = i;
-				break;
-			}
-		}
-
-		if (last_slash == 0) {
-			parent_block =
-			    cfs->superblock.root_dir_block;
-			leaf = linkpath + 1;
-		} else {
-			for (i = 0; i < last_slash; i++) {
-				parent_path[i] = linkpath[i];
-			}
-			parent_path[last_slash] = '\0';
-			leaf = linkpath + last_slash + 1;
-
-			ret = chainfs_resolve_path(parent_path,
-			    &parent_entry, &parent_entry_block,
-			    &parent_entry_offset);
-			if (ret != 0) {
-				return (ret);
-			}
-			if (parent_entry.type != CHAINFS_TYPE_DIR) {
-				return (-API_ERR_NOT_DIR);
-			}
-			parent_block =
-			    (parent_entry_block - 1) *
-			    ENTRIES_PER_BLOCK + parent_entry_offset;
-		}
+	ret = chainfs_split_parent(linkpath, &parent_block, file_name);
+	if (ret != 0) {
+		return (ret);
 	}
-	if (leaf[0] == '\0') {
-		return (-API_ERR_BAD_VALUE);
-	}
-	if (strlen(leaf) > 29) {
-		return (-API_ERR_TOO_BIG);
-	}
-	strcpy(file_name, leaf);
 	if (chainfs_find_in_directory(parent_block, file_name,
 	    &entry, &entry_block, &entry_offset) == 0) {
 		return (-API_ERR_EXISTS);
@@ -1522,8 +1649,8 @@ chainfs_symlink(const char *target, const char *linkpath)
 		u32		real_sector, next_block;
 		u32		j;
 
-		blocks_needed = (target_len + CHAINFS_BLOCK_SIZE -
-		    1) / CHAINFS_BLOCK_SIZE;
+		blocks_needed = (target_len + CHAINFS_CLUSTER_SIZE -
+		    1) / CHAINFS_CLUSTER_SIZE;
 
 		allocated_blocks = (u32 *)kmem_alloc(
 		    blocks_needed * sizeof(u32));
@@ -1545,13 +1672,13 @@ chainfs_symlink(const char *target, const char *linkpath)
 		data_offset = 0;
 
 		for (i = 0; i < blocks_needed; i++) {
-			for (j = 0; j < CHAINFS_BLOCK_SIZE; j++) {
+			for (j = 0; j < CHAINFS_CLUSTER_SIZE; j++) {
 				cfs->sector_buffer[j] = 0;
 			}
 
 			to_copy = remaining;
-			if (to_copy > CHAINFS_BLOCK_SIZE) {
-				to_copy = CHAINFS_BLOCK_SIZE;
+			if (to_copy > CHAINFS_CLUSTER_SIZE) {
+				to_copy = CHAINFS_CLUSTER_SIZE;
 			}
 
 			for (j = 0; j < to_copy; j++) {
@@ -1582,21 +1709,18 @@ chainfs_symlink(const char *target, const char *linkpath)
 	cfs_sector_write(entry_block,
 	    cfs->sector_buffer);
 
-	(void)cfs_map_flush();
+	(void)cfs_flush_metadata();
 	return (0);
 }
 
 int
 chainfs_link(const char *oldpath, const char *newpath)
 {
-	chainfs_file_entry_t	old_entry, parent_entry;
+	chainfs_file_entry_t	old_entry;
 	u32			old_block, old_offset;
 	u32			entry_block, entry_offset;
-	u32			parent_entry_block, parent_entry_offset;
-	u32			parent_block, i, path_len, last_slash;
+	u32			parent_block, i;
 	char			file_name[32];
-	char			parent_path[CHAINFS_MAX_PATH];
-	const char		*leaf;
 	chainfs_file_entry_t	*entries;
 	int			ret;
 
@@ -1617,55 +1741,12 @@ chainfs_link(const char *oldpath, const char *newpath)
 		return (-API_ERR_IS_DIR);
 	}
 
-	parent_block = cfs->current_dir_block;
-	leaf = newpath;
-
-	if (strchr(newpath, '/') != 0) {
-		path_len = strlen(newpath);
-		last_slash = 0;
-
-		for (i = path_len - 1; i > 0; i--) {
-			if (newpath[i] == '/') {
-				last_slash = i;
-				break;
-			}
-		}
-
-		if (last_slash == 0) {
-			parent_block =
-			    cfs->superblock.root_dir_block;
-			leaf = newpath + 1;
-		} else {
-			for (i = 0; i < last_slash; i++) {
-				parent_path[i] = newpath[i];
-			}
-			parent_path[last_slash] = '\0';
-			leaf = newpath + last_slash + 1;
-
-			ret = chainfs_resolve_path(parent_path,
-			    &parent_entry, &parent_entry_block,
-			    &parent_entry_offset);
-			if (ret != 0) {
-				return (ret);
-			}
-			if (parent_entry.type != CHAINFS_TYPE_DIR) {
-				return (-API_ERR_NOT_DIR);
-			}
-			parent_block =
-			    (parent_entry_block - 1) *
-			    ENTRIES_PER_BLOCK + parent_entry_offset;
-		}
+	ret = chainfs_split_parent(newpath, &parent_block, file_name);
+	if (ret != 0) {
+		return (ret);
 	}
-	if (leaf[0] == '\0') {
-		return (-API_ERR_BAD_VALUE);
-	}
-	if (strlen(leaf) > 29) {
-		return (-API_ERR_TOO_BIG);
-	}
-	strcpy(file_name, leaf);
 	if (chainfs_find_in_directory(parent_block, file_name,
-	    &parent_entry, &parent_entry_block,
-	    &parent_entry_offset) == 0) {
+	    &old_entry, &old_block, &old_offset) == 0) {
 		return (-API_ERR_EXISTS);
 	}
 
@@ -1704,7 +1785,7 @@ chainfs_link(const char *oldpath, const char *newpath)
 	cfs_sector_write(entry_block,
 	    cfs->sector_buffer);
 
-	(void)cfs_map_flush();
+	(void)cfs_flush_metadata();
 	return (0);
 }
 
@@ -1804,7 +1885,7 @@ chainfs_delete_file(const char *filename)
 	}
 
 	drivers_log("ChainFS: Deleted file '%s'\n", filename);
-	(void)cfs_map_flush();
+	(void)cfs_flush_metadata();
 	return (0);
 }
 
@@ -1820,26 +1901,57 @@ static int
 read_entry_by_index(u32 index, chainfs_file_entry_t *entry,
     u32 *block, u32 *offset)
 {
-	u32			b, o;
 	chainfs_file_entry_t	*entries;
+	u32			b, o;
 
-	if (index >= cfs->superblock.total_files) {
+	if (index >= cfs->superblock.total_files ||
+	    cfs->file_table == NULL) {
 		return (-1);
 	}
 
-	b = 1 + (index / ENTRIES_PER_BLOCK);
-	o = index % ENTRIES_PER_BLOCK;
+	b = 1 + (index / cfs->entries_per_cluster);
+	o = index % cfs->entries_per_cluster;
 
-	cfs_sector_read(b, cfs->sector_buffer);
-	entries = (chainfs_file_entry_t *)
-	    cfs->sector_buffer;
-	*entry = entries[o];
+	entries = (chainfs_file_entry_t *)cfs->file_table;
+	*entry = entries[index];
 	if (block) {
 		*block = b;
 	}
 	if (offset) {
 		*offset = o;
 	}
+	return (0);
+}
+
+/*
+ * Read a file-table entry directly by its cluster index + slot offset, going
+ * straight to the in-memory cache (via cfs_sector_read) instead of resolving
+ * a path.  Used by the VFS backend to avoid re-scanning on every read/stat.
+ */
+int
+chainfs_read_entry_at(u32 entry_block, u32 entry_offset,
+    chainfs_file_entry_t *out)
+{
+	chainfs_file_entry_t	*entries;
+
+	if (out == NULL || entry_block < 1 ||
+	    entry_block >= 1 + cfs->superblock.file_table_block_count) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (entry_offset >= cfs->entries_per_cluster) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	if (cfs->file_table != NULL) {
+		entries = (chainfs_file_entry_t *)(cfs->file_table +
+		    (u64)(entry_block - 1) * CHAINFS_CLUSTER_SIZE);
+		*out = entries[entry_offset];
+		return (0);
+	}
+	if (cfs_cluster_read(entry_block, cfs->sector_buffer) != BIO_STATUS_OK) {
+		return (-API_ERR_IO);
+	}
+	entries = (chainfs_file_entry_t *)cfs->sector_buffer;
+	*out = entries[entry_offset];
 	return (0);
 }
 
@@ -1876,38 +1988,53 @@ split_path(const char *path, char components[][32], int max_components)
 	return (count);
 }
 
+/* Fixed-length name compare: entry names are 30 bytes and may lack a
+ * terminator, so strcmp is unsafe. */
+static int
+cfs_name_eq(const char *a, const char *b)
+{
+	int	i;
+
+	for (i = 0; i < 30; i++) {
+		if (a[i] != b[i]) {
+			return (0);
+		}
+		if (a[i] == '\0') {
+			return (1);
+		}
+	}
+	return (1);
+}
+
 int
 chainfs_find_in_directory(u32 dir_block, const char *name,
     chainfs_file_entry_t *entry, u32 *entry_block, u32 *entry_offset)
 {
-	u32			entries_per_block, block, i;
 	chainfs_file_entry_t	*entries;
+	u32			total_slots, i;
+	int			block;
 
 	if (!name || name[0] == '\0' || !entry || !entry_block ||
-	    !entry_offset) {
+	    !entry_offset || cfs->file_table == NULL) {
 		return (-API_ERR_BAD_VALUE);
 	}
 
-	entries_per_block =
-	    CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t);
+	total_slots = cfs->superblock.file_table_block_count *
+	    cfs->entries_per_cluster;
+	if (total_slots > cfs->superblock.total_files) {
+		total_slots = cfs->superblock.total_files;
+	}
+	entries = (chainfs_file_entry_t *)cfs->file_table;
 
-	for (block = 1;
-	    block < 1 + cfs->superblock.file_table_block_count;
-	    block++) {
-		cfs_sector_read(block,
-		    cfs->sector_buffer);
-		entries = (chainfs_file_entry_t *)
-		    cfs->sector_buffer;
-
-		for (i = 0; i < entries_per_block; i++) {
-			if (entries[i].status == 1 &&
-			    entries[i].parent_block == dir_block &&
-			    strcmp(entries[i].name, name) == 0) {
-				*entry = entries[i];
-				*entry_block = block;
-				*entry_offset = i;
-				return (0);
-			}
+	for (i = 0; i < total_slots; i++) {
+		if (entries[i].status == 1 &&
+		    entries[i].parent_block == dir_block &&
+		    cfs_name_eq(entries[i].name, name)) {
+			*entry = entries[i];
+			block = 1 + (int)(i / cfs->entries_per_cluster);
+			*entry_block = (u32)block;
+			*entry_offset = i % cfs->entries_per_cluster;
+			return (0);
 		}
 	}
 
@@ -1979,14 +2106,11 @@ chainfs_resolve_path(const char *path, chainfs_file_entry_t *entry,
 int
 chainfs_mkdir(const char *path)
 {
-	char			parent_path[CHAINFS_MAX_PATH];
 	char			dir_name[32];
-	int			path_len, last_slash, i;
-	chainfs_file_entry_t	parent_entry, existing_entry;
-	u32			parent_block, parent_offset;
+	chainfs_file_entry_t	existing_entry;
+	u32			parent_block;
 	u32			existing_block, existing_offset;
 	u32			entry_block, entry_offset;
-	const char		*leaf;
 	chainfs_file_entry_t	*entries;
 	int			ret;
 
@@ -1999,58 +2123,9 @@ chainfs_mkdir(const char *path)
 		return (-API_ERR_BAD_VALUE);
 	}
 
-	path_len = strlen(path);
-	last_slash = -1;
-	leaf = path;
-
-	for (i = path_len - 1; i >= 0; i--) {
-		if (path[i] == '/') {
-			last_slash = i;
-			break;
-		}
-	}
-
-	if (last_slash == -1) {
-		parent_path[0] = 0;
-		leaf = path;
-	} else if (last_slash == 0) {
-		parent_path[0] = '/';
-		parent_path[1] = 0;
-		leaf = path + 1;
-	} else {
-		for (i = 0; i < last_slash; i++) {
-			parent_path[i] = path[i];
-		}
-		parent_path[last_slash] = 0;
-		leaf = path + last_slash + 1;
-	}
-
-	if (leaf[0] == '\0') {
-		return (-API_ERR_BAD_VALUE);
-	}
-	if (strlen(leaf) > 29) {
-		return (-API_ERR_TOO_BIG);
-	}
-	strcpy(dir_name, leaf);
-
-	if (parent_path[0] == 0) {
-		parent_block = cfs->current_dir_block;
-	} else {
-		ret = chainfs_resolve_path(parent_path,
-		    &parent_entry, &parent_block,
-		    &parent_offset);
-		if (ret != 0) {
-			drivers_log("ChainFS: Parent directory "
-			    "not found: %s\n", parent_path);
-			return (ret);
-		}
-		if (parent_entry.type != CHAINFS_TYPE_DIR) {
-			drivers_log("ChainFS: Parent is not "
-			    "a directory: %s\n", parent_path);
-			return (-API_ERR_NOT_DIR);
-		}
-		parent_block = (parent_block - 1) *
-		    ENTRIES_PER_BLOCK + parent_offset;
+	ret = chainfs_split_parent(path, &parent_block, dir_name);
+	if (ret != 0) {
+		return (ret);
 	}
 
 	if (chainfs_find_in_directory(parent_block, dir_name,
@@ -2084,7 +2159,7 @@ chainfs_mkdir(const char *path)
 	    cfs->sector_buffer);
 
 	drivers_log("ChainFS: Created directory: %s\n", path);
-	(void)cfs_map_flush();
+	(void)cfs_flush_metadata();
 	return (0);
 }
 
@@ -2131,10 +2206,10 @@ chainfs_list_dir_range(const char *path, u32 start,
     u32 *total_count)
 {
 	chainfs_file_entry_t	dir_entry;
-	chainfs_file_entry_t	sector_entries[ENTRIES_PER_BLOCK];
-	u32			dir_block, dir_offset, entries_per_block;
-	u32			found, seen, block, i;
 	chainfs_file_entry_t	*entries;
+	u32			dir_block, dir_offset;
+	u32			total_slots, i;
+	u32			found, seen;
 	int			ret;
 
 	if (!path || !file_count || (max_files != 0 && !files)) {
@@ -2161,8 +2236,6 @@ chainfs_list_dir_range(const char *path, u32 start,
 		    ENTRIES_PER_BLOCK + dir_offset;
 	}
 
-	entries_per_block =
-	    CHAINFS_BLOCK_SIZE / sizeof(chainfs_file_entry_t);
 	found = 0;
 	seen = 0;
 	if (max_files == 0 && total_count == NULL) {
@@ -2170,26 +2243,32 @@ chainfs_list_dir_range(const char *path, u32 start,
 		return (0);
 	}
 
-	for (block = 1;
-	    block < 1 + cfs->superblock.file_table_block_count;
-	    block++) {
+	/*
+	 * Walk the in-memory file table directly.  entries_per_cluster entries
+	 * fit in each file-table cluster; slots beyond total_files are ignored.
+	 */
+	if (cfs->file_table == NULL) {
+		return (-API_ERR_IO);
+	}
+	total_slots = cfs->superblock.file_table_block_count *
+	    cfs->entries_per_cluster;
+	if (total_slots > cfs->superblock.total_files) {
+		total_slots = cfs->superblock.total_files;
+	}
+	entries = (chainfs_file_entry_t *)cfs->file_table;
+
+	for (i = 0; i < total_slots; i++) {
 		if (total_count == NULL && max_files != 0 &&
 		    found >= max_files) {
 			break;
 		}
-
-		cfs_sector_read(block, (u8 *)sector_entries);
-		entries = sector_entries;
-
-		for (i = 0; i < entries_per_block; i++) {
-			if (entries[i].status == 1 &&
-			    entries[i].parent_block == dir_block) {
-				if (seen >= start && found < max_files) {
-					files[found] = entries[i];
-					found++;
-				}
-				seen++;
+		if (entries[i].status == 1 &&
+		    entries[i].parent_block == dir_block) {
+			if (seen >= start && found < max_files) {
+				files[found] = entries[i];
+				found++;
 			}
+			seen++;
 		}
 	}
 
@@ -2253,14 +2332,11 @@ chainfs_get_current_path(char *buffer, u32 buffer_size)
 int
 chainfs_create_socket(const char *path)
 {
-	char			parent_path[CHAINFS_MAX_PATH];
 	char			sock_name[32];
-	int			path_len, last_slash, i;
-	chainfs_file_entry_t	parent_entry, existing_entry;
-	u32			parent_block, parent_offset;
+	chainfs_file_entry_t	existing_entry;
+	u32			parent_block;
 	u32			existing_block, existing_offset;
 	u32			entry_block, entry_offset;
-	const char		*leaf;
 	chainfs_file_entry_t	*entries;
 	int			ret;
 
@@ -2271,53 +2347,9 @@ chainfs_create_socket(const char *path)
 		return (-API_ERR_BAD_VALUE);
 	}
 
-	path_len = strlen(path);
-	last_slash = -1;
-	leaf = path;
-
-	for (i = path_len - 1; i >= 0; i--) {
-		if (path[i] == '/') {
-			last_slash = i;
-			break;
-		}
-	}
-
-	if (last_slash == -1) {
-		parent_path[0] = 0;
-		leaf = path;
-	} else if (last_slash == 0) {
-		parent_path[0] = '/';
-		parent_path[1] = 0;
-		leaf = path + 1;
-	} else {
-		for (i = 0; i < last_slash; i++) {
-			parent_path[i] = path[i];
-		}
-		parent_path[last_slash] = 0;
-		leaf = path + last_slash + 1;
-	}
-
-	if (leaf[0] == '\0') {
-		return (-API_ERR_BAD_VALUE);
-	}
-	if (strlen(leaf) > 29) {
-		return (-API_ERR_TOO_BIG);
-	}
-	strcpy(sock_name, leaf);
-
-	if (parent_path[0] == 0) {
-		parent_block = cfs->current_dir_block;
-	} else {
-		ret = chainfs_resolve_path(parent_path, &parent_entry,
-		    &parent_block, &parent_offset);
-		if (ret != 0) {
-			return (ret);
-		}
-		if (parent_entry.type != CHAINFS_TYPE_DIR) {
-			return (-API_ERR_NOT_DIR);
-		}
-		parent_block = (parent_block - 1) *
-		    ENTRIES_PER_BLOCK + parent_offset;
+	ret = chainfs_split_parent(path, &parent_block, sock_name);
+	if (ret != 0) {
+		return (ret);
 	}
 
 	if (chainfs_find_in_directory(parent_block, sock_name,
@@ -2346,7 +2378,7 @@ chainfs_create_socket(const char *path)
 	cfs_sector_write(entry_block,
 	    cfs->sector_buffer);
 
-	(void)cfs_map_flush();
+	(void)cfs_flush_metadata();
 	return (0);
 }
 
@@ -2395,7 +2427,7 @@ chainfs_rmdir(const char *path)
 	    cfs->sector_buffer);
 
 	drivers_log("ChainFS: Removed directory: %s\n", path);
-	(void)cfs_map_flush();
+	(void)cfs_flush_metadata();
 	return (0);
 }
 
@@ -2448,13 +2480,14 @@ chainfs_pick_root(void)
 	fallback = NULL;
 	count = disk_count();
 	live = chainfs_live_boot();
-	probe = kmem_alloc(CHAINFS_BLOCK_SIZE);
+	probe = kmem_alloc(CHAINFS_CLUSTER_SIZE);
 	if (probe == NULL) {
 		return (disk_get(0));
 	}
 	for (i = 0; i < count; i++) {
 		disk = disk_get(i);
-		if (disk == NULL || disk->sector_size != CHAINFS_BLOCK_SIZE) {
+		if (disk == NULL || disk->sector_size == 0 ||
+		    CHAINFS_CLUSTER_SIZE % disk->sector_size != 0) {
 			continue;
 		}
 		if (disk->type == DISK_TYPE_RAM) {
@@ -2514,8 +2547,9 @@ chainfs_root_attach(device_t dev)
 			return (-1);
 		}
 		format_blocks = 64;
-		if (disk->total_sectors > 0) {
-			format_blocks = disk->total_sectors;
+		if (disk->sector_size > 0 && disk->total_sectors > 0) {
+			format_blocks = disk->total_sectors /
+			    (CHAINFS_CLUSTER_SIZE / disk->sector_size);
 		}
 		drivers_log("[CHAINFS] init failed on %s, formatting ram "
 		    "disk\n", disk->name);

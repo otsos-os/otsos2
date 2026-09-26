@@ -477,17 +477,14 @@ static int
 chainfs_vnode_read(vnode_t *vn, void *buf, u64 count, u64 offset)
 {
 	chainfs_file_entry_t	entry;
-	char			*path;
-	u32			entry_block, entry_offset;
 	u32			bytes_read, to_read;
 	int			ret;
 
-	path = (char *)vn->data;
-	if (!path || !buf) {
+	if (!buf || !vn->data) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	ret = chainfs_find_file(path, &entry, &entry_block,
-	    &entry_offset);
+	ret = chainfs_read_entry_at(vn->fs_entry_block, vn->fs_entry_offset,
+	    &entry);
 	if (ret != 0) {
 		return (ret);
 	}
@@ -504,8 +501,8 @@ chainfs_vnode_read(vnode_t *vn, void *buf, u64 count, u64 offset)
 	}
 
 	bytes_read = 0;
-	ret = chainfs_read_file_range(path, (u8 *)buf, to_read,
-	    (u32)offset, &bytes_read);
+	ret = chainfs_read_file_range((const char *)vn->data, (u8 *)buf,
+	    to_read, (u32)offset, &bytes_read);
 	if (ret != 0) {
 		return (ret);
 	}
@@ -518,20 +515,15 @@ static int
 chainfs_vnode_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
 {
 	chainfs_file_entry_t	entry;
-	char			*path;
-	u8			*new_data;
-	u32			entry_block, entry_offset;
-	u32			bytes_read, end_pos, new_size, old_size;
-	u32			write_off;
-	int			result, ret;
+	u32			end_pos, new_size, old_size, write_off;
+	int			ret;
 
-	path = (char *)vn->data;
-	if (!path || !buf || offset > 0xFFFFFFFFULL ||
+	if (!vn->data || !buf || offset > 0xFFFFFFFFULL ||
 	    count > 0x7FFFFFFFULL) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	ret = chainfs_find_file(path, &entry, &entry_block,
-	    &entry_offset);
+	ret = chainfs_read_entry_at(vn->fs_entry_block, vn->fs_entry_offset,
+	    &entry);
 	if (ret != 0) {
 		return (ret);
 	}
@@ -547,32 +539,19 @@ chainfs_vnode_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
 	old_size = entry.size;
 	end_pos = write_off + (u32)count;
 	new_size = (end_pos > old_size) ? end_pos : old_size;
-	if (new_size == 0) {
-		result = chainfs_write_file(path, (const u8 *)"", 0, 0);
-		return (result == 0 ? 0 : result);
-	}
 
-	new_data = (u8 *)kmem_calloc(new_size, 1);
-	if (!new_data) {
-		return (-API_ERR_NO_MEMORY);
-	}
-
-	if (old_size > 0) {
-		bytes_read = 0;
-		ret = chainfs_read_file(path, new_data, old_size,
-		    &bytes_read);
+	if (new_size != old_size) {
+		ret = chainfs_truncate((const char *)vn->data, new_size);
 		if (ret != 0) {
-			kmem_free(new_data);
 			return (ret);
 		}
 	}
-
-	memcpy(new_data + write_off, buf, (unsigned long)count);
-	result = chainfs_write_file(path, new_data, new_size, new_size);
-	kmem_free(new_data);
-
-	if (result != 0) {
-		return (result);
+	if (count != 0) {
+		ret = chainfs_write_file_range((const char *)vn->data,
+		    (const u8 *)buf, (u32)count, write_off);
+		if (ret != 0) {
+			return (ret);
+		}
 	}
 
 	vn->size = new_size;
@@ -582,29 +561,35 @@ chainfs_vnode_write(vnode_t *vn, const void *buf, u64 count, u64 offset)
 static int
 chainfs_vnode_readlink(vnode_t *vn, char *buf, size_t bufsize)
 {
-	char	*path;
+	chainfs_file_entry_t	entry;
+	int			ret;
 
-	path = (char *)vn->data;
-	if (!path || !buf || bufsize == 0) {
+	if (!vn->data || !buf || bufsize == 0) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	return (chainfs_readlink(path, buf, (u32)bufsize));
+	ret = chainfs_read_entry_at(vn->fs_entry_block, vn->fs_entry_offset,
+	    &entry);
+	if (ret != 0) {
+		return (ret);
+	}
+	if (entry.type != CHAINFS_TYPE_SYMLINK) {
+		return (-API_ERR_BAD_VALUE);
+	}
+	return (chainfs_readlink((const char *)vn->data, buf,
+	    (u32)bufsize));
 }
 
 static int
 chainfs_vnode_stat(vnode_t *vn, posix_stat_t *st)
 {
 	chainfs_file_entry_t	entry;
-	char			*path;
-	u32			entry_block, entry_offset;
 	int			ret;
 
-	path = (char *)vn->data;
-	if (!path || !st) {
+	if (!vn->data || !st) {
 		return (-API_ERR_BAD_VALUE);
 	}
-	ret = chainfs_find_file(path, &entry, &entry_block,
-	    &entry_offset);
+	ret = chainfs_read_entry_at(vn->fs_entry_block, vn->fs_entry_offset,
+	    &entry);
 	if (ret != 0) {
 		return (ret);
 	}
@@ -612,13 +597,14 @@ chainfs_vnode_stat(vnode_t *vn, posix_stat_t *st)
 	memset(st, 0, sizeof(posix_stat_t));
 	st->st_mode = vn->mode;
 	st->st_size = (s64)entry.size;
-	st->st_blksize = CHAINFS_BLOCK_SIZE;
-	st->st_blocks = (s64)((entry.size + CHAINFS_BLOCK_SIZE - 1) /
-	    CHAINFS_BLOCK_SIZE);
+	st->st_blksize = CHAINFS_CLUSTER_SIZE;
+	st->st_blocks = (s64)((entry.size + CHAINFS_CLUSTER_SIZE - 1) /
+	    CHAINFS_CLUSTER_SIZE);
 	st->st_nlink = entry.nlink;
 	st->st_uid = vn->uid;
 	st->st_gid = vn->gid;
-	st->st_ino = (u64)entry_block;
+	st->st_ino = (u64)((u64)vn->fs_entry_block << 32) |
+	    vn->fs_entry_offset;
 	vn->size = entry.size;
 	return (0);
 }
@@ -857,6 +843,8 @@ chainfs_back_lookup(const char *path)
 
 	vn->data = path_copy;
 	vn->data_owned = 1;
+	vn->fs_entry_block = entry_block;
+	vn->fs_entry_offset = entry_offset;
 	vn->size = entry.size;
 	vn->read_fn = chainfs_vnode_read;
 	vn->write_fn = chainfs_vnode_write;

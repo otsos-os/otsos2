@@ -54,7 +54,9 @@ $space %export cfsr_dir_entry
 
 #include <boot/bootloader/lib/types.h>
 
-#define CFSR_BLOCK_SIZE		512U
+#define CFSR_CLUSTER_SIZE	4096U
+#define CFSR_CLUSTER_SHIFT	12U
+#define CFSR_SECTORS_PER_CLUSTER	8U
 #define CFSR_MAGIC		0xCAFEBABEU
 #define CFSR_EOF_MARKER		0xFFFFFFFFU
 #define CFSR_FREE_BLOCK		0x00000000U
@@ -99,8 +101,9 @@ typedef struct {
 	u32		data_area_start;
 	u32		map_cached;
 	u32		max_run;
-	u8		sector[CFSR_BLOCK_SIZE];
-	u8		map[CFSR_BLOCK_SIZE];
+	u32		sectors_per_cluster;
+	u8		sector[CFSR_CLUSTER_SIZE];
+	u8		map[CFSR_CLUSTER_SIZE];
 } cfsr_volume_t;
 
 int	cfsr_probe(const void *sector);

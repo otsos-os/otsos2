@@ -2,33 +2,38 @@
 #include <boot/bootloader/lib/string.h>
 
 static int
-cfsr_sectors(cfsr_volume_t *vol, u32 block, u32 count, void *dst)
+cfsr_sectors(cfsr_volume_t *vol, u32 cluster, u32 count, void *dst)
 {
-	u32	chunk, limit;
+	u32	chunk, limit, spc;
 	u8	*out;
 
 	out = (u8 *)dst;
+	spc = vol->sectors_per_cluster;
 	limit = vol->max_run;
 	if (limit == 0) {
 		limit = 1;
 	}
 	while (count > 0) {
 		chunk = count > limit ? limit : count;
-		if (vol->read(vol->ctx, vol->base_lba + block, chunk,
-		    out) != 0) {
+		if (vol->read(vol->ctx, vol->base_lba + (u64)cluster * spc,
+		    chunk * spc, out) != 0) {
 			return (-1);
 		}
-		out += chunk * CFSR_BLOCK_SIZE;
-		block += chunk;
+		out += chunk * CFSR_CLUSTER_SIZE;
+		cluster += chunk;
 		count -= chunk;
 	}
 	return (0);
 }
 
 static int
-cfsr_sector(cfsr_volume_t *vol, u32 block, void *dst)
+cfsr_sector(cfsr_volume_t *vol, u32 cluster, void *dst)
 {
-	return (vol->read(vol->ctx, vol->base_lba + block, 1, dst));
+	u32	spc;
+
+	spc = vol->sectors_per_cluster;
+	return (vol->read(vol->ctx, vol->base_lba + (u64)cluster * spc,
+	    spc, dst));
 }
 
 static int
@@ -57,7 +62,7 @@ cfsr_next_block(cfsr_volume_t *vol, u32 block, u32 *next)
 	const u32	*entries;
 	u32		per_block, map_block, map_offset;
 
-	per_block = CFSR_BLOCK_SIZE / sizeof(u32);
+	per_block = CFSR_CLUSTER_SIZE / sizeof(u32);
 	map_block = block / per_block;
 	map_offset = block % per_block;
 	if (cfsr_map_load(vol, map_block) != 0) {
@@ -106,6 +111,7 @@ cfsr_mount(cfsr_volume_t *vol, cfsr_read_fn read, void *ctx, u64 base_lba,
 	vol->base_lba = base_lba;
 	vol->max_run = max_run != 0 ? max_run : 1;
 	vol->map_cached = CFSR_MAP_NONE;
+	vol->sectors_per_cluster = CFSR_SECTORS_PER_CLUSTER;
 
 	if (cfsr_sector(vol, 0, vol->sector) != 0) {
 		return (-1);
@@ -146,7 +152,7 @@ cfsr_find_in_dir(cfsr_volume_t *vol, u32 dir_block, const char *comp,
 	const cfsr_entry_t	*entries;
 	u32			per_block, block, i;
 
-	per_block = CFSR_BLOCK_SIZE / sizeof(cfsr_entry_t);
+	per_block = CFSR_CLUSTER_SIZE / sizeof(cfsr_entry_t);
 	for (block = 1; block < 1 + vol->file_table_blocks; block++) {
 		if (cfsr_sector(vol, block, vol->sector) != 0) {
 			return (-1);
@@ -176,7 +182,7 @@ cfsr_entry_by_index(cfsr_volume_t *vol, u32 index, cfsr_entry_t *out)
 	const cfsr_entry_t	*entries;
 	u32			per_block, block, offset;
 
-	per_block = CFSR_BLOCK_SIZE / sizeof(cfsr_entry_t);
+	per_block = CFSR_CLUSTER_SIZE / sizeof(cfsr_entry_t);
 	block = 1 + index / per_block;
 	offset = index % per_block;
 	if (block >= 1 + vol->file_table_blocks) {
@@ -281,8 +287,8 @@ cfsr_read(cfsr_volume_t *vol, const cfsr_entry_t *entry, void *dst, u32 limit,
 	block = entry->start_block;
 
 	while (remaining > 0 && block != CFSR_EOF_MARKER) {
-		needed = (remaining + CFSR_BLOCK_SIZE - 1) /
-		    CFSR_BLOCK_SIZE;
+		needed = (remaining + CFSR_CLUSTER_SIZE - 1) /
+		    CFSR_CLUSTER_SIZE;
 		run = 1;
 		last = block;
 		while (run < needed) {
@@ -296,7 +302,7 @@ cfsr_read(cfsr_volume_t *vol, const cfsr_entry_t *entry, void *dst, u32 limit,
 			run++;
 		}
 
-		full = remaining / CFSR_BLOCK_SIZE;
+		full = remaining / CFSR_CLUSTER_SIZE;
 		if (full > run) {
 			full = run;
 		}
@@ -305,8 +311,8 @@ cfsr_read(cfsr_volume_t *vol, const cfsr_entry_t *entry, void *dst, u32 limit,
 			    full, out + copied) != 0) {
 				return (-1);
 			}
-			copied += full * CFSR_BLOCK_SIZE;
-			remaining -= full * CFSR_BLOCK_SIZE;
+			copied += full * CFSR_CLUSTER_SIZE;
+			remaining -= full * CFSR_CLUSTER_SIZE;
 		}
 		if (full < run && remaining > 0) {
 			if (cfsr_sector(vol, vol->data_area_start + block +
@@ -351,7 +357,7 @@ cfsr_dir_entry(cfsr_volume_t *vol, const char *path, u32 index,
 		return (-1);
 	}
 
-	per_block = CFSR_BLOCK_SIZE / sizeof(cfsr_entry_t);
+	per_block = CFSR_CLUSTER_SIZE / sizeof(cfsr_entry_t);
 	seen = 0;
 	for (block = 1; block < 1 + vol->file_table_blocks; block++) {
 		if (cfsr_sector(vol, block, vol->sector) != 0) {

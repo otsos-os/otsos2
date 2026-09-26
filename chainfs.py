@@ -5,7 +5,7 @@ import struct
 import sys
 
 CHAINFS_MAGIC = 0xCAFEBABE
-CHAINFS_BLOCK_SIZE = 512
+CHAINFS_CLUSTER_SIZE = 4096
 CHAINFS_MAX_FILENAME = 31
 CHAINFS_EOF_MARKER = 0xFFFFFFFF
 CHAINFS_FREE_BLOCK = 0x00000000
@@ -15,7 +15,7 @@ CHAINFS_TYPE_FILE = 0
 CHAINFS_TYPE_DIR = 1
 
 SUPERBLOCK_STRUCT = struct.Struct("<6I488s")
-ENTRY_STRUCT = struct.Struct("<BB30sIII16s")
+ENTRY_STRUCT = struct.Struct("<BB30sIIII12s")
 
 
 def die(msg):
@@ -29,7 +29,7 @@ class ChainFS:
         self.fd = None
         self.sb = None
         self.data_area_start = None
-        self.entries_per_block = CHAINFS_BLOCK_SIZE // ENTRY_STRUCT.size
+        self.entries_per_cluster = CHAINFS_CLUSTER_SIZE // ENTRY_STRUCT.size
         self.current_dir_index = 0  # root index
 
     def open(self):
@@ -43,24 +43,24 @@ class ChainFS:
             self.fd.close()
             self.fd = None
 
-    def _read_sector(self, block):
-        self.fd.seek(block * CHAINFS_BLOCK_SIZE)
-        data = self.fd.read(CHAINFS_BLOCK_SIZE)
-        if len(data) != CHAINFS_BLOCK_SIZE:
-            die(f"short read at block {block}")
+    def _read_cluster(self, cluster):
+        self.fd.seek(cluster * CHAINFS_CLUSTER_SIZE)
+        data = self.fd.read(CHAINFS_CLUSTER_SIZE)
+        if len(data) != CHAINFS_CLUSTER_SIZE:
+            die(f"short read at cluster {cluster}")
         return data
 
-    def _write_sector(self, block, data):
-        if len(data) != CHAINFS_BLOCK_SIZE:
-            die("sector write size mismatch")
-        self.fd.seek(block * CHAINFS_BLOCK_SIZE)
+    def _write_cluster(self, cluster, data):
+        if len(data) != CHAINFS_CLUSTER_SIZE:
+            die("cluster write size mismatch")
+        self.fd.seek(cluster * CHAINFS_CLUSTER_SIZE)
         self.fd.write(data)
         self.fd.flush()
 
     def _load_superblock(self):
-        data = self._read_sector(0)
+        data = self._read_cluster(0)
         magic, block_count, ft_blocks, bm_blocks, total_files, root_dir_block, _ = SUPERBLOCK_STRUCT.unpack(
-            data
+            data[:512]
         )
         if magic != CHAINFS_MAGIC:
             die(f"invalid magic 0x{magic:x}, expected 0x{CHAINFS_MAGIC:x}")
@@ -86,16 +86,16 @@ class ChainFS:
         }
 
     def _entry_index_to_block_offset(self, index):
-        block = 1 + (index // self.entries_per_block)
-        offset = index % self.entries_per_block
+        block = 1 + (index // self.entries_per_cluster)
+        offset = index % self.entries_per_cluster
         return block, offset
 
     def _read_entry_by_index(self, index):
         block, offset = self._entry_index_to_block_offset(index)
-        data = self._read_sector(block)
+        data = self._read_cluster(block)
         start = offset * ENTRY_STRUCT.size
         chunk = data[start : start + ENTRY_STRUCT.size]
-        status, ftype, name_raw, size, start_block, parent_block, _ = ENTRY_STRUCT.unpack(
+        status, ftype, name_raw, size, start_block, parent_block, nlink, _ = ENTRY_STRUCT.unpack(
             chunk
         )
         name = name_raw.split(b"\x00", 1)[0].decode("utf-8", "ignore")
@@ -106,6 +106,7 @@ class ChainFS:
             "size": size,
             "start_block": start_block,
             "parent_block": parent_block,
+            "nlink": nlink,
             "entry_index": index,
             "entry_block": block,
             "entry_offset": offset,
@@ -114,7 +115,7 @@ class ChainFS:
     def _write_entry(self, entry):
         block = entry["entry_block"]
         offset = entry["entry_offset"]
-        data = bytearray(self._read_sector(block))
+        data = bytearray(self._read_cluster(block))
         name_bytes = entry["name"].encode("utf-8")[:30]
         name_bytes = name_bytes.ljust(30, b"\x00")
         packed = ENTRY_STRUCT.pack(
@@ -124,11 +125,12 @@ class ChainFS:
             entry["size"],
             entry["start_block"],
             entry["parent_block"],
-            b"\x00" * 16,
+            entry.get("nlink", 1),
+            b"\x00" * 12,
         )
         start = offset * ENTRY_STRUCT.size
         data[start : start + ENTRY_STRUCT.size] = packed
-        self._write_sector(block, bytes(data))
+        self._write_cluster(block, bytes(data))
 
     def _iter_entries(self):
         total_entries = self.sb["total_files"]
@@ -144,27 +146,27 @@ class ChainFS:
         return None
 
     def _read_block_map_entry(self, block_index):
-        entries_per_block = CHAINFS_BLOCK_SIZE // 4
-        map_block = block_index // entries_per_block
-        map_offset = block_index % entries_per_block
+        entries_per_cluster = CHAINFS_CLUSTER_SIZE // 4
+        map_block = block_index // entries_per_cluster
+        map_offset = block_index % entries_per_cluster
         if map_block >= self.sb["block_map_block_count"]:
             return None
-        sector = 1 + self.sb["file_table_block_count"] + map_block
-        data = self._read_sector(sector)
+        cluster = 1 + self.sb["file_table_block_count"] + map_block
+        data = self._read_cluster(cluster)
         start = map_offset * 4
         return struct.unpack("<I", data[start : start + 4])[0]
 
     def _write_block_map_entry(self, block_index, next_block):
-        entries_per_block = CHAINFS_BLOCK_SIZE // 4
-        map_block = block_index // entries_per_block
-        map_offset = block_index % entries_per_block
+        entries_per_cluster = CHAINFS_CLUSTER_SIZE // 4
+        map_block = block_index // entries_per_cluster
+        map_offset = block_index % entries_per_cluster
         if map_block >= self.sb["block_map_block_count"]:
             die("block map index out of range")
-        sector = 1 + self.sb["file_table_block_count"] + map_block
-        data = bytearray(self._read_sector(sector))
+        cluster = 1 + self.sb["file_table_block_count"] + map_block
+        data = bytearray(self._read_cluster(cluster))
         start = map_offset * 4
         data[start : start + 4] = struct.pack("<I", next_block)
-        self._write_sector(sector, bytes(data))
+        self._write_cluster(cluster, bytes(data))
 
     def _find_free_blocks(self, count):
         total_data_blocks = self.sb["block_count"] - self.data_area_start
@@ -261,9 +263,9 @@ class ChainFS:
         data = bytearray()
         current = entry["start_block"]
         while remaining > 0 and current != CHAINFS_EOF_MARKER:
-            sector = self.data_area_start + current
-            block_data = self._read_sector(sector)
-            take = min(remaining, CHAINFS_BLOCK_SIZE)
+            cluster = self.data_area_start + current
+            block_data = self._read_cluster(cluster)
+            take = min(remaining, CHAINFS_CLUSTER_SIZE)
             data += block_data[:take]
             remaining -= take
             if remaining > 0:
@@ -300,7 +302,7 @@ class ChainFS:
                 die("no free file entries")
 
         size = len(payload)
-        blocks_needed = (size + CHAINFS_BLOCK_SIZE - 1) // CHAINFS_BLOCK_SIZE
+        blocks_needed = (size + CHAINFS_CLUSTER_SIZE - 1) // CHAINFS_CLUSTER_SIZE
         if blocks_needed == 0:
             blocks_needed = 1
 
@@ -311,11 +313,11 @@ class ChainFS:
         remaining = size
         offset = 0
         for i, blk in enumerate(blocks):
-            chunk = payload[offset : offset + CHAINFS_BLOCK_SIZE]
-            offset += CHAINFS_BLOCK_SIZE
+            chunk = payload[offset : offset + CHAINFS_CLUSTER_SIZE]
+            offset += CHAINFS_CLUSTER_SIZE
             remaining -= len(chunk)
-            data = chunk.ljust(CHAINFS_BLOCK_SIZE, b"\x00")
-            self._write_sector(self.data_area_start + blk, data)
+            data = chunk.ljust(CHAINFS_CLUSTER_SIZE, b"\x00")
+            self._write_cluster(self.data_area_start + blk, data)
             nxt = blocks[i + 1] if i + 1 < len(blocks) else CHAINFS_EOF_MARKER
             self._write_block_map_entry(blk, nxt)
 
@@ -385,29 +387,33 @@ class ChainFS:
         entry["status"] = 0
         self._write_entry(entry)
 
-    def format(self, total_blocks, max_files):
-        entries_per_block = CHAINFS_BLOCK_SIZE // ENTRY_STRUCT.size
-        file_table_blocks = (max_files + entries_per_block - 1) // entries_per_block
+    def format(self, total_clusters, max_files):
+        entries_per_cluster = CHAINFS_CLUSTER_SIZE // ENTRY_STRUCT.size
+        file_table_clusters = (
+            max_files + entries_per_cluster - 1
+        ) // entries_per_cluster
 
-        data_blocks = total_blocks - 1 - file_table_blocks
-        map_entries_per_block = CHAINFS_BLOCK_SIZE // 4
-        block_map_blocks = (data_blocks + map_entries_per_block - 1) // map_entries_per_block
-        data_blocks = total_blocks - 1 - file_table_blocks - block_map_blocks
+        data_clusters = total_clusters - 1 - file_table_clusters
+        map_entries_per_cluster = CHAINFS_CLUSTER_SIZE // 4
+        block_map_clusters = (
+            data_clusters + map_entries_per_cluster - 1
+        ) // map_entries_per_cluster
+        data_clusters = total_clusters - 1 - file_table_clusters - block_map_clusters
 
         sb = struct.pack(
             "<6I488s",
             CHAINFS_MAGIC,
-            total_blocks,
-            file_table_blocks,
-            block_map_blocks,
+            total_clusters,
+            file_table_clusters,
+            block_map_clusters,
             max_files,
             0,
             b"\x00" * 488,
         )
-        self._write_sector(0, sb)
+        self._write_cluster(0, sb.ljust(CHAINFS_CLUSTER_SIZE, b"\x00"))
 
-        zero = b"\x00" * CHAINFS_BLOCK_SIZE
-        # root entry in first file table block
+        zero = b"\x00" * CHAINFS_CLUSTER_SIZE
+        # root entry in first file table cluster
         entries = bytearray(zero)
         root = ENTRY_STRUCT.pack(
             1,
@@ -419,19 +425,20 @@ class ChainFS:
             b"\x00" * 16,
         )
         entries[: ENTRY_STRUCT.size] = root
-        self._write_sector(1, bytes(entries))
+        self._write_cluster(1, bytes(entries))
 
-        for blk in range(2, 1 + file_table_blocks):
-            self._write_sector(blk, zero)
+        for cl in range(2, 1 + file_table_clusters):
+            self._write_cluster(cl, zero)
 
         # block map
-        map_block = struct.pack("<I", CHAINFS_FREE_BLOCK) * (
-            CHAINFS_BLOCK_SIZE // 4
+        map_entry = struct.pack("<I", CHAINFS_FREE_BLOCK) * (
+            CHAINFS_CLUSTER_SIZE // 4
         )
-        for blk in range(
-            1 + file_table_blocks, 1 + file_table_blocks + block_map_blocks
+        for cl in range(
+            1 + file_table_clusters,
+            1 + file_table_clusters + block_map_clusters,
         ):
-            self._write_sector(blk, map_block)
+            self._write_cluster(cl, map_entry)
 
         self._load_superblock()
 
