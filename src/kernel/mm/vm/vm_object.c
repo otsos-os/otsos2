@@ -79,6 +79,7 @@ $space %export vm_object_get_page, vm_object_resize
 
 #define VM_OBJECT_PAGE_SHIFT	12
 #define VM_OBJECT_PAGE_SIZE	(1ULL << VM_OBJECT_PAGE_SHIFT)
+#define VM_OBJECT_READAHEAD	8
 
 #define VM_OBJECT_PINDEX_BITS	(VM_RADIX_LEVELS * VM_RADIX_SHIFT)
 #define VM_OBJECT_SIZE_MAX	(((u64)1 << VM_OBJECT_PINDEX_BITS) << \
@@ -445,6 +446,9 @@ vm_object_get_page(vm_object_t *obj, u64 index, u64 file_offset)
 	vm_object_t	*pager_obj;
 	vm_page_t	*page;
 	u64		 phys;
+	u64		 ra_phys, ra_off;
+	u64		 ra_end;
+	u64		 i;
 
 	phys = vm_object_find_page(obj, index);
 	if (phys != 0) {
@@ -466,6 +470,25 @@ vm_object_get_page(vm_object_t *obj, u64 index, u64 file_offset)
 	if (page == NULL || vm_object_set_page(pager_obj, index, phys) != 0) {
 		vm_page_free_phys(phys);
 		return (0);
+	}
+
+	if (pager_obj->type == VM_OBJ_FILE) {
+		ra_end = index + VM_OBJECT_READAHEAD;
+		if (ra_end > pager_obj->page_count) {
+			ra_end = pager_obj->page_count;
+		}
+		for (i = index + 1; i < ra_end; i++) {
+			ra_off = file_offset + (i - index) * VM_OBJECT_PAGE_SIZE;
+			ra_phys = 0;
+			if (pager_obj->pager->getpage(pager_obj->pager, ra_off,
+			    &ra_phys) != 0 || ra_phys == 0) {
+				break;
+			}
+			if (vm_object_set_page(pager_obj, i, ra_phys) != 0) {
+				vm_page_free_phys(ra_phys);
+				break;
+			}
+		}
 	}
 	return (phys);
 }

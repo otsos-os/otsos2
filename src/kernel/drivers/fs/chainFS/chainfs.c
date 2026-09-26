@@ -1080,9 +1080,9 @@ chainfs_read_file_range(const char *filename, u8 *buffer,
 {
 	chainfs_file_entry_t	entry;
 	u32			entry_block, entry_offset;
-	u32			remaining, block_skip, intra_offset;
+	u32			remaining, block_index, intra_offset;
 	u32			current_block, copied, real_sector;
-	u32			to_copy, next_block, i;
+	u32			to_copy, next_block;
 	int			ret;
 
 	if (bytes_read == NULL || buffer == NULL) {
@@ -1108,36 +1108,29 @@ chainfs_read_file_range(const char *filename, u8 *buffer,
 		remaining = buffer_size;
 	}
 
-	block_skip = offset / CHAINFS_BLOCK_SIZE;
+	block_index = offset / CHAINFS_BLOCK_SIZE;
 	intra_offset = offset % CHAINFS_BLOCK_SIZE;
-	current_block = entry.start_block;
 
-	for (i = 0; i < block_skip; i++) {
-		if (chainfs_read_block_map_entry(current_block,
-		    &next_block) != 0) {
-			return (-API_ERR_IO);
-		}
-		if (next_block == CHAINFS_EOF_MARKER) {
-			*bytes_read = 0;
-			return (0);
-		}
-		current_block = next_block;
+	ret = cfs_seek_block(entry_block, entry_offset, entry.start_block,
+	    block_index, &current_block);
+	if (ret != 0) {
+		return (-API_ERR_IO);
 	}
 
 	copied = 0;
 	while (remaining > 0) {
-		real_sector = cfs->data_area_start +
-		    current_block;
-		cfs_sector_read(real_sector,
-		    cfs->sector_buffer);
+		real_sector = cfs->data_area_start + current_block;
+		if (cfs_sector_read(real_sector,
+		    cfs->sector_buffer) != BIO_STATUS_OK) {
+			return (-API_ERR_IO);
+		}
 
 		to_copy = CHAINFS_BLOCK_SIZE - intra_offset;
 		if (to_copy > remaining) {
 			to_copy = remaining;
 		}
 
-			memcpy(buffer + copied,
-		    cfs->sector_buffer + intra_offset,
+		memcpy(buffer + copied, cfs->sector_buffer + intra_offset,
 		    to_copy);
 
 		copied += to_copy;
@@ -1156,7 +1149,15 @@ chainfs_read_file_range(const char *filename, u8 *buffer,
 			break;
 		}
 		current_block = next_block;
+		block_index++;
 	}
+
+	/* Record where the walk stopped so the next sequential read of this
+	 * file resumes from here instead of re-walking the chain. */
+	cfs->seek_entry_block = entry_block;
+	cfs->seek_entry_offset = entry_offset;
+	cfs->seek_block_index = block_index;
+	cfs->seek_block = current_block;
 
 	*bytes_read = copied;
 	/*drivers_log("ChainFS: Read %u bytes from '%s' "

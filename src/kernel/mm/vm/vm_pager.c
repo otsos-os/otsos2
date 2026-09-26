@@ -112,7 +112,6 @@ static int
 vnode_getpage(vm_pager_t *pager, u64 offset, u64 *out_phys)
 {
 	u64	phys;
-	vnode_t	*vn;
 	int	n;
 
 	phys = vm_page_alloc_phys(0);
@@ -120,14 +119,10 @@ vnode_getpage(vm_pager_t *pager, u64 offset, u64 *out_phys)
 		return (-1);
 	}
 	memset((void *)(phys + DMAP_BASE), 0, PAGE_SIZE);
-	if (pager->path[0] != '\0') {
-		vn = NULL;
-		if (vfs_resolve(pager->path, &vn) == 0 && vn != NULL) {
-			n = vnode_read(vn, (void *)(phys + DMAP_BASE), PAGE_SIZE,
-			    offset);
-			vnode_release(vn);
-			(void)n;
-		}
+	if (pager->vn != NULL) {
+		n = vnode_read(pager->vn, (void *)(phys + DMAP_BASE),
+		    PAGE_SIZE, offset);
+		(void)n;
 	}
 	*out_phys = phys;
 	return (0);
@@ -149,6 +144,7 @@ vm_pager_t *
 vm_pager_create_vnode(const char *path, u64 size)
 {
 	vm_pager_t *p;
+	vnode_t *vn;
 	u32 i;
 
 	p = kmem_calloc(1, sizeof(vm_pager_t));
@@ -163,6 +159,12 @@ vm_pager_create_vnode(const char *path, u64 size)
 		}
 		p->path[i] = '\0';
 		p->handle = p->path;
+	}
+
+	vn = NULL;
+	if (p->path[0] != '\0' && vfs_resolve(p->path, &vn) == 0 &&
+	    vn != NULL) {
+		p->vn = vn;
 	}
 	p->getpage = vnode_getpage;
 	p->putpage = vnode_putpage;
@@ -212,6 +214,10 @@ vm_pager_destroy(vm_pager_t *pager)
 {
 	if (pager == NULL) {
 		return;
+	}
+	if (pager->vn != NULL) {
+		vnode_release(pager->vn);
+		pager->vn = NULL;
 	}
 	kmem_free(pager);
 }

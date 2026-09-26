@@ -29,7 +29,7 @@
 $define %type u32 as 32 bit unsigned
 $define %type u64 as 64 bit unsigned
 $define %type int as 32 bit signed
-$define %type vm_pager_t as struct with type, size, handle, path, getpage, putpage, haspage
+$define %type vm_pager_t as struct with type, size, handle, vnode, path, getpage, putpage, haspage
 
 $define %func vm_pager_create_default as function with args u64
 $define %func vm_pager_create_vnode as function with args const char *, u64
@@ -56,11 +56,14 @@ $space %export vm_pager_create_device, vm_pager_destroy
 
 #define VM_PAGER_PATH_MAX	256
 
+struct vnode;
+
 typedef struct vm_pager {
-	u32	type;
-	u64	size;
-	void	*handle;
-	char	path[VM_PAGER_PATH_MAX];
+	u32		type;
+	u64		size;
+	void		*handle;
+	struct vnode	*vn;
+	char		path[VM_PAGER_PATH_MAX];
 	int	(*getpage)(struct vm_pager *pager, u64 offset,
 		    u64 *out_phys);
 	int	(*putpage)(struct vm_pager *pager, u64 offset,
