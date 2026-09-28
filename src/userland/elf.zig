@@ -242,6 +242,27 @@ pub export fn elf_parse(data: *anyopaque, size: u64, info: *elf_info_t) elf_resu
 }
 
 
+fn page_is_exec(info: *const elf_info_t, load_base: u64, page: u64) bool {
+    var i: u16 = 0;
+    while (i < info.header.e_phnum) : (i += 1) {
+        const phdr = &info.phdrs[i];
+        if (phdr.p_type != PT_LOAD) {
+            continue;
+        }
+        if ((phdr.p_flags & PF_X) == 0) {
+            continue;
+        }
+        const seg_start = phdr.p_vaddr + load_base;
+        const seg_end = seg_start + phdr.p_memsz;
+        const page_mask: u64 = PAGE_SIZE - 1;
+        const p_start = seg_start & ~page_mask;
+        if (page >= p_start and page < seg_end) {
+            return true;
+        }
+    }
+    return false;
+}
+
 fn load_segments(data: *anyopaque, info: *const elf_info_t, load_base: u64) bool {
     var i: u16 = 0;
     while (i < info.header.e_phnum) : (i += 1) {
@@ -264,11 +285,6 @@ fn load_segments(data: *anyopaque, info: *const elf_info_t, load_base: u64) bool
             phdr.p_flags,
         );
 
-        var page_flags: u64 = PTE_PRESENT | PTE_USER | PTE_RW;
-        if ((phdr.p_flags & PF_X) == 0) {
-            page_flags |= PTE_NX;
-        }
-
         const page_mask: u64 = PAGE_SIZE - 1;
         const page_start = vaddr & ~page_mask;
         const page_end = (vaddr + memsz + PAGE_SIZE - 1) & ~page_mask;
@@ -279,12 +295,6 @@ fn load_segments(data: *anyopaque, info: *const elf_info_t, load_base: u64) bool
             if (existing_phys != 0) {
                 const existing_flags = pmap_extract_flags(page);
                 if ((existing_flags & PTE_USER) != 0) {
-                    var combined_flags = existing_flags | page_flags | PTE_USER | PTE_PRESENT;
-                    const exec_ok = ((existing_flags & PTE_NX) == 0) or ((phdr.p_flags & PF_X) != 0);
-                    if (exec_ok) {
-                        combined_flags &= ~PTE_NX;
-                    }
-                    pmap_enter(page, existing_phys, combined_flags);
                     continue;
                 }
             }
@@ -296,21 +306,31 @@ fn load_segments(data: *anyopaque, info: *const elf_info_t, load_base: u64) bool
             }
             _ = memset(phys_to_ptr(phys_page), 0, u64_to_usize(PAGE_SIZE));
 
-            pmap_enter(page, phys_page, page_flags);
+            pmap_enter(page, phys_page, PTE_PRESENT | PTE_USER | PTE_RW);
         }
 
         const base = data_as_bytes(data);
         const src = base + u64_to_usize(offset);
-        const dst: [*]u8 = @ptrFromInt(u64_to_usize(vaddr));
-
         var j: u64 = 0;
         while (j < filesz) : (j += 1) {
-            dst[u64_to_usize(j)] = src[u64_to_usize(j)];
+            const va = vaddr + j;
+            const phys = pmap_extract(va);
+            if (phys == 0) {
+                continue;
+            }
+            const dst: [*]u8 = @ptrCast(phys_to_ptr(phys));
+            dst[0] = src[u64_to_usize(j)];
         }
 
         j = filesz;
         while (j < memsz) : (j += 1) {
-            dst[u64_to_usize(j)] = 0;
+            const va = vaddr + j;
+            const phys = pmap_extract(va);
+            if (phys == 0) {
+                continue;
+            }
+            const dst: [*]u8 = @ptrCast(phys_to_ptr(phys));
+            dst[0] = 0;
         }
 
         page = page_start;
@@ -319,13 +339,9 @@ fn load_segments(data: *anyopaque, info: *const elf_info_t, load_base: u64) bool
             if (phys == 0) {
                 continue;
             }
-            const existing_flags = pmap_extract_flags(page);
 
-            var combined_flags = existing_flags | (page_flags & (PTE_PRESENT | PTE_USER | PTE_RW));
-            const exec_ok = ((existing_flags & PTE_NX) == 0) or ((phdr.p_flags & PF_X) != 0);
-            if (exec_ok) {
-                combined_flags &= ~PTE_NX;
-            } else {
+            var combined_flags = PTE_PRESENT | PTE_USER | PTE_RW;
+            if (!page_is_exec(info, load_base, page)) {
                 combined_flags |= PTE_NX;
             }
             pmap_enter(page, phys, combined_flags);
@@ -396,10 +412,15 @@ fn map_elf_headers(data: *anyopaque, info: *const elf_info_t, load_base: u64) bo
     }
 
     const base = data_as_bytes(data);
-    const dst: [*]u8 = @ptrFromInt(u64_to_usize(header_vaddr));
     var j: u64 = 0;
     while (j < fl.p_offset) : (j += 1) {
-        dst[u64_to_usize(j)] = base[u64_to_usize(j)];
+        const va = header_vaddr + j;
+        const phys = pmap_extract(va);
+        if (phys == 0) {
+            continue;
+        }
+        const dst: [*]u8 = @ptrCast(phys_to_ptr(phys));
+        dst[0] = base[u64_to_usize(j)];
     }
     return true;
 }
