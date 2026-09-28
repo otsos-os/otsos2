@@ -77,7 +77,7 @@ $define %func chainfs_live_boot as function with args void
 $space %internal cfs_sector_read, cfs_sector_write
 $space %internal cfs_sectors_read, cfs_sectors_write
 $space %internal cfs_cluster_read, cfs_cluster_write
-$space %internal cfs_name_eq, cfs_file_table_flush, cfs_map_load, cfs_map_flush
+$space %internal cfs_name_eq, cfs_entry_at, cfs_file_table_flush, cfs_map_load, cfs_map_flush
 $space %internal read_entry_by_index, split_path, chainfs_live_boot
 $space %export chainfs_split_parent, chainfs_read_entry_at
 $space %export chainfs_init, chainfs_root_disk, chainfs_format
@@ -722,11 +722,21 @@ chainfs_find_file(const char *filename, chainfs_file_entry_t *entry,
 	    cfs->current_dir_block, filename, entry,
 	    entry_block, entry_offset));
 }
+static chainfs_file_entry_t *
+cfs_entry_at(u32 i)
+{
+	u32	cluster;
+	u32	offset;
+
+	cluster = i / cfs->entries_per_cluster;
+	offset = i % cfs->entries_per_cluster;
+	return ((chainfs_file_entry_t *)(cfs->file_table +
+	    (u64)cluster * CHAINFS_CLUSTER_SIZE) + offset);
+}
 
 int
 chainfs_find_free_file_entry(u32 *entry_block, u32 *entry_offset)
 {
-	chainfs_file_entry_t	*entries;
 	u32			total_slots, i;
 
 	if (cfs->superblock.magic != CHAINFS_MAGIC) {
@@ -742,10 +752,9 @@ chainfs_find_free_file_entry(u32 *entry_block, u32 *entry_offset)
 	if (total_slots > cfs->superblock.total_files) {
 		total_slots = cfs->superblock.total_files;
 	}
-	entries = (chainfs_file_entry_t *)cfs->file_table;
 
 	for (i = 0; i < total_slots; i++) {
-		if (entries[i].status == 0) {
+		if (cfs_entry_at(i)->status == 0) {
 			*entry_block = 1 + i / cfs->entries_per_cluster;
 			*entry_offset = i % cfs->entries_per_cluster;
 			return (0);
@@ -1901,7 +1910,6 @@ static int
 read_entry_by_index(u32 index, chainfs_file_entry_t *entry,
     u32 *block, u32 *offset)
 {
-	chainfs_file_entry_t	*entries;
 	u32			b, o;
 
 	if (index >= cfs->superblock.total_files ||
@@ -1912,8 +1920,7 @@ read_entry_by_index(u32 index, chainfs_file_entry_t *entry,
 	b = 1 + (index / cfs->entries_per_cluster);
 	o = index % cfs->entries_per_cluster;
 
-	entries = (chainfs_file_entry_t *)cfs->file_table;
-	*entry = entries[index];
+	*entry = *cfs_entry_at(index);
 	if (block) {
 		*block = b;
 	}
@@ -2010,7 +2017,6 @@ int
 chainfs_find_in_directory(u32 dir_block, const char *name,
     chainfs_file_entry_t *entry, u32 *entry_block, u32 *entry_offset)
 {
-	chainfs_file_entry_t	*entries;
 	u32			total_slots, i;
 	int			block;
 
@@ -2024,13 +2030,12 @@ chainfs_find_in_directory(u32 dir_block, const char *name,
 	if (total_slots > cfs->superblock.total_files) {
 		total_slots = cfs->superblock.total_files;
 	}
-	entries = (chainfs_file_entry_t *)cfs->file_table;
 
 	for (i = 0; i < total_slots; i++) {
-		if (entries[i].status == 1 &&
-		    entries[i].parent_block == dir_block &&
-		    cfs_name_eq(entries[i].name, name)) {
-			*entry = entries[i];
+		if (cfs_entry_at(i)->status == 1 &&
+		    cfs_entry_at(i)->parent_block == dir_block &&
+		    cfs_name_eq(cfs_entry_at(i)->name, name)) {
+			*entry = *cfs_entry_at(i);
 			block = 1 + (int)(i / cfs->entries_per_cluster);
 			*entry_block = (u32)block;
 			*entry_offset = i % cfs->entries_per_cluster;
@@ -2111,6 +2116,7 @@ chainfs_mkdir(const char *path)
 	u32			parent_block;
 	u32			existing_block, existing_offset;
 	u32			entry_block, entry_offset;
+	u32			i;
 	chainfs_file_entry_t	*entries;
 	int			ret;
 
@@ -2149,6 +2155,9 @@ chainfs_mkdir(const char *path)
 
 	entries[entry_offset].status = 1;
 	entries[entry_offset].type = CHAINFS_TYPE_DIR;
+	for (i = 0; i < 30; i++) {
+		entries[entry_offset].name[i] = 0;
+	}
 	strcpy(entries[entry_offset].name, dir_name);
 	entries[entry_offset].size = 0;
 	entries[entry_offset].start_block = 0;
@@ -2206,7 +2215,6 @@ chainfs_list_dir_range(const char *path, u32 start,
     u32 *total_count)
 {
 	chainfs_file_entry_t	dir_entry;
-	chainfs_file_entry_t	*entries;
 	u32			dir_block, dir_offset;
 	u32			total_slots, i;
 	u32			found, seen;
@@ -2255,17 +2263,16 @@ chainfs_list_dir_range(const char *path, u32 start,
 	if (total_slots > cfs->superblock.total_files) {
 		total_slots = cfs->superblock.total_files;
 	}
-	entries = (chainfs_file_entry_t *)cfs->file_table;
 
 	for (i = 0; i < total_slots; i++) {
 		if (total_count == NULL && max_files != 0 &&
 		    found >= max_files) {
 			break;
 		}
-		if (entries[i].status == 1 &&
-		    entries[i].parent_block == dir_block) {
+		if (cfs_entry_at(i)->status == 1 &&
+		    cfs_entry_at(i)->parent_block == dir_block) {
 			if (seen >= start && found < max_files) {
-				files[found] = entries[i];
+				files[found] = *cfs_entry_at(i);
 				found++;
 			}
 			seen++;
@@ -2337,6 +2344,7 @@ chainfs_create_socket(const char *path)
 	u32			parent_block;
 	u32			existing_block, existing_offset;
 	u32			entry_block, entry_offset;
+	u32			i;
 	chainfs_file_entry_t	*entries;
 	int			ret;
 
@@ -2369,6 +2377,9 @@ chainfs_create_socket(const char *path)
 
 	entries[entry_offset].status = 1;
 	entries[entry_offset].type = CHAINFS_TYPE_SOCK;
+	for (i = 0; i < 30; i++) {
+		entries[entry_offset].name[i] = 0;
+	}
 	strcpy(entries[entry_offset].name, sock_name);
 	entries[entry_offset].size = 0;
 	entries[entry_offset].start_block = 0;

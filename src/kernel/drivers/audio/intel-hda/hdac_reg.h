@@ -1,0 +1,260 @@
+/*
+ * Copyright (c) 2026, otsos team
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ * this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/* !DEFINES!
+
+$define %type u8 as 8 bit unsigned
+$define %type u16 as 16 bit unsigned
+$define %type u32 as 32 bit unsigned
+$define %type u64 as 64 bit unsigned
+$define %type hda_bdl_entry_t as one buffer descriptor list entry
+
+$const HDAC_GCTL as global control register offset
+$const HDAC_GCAP as global capabilities register offset
+$const HDAC_INTCTL as interrupt control register offset
+$const HDAC_INTSTS as interrupt status register offset
+$const HDAC_CORB* as CORB register offsets
+$const HDAC_RIRB* as RIRB register offsets
+$const HDAC_DPLBASE as DMA position lower base offset
+$const HDAC_DPUBASE as DMA position upper base offset
+$const HDAC_SD_BASE as first stream descriptor offset
+$const HDAC_SD_STRIDE as stride between stream descriptors
+$const HDAC_SD_* as per-stream register offsets within a descriptor
+$const HDAC_SDCTL_* as stream control bits
+$const HDAC_SDSTS_* as stream status bits
+$const HDAC_BDL_ENTRY_SIZE as byte size of one BDL entry
+$const HDAC_MAX_STREAMS as number of stream descriptors (0..29)
+$const HDAC_MAJORVER as major version reported by controller
+
+*/
+
+/* !SPACE!
+
+$space %none
+
+*/
+
+#ifndef KERNEL_DRIVERS_AUDIO_INTEL_HDA_HDAC_REG_H
+#define KERNEL_DRIVERS_AUDIO_INTEL_HDA_HDAC_REG_H
+
+#include <mlibc/mlibc.h>
+
+#define	HDAC_GCAP		0x00
+#define	HDAC_VMIN		0x02
+#define	HDAC_VMAJ		0x03
+#define	HDAC_GCTL		0x08
+#define	HDAC_WAKEEN		0x0C
+#define	HDAC_STATESTS		0x0E
+#define	HDAC_GSTS		0x10
+#define	HDAC_OUTPAY		0x04
+#define	HDAC_INPAY		0x06
+#define	HDAC_INTCTL		0x20
+#define	HDAC_INTSTS		0x24
+#define	HDAC_WALCLK		0x30
+#define	HDAC_SSYNC		0x38
+#define	HDAC_CORBLBASE		0x40
+#define	HDAC_CORBUBASE		0x44
+#define	HDAC_CORBWP		0x48
+#define	HDAC_CORBRP		0x4A
+#define	HDAC_CORBCTL		0x4C
+#define	HDAC_CORBSTS		0x4D
+#define	HDAC_CORBSIZE		0x4E
+#define	HDAC_RIRBLBASE		0x50
+#define	HDAC_RIRBUBASE		0x54
+#define	HDAC_RIRBWP		0x58
+#define	HDAC_RINTCNT		0x5A
+#define	HDAC_RIRBCTL		0x5C
+#define	HDAC_RIRBSTS		0x5D
+#define	HDAC_RIRBSIZE		0x5E
+#define	HDAC_ICOI		0x60
+#define	HDAC_ICII		0x64
+#define	HDAC_ICIS		0x68
+#define	HDAC_DPLBASE		0x70
+#define	HDAC_DPUBASE		0x74
+#define	HDAC_GCTL_CRST		0x00000001U
+#define	HDAC_GCTL_FCNTRL	0x00000002U
+#define	HDAC_GCTL_UNSOL		0x00000100U
+#define	HDAC_INTCTL_GIE		0x80000000U
+#define	HDAC_INTCTL_CIE		0x40000000U
+#define	HDAC_INTCTL_SIE_MASK	0x3FFFFFFFU
+#define	HDAC_INTSTS_GIS		0x80000000U
+#define	HDAC_INTSTS_CIS		0x40000000U
+#define	HDAC_INTSTS_SIS_MASK	0x3FFFFFFFU
+#define	HDAC_CORBCTL_RUN	0x02
+#define	HDAC_CORBCTL_CMEIE	0x01
+#define	HDAC_CORBSTS_CMEI	0x01
+#define	HDAC_CORBSIZE_CAP_SHIFT	4
+#define	HDAC_CORBSIZE_ENTRIES_2	0x00
+#define	HDAC_CORBSIZE_ENTRIES_16	0x01
+#define	HDAC_CORBSIZE_ENTRIES_256	0x02
+#define	HDAC_RIRBCTL_RINTL	0x01	
+#define	HDAC_RIRBCTL_RIRBDMAEN	0x02	
+#define	HDAC_RIRBCTL_RIRBOIC	0x04	
+#define	HDAC_RIRBSTS_RINTFL	0x01	
+#define	HDAC_RIRBSTS_RIRBOIS	0x04	
+#define	HDAC_RIRBSTS_MASK	(HDAC_RIRBSTS_RINTFL | HDAC_RIRBSTS_RIRBOIS)
+#define	HDAC_RIRBSIZE_CAP_SHIFT	4
+#define	HDAC_RIRBSIZE_ENTRIES_2	0x00
+#define	HDAC_RIRBSIZE_ENTRIES_16	0x01
+#define	HDAC_RIRBSIZE_ENTRIES_256	0x02
+#define	HDAC_RIRB_RESPONSE_EX_MASK	0x0000003FU
+#define	HDAC_RIRB_RESPONSE_EX_SOL	0x00000010U
+#define	HDAC_RIRB_RESPONSE_EX_UNSOL	0x00000020U
+#define	HDAC_RIRB_RESPONSE_EX_MASKED	0x00000030U
+#define	HDAC_SD_BASE		0x80
+#define	HDAC_SD_STRIDE		0x20
+#define	HDAC_MAX_STREAMS	30
+#define	HDAC_MAX_INSTREAMS	16
+#define	HDAC_MAX_OUTSTREAMS	16
+#define	HDAC_SD_CTL		0x00
+#define	HDAC_SD_STS		0x03
+#define	HDAC_SD_LPIB		0x04
+#define	HDAC_SD_CBL		0x08
+#define	HDAC_SD_LVI		0x0C
+#define	HDAC_SD_FIFOW		0x0E
+#define	HDAC_SD_FIFOS		0x10
+#define	HDAC_SD_FMT		0x12
+#define	HDAC_SD_BDPL		0x18
+#define	HDAC_SD_BDPL_BASE	0x18
+#define	HDAC_SD_BDPU_BASE	0x1C
+#define	HDAC_SDCTL_SRST		0x000001U
+#define	HDAC_SDCTL_RUN		0x000002U
+#define	HDAC_SDCTL_IOCE		0x000004U
+#define	HDAC_SDCTL_FEIE		0x000008U
+#define	HDAC_SDCTL_DEIE		0x000010U
+#define	HDAC_SDCTL_STRIPE_MASK	0x000300U
+#define	HDAC_SDCTL_STRIPE_SHIFT	8
+#define	HDAC_SDCTL_TP_MASK	0x000C00U
+#define	HDAC_SDCTL_TP_SHIFT	10
+#define	HDAC_SDCTL_DIR		0x001000U
+#define	HDAC_SDCTL_STRM_MASK	0x300000U
+#define	HDAC_SDCTL_STRM_SHIFT	20
+#define	HDAC_SDSTS_BCIS		0x04
+#define	HDAC_SDSTS_FIFOE	0x08
+#define	HDAC_SDSTS_DESE		0x10
+#define	HDAC_SDSTS_FIFOR	0x20
+#define	HDAC_SDSTS_MASK		(HDAC_SDSTS_BCIS | HDAC_SDSTS_FIFOE | 				    HDAC_SDSTS_DESE | HDAC_SDSTS_FIFOR)
+#define	HDAC_SDFMT_BASE_MASK	0x0001U
+#define	HDAC_SDFMT_BASE_44K	0x0000U
+#define	HDAC_SDFMT_MULT_MASK	0x000EU
+#define	HDAC_SDFMT_MULT_NO	0x0000U
+#define	HDAC_SDFMT_MULT_2	0x0002U
+#define	HDAC_SDFMT_MULT_3	0x0004U
+#define	HDAC_SDFMT_MULT_4	0x0006U
+#define	HDAC_SDFMT_DIV_MASK	0x0070U
+#define	HDAC_SDFMT_DIV_NO	0x0000U
+#define	HDAC_SDFMT_DIV_2	0x0010U
+#define	HDAC_SDFMT_DIV_3	0x0020U
+#define	HDAC_SDFMT_DIV_4	0x0030U
+#define	HDAC_SDFMT_BITS_MASK	0x0380U
+#define	HDAC_SDFMT_BITS_8	0x0000U
+#define	HDAC_SDFMT_BITS_16	0x0080U
+#define	HDAC_SDFMT_BITS_20	0x0100U
+#define	HDAC_SDFMT_BITS_24	0x0180U
+#define	HDAC_SDFMT_BITS_32	0x0200U
+#define	HDAC_SDFMT_CHAN_MASK	0xF000U
+#define	HDAC_SDFMT_CHAN_SHIFT	12
+#define	HDAC_ICOI_ICB		0x00000001U
+#define	HDAC_ICII_BUSY		0x00000001U
+#define	HDAC_ICIS_RESP_VALID	0x00000002U
+#define	HDAC_VERB_ID_MASK	0x00000FFFU
+#define	HDAC_VERB_ID_SHIFT	20
+#define	HDAC_BDL_ENTRY_SIZE	16
+#define	HDAC_BDL_IOC		0x01
+
+typedef struct hda_bdl_entry {
+	u64	address;
+	u32	length;
+	u32	ioc;
+} __attribute__((packed)) hda_bdl_entry_t;
+
+_Static_assert(sizeof(hda_bdl_entry_t) == HDAC_BDL_ENTRY_SIZE,
+    "HDA BDL entry must be exactly 16 bytes");
+
+#define	HDAC_MAJORVER		1
+#define	HDAC_VERB_GET_PARAMETER		0xF00
+#define	HDAC_VERB_GET_SUBSYS_ID		0xF20
+#define	HDAC_VERB_SET_POWER		0x705
+#define	HDAC_VERB_GET_POWER		0xF05
+#define	HDAC_VERB_GET_CONNLIST		0xF02
+#define	HDAC_VERB_GET_CONNSEL		0xF01
+#define	HDAC_VERB_SET_CONNSEL		0x701
+#define	HDAC_VERB_GET_PIN_SENSE		0xF09
+#define	HDAC_VERB_GET_CONFIG_DEFAULT	0xF1C
+#define	HDAC_VERB_SET_CONFIG_DEFAULT	0x71C
+#define	HDAC_VERB_GET_PIN_WIDGET_CTRL	0xF07
+#define	HDAC_VERB_SET_PIN_WIDGET_CTRL	0x707
+#define	HDAC_VERB_GET_AMP_GAIN_MUTE	0xB00
+#define	HDAC_VERB_SET_AMP_GAIN_MUTE	0x300
+#define	HDAC_VERB_GET_EAPD_BTLENABLE	0xF0C
+#define	HDAC_VERB_SET_EAPD_BTLENABLE	0x70C
+#define	HDAC_VERB_GET_STREAM		0xF06
+#define	HDAC_VERB_SET_STREAM		0x706
+#define	HDAC_VERB_GET_CHANNEL_STREAMID	0xF06
+#define	HDAC_VERB_SET_CHANNEL_STREAMID	0x706
+#define	HDAC_VERB_GET_PROC_STATE		0xF03
+#define	HDAC_VERB_SET_PROC_STATE		0x703
+#define	HDAC_VERB_GET_COEFF_INDEX	0xD00
+#define	HDAC_VERB_SET_COEFF_INDEX	0x500
+#define	HDAC_VERB_GET_PROC_COEF		0xC00
+#define	HDAC_VERB_SET_PROC_COEF		0x400
+#define	HDAC_VERB_GET_CONV		0xF06
+#define	HDAC_VERB_SET_CONV		0x706
+#define	HDAC_VERB_GET_BEEP_GEN		0xF0A
+#define	HDAC_VERB_SET_BEEP_GEN		0x70A
+#define	HDAC_VERB_GET_VOLUME_KNOB	0xF0F
+#define	HDAC_VERB_SET_VOLUME_KNOB	0x70F
+#define	HDAC_PIN_CTRL_HP_EN		0x80
+#define	HDAC_PIN_CTRL_OUT_EN		0x40
+#define	HDAC_PIN_CTRL_IN_EN		0x20
+#define	HDAC_PIN_CTRL_VREF_EN_MASK	0x07
+#define	HDAC_AMP_SET_LEFT		0x80
+#define	HDAC_AMP_SET_RIGHT		0x40
+#define	HDAC_AMP_SET_INPUT		0x20
+#define	HDAC_AMP_SET_OUTPUT		0x10
+#define	HDAC_AMP_SET_GAIN_MASK		0x0F
+#define	HDAC_EAPD_BTL_ENABLE		0x02
+#define	HDAC_PARAM_VENDOR_ID		0x00
+#define	HDAC_PARAM_REV_ID		0x02
+#define	HDAC_PARAM_SUB_NODE_COUNT	0x03
+#define	HDAC_PARAM_NODE_COUNT		0x04
+#define	HDAC_PARAM_FUNC_GROUP		0x05
+#define	HDAC_PARAM_STREAM		0x0B
+#define	HDAC_PARAM_PCM			0x0A
+#define	HDAC_PARAM_AUDIO_WIDGET		0x09
+#define	HDAC_PARAM_PIN_CAP		0x0C
+#define	HDAC_PARAM_IN_AMP_CAP		0x0D
+#define	HDAC_PARAM_OUT_AMP_CAP		0x12
+#define	HDAC_PARAM_CONNLIST_LEN		0x0E
+#define	HDAC_PARAM_POWER_STATE		0x0F
+#define	HDAC_PARAM_GPIO_COUNT		0x11
+#define	HDAC_PARAM_VOLUME_CAP		0x12
+#define	HDAC_GRP_AUDIO			0x01
+#define	HDAC_GRP_MODEM			0x02
+#define	HDAC_PARAM_AUDIO_GROUP		0x08
+#define	HDAC_NODE_ROOT			0x00
+
+#endif

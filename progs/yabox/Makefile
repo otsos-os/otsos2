@@ -5,22 +5,27 @@ LD ?= ld.lld
 ROOT = ../..
 NATIVE_DIR = $(ROOT)/libc/native
 LIBARCHIVE_DIR = $(ROOT)/libc/LibArchive
+LIBAUDIO_DIR = $(ROOT)/libc/LibAudio
 NATIVE_LIB = $(NATIVE_DIR)/lib/libc.a
 NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
 LIBARCHIVE = $(LIBARCHIVE_DIR)/lib/libarchive.a
+LIBAUDIO = $(LIBAUDIO_DIR)/lib/libaudio.a
 TARGET_CFLAGS ?= --target=$(TARGET)
 CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fPIE -fno-stack-protector \
 	-nostdlib -nostdinc -fno-builtin -O2 -Wall -Wextra \
-	-I$(NATIVE_DIR)/include -I$(LIBARCHIVE_DIR)/include -I.
+	-I$(NATIVE_DIR)/include -I$(LIBARCHIVE_DIR)/include \
+	-I$(LIBAUDIO_DIR)/include -I.
 LDFLAGS ?= -m elf_x86_64 -pie --oformat=elf64-x86-64 \
 	-nostdlib -dynamic-linker /lib/drld --export-dynamic
 
 TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv mmod profile lse ecat
 ARCHIVE_TOOLS = unzip
+AUDIO_TOOLS = wavplay
 COMMON = build/common.o
-OBJS = $(TOOLS:%=build/%.o) $(ARCHIVE_TOOLS:%=build/%.o)
-BINS = $(TOOLS:%=%) $(ARCHIVE_TOOLS:%=%)
+OBJS = $(TOOLS:%=build/%.o) $(ARCHIVE_TOOLS:%=build/%.o) \
+	$(AUDIO_TOOLS:%=build/%.o)
+BINS = $(TOOLS:%=%) $(ARCHIVE_TOOLS:%=%) $(AUDIO_TOOLS:%=%)
 OLD_BINS = $(BINS:%=yabox/%)
 
 .PHONY: all clean
@@ -33,6 +38,9 @@ $(NATIVE_LIB) $(NATIVE_SO) $(NATIVE_CRT0):
 $(LIBARCHIVE):
 	$(MAKE) -C $(LIBARCHIVE_DIR)
 
+$(LIBAUDIO):
+	$(MAKE) -C $(LIBAUDIO_DIR)
+
 $(TOOLS): %: build/%.o $(COMMON) $(NATIVE_SO) $(NATIVE_CRT0)
 	@echo "  LLD      $@"
 	@$(LD) $(LDFLAGS) $(NATIVE_CRT0) $< $(COMMON) $(NATIVE_SO) -o $@
@@ -40,6 +48,11 @@ $(TOOLS): %: build/%.o $(COMMON) $(NATIVE_SO) $(NATIVE_CRT0)
 $(ARCHIVE_TOOLS): %: build/%.o $(COMMON) $(LIBARCHIVE) $(NATIVE_SO) $(NATIVE_CRT0)
 	@echo "  LLD      $@"
 	@$(LD) $(LDFLAGS) $(NATIVE_CRT0) $< $(COMMON) $(LIBARCHIVE) \
+	    $(NATIVE_SO) -o $@
+
+$(AUDIO_TOOLS): %: build/%.o $(COMMON) $(LIBAUDIO) $(NATIVE_SO) $(NATIVE_CRT0)
+	@echo "  LLD      $@"
+	@$(LD) $(LDFLAGS) $(NATIVE_CRT0) $< $(COMMON) $(LIBAUDIO) \
 	    $(NATIVE_SO) -o $@
 
 build/%.o: %.c yabox.h
@@ -56,3 +69,4 @@ clean:
 	rm -rf build
 	rm -f $(BINS) $(OLD_BINS)
 	$(MAKE) -C $(LIBARCHIVE_DIR) clean
+	$(MAKE) -C $(LIBAUDIO_DIR) clean

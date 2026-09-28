@@ -91,7 +91,7 @@ typedef struct entity_query_ctx {
 static int
 entity_ns_kernel_reserved(const char *name)
 {
-	return (strncmp(name, "/Entity/Interface/Driver/", 25) == 0);
+	return (strncmp(name, "/Entity/Interface/", 18) == 0);
 }
 
 static int

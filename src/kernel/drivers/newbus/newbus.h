@@ -147,6 +147,7 @@ $space %export newbus_interface_ioctl_entity, newbus_interface_stat_entity
 #define	NEWBUS_PASS_STORAGE		60
 #define	NEWBUS_PASS_INPUT		70
 #define	NEWBUS_PASS_DISPLAY		80
+#define	NEWBUS_PASS_AUDIO		85
 #define	NEWBUS_PASS_NETWORK		90
 #define	NEWBUS_PASS_FILESYSTEM		100
 #define	NEWBUS_PASS_LATE		110

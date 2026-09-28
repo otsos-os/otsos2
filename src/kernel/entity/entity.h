@@ -188,6 +188,7 @@ typedef struct entity_meta_block {
 #define	ENTITY_ARCH_DRM			17
 #define	ENTITY_ARCH_PTY			18
 #define	ENTITY_ARCH_NB_DEVICE		19
+#define	ENTITY_ARCH_AUDIO		20
 #define	ENTITY_ARCH_MAX			63
 
 #define	ENTITY_STATE_ACTIVE		1

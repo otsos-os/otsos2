@@ -28,6 +28,9 @@ CFLAGS += $(DISK_DEFINES)
 include kernel/drivers/disk/nvme/nvme.mk
 CFLAGS += $(NVME_DEFINES)
 
+include kernel/audio/audio.mk
+CFLAGS += $(AUDIO_DEFINES)
+
 KERNEL_BIN = ../bin/kernel.bin
 ISO_IMAGE = ../otsos.iso
 MAKEISO = ../tools/makeiso.py
@@ -69,6 +72,7 @@ CPYTHON_BIN = $(PORTS_DIR)/cpython/cpython/python
 CPYTHON_STDLIB_ZIP = ../bin/python314.zip
 DOOM_BIN = $(PORTS_DIR)/doom/doom
 DOOM_WAD = $(PORTS_DIR)/doom/doom1.wad
+TEST_WAV = /home/booga/Загрузки/ssstik.io_1788107978308.wav
 MUSL_LDSO = $(MUSL_DIR)/lib/libc.so
 LDSO_BIN = $(PORTS_DIR)/ld-musl-x86_64.so.1
 NATIVE_LIBC = $(NATIVE_DIR)/lib/libc.a
@@ -76,7 +80,7 @@ NATIVE_CRT0 = $(NATIVE_DIR)/lib/crt0.o
 NATIVE_SO = $(NATIVE_DIR)/lib/native.so
 DLD_BIN = ../libc/LibExec/dld/drld
 YABOX_DIR = $(PROGS_DIR)/yabox
-YABOX_TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv mmod unzip profile lse ecat
+YABOX_TOOLS = ls cat touch pwd whoami rm mkdir rmdir cp mv mmod unzip profile lse ecat wavplay
 CMSEED_BIN = ../bin/cmseed
 BOOT_HIVE = ../config/hives/BOOT.hive
 KOFO_PACK = ../tools/kofo_pack.py
@@ -456,6 +460,7 @@ OBJ_NO_KSYMTAB = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UAR
       $(NEWBUS_DEVICE_O) $(NEWBUS_MODULE_O) $(NEWBUS_ROOT_O) $(NEWBUS_NEXUS_O) $(NEWBUS_PLATFORM_O) $(NEWBUS_CONFIG_O) $(NEWBUS_RESOURCE_O) $(NEWBUS_INTR_O) $(NEWBUS_POLL_O) $(NEWBUS_DEBUG_O) $(NEWBUS_INTERFACE_O) \
       $(PCI_CORE_O) $(PCI_SCAN_O) $(PCI_CONFIG_O) $(PCI_DEVICE_O) $(PCI_MSI_O) $(PCI_BAR_O) \
       $(WATCHDOG_O) $(WATCHDOG_I6300ESB_O) $(WATCHDOG_ICH_TCO_O) \
+      $(AUDIO_OBJ) \
       $(KSHELL_OBJ) \
       $(KUSR_O) $(KUSR_AUTH_O) $(CM_O) $(DRM_API_O) $(RESTRICT_O) \
       $(CRYPTO_UTIL_O) $(CRYPTO_SHA256_O) $(CRYPTO_HMAC_O) $(CRYPTO_PBKDF2_O) $(CRYPTO_RNG_O) $(CRYPTO_CHACHA20_O) \
@@ -852,7 +857,7 @@ $(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(BIOS_STAGE1
 			yes) src=$(YES_BIN);; \
 			fetch) src=$(FETCH_BIN);; \
 			sh) src=$(SHELL_BIN);; \
-			ls|cat|touch|pwd|whoami|rm|mkdir|rmdir|cp|mv|mmod|unzip|profile|lse|ecat) src=$(YABOX_DIR)/$$m;; \
+			ls|cat|touch|pwd|whoami|rm|mkdir|rmdir|cp|mv|mmod|unzip|profile|lse|ecat|wavplay) src=$(YABOX_DIR)/$$m;; \
 			oven) src=$(OVEN_BIN);; \
 			regedit) src=$(REGEDIT_BIN);; \
 			install) src=$(INSTALL_BIN);; \
@@ -880,6 +885,7 @@ $(BIOS_BOOTPACK): Makefile config.toml $(CMSEED_BIN) $(KERNEL_BIN) $(BIOS_STAGE1
 			python-stdlib) src=$(CPYTHON_STDLIB_ZIP);; \
 			doom) src=$(DOOM_BIN);; \
 			doom-wad) src=$(DOOM_WAD);; \
+			test-wav) src=$(TEST_WAV);; \
 			ld-musl) src=$(LDSO_BIN);; \
 			drld) src=$(DLD_BIN);; \
 			native-so) src=$(NATIVE_SO);; \
@@ -2000,6 +2006,10 @@ OVMF ?= /usr/share/ovmf/OVMF.fd
 run: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
 	@echo "  RUN     QEMU (UEFI)"
 	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device i6300esb -watchdog-action reset -smp 2 $(QEMU_MEM_OPTS)
+
+run_ihda: check_run_tools $(ISO_IMAGE) $(DISK_IMG)
+	@echo "  RUN     QEMU (UEFI, Intel HDA audio)"
+	@$(QEMU) -cdrom $(ISO_IMAGE) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -serial stdio -bios $(OVMF) $(QEMU_GUI_OPTS) -device intel-hda -device hda-duplex -device i6300esb -watchdog-action reset -smp 2 $(QEMU_MEM_OPTS)
 
 run_nvme_disk: check_run_tools $(DISK_IMG)
 	@echo "  RUN     QEMU (NVMe, disk)"

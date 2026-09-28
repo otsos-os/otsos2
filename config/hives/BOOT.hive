@@ -103,6 +103,10 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 		string Dest = "/bin/ecat"
 	}
 
+	key Modules.wavplay {
+		string Dest = "/bin/eavplay"
+	}
+
 	key Modules.oven {
 		string Dest = "/bin/oven"
 	}
@@ -221,6 +225,10 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 
 	key Modules.doom-wad {
 		string Dest = "/usr/share/games/doom/doom1.wad"
+	}
+
+	key Modules.test-wav {
+		string Dest = "/usr/share/music/test.wav"
 	}
 }
 
