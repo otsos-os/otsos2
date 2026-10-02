@@ -131,6 +131,8 @@ static entity_arch_block_t	entity_arch_blocks[ENTITY_MAX_ARCHETYPES];
 
 static spin_t		entity_spin = SPIN_INITIALIZER("entity", LO_ENTITY);
 
+static entity_id_t	entity_foreach_ids[ENTITY_MAX_ENTITIES];
+
 static void
 entity_trace_notify(entity_id_t id, u32 fflags)
 {
@@ -981,18 +983,18 @@ entity_foreach(u16 arch, u32 start, int (*cb)(entity_id_t id, void *ctx),
     void *ctx)
 {
 	u32	index, slot, a;
+	u32	n;
 	int	ret;
 
 	if (!cb) {
 		return (-API_ERR_BAD_VALUE);
 	}
 	spin_lock(&entity_spin);
-	ret = 0;
+	n = 0;
 	if (arch == 0 || arch > ENTITY_ARCH_MAX ||
 	    entity_arch_blocks[arch].meta == NULL) {
 		for (index = start; index < ENTITY_MAX_ENTITIES; index++) {
 			entity_meta_block_t	*block;
-			entity_id_t		id;
 
 			block = &entity_blocks[index >>
 			    ENTITY_BLOCK_SHIFT];
@@ -1003,17 +1005,9 @@ entity_foreach(u16 arch, u32 start, int (*cb)(entity_id_t id, void *ctx),
 			if (arch != 0 && block->arch[slot] != arch) {
 				continue;
 			}
-			id = entity_id_make(block->arch[slot],
-			    block->gen[slot], index);
-			ret = cb(id, ctx);
-			if (ret != 0) {
-				break;
-			}
+			entity_foreach_ids[n++] = entity_id_make(
+			    block->arch[slot], block->gen[slot], index);
 		}
-	}
-	if (ret != 0) {
-		spin_unlock(&entity_spin);
-		return (ret);
 	}
 	if (arch == 0) {
 		for (a = 1; a <= ENTITY_ARCH_MAX; a++) {
@@ -1025,20 +1019,11 @@ entity_foreach(u16 arch, u32 start, int (*cb)(entity_id_t id, void *ctx),
 			}
 			for (slot = 0; slot < entity_arch_blocks[a].count;
 			    slot++) {
-				entity_id_t	id;
-
 				if (!block->used[slot]) {
 					continue;
 				}
-				id = entity_id_make((u16)a,
-				    block->gen[slot], slot);
-				ret = cb(id, ctx);
-				if (ret != 0) {
-					break;
-				}
-			}
-			if (ret != 0) {
-				break;
+				entity_foreach_ids[n++] = entity_id_make(
+				    (u16)a, block->gen[slot], slot);
 			}
 		}
 	} else if (entity_arch_blocks[arch].meta != NULL) {
@@ -1047,19 +1032,22 @@ entity_foreach(u16 arch, u32 start, int (*cb)(entity_id_t id, void *ctx),
 		block = entity_arch_blocks[arch].meta;
 		for (slot = start; slot < entity_arch_blocks[arch].count;
 		    slot++) {
-			entity_id_t	id;
-
 			if (!block->used[slot]) {
 				continue;
 			}
-			id = entity_id_make(arch, block->gen[slot], slot);
-			ret = cb(id, ctx);
-			if (ret != 0) {
-				break;
-			}
+			entity_foreach_ids[n++] = entity_id_make(arch,
+			    block->gen[slot], slot);
 		}
 	}
 	spin_unlock(&entity_spin);
+
+	ret = 0;
+	for (index = 0; index < n; index++) {
+		ret = cb(entity_foreach_ids[index], ctx);
+		if (ret != 0) {
+			break;
+		}
+	}
 	return (ret);
 }
 
