@@ -592,6 +592,7 @@ pmap_create(void)
 	u64	*src_pml4v;
 	u64	*new_pml4;
 	u64	*new_pml4v;
+	u64	*user_pdpt;
 	int	i;
 
 	src_pml4 = (u64 *)(pmap_kernel_cr3() & PTE_ADDR_MASK);
@@ -602,6 +603,9 @@ pmap_create(void)
 	src_pml4v = pmap_table_ptr((u64)src_pml4);
 	new_pml4v = pmap_table_ptr((u64)new_pml4);
 	for (i = 0; i < 512; i++) {
+		if (i == 0) {
+			continue;
+		}
 		if (i > 0 && i < 256) {
 			continue;
 		}
@@ -610,6 +614,13 @@ pmap_create(void)
 		}
 		new_pml4v[i] = src_pml4v[i];
 	}
+
+	user_pdpt = pmap_alloc_table();
+	if (user_pdpt == NULL) {
+		pmap_free_phys_page((u64)new_pml4);
+		return (0);
+	}
+	new_pml4v[0] = (u64)user_pdpt | PTE_PRESENT | PTE_RW | PTE_USER;
 
 	return ((u64)new_pml4);
 }

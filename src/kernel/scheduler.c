@@ -414,7 +414,8 @@ scheduler_switch(registers_t *regs, int voluntary)
 		thread_set_current(next);
 		thread_unlock();
 		spin_unlock(&sched_spin);
-		if (next->proc) {
+		if (next->proc && next->proc->owns_address_space &&
+		    next->proc->cr3 != 0) {
 			pmap_load(next->proc->cr3);
 		}
 		trace_sched_switch(NULL, next, TRACE_SCHED_BOOT, regs);
@@ -445,10 +446,9 @@ scheduler_switch(registers_t *regs, int voluntary)
 		thread_unlock();
 		spin_unlock(&sched_spin);
 		trace_sched_switch(current, next, TRACE_SCHED_SLEEP, regs);
-		if (next->proc && cur_proc &&
-		    next->proc->cr3 != cur_proc->cr3) {
-			pmap_load(next->proc->cr3);
-		} else if (next->proc && !cur_proc) {
+		if (next->proc && next->proc->owns_address_space &&
+		    next->proc->cr3 != 0 &&
+		    next->proc->cr3 != pmap_get_cr3()) {
 			pmap_load(next->proc->cr3);
 		}
 		thread_load_context(next, regs);
@@ -498,10 +498,9 @@ scheduler_switch(registers_t *regs, int voluntary)
 	thread_unlock();
 	spin_unlock(&sched_spin);
 	trace_sched_switch(current, next, trace_reason, regs);
-	if (next->proc && cur_proc &&
-	    next->proc->cr3 != cur_proc->cr3) {
-		pmap_load(next->proc->cr3);
-	} else if (next->proc && !cur_proc) {
+	if (next->proc && next->proc->owns_address_space &&
+	    next->proc->cr3 != 0 &&
+	    next->proc->cr3 != pmap_get_cr3()) {
 		pmap_load(next->proc->cr3);
 	}
 

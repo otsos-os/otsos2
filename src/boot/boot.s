@@ -1654,6 +1654,9 @@ start64:
     mov es, ax
     mov fs, ax
     mov gs, ax
+    mov rsp, offset stack_top
+    mov rax, 0xFFFFFFFF80000000
+    add rsp, rax
 
     mov rdi, [multiboot_magic_val]
     mov rsi, [multiboot_info_ptr]

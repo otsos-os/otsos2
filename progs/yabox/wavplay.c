@@ -28,6 +28,7 @@
 
 $define %type audio_t as userspace handle to one opened endpoint
 $define %type audio_pcm_t as decoded PCM header for one WAV stream
+$define %type audio_endpoint_t as one enumerable audio endpoint
 $define %type size_t as native object size
 
 $define %func wavplay_file as function with args const char *, const char *
@@ -46,19 +47,25 @@ $space %export main
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <libaudio.h>
 #include "yabox.h"
 
 static int
 wavplay_file(const char *path, const char *epname)
 {
+	audio_endpoint_t	eps[4];
 	uint8_t		*data;
 	uint8_t		*pcm;
 	audio_pcm_t	pcm_hdr;
 	audio_format_t	fmt;
+	char			epbuf[AUDIO_NAME_MAX];
 	audio_t		h;
 	FILE		*fp;
 	long		len;
+	int		ep_count;
+	int		sel;
+	int		i;
 	int		code;
 	int		ret;
 
@@ -102,7 +109,26 @@ wavplay_file(const char *path, const char *epname)
 	}
 
 	if (epname == NULL || epname[0] == '\0') {
-		epname = "hda";
+		ep_count = audioEnumerate(eps,
+		    sizeof(eps) / sizeof(eps[0]));
+		if (ep_count <= 0) {
+			ybx_error("wavplay", "no audio endpoints", ENODEV);
+			free(data);
+			return (1);
+		}
+		sel = -1;
+		for (i = 0; i < ep_count; i++) {
+			if (eps[i].flow == AUDIO_FLOW_OUT) {
+				sel = i;
+				break;
+			}
+		}
+		if (sel < 0) {
+			sel = 0;
+		}
+		memcpy(epbuf, eps[sel].name, AUDIO_NAME_MAX);
+		epbuf[AUDIO_NAME_MAX - 1] = '\0';
+		epname = epbuf;
 	}
 	h = audioOpen(epname);
 	if (h < 0) {

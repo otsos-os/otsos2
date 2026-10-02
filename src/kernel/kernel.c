@@ -346,7 +346,7 @@ kernel_install_module_cb(const char *name, const char *dest, void *ctx)
 	}
 
 	if (strcmp(name, "init") == 0) {
-		c->init_mod = mod;
+		c->init_mod = (void *)(DMAP_BASE + (u64)mod);
 		c->init_sz = sz;
 	}
 

@@ -91,7 +91,8 @@ i6300esb_mmio_map(u64 base, u64 size)
 	end = (base + size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
 
 	for (addr = start; addr < end; addr += PAGE_SIZE) {
-		pmap_enter(addr, addr, PTE_RW | PTE_PCD | PTE_PWT);
+		pmap_enter(DMAP_BASE + addr, addr,
+		    PTE_RW | PTE_PCD | PTE_PWT);
 	}
 }
 
@@ -229,8 +230,9 @@ i6300esb_probe(pci_device_t *dev, const pci_match_t *match)
 	} else {
 		pci_enable_memory_space(dev);
 		i6300esb_priv.use_mmio = 1;
+		/* Access MMIO through the direct map (see i6300esb_mmio_map). */
 		i6300esb_priv.mmio_base =
-		    (volatile u32 *)(u64)bar0.base;
+		    (volatile u32 *)((u64)bar0.base + DMAP_BASE);
 		i6300esb_priv.mmio_size = bar0.size;
 		i6300esb_mmio_map(bar0.base, bar0.size);
 	}
