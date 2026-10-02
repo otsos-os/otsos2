@@ -121,18 +121,22 @@ acpi_prt_bridge_match(aml_node_t *node, void *ctx)
 	if (node->object == NULL || node->object->type != AML_TYPE_DEVICE) {
 		return (0);
 	}
-	if (aml_node_hid(node, hid, sizeof(hid)) != 0) {
-		return (0);
-	}
-	for (i = 0; i < sizeof(acpi_prt_bridge_ids) /
-	    sizeof(acpi_prt_bridge_ids[0]); i++) {
-		if (strcmp(hid, acpi_prt_bridge_ids[i]) == 0) {
-			break;
+	if (acpi_prt_integer_child(node, "_ADR", &value) == 0 &&
+	    value == 0) {
+	} else {
+		if (aml_node_hid(node, hid, sizeof(hid)) != 0) {
+			return (0);
 		}
-	}
-	if (i == sizeof(acpi_prt_bridge_ids) /
-	    sizeof(acpi_prt_bridge_ids[0])) {
-		return (0);
+		for (i = 0; i < sizeof(acpi_prt_bridge_ids) /
+		    sizeof(acpi_prt_bridge_ids[0]); i++) {
+			if (strcmp(hid, acpi_prt_bridge_ids[i]) == 0) {
+				break;
+			}
+		}
+		if (i == sizeof(acpi_prt_bridge_ids) /
+		    sizeof(acpi_prt_bridge_ids[0])) {
+			return (0);
+		}
 	}
 	bus = 0;
 	if (acpi_prt_integer_child(node, "_BBN", &value) == 0) {
@@ -368,8 +372,8 @@ acpi_prt_link_irq(aml_node_t *link, u32 index, u32 *gsi, u32 *flags)
 }
 
 static int
-acpi_prt_entry_match(aml_object_t *entry, u8 slot, u8 pin, u32 *gsi,
-    u32 *flags)
+acpi_prt_entry_match(aml_object_t *entry, u8 slot, u8 pin,
+    aml_node_t *scope, u32 *gsi, u32 *flags)
 {
 	aml_object_t	*source;
 	aml_node_t	*link;
@@ -416,7 +420,7 @@ acpi_prt_entry_match(aml_object_t *entry, u8 slot, u8 pin, u32 *gsi,
 	if (source->type == AML_TYPE_REFERENCE) {
 		link = source->u.reference.node;
 	} else if (source->type == AML_TYPE_STRING) {
-		link = aml_resolve(NULL, source->u.string.data);
+		link = aml_resolve(scope, source->u.string.data);
 	} else if (source->type == AML_TYPE_INTEGER) {
 		*gsi = (u32)index;
 		*flags = RF_SHAREABLE | RF_IRQ_GSI | RF_IRQ_LEVEL |
@@ -445,14 +449,16 @@ acpi_prt_lookup(aml_node_t *bridge, u8 slot, u8 pin, u32 *gsi, u32 *flags)
 	if (aml_evaluate(method, NULL, 0, &table) != 0) {
 		return (-1);
 	}
-	if (table->type != AML_TYPE_PACKAGE) {
-		aml_object_unref(table);
+	if (table == NULL || table->type != AML_TYPE_PACKAGE) {
+		if (table != NULL) {
+			aml_object_unref(table);
+		}
 		return (-1);
 	}
 	status = -1;
 	for (i = 0; i < table->u.package.count; i++) {
 		if (acpi_prt_entry_match(table->u.package.elements[i], slot,
-		    pin, gsi, flags) == 0) {
+		    pin, bridge->parent, gsi, flags) == 0) {
 			status = 0;
 			break;
 		}
@@ -519,6 +525,22 @@ acpi_prt_rewire(void)
 
 	if (!aml_is_initialized()) {
 		return (0);
+	}
+	{
+		aml_object_t	*arg;
+		aml_object_t	*discard;
+		aml_node_t	*pic;
+
+		pic = aml_resolve(NULL, "_PIC");
+		if (pic != NULL) {
+			arg = aml_integer_create(1);
+			discard = NULL;
+			if (arg != NULL) {
+				(void)aml_evaluate(pic, &arg, 1, &discard);
+				aml_object_unref(arg);
+			}
+			aml_object_unref(discard);
+		}
 	}
 	routed = 0;
 	count = newbus_device_count_get();

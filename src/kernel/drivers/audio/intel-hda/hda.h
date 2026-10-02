@@ -78,6 +78,14 @@ $space %export hda_miniport
 #define	HDA_PCI_CLASS			0x04
 #define	HDA_PCI_SUBCLASS		0x03
 #define	HDA_PCI_PROGIF			0x00
+#define	HDA_QUIRK_NONE			0x0U
+#define	HDA_QUIRK_STREAM_TAG_SDO	0x1U
+
+typedef struct hda_quirk {
+	u16	codec_vendor;	/* codec vendor id, HDAC_QUIRK_ANY to match */
+	u16	codec_device;	/* codec device id, HDAC_QUIRK_ANY to match */
+	u32	flags;
+} hda_quirk_t;
 
 typedef struct hda_stream {
 	u32		desc;
@@ -114,6 +122,7 @@ typedef struct hda_softc {
 	resource_t	*irq_res;
 	void		*poll_cookie;
 	u32		poll_probe_count;
+	u32		quirks;
 	pc_miniport_t	miniport;
 	struct hda_codec_graph *codec;
 	struct pc_port	*port;

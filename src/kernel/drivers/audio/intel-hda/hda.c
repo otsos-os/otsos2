@@ -51,6 +51,8 @@ $define %func hda_reset_stream as procedure with args hda_softc_t *, hda_stream_
 $define %func hda_run_stream as procedure with args hda_softc_t *, hda_stream_t *, int
 $define %func hda_codec_route_render as procedure with args hda_softc_t *, u32, const ks_format_t *
 $define %func hda_codec_format_from_ks as function with args const ks_format_t *
+$define %func hda_lookup_quirks as function with args u32
+$define %func hda_stream_tag as function with args hda_softc_t *, const hda_stream_t *
 */
 
 /* !SPACE!
@@ -61,7 +63,7 @@ $space %internal hda_poll
 $space %internal hda_miniport_probe_format, hda_miniport_create_stream
 $space %internal hda_miniport_destroy_stream, hda_miniport_set_state
 $space %internal hda_miniport_position, hda_codec_route_render
-$space %internal hda_codec_format_from_ks
+$space %internal hda_codec_format_from_ks, hda_lookup_quirks, hda_stream_tag
 $space %export hda_attach, hda_detach, hda_miniport
 $space %export hda_reg_read32, hda_reg_write32
 
@@ -126,48 +128,49 @@ hda_reg_write8(hda_softc_t *sc, u32 off, u8 val)
 	}
 }
 
+static u32	hda_codec_format_from_ks(const ks_format_t *fmt);
 
 static u32
 hda_format_to_sdfmt(const ks_format_t *fmt)
 {
-	u32	val;
+	return (hda_codec_format_from_ks(fmt));
+}
 
-	val = HDAC_SDFMT_BASE_44K | HDAC_SDFMT_MULT_NO | HDAC_SDFMT_DIV_NO;
-	switch (fmt->rate) {
-	case 44100:
-		val = HDAC_SDFMT_BASE_44K | HDAC_SDFMT_MULT_NO |
-		    HDAC_SDFMT_DIV_NO;
-		break;
-	case 48000:
-		val = HDAC_SDFMT_MULT_NO | HDAC_SDFMT_DIV_NO;
-		break;
-	case 96000:
-		val = HDAC_SDFMT_MULT_2 | HDAC_SDFMT_DIV_NO;
-		break;
-	case 192000:
-		val = HDAC_SDFMT_MULT_4 | HDAC_SDFMT_DIV_NO;
-		break;
-	default:
-		break;
+
+
+static const hda_quirk_t hda_quirk_table[] = {
+	{ 0x1af4, 0x0022, HDA_QUIRK_NONE },		/* QEMU intel-hda */
+	{ 0x8384, 0xffff, HDA_QUIRK_STREAM_TAG_SDO },	/* VB SigmaTel */
+};
+
+static u32
+hda_lookup_quirks(u32 codec_vendor)
+{
+	u32	i;
+
+	for (i = 0; i < sizeof(hda_quirk_table) / sizeof(hda_quirk_table[0]);
+	    i++) {
+		const hda_quirk_t	*q;
+
+		q = &hda_quirk_table[i];
+		if ((q->codec_vendor == 0xffff ||
+		    q->codec_vendor == (u16)(codec_vendor >> 16)) &&
+		    (q->codec_device == 0xffff ||
+		    q->codec_device == (u16)codec_vendor)) {
+			return (q->flags);
+		}
 	}
-	switch (fmt->container) {
-	case KS_DATARANGE_PCM_S8:
-	case KS_DATARANGE_PCM_U8:
-		val |= HDAC_SDFMT_BITS_8;
-		break;
-	case KS_DATARANGE_PCM_S16LE:
-		val |= HDAC_SDFMT_BITS_16;
-		break;
-	case KS_DATARANGE_PCM_S24LE:
-		val |= HDAC_SDFMT_BITS_24;
-		break;
-	case KS_DATARANGE_PCM_S32LE:
-		val |= HDAC_SDFMT_BITS_32;
-		break;
-	default:
-		break;
+	return (HDA_QUIRK_NONE);
+}
+
+static u32
+hda_stream_tag(hda_softc_t *sc, const hda_stream_t *stream)
+{
+	if ((sc->quirks & HDA_QUIRK_STREAM_TAG_SDO) != 0 &&
+	    stream->direction == 0) {
+		return ((u32)stream->desc - HDA_OUT_DESC_LO);
 	}
-	return (val);
+	return ((u32)stream->desc + 1);
 }
 
 
@@ -327,7 +330,7 @@ hda_stream_setup(hda_softc_t *sc, hda_stream_t *stream)
 	if (stream->direction != 0) {
 		ctl |= HDAC_SDCTL_DIR;
 	}
-	ctl |= ((stream->desc + 1) << HDAC_SDCTL_STRM_SHIFT) &
+	ctl |= (hda_stream_tag(sc, stream) << HDAC_SDCTL_STRM_SHIFT) &
 	    HDAC_SDCTL_STRM_MASK;
 	ctl |= HDAC_SDCTL_IOCE;
 	hda_reg_write32(sc, base + HDAC_SD_CTL, ctl);
@@ -635,9 +638,12 @@ hda_miniport_set_state(const pc_miniport_t *mp, mp_stream_t *handle,
 		return (PC_FAILURE_NOT_SUPPORTED);
 	}
 	if (state == KS_STATE_RUN) {
+		if (hda_stream_setup(sc, stream) != 0) {
+			return (PC_FAILURE_NO_RESOURCE);
+		}
 		if (stream->direction == 0) {
 			hda_codec_route_render(sc,
-			    (u32)(stream->desc + 1), &stream->format);
+			    hda_stream_tag(sc, stream), &stream->format);
 		}
 		hda_run_stream(sc, stream, 1);
 	} else if (state == KS_STATE_STOP ||
@@ -911,22 +917,13 @@ hda_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 		goto fail;
 	}
 
-	rid = PCI_MSI_RID;
-	sc->irq_res = bus_alloc_resource(sc->dev, SYS_RES_IRQ, &rid,
-	    0, 1, RF_ACTIVE | RF_SHAREABLE);
+	rid = 0;
+	sc->irq_res = bus_alloc_resource_any(sc->dev, SYS_RES_IRQ, &rid,
+	    RF_ACTIVE | RF_SHAREABLE);
 	if (sc->irq_res != NULL) {
 		if (bus_setup_intr(sc->dev, sc->irq_res, hda_intr, sc,
 		    &sc->intr_cookie) != 0) {
 			sc->intr_cookie = NULL;
-		}
-	}
-	if (sc->intr_cookie == NULL) {
-		rid = 0;
-		sc->irq_res = bus_alloc_resource(sc->dev, SYS_RES_IRQ,
-		    &rid, 0, 1, RF_ACTIVE);
-		if (sc->irq_res != NULL) {
-			bus_setup_intr(sc->dev, sc->irq_res, hda_intr, sc,
-			    &sc->intr_cookie);
 		}
 	}
 
@@ -984,6 +981,9 @@ hda_pci_probe(pci_device_t *pdev, const pci_match_t *match)
 			sc->port = port;
 			sc->ksdev = ksdev;
 			sc->codec_count++;
+			sc->quirks = hda_lookup_quirks(codec->vendor_id);
+			drivers_log("[HDA] codec vendor=0x%08x "
+			    "quirks=0x%x\n", codec->vendor_id, sc->quirks);
 			drivers_log("[HDA] publishing device via sysaudio\n");
 			sysaudio_publish_device(ksdev, port);
 		}

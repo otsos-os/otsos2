@@ -360,11 +360,24 @@ hda_bus_scan_codecs(hda_bus_t *bus)
 {
 	u16	mask;
 	u8	addr;
+	u32	resp;
+	u32	verb;
 
 	if (bus == NULL) {
 		return (0);
 	}
 	mask = hda_bus_reg_read16(bus, HDAC_STATESTS);
+	for (addr = 0; addr < HDA_BUS_MAX_CODECS; addr++) {
+		resp = 0xFFFFFFFFU;
+		verb = ((u32)addr << HDA_CODEC_ADDR_SHIFT) |
+		    (0u << 20) | (HDAC_VERB_GET_PARAMETER << 8) |
+		    HDAC_PARAM_VENDOR_ID;
+		(void)hda_bus_command(bus, verb, &resp);
+		drivers_log("[HDA] probe addr=%u vaddr=0x%08x\n", addr, resp);
+		if (resp != 0 && resp != 0xFFFFFFFFU) {
+			mask |= (1u << addr);
+		}
+	}
 	bus->codec_mask = mask;
 	drivers_log("[HDA] STATESTS=0x%04x codec mask=0x%04x\n",
 	    hda_bus_reg_read16(bus, HDAC_STATESTS), mask);

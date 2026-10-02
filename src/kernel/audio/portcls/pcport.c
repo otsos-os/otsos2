@@ -196,6 +196,10 @@ pc_port_start(pc_port_t *port, pc_stream_t *stream)
 		return (-1);
 	}
 	next = KS_STATE_RUN;
+	ks_ring_reset(&stream->ring);
+	if (stream->ring.base != NULL) {
+		memset(stream->ring.base, 0, (size_t)stream->ring.length);
+	}
 	if (port->mp.set_state(&port->mp, stream->handle, next) != 0) {
 		return (-1);
 	}
@@ -203,10 +207,6 @@ pc_port_start(pc_port_t *port, pc_stream_t *stream)
 	stream->active = 1;
 	stream->started = 0;
 	stream->drain_stop = 0;
-	ks_ring_reset(&stream->ring);
-	if (stream->ring.base != NULL) {
-		memset(stream->ring.base, 0, (size_t)stream->ring.length);
-	}
 	for (i = 0; i < port->stream_count; i++) {
 		if (&port->streams[i] == stream) {
 			port->enable_mask |= (1u << i);
@@ -226,6 +226,15 @@ pc_port_stop(pc_port_t *port, pc_stream_t *stream)
 		return (-1);
 	}
 	if ((stream->flags & PC_STREAM_RENDER) && stream->active) {
+		if (stream->ring.base != NULL && stream->ring.length != 0) {
+			u64	tail;
+
+			tail = stream->ring.write_cursor % stream->ring.length;
+			if (tail != 0) {
+				memset(stream->ring.base + tail, 0,
+				    (size_t)(stream->ring.length - tail));
+			}
+		}
 		stream->drain_stop = 1;
 		stream->state = KS_STATE_STOP;
 		return (0);
@@ -245,7 +254,6 @@ pc_port_stop(pc_port_t *port, pc_stream_t *stream)
 	}
 	return (0);
 }
-
 
 void
 pc_port_process(pc_port_t *port)

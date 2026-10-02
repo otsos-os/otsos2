@@ -79,8 +79,8 @@ struct pc_miniport {
 		    ks_state_t state);
 	int	(*position)(const pc_miniport_t *mp, mp_stream_t *stream,
 		    ks_position_t *pos);
-
-	int	(*map_buffer)(const pc_miniport_t *mp, mp_stream_t *stream,
+		    
+		    int	(*map_buffer)(const pc_miniport_t *mp, mp_stream_t *stream,
 		    dma_seg_t *segs, u32 maxsegs, u32 *nsegs);
 
 	int	(*get_buffer)(const pc_miniport_t *mp, mp_stream_t *stream,
@@ -106,5 +106,4 @@ pc_miniport_set_state(const pc_miniport_t *mp, mp_stream_t *stream,
 int
 pc_miniport_position(const pc_miniport_t *mp, mp_stream_t *stream,
     ks_position_t *pos);
-
 #endif

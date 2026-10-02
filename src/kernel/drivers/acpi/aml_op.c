@@ -740,17 +740,49 @@ aml_op_size_of(aml_state_t *state, aml_stream_t *stream, aml_object_t **result)
 	if (status != AML_OK) {
 		return (status);
 	}
-	if (source != NULL && source->type == AML_TYPE_REFERENCE &&
-	    source->u.reference.kind == AML_REF_NAMED) {
-		aml_object_t	*value;
+	if (source != NULL && source->type == AML_TYPE_REFERENCE) {
+		aml_object_t	*resolved;
 
-		value = NULL;
-		status = aml_evaluate(source->u.reference.node, NULL, 0, &value);
+		resolved = NULL;
+		switch (source->u.reference.kind) {
+		case AML_REF_NAMED:
+			status = aml_evaluate(source->u.reference.node,
+			    NULL, 0, &resolved);
+			break;
+		case AML_REF_LOCAL:
+			resolved = state->locals[source->u.reference.index];
+			if (resolved != NULL) {
+				aml_object_ref(resolved);
+			}
+			break;
+		case AML_REF_ARG:
+			resolved = state->args[source->u.reference.index];
+			if (resolved != NULL) {
+				aml_object_ref(resolved);
+			}
+			break;
+		case AML_REF_INDEX_PACKAGE:
+			if (source->u.reference.container != NULL &&
+			    source->u.reference.index <
+			    source->u.reference.container->u.package.count) {
+				resolved = source->u.reference.container->
+				    u.package.elements[source->u.reference.index];
+				if (resolved != NULL) {
+					aml_object_ref(resolved);
+				}
+			}
+			break;
+		default:
+			break;
+		}
 		aml_object_unref(source);
 		if (status != AML_OK) {
 			return (status);
 		}
-		source = value;
+		source = resolved;
+	}
+	if (source == NULL) {
+		return (AML_ERR);
 	}
 	source = aml_object_deref(source);
 	if (source == NULL) {
