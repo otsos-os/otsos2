@@ -125,6 +125,7 @@ typedef enum hda_widget_type {
 #define	HDA_AMP_OFFSET_MASK	0x7FU
 #define	HDA_AMP_NUM_STEPS_SHIFT	0
 #define	HDA_AMP_NUM_STEPS_MASK	0x7FU
+#define	HDA_AMP_SET_MUTE	0x8000U
 
 typedef struct hda_pcm_caps {
 	u32	bits;

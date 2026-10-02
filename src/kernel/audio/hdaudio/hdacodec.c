@@ -112,7 +112,7 @@ hda_codec_fill_conns(hda_codec_graph_t *codec, hda_widget_t *widget)
 {
 	u32	max_conn;
 	u32	response;
-	u32	extra;
+	u32	long_form;
 	u32	length;
 	u32	i;
 
@@ -125,7 +125,8 @@ hda_codec_fill_conns(hda_codec_graph_t *codec, hda_widget_t *widget)
 		widget->conn_count = 0;
 		return;
 	}
-	if ((length & 0x80) != 0) {
+	long_form = (length & 0x80) != 0 ? 1 : 0;
+	if (long_form) {
 		max_conn = length & 0x7F;
 	} else {
 		max_conn = length & 0x1F;
@@ -135,14 +136,13 @@ hda_codec_fill_conns(hda_codec_graph_t *codec, hda_widget_t *widget)
 	}
 	widget->conn_count = 0;
 	response = 0;
-	extra = 0;
 	for (i = 0; i < max_conn && widget->conn_count < HDA_MAX_CONN;
 	    i++) {
 		if (hda_codec_verb(codec->bus, codec->addr, widget->nid,
 		    (HDAC_VERB_GET_CONNLIST << 8) | i, &response) != 0) {
 			break;
 		}
-		hda_widget_parse_conns(widget, response, extra);
+		hda_widget_parse_conns(widget, response, long_form);
 	}
 }
 
@@ -164,13 +164,15 @@ hda_codec_fill_widget(hda_codec_graph_t *codec, u32 nid, hda_widget_t *widget)
 			hda_widget_parse_pcm(&widget->pcm, param);
 		}
 	}
-	if (widget->caps & HDA_WCAP_IN_AMP) {
+	if ((widget->caps & HDA_WCAP_IN_AMP) ||
+	    widget->type == HDA_WIDGET_UNKNOWN) {
 		if (hda_codec_param(codec->bus, codec->addr, nid,
 		    HDAC_PARAM_IN_AMP_CAP, &param)) {
 			hda_widget_parse_amp(&widget->amp_in, param);
 		}
 	}
-	if (widget->caps & HDA_WCAP_OUT_AMP) {
+	if ((widget->caps & HDA_WCAP_OUT_AMP) ||
+	    widget->type == HDA_WIDGET_UNKNOWN) {
 		if (hda_codec_param(codec->bus, codec->addr, nid,
 		    HDAC_PARAM_OUT_AMP_CAP, &param)) {
 			hda_widget_parse_amp(&widget->amp_out, param);
@@ -229,17 +231,26 @@ hda_codec_discover(hda_bus_t *bus, u8 addr, hda_codec_graph_t **outcodec)
 	codec->node_start = start;
 
 	last = HDA_MAX_WIDGETS;
-	for (nid = 1; nid < last &&
+	for (nid = start; nid < last &&
 	    codec->widget_count < HDA_CODEC_MAX_WIDGETS; nid++) {
 		widget = (hda_widget_t *)kmem_calloc(1, sizeof(*widget));
 		if (widget == NULL) {
 			break;
 		}
-		hda_codec_fill_widget(codec, nid, widget);
-		if (widget->type == HDA_WIDGET_UNKNOWN) {
+		if (!hda_codec_param(codec->bus, codec->addr, nid,
+		    HDAC_PARAM_AUDIO_WIDGET, &widget->caps)) {
+			kmem_free(widget);
+			break;
+		}
+		if (widget->caps == 0) {
+			if (codec->widget_count != 0) {
+				kmem_free(widget);
+				break;
+			}
 			kmem_free(widget);
 			continue;
 		}
+		hda_codec_fill_widget(codec, nid, widget);
 		codec->widgets[codec->widget_count++] = widget;
 		if (widget->type == HDA_WIDGET_PIN_COMPLEX &&
 		    codec->pin_count < HDA_CODEC_MAX_PINS) {

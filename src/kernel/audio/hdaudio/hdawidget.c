@@ -120,14 +120,14 @@ hda_widget_parse_amp(hda_amp_caps_t *amp, u32 response)
 
 
 void
-hda_widget_parse_conns(hda_widget_t *widget, u32 response, u32 extra)
+hda_widget_parse_conns(hda_widget_t *widget, u32 response, u32 long_form)
 {
 	u32	bit;
 
 	if (widget == NULL) {
 		return;
 	}
-	if ((response & 0x80000000U) == 0) {
+	if (long_form != 0) {
 		widget->conn_count = 0;
 		for (bit = 0; bit < 32; bit++) {
 			if ((response & (1u << bit)) != 0 &&
@@ -139,20 +139,15 @@ hda_widget_parse_conns(hda_widget_t *widget, u32 response, u32 extra)
 		return;
 	}
 
+	for (bit = 0; bit < 4; bit++) {
+		u32	node;
 
-	if (widget->conn_count < HDA_MAX_CONN) {
-		widget->conn_list[widget->conn_count++] =
-		    response & 0xFF;
-	}
-	if ((response & 0x00000100U) != 0 && extra != 0) {
-		if (widget->conn_count < HDA_MAX_CONN) {
-			widget->conn_list[widget->conn_count++] =
-			    extra & 0x7F;
+		node = (response >> (bit * 8)) & 0xFF;
+		if (node == 0 || node == 0xFF) {
+			continue;
 		}
-	} else if (extra != 0) {
 		if (widget->conn_count < HDA_MAX_CONN) {
-			widget->conn_list[widget->conn_count++] =
-			    extra & 0xFF;
+			widget->conn_list[widget->conn_count++] = node;
 		}
 	}
 }

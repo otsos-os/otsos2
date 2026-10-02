@@ -212,12 +212,20 @@ static int
 api_audio_get_position(entity_id_t id, void *arg)
 {
 	api_audio_entry_t	*entry;
+	api_audio_position_t	pos;
+	pc_stream_t		*stream;
 
 	entry = api_audio_slot(id);
 	if (entry == NULL || arg == NULL) {
 		return (-1);
 	}
-	memcpy(arg, &entry->position, sizeof(entry->position));
+	memset(&pos, 0, sizeof(pos));
+	stream = (pc_stream_t *)entry->stream;
+	if (stream != NULL) {
+		pos.play_offset = stream->ring.read_cursor;
+		pos.write_offset = stream->ring.write_cursor;
+	}
+	memcpy(arg, &pos, sizeof(pos));
 	return (0);
 }
 

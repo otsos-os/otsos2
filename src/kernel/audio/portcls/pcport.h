@@ -71,6 +71,8 @@ struct pc_stream {
 	ks_state_t		state;
 	u32			flags;
 	u32			active;
+	u32			started;
+	u32			drain_stop;
 	u64			last_position;
 	u64			position;
 };

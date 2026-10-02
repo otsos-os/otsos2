@@ -147,6 +147,7 @@ pc_port_open_stream(pc_port_t *port, const ks_format_t *fmt, u32 flags)
 	stream->flags = flags;
 	stream->state = KS_STATE_STOP;
 	stream->active = 0;
+	stream->started = 0;
 	stream->position = 0;
 	stream->last_position = 0;
 	port->stream_count++;
@@ -200,6 +201,8 @@ pc_port_start(pc_port_t *port, pc_stream_t *stream)
 	}
 	stream->state = next;
 	stream->active = 1;
+	stream->started = 0;
+	stream->drain_stop = 0;
 	for (i = 0; i < port->stream_count; i++) {
 		if (&port->streams[i] == stream) {
 			port->enable_mask |= (1u << i);
@@ -218,12 +221,18 @@ pc_port_stop(pc_port_t *port, pc_stream_t *stream)
 	    stream->handle == NULL) {
 		return (-1);
 	}
+	if ((stream->flags & PC_STREAM_RENDER) && stream->active) {
+		stream->drain_stop = 1;
+		stream->state = KS_STATE_STOP;
+		return (0);
+	}
 	if (port->mp.set_state(&port->mp, stream->handle,
 	    KS_STATE_STOP) != 0) {
 		return (-1);
 	}
 	stream->state = KS_STATE_STOP;
 	stream->active = 0;
+	stream->drain_stop = 0;
 	for (i = 0; i < port->stream_count; i++) {
 		if (&port->streams[i] == stream) {
 			port->enable_mask &= ~(1u << i);
@@ -254,6 +263,14 @@ pc_port_process(pc_port_t *port)
 		    &pos) != 0) {
 			continue;
 		}
+
+		pos.play_offset = pos.play_offset % stream->ring.length;
+		if (!stream->started) {
+			stream->last_position = pos.play_offset;
+			stream->started = 1;
+			stream->position = pos.play_offset;
+			continue;
+		}
 		stream->last_position = stream->position;
 		stream->position = pos.play_offset;
 		if (pos.play_offset >= stream->last_position) {
@@ -269,6 +286,14 @@ pc_port_process(pc_port_t *port)
 			stream->ring.read_cursor += delta;
 		} else {
 			stream->ring.write_cursor += delta;
+		}
+		if ((stream->flags & PC_STREAM_RENDER) &&
+		    stream->drain_stop &&
+		    stream->ring.read_cursor >= stream->ring.write_cursor) {
+			port->mp.set_state(&port->mp, stream->handle,
+			    KS_STATE_STOP);
+			stream->active = 0;
+			stream->drain_stop = 0;
 		}
 		avail = ks_ring_bytes_available(&stream->ring);
 		buffered = stream->ring.length;

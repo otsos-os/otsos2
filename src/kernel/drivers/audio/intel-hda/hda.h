@@ -67,8 +67,14 @@ $space %export hda_miniport
 #define	HDA_MAX_STREAM_INSTANCES	(HDAC_MAX_OUTSTREAMS + \
 					    HDAC_MAX_INSTREAMS)
 #define	HDA_FIFO_SIZE			4
+#define	HDA_IN_DESC_LO			0
+#define	HDA_IN_DESC_HI			3
+#define	HDA_OUT_DESC_LO			4
+#define	HDA_OUT_DESC_HI			7
 #define	HDA_DEFAULT_BUFFER_BYTES	65536
 #define	HDA_BDL_ENTRIES			16
+#define	HDA_RESET_POLLS			2000
+#define	HDA_RESET_POLL_US		1
 #define	HDA_PCI_CLASS			0x04
 #define	HDA_PCI_SUBCLASS		0x03
 #define	HDA_PCI_PROGIF			0x00
@@ -107,6 +113,7 @@ typedef struct hda_softc {
 	void		*intr_cookie;
 	resource_t	*irq_res;
 	void		*poll_cookie;
+	u32		poll_probe_count;
 	pc_miniport_t	miniport;
 	struct hda_codec_graph *codec;
 	struct pc_port	*port;

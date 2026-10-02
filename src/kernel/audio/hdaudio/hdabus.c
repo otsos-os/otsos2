@@ -45,6 +45,7 @@ $define %func hda_bus_wait_us as procedure with args u64
 /* !SPACE!
 
 $space %internal hda_bus_wait_us, hda_bus_corb_start, hda_bus_rirb_start
+$space %internal verb_is_silent
 $space %export hda_bus_reg_read32, hda_bus_reg_write32
 $space %export hda_bus_init, hda_bus_reset, hda_bus_command
 $space %export hda_bus_scan_codecs, hda_bus_codec_attach
@@ -154,7 +155,7 @@ hda_bus_rirb_start(hda_bus_t *bus)
 	    (u32)(bus->rirb_phys >> 32));
 	hda_bus_reg_write8(bus, HDAC_RIRBSIZE, bus->rirb_size_code);
 	hda_bus_reg_write16(bus, HDAC_RIRBWP, 0);
-	bus->rirb_rp = 1;
+	bus->rirb_rp = 0;
 	bus->rirb_last_wp = 0;
 	hda_bus_reg_write16(bus, HDAC_RINTCNT, 0xFF);
 	hda_bus_reg_write8(bus, HDAC_RIRBSTS, HDAC_RIRBSTS_MASK);
@@ -276,6 +277,26 @@ hda_bus_reset(hda_bus_t *bus)
 	    HDAC_GCTL_CRST) != 0 ? 0 : (-1));
 }
 
+static int
+verb_is_silent(u32 verb)
+{
+	u32	cmd;
+
+	cmd = (verb >> 8) & 0xFFF;
+	switch (cmd) {
+	case HDAC_VERB_SET_CONNSEL:
+	case HDAC_VERB_SET_STREAM:
+	case HDAC_VERB_SET_AMP_GAIN_MUTE:
+	case HDAC_VERB_SET_PIN_WIDGET_CTRL:
+	case HDAC_VERB_SET_EAPD_BTLENABLE:
+	case HDAC_VERB_SET_POWER:
+	case HDAC_VERB_SET_PROC_STATE:
+	case HDAC_VERB_SET_CONFIG_DEFAULT:
+		return (1);
+	default:
+		return (0);
+	}
+}
 
 int
 hda_bus_command(hda_bus_t *bus, u32 verb, u32 *response)
@@ -307,20 +328,30 @@ hda_bus_command(hda_bus_t *bus, u32 verb, u32 *response)
 		hda_bus_wait_us(1);
 	}
 	if (hda_bus_reg_read16(bus, HDAC_RIRBWP) == last_wp) {
+		if (verb_is_silent(verb)) {
+			return (0);
+		}
 		drivers_log("[HDA] command verb=0x%08x RIRB timeout "
 		    "(wp=0x%04x unchanged)\n", verb,
 		    hda_bus_reg_read16(bus, HDAC_RIRBWP));
+		bus->rirb_last_wp = hda_bus_reg_read16(bus,
+		    HDAC_RIRBWP) & 0xFF;
 		return (-1);
 	}
 
+	wp = hda_bus_reg_read16(bus, HDAC_RIRBWP) & 0xFF;
+	rirb_rp = wp & (bus->rirb_entries - 1);
 	response_qw = ((volatile u64 *)bus->rirb)[rirb_rp];
 	bus->rirb_rp = (rirb_rp + 1) & (bus->rirb_entries - 1);
-	bus->rirb_last_wp = hda_bus_reg_read16(bus, HDAC_RIRBWP) & 0xFF;
+	bus->rirb_last_wp = wp;
 	if (response != NULL) {
 		*response = (u32)response_qw;
 	}
-	drivers_log("[HDA] command verb=0x%08x -> resp=0x%08x\n",
-	    verb, (u32)response_qw);
+	drivers_log("[HDA] command verb=0x%08x(codec=%u node=%u cmd=0x%03x "
+	    "pay=0x%03x) -> resp=0x%08x rp=%u wp=%u\n", verb,
+	    (verb >> HDA_CODEC_ADDR_SHIFT) & 0xF,
+	    (verb >> 20) & 0xFF, (verb >> 8) & 0xFFF, verb & 0xFF,
+	    (u32)response_qw, rirb_rp, wp);
 	return (0);
 }
 

@@ -49,6 +49,8 @@ $define %func hda_stream_setup as function with args hda_softc_t *, hda_stream_t
 $define %func hda_stream_teardown as procedure with args hda_softc_t *, hda_stream_t *
 $define %func hda_reset_stream as procedure with args hda_softc_t *, hda_stream_t *
 $define %func hda_run_stream as procedure with args hda_softc_t *, hda_stream_t *, int
+$define %func hda_codec_route_render as procedure with args hda_softc_t *, u32, const ks_format_t *
+$define %func hda_codec_format_from_ks as function with args const ks_format_t *
 */
 
 /* !SPACE!
@@ -58,7 +60,8 @@ $space %internal hda_reset_stream, hda_run_stream, hda_map_bar
 $space %internal hda_poll
 $space %internal hda_miniport_probe_format, hda_miniport_create_stream
 $space %internal hda_miniport_destroy_stream, hda_miniport_set_state
-$space %internal hda_miniport_position
+$space %internal hda_miniport_position, hda_codec_route_render
+$space %internal hda_codec_format_from_ks
 $space %export hda_attach, hda_detach, hda_miniport
 $space %export hda_reg_read32, hda_reg_write32
 
@@ -69,6 +72,7 @@ $space %export hda_reg_read32, hda_reg_write32
 #include <kernel/audio/portcls/pcport.h>
 #include <kernel/audio/api/api_audio.h>
 #include <kernel/audio/sysaudio/sysaudio.h>
+#include <kernel/drivers/timer.h>
 #include <mlibc/stdio.h>
 
 u32
@@ -163,34 +167,65 @@ hda_format_to_sdfmt(const ks_format_t *fmt)
 	default:
 		break;
 	}
-	val |= ((fmt->channels - 1) & 0xF) << HDAC_SDFMT_CHAN_SHIFT;
 	return (val);
 }
 
 
 static void
-hda_reset_stream(hda_softc_t *sc, hda_stream_t *stream)
+hda_delay_us(u32 us)
 {
-	u32	base;
-	u32	ctl;
-	u32	i;
+	volatile u32	i;
 
-	base = HDAC_SD_BASE + stream->desc * HDAC_SD_STRIDE;
-	ctl = hda_reg_read32(sc, base + HDAC_SD_CTL);
-	ctl &= ~HDAC_SDCTL_RUN;
-	ctl |= HDAC_SDCTL_SRST;
-	hda_reg_write32(sc, base + HDAC_SD_CTL, ctl);
-	for (i = 0; i < 1000; i++) {
-		if ((hda_reg_read32(sc, base + HDAC_SD_CTL) &
-		    HDAC_SDCTL_SRST) == 0) {
-			break;
-		}
+	for (i = 0; i < us * 100; i++) {
 		__asm__ volatile("pause");
 	}
-	ctl = hda_reg_read32(sc, base + HDAC_SD_CTL);
-	ctl &= ~HDAC_SDCTL_SRST;
-	hda_reg_write32(sc, base + HDAC_SD_CTL, ctl);
+}
+
+static void
+hda_dump_desc(hda_softc_t *sc, u32 base, const char *tag)
+{
+	drivers_log("[HDA] desc[%s] base=0x%02x ctl=0x%08x sts=0x%02x "
+	    "lpib=%u cbl=%u lvi=%u fifow=0x%02x fifos=0x%02x fmt=0x%04x "
+	    "bdpl=0x%08x bdpu=0x%08x\n", tag, base,
+	    hda_reg_read32(sc, base + 0x00),
+	    hda_reg_read8(sc, base + 0x03),
+	    hda_reg_read32(sc, base + 0x04),
+	    hda_reg_read32(sc, base + 0x08),
+	    hda_reg_read16(sc, base + 0x0C),
+	    hda_reg_read8(sc, base + 0x0E),
+	    hda_reg_read8(sc, base + 0x10),
+	    hda_reg_read16(sc, base + 0x12),
+	    hda_reg_read32(sc, base + 0x18),
+	    hda_reg_read32(sc, base + 0x1C));
+}
+
+static void
+hda_reset_stream(hda_softc_t *sc, hda_stream_t *stream)
+{
+	u64	spin;
+	u32	base;
+	u32	ctl;
+
+	base = HDAC_SD_BASE + stream->desc * HDAC_SD_STRIDE;
+	hda_dump_desc(sc, base, "before-reset");
+	hda_reg_write32(sc, base + HDAC_SD_CTL, HDAC_SDCTL_SRST);
+	hda_delay_us(HDA_RESET_POLL_US);
+	hda_reg_write32(sc, base + HDAC_SD_CTL, 0);
+	ctl = 0;
+	spin = 0;
+	for (spin = 0; spin < HDA_RESET_POLLS; spin++) {
+		ctl = hda_reg_read32(sc, base + HDAC_SD_CTL);
+		if ((ctl & HDAC_SDCTL_SRST) == 0) {
+			break;
+		}
+		hda_delay_us(HDA_RESET_POLL_US);
+	}
+	drivers_log("[HDA] reset stream %u: srst cleared=%u polls=%llu "
+	    "ctl=0x%08x\n", stream->desc,
+	    (ctl & HDAC_SDCTL_SRST) == 0,
+	    (unsigned long long)spin, ctl);
 	stream->active = 0;
+	hda_dump_desc(sc, base, "after-reset");
 }
 
 static void
@@ -208,16 +243,30 @@ hda_run_stream(hda_softc_t *sc, hda_stream_t *stream, int run)
 	}
 	hda_reg_write32(sc, base + HDAC_SD_CTL, ctl);
 	stream->active = run ? 1 : 0;
+	drivers_log("[HDA] run stream %u run=%u ctl=0x%08x sts=0x%02x "
+	    "lpib=%u\n", stream->desc, run,
+	    hda_reg_read32(sc, base + HDAC_SD_CTL),
+	    hda_reg_read8(sc, base + HDAC_SD_STS),
+	    hda_reg_read32(sc, base + HDAC_SD_LPIB));
+	if (run) {
+		drivers_log("[HDA] bdl[0] addr=0x%llx len=%u ioc=%u | "
+		    "bdl[1] addr=0x%llx len=%u ioc=%u\n",
+		    (unsigned long long)stream->bdl[0].address,
+		    stream->bdl[0].length, stream->bdl[0].ioc,
+		    (unsigned long long)stream->bdl[1].address,
+		    stream->bdl[1].length, stream->bdl[1].ioc);
+	}
 }
 
 
 static int
 hda_stream_setup(hda_softc_t *sc, hda_stream_t *stream)
 {
+	u64	phys;
 	u32	base;
 	u32	i;
 	u32	byte_off;
-	u64	phys;
+	u32	ctl;
 
 	if (sc == NULL || stream == NULL) {
 		return (-1);
@@ -225,13 +274,36 @@ hda_stream_setup(hda_softc_t *sc, hda_stream_t *stream)
 	base = HDAC_SD_BASE + stream->desc * HDAC_SD_STRIDE;
 	hda_reset_stream(sc, stream);
 
-	hda_reg_write16(sc, base + HDAC_SD_FMT,
-	    hda_format_to_sdfmt(&stream->format));
+	{
+		u16	want, got;
+
+		want = (u16)hda_format_to_sdfmt(&stream->format);
+		hda_reg_write16(sc, base + HDAC_SD_FMT, want);
+		got = hda_reg_read16(sc, base + HDAC_SD_FMT);
+		{
+			u32	raw32;
+
+			raw32 = hda_reg_read32(sc, base + 0x10);
+			drivers_log("[HDA] fmt raw: dword@0x10=0x%08x "
+			    "fifos8=0x%02x fifow8=0x%02x fmt16=0x%04x "
+			    "want16=0x%04x\n", raw32,
+			    hda_reg_read8(sc, base + 0x10),
+			    hda_reg_read8(sc, base + 0x0E),
+			    hda_reg_read16(sc, base + 0x12), want);
+		}
+		drivers_log("[HDA] fmt probe: container=0x%04x bits=%u "
+		    "ch=%u rate=%u wrote=0x%04x read=0x%04x base=0x%02x\n",
+		    stream->format.container, stream->format.valid_bits,
+		    stream->format.channels, stream->format.rate,
+		    want, got, base);
+	}
 	hda_reg_write32(sc, base + HDAC_SD_CBL, stream->total_bytes);
 	hda_reg_write16(sc, base + HDAC_SD_LVI,
 	    stream->nfrags - 1);
-	hda_reg_write16(sc, base + HDAC_SD_FIFOS, HDA_FIFO_SIZE);
-	hda_reg_write16(sc, base + HDAC_SD_FIFOW, HDA_FIFO_SIZE);
+
+	hda_reg_write8(sc, base + HDAC_SD_FIFOW, HDA_FIFO_SIZE);
+	hda_reg_write8(sc, base + HDAC_SD_FIFOS, HDA_FIFO_SIZE);
+	hda_dump_desc(sc, base, "after-fmt-cbl-lvi-fifo");
 
 	phys = stream->buf_mem.phys;
 	byte_off = 0;
@@ -243,15 +315,46 @@ hda_stream_setup(hda_softc_t *sc, hda_stream_t *stream)
 	}
 	__sync_synchronize();
 
+
 	hda_reg_write32(sc, base + HDAC_SD_BDPL,
 	    (u32)stream->bdl_mem.phys);
-	hda_reg_write32(sc, base + HDAC_SD_BDPU_BASE,
+	hda_reg_write32(sc, base + HDAC_SD_BDPL_BASE + 4,
 	    (u32)(stream->bdl_mem.phys >> 32));
+	hda_dump_desc(sc, base, "after-bdl");
 
+
+	ctl = 0;
 	if (stream->direction != 0) {
-		hda_reg_write32(sc, base + HDAC_SD_CTL,
-		    hda_reg_read32(sc, base + HDAC_SD_CTL) |
-		    HDAC_SDCTL_DIR);
+		ctl |= HDAC_SDCTL_DIR;
+	}
+	ctl |= ((stream->desc + 1) << HDAC_SDCTL_STRM_SHIFT) &
+	    HDAC_SDCTL_STRM_MASK;
+	ctl |= HDAC_SDCTL_IOCE;
+	hda_reg_write32(sc, base + HDAC_SD_CTL, ctl);
+	hda_reg_write32(sc, HDAC_DPLBASE, 0);
+	hda_reg_write32(sc, HDAC_DPUBASE, 0);
+
+	drivers_log("[HDA] setup stream %u: cbl=%u lvi=%u frag=%u "
+	    "nfrags=%u bdl=0x%llx buf=0x%llx sdfmt=0x%04x\n",
+	    stream->desc, stream->total_bytes, stream->nfrags - 1,
+	    stream->frag_bytes, stream->nfrags,
+	    (unsigned long long)stream->bdl_mem.phys,
+	    (unsigned long long)stream->buf_mem.phys,
+	    hda_format_to_sdfmt(&stream->format));
+	hda_dump_desc(sc, base, "after-ctl");
+
+	{
+		u32	k;
+		u64	sum;
+
+		sum = 0;
+		for (k = 0; k < 64 && k < stream->total_bytes; k++) {
+			sum += ((const u8 *)stream->buf_mem.virt)[k];
+		}
+		drivers_log("[HDA] buffer check: virt=%p phys=0x%llx "
+		    "bytes=%u sum(first64)=%llu\n", stream->buf_mem.virt,
+		    (unsigned long long)stream->buf_mem.phys,
+		    stream->total_bytes, (unsigned long long)sum);
 	}
 	return (0);
 }
@@ -313,14 +416,27 @@ hda_miniport_create_stream(const pc_miniport_t *mp,
 	if (framesz == 0) {
 		return (PC_FAILURE_INVALID_FORMAT);
 	}
-	for (i = 0; i < HDA_MAX_STREAM_INSTANCES; i++) {
-		stream = &sc->streams[i];
-		if (stream->buf_mem.virt != NULL) {
-			continue;
+
+	if (flags & PC_STREAM_CAPTURE) {
+		stream = NULL;
+		for (i = HDA_IN_DESC_LO; i <= HDA_IN_DESC_HI; i++) {
+			stream = &sc->streams[i];
+			if (stream->buf_mem.virt == NULL) {
+				break;
+			}
+			stream = NULL;
 		}
-		break;
+	} else {
+		stream = NULL;
+		for (i = HDA_OUT_DESC_LO; i <= HDA_OUT_DESC_HI; i++) {
+			stream = &sc->streams[i];
+			if (stream->buf_mem.virt == NULL) {
+				break;
+			}
+			stream = NULL;
+		}
 	}
-	if (i >= HDA_MAX_STREAM_INSTANCES) {
+	if (stream == NULL) {
 		return (PC_FAILURE_NO_RESOURCE);
 	}
 	memset(stream, 0, sizeof(*stream));
@@ -374,6 +490,134 @@ hda_miniport_destroy_stream(const pc_miniport_t *mp, mp_stream_t *handle)
 	return (0);
 }
 
+static u32
+hda_codec_format_from_ks(const ks_format_t *fmt)
+{
+	u32	val;
+
+	if (fmt == NULL) {
+		return (0);
+	}
+	val = HDAC_FMT_TYPE_PCM;
+	switch (fmt->valid_bits) {
+	case 8:
+		val |= HDAC_FMT_BITS_8;
+		break;
+	case 20:
+		val |= HDAC_FMT_BITS_20;
+		break;
+	case 24:
+		val |= HDAC_FMT_BITS_24;
+		break;
+	case 32:
+		val |= HDAC_FMT_BITS_32;
+		break;
+	case 16:
+	default:
+		val |= HDAC_FMT_BITS_16;
+		break;
+	}
+	if (fmt->rate == 44100) {
+		val |= HDAC_FMT_BASE_44K;
+	}
+	val |= ((fmt->channels - 1) & 0xF) << HDAC_FMT_CHAN_SHIFT;
+	return (val);
+}
+
+
+static void
+hda_codec_route_render(hda_softc_t *sc, u32 stream_id, const ks_format_t *fmt)
+{
+	hda_codec_graph_t	*codec;
+	hda_widget_t		*pin;
+	hda_widget_t		*conv;
+	u32			i;
+	u32			j;
+	u32			conv_idx;
+	u32			resp;
+	u32			conv_fmt;
+
+	if (sc == NULL) {
+		return;
+	}
+	codec = sc->codec;
+	if (codec == NULL) {
+		return;
+	}
+	for (i = 0; i < codec->pin_count; i++) {
+		pin = hda_codec_widget(codec, codec->pin_ids[i]);
+		if (pin == NULL || pin->type != HDA_WIDGET_PIN_COMPLEX ||
+		    codec->pin_flows[i] != KS_DATAFLOW_OUT) {
+			continue;
+		}
+
+
+		conv = NULL;
+		conv_idx = 0;
+		for (j = 0; j < pin->conn_count; j++) {
+			hda_widget_t	*cand;
+
+			cand = hda_codec_widget(codec, pin->conn_list[j]);
+			if (cand == NULL) {
+				continue;
+			}
+			if (cand->type == HDA_WIDGET_AUDIO_OUTPUT ||
+			    cand->type == HDA_WIDGET_UNKNOWN) {
+				conv = cand;
+				conv_idx = j;
+				break;
+			}
+		}
+		if (conv == NULL) {
+			continue;
+		}
+
+		if (pin->conn_count > 1) {
+			(void)hda_codec_verb(codec->bus, codec->addr,
+			    pin->nid,
+			    (HDAC_VERB_SET_CONNSEL << 8) | conv_idx,
+			    &resp);
+		}
+
+
+		(void)hda_codec_verb(codec->bus, codec->addr, conv->nid,
+		    (HDAC_VERB_SET_STREAM << 8) |
+		    (((stream_id & 0xF) << 4) | 0),
+		    &resp);
+
+		conv_fmt = hda_codec_format_from_ks(fmt);
+		(void)hda_codec_verb(codec->bus, codec->addr, conv->nid,
+		    (HDAC_VERB_SET_STREAM_FORMAT << 8) | conv_fmt,
+		    &resp);
+		drivers_log("[HDA] converter format stream %u conv=%u "
+		    "payload=0x%04x\n", stream_id, conv->nid, conv_fmt);
+
+
+		(void)hda_codec_verb(codec->bus, codec->addr,
+		    conv->nid,
+		    (HDAC_VERB_SET_AMP_GAIN_MUTE << 8) |
+		    HDAC_AMP_SET_OUTPUT | HDAC_AMP_SET_LEFT |
+		    HDAC_AMP_SET_RIGHT |
+		    ((conv->amp_out.num_steps & 0x7F) << 8),
+		    &resp);
+
+		(void)hda_codec_verb(codec->bus, codec->addr, pin->nid,
+		    (HDAC_VERB_SET_PIN_WIDGET_CTRL << 8) |
+		    HDAC_PIN_CTRL_OUT_EN, &resp);
+
+		if (pin->eapd) {
+			(void)hda_codec_verb(codec->bus, codec->addr,
+			    pin->nid,
+			    (HDAC_VERB_SET_EAPD_BTLENABLE << 8) |
+			    HDAC_EAPD_BTL_ENABLE, &resp);
+		}
+
+		drivers_log("[HDA] routed render stream %u pin=%u conv=%u\n",
+		    stream_id, pin->nid, conv->nid);
+		return;
+	}
+}
+
 static int
 hda_miniport_set_state(const pc_miniport_t *mp, mp_stream_t *handle,
     ks_state_t state)
@@ -391,6 +635,10 @@ hda_miniport_set_state(const pc_miniport_t *mp, mp_stream_t *handle,
 		return (PC_FAILURE_NOT_SUPPORTED);
 	}
 	if (state == KS_STATE_RUN) {
+		if (stream->direction == 0) {
+			hda_codec_route_render(sc,
+			    (u32)(stream->desc + 1), &stream->format);
+		}
 		hda_run_stream(sc, stream, 1);
 	} else if (state == KS_STATE_STOP ||
 	    state == KS_STATE_PAUSE) {
@@ -420,9 +668,9 @@ hda_miniport_position(const pc_miniport_t *mp, mp_stream_t *handle,
 	base = HDAC_SD_BASE + stream->desc * HDAC_SD_STRIDE;
 	lpib = hda_reg_read32(sc, base + HDAC_SD_LPIB);
 	stream->position = lpib;
-	pos->play_offset = lpib;
-	pos->write_offset = (lpib + stream->frag_bytes) %
-	    stream->total_bytes;
+
+	pos->play_offset = lpib % stream->total_bytes;
+	pos->write_offset = lpib % stream->total_bytes;
 	return (0);
 }
 
@@ -510,11 +758,55 @@ static void
 hda_poll(void *arg)
 {
 	hda_softc_t	*sc;
+	hda_stream_t	*stream;
+	u32		lpib;
+	u32		base;
+	u32		i;
 
 	sc = (hda_softc_t *)arg;
 	if (sc == NULL || sc->port == NULL) {
 		return;
 	}
+
+	for (i = 0; i < HDA_MAX_STREAM_INSTANCES; i++) {
+		stream = &sc->streams[i];
+		if (stream->buf_mem.virt == NULL) {
+			continue;
+		}
+		base = HDAC_SD_BASE + stream->desc * HDAC_SD_STRIDE;
+		lpib = hda_reg_read32(sc, base + HDAC_SD_LPIB);
+		if (sc->poll_probe_count < 4 ||
+		    (sc->poll_probe_count % 500) == 0) {
+			u32	sts;
+			u32	lpib_now;
+			u32	ctl_now;
+
+			ctl_now = hda_reg_read32(sc, base + HDAC_SD_CTL);
+			sts = hda_reg_read8(sc, base + HDAC_SD_STS);
+			lpib_now = hda_reg_read32(sc, base + HDAC_SD_LPIB);
+			drivers_log("[HDA] poll#%u stream %u LPIB=%u(%u) "
+			    "ctl=0x%08x sts=0x%02x cbl=%u(%u) lvi=%u "
+			    "fmt=0x%04x(0x%04x) bdpl=0x%08x(0x%08x) "
+			    "gcap=0x%08x gctl=0x%08x intsts=0x%08x "
+			    "corbwp=0x%04x rirbwp=0x%04x\n",
+			    sc->poll_probe_count, stream->desc, lpib,
+			    lpib_now, ctl_now, sts,
+			    hda_reg_read32(sc, base + HDAC_SD_CBL),
+			    stream->total_bytes,
+			    hda_reg_read16(sc, base + HDAC_SD_LVI),
+			    hda_reg_read16(sc, base + HDAC_SD_FMT),
+			    hda_format_to_sdfmt(&stream->format),
+			    hda_reg_read32(sc, base + HDAC_SD_BDPL),
+			    (u32)stream->bdl_mem.phys,
+			    hda_reg_read32(sc, HDAC_GCAP),
+			    hda_reg_read32(sc, HDAC_GCTL),
+			    hda_reg_read32(sc, HDAC_INTSTS),
+			    hda_reg_read16(sc, HDAC_CORBWP),
+			    hda_reg_read16(sc, HDAC_RIRBWP));
+		}
+		stream->position = lpib;
+	}
+	sc->poll_probe_count++;
 	pc_port_process(sc->port);
 }
 
@@ -528,11 +820,11 @@ hda_intr(void *arg)
 
 	sc = (hda_softc_t *)arg;
 	if (sc == NULL) {
-		return (0);
+		return (-1);
 	}
 	intsts = hda_reg_read32(sc, HDAC_INTSTS);
 	if ((intsts & HDAC_INTSTS_GIS) == 0) {
-		return (0);
+		return (-1);
 	}
 
 	for (i = 0; i < HDA_MAX_STREAM_INSTANCES; i++) {
@@ -545,7 +837,8 @@ hda_intr(void *arg)
 	}
 	hda_reg_write32(sc, HDAC_INTSTS,
 	    intsts & HDAC_INTSTS_SIS_MASK);
-	return (1);
+
+	return (0);
 }
 
 static pci_match_t	hda_matches[] = {
