@@ -203,6 +203,10 @@ pc_port_start(pc_port_t *port, pc_stream_t *stream)
 	stream->active = 1;
 	stream->started = 0;
 	stream->drain_stop = 0;
+	ks_ring_reset(&stream->ring);
+	if (stream->ring.base != NULL) {
+		memset(stream->ring.base, 0, (size_t)stream->ring.length);
+	}
 	for (i = 0; i < port->stream_count; i++) {
 		if (&port->streams[i] == stream) {
 			port->enable_mask |= (1u << i);
@@ -283,6 +287,9 @@ pc_port_process(pc_port_t *port)
 			continue;
 		}
 		if (stream->flags & PC_STREAM_RENDER) {
+			if (delta > ks_ring_bytes_available(&stream->ring)) {
+				delta = ks_ring_bytes_available(&stream->ring);
+			}
 			stream->ring.read_cursor += delta;
 		} else {
 			stream->ring.write_cursor += delta;
