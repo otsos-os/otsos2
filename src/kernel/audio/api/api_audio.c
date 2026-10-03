@@ -514,6 +514,12 @@ api_audio_stream_release(entity_id_t id)
 	port = (pc_port_t *)st->port;
 	stream = (pc_stream_t *)st->stream;
 	if (port != NULL && stream != NULL) {
+		if (stream->drain_stop) {
+			stream->release_pending = 1;
+			st->stream = NULL;
+			memset(st, 0, sizeof(*st));
+			return;
+		}
 		(void)pc_port_abort(port, stream);
 		(void)pc_port_close_stream(port, stream);
 	}

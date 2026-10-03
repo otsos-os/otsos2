@@ -341,12 +341,15 @@ pc_port_process(pc_port_t *port)
 {
 	ks_position_t	pos;
 	pc_stream_t	*stream;
+	pc_stream_t	*close[PC_MAX_STREAMS];
 	u64		delta, avail, buffered;
 	u32		i;
+	u32		nclose;
 
 	if (port == NULL) {
 		return;
 	}
+	nclose = 0;
 	spin_lock(&port->lock);
 	for (i = 0; i < port->stream_count; i++) {
 		stream = &port->streams[i];
@@ -388,6 +391,10 @@ pc_port_process(pc_port_t *port)
 			    KS_STATE_STOP);
 			stream->active = 0;
 			stream->drain_stop = 0;
+			if (stream->release_pending &&
+			    nclose < PC_MAX_STREAMS) {
+				close[nclose++] = stream;
+			}
 		}
 		avail = ks_ring_bytes_available(&stream->ring);
 		buffered = stream->ring.length;
@@ -395,6 +402,10 @@ pc_port_process(pc_port_t *port)
 		(void)buffered;
 	}
 	spin_unlock(&port->lock);
+
+	for (i = 0; i < nclose; i++) {
+		(void)pc_port_close_stream(port, close[i]);
+	}
 }
 
 static void

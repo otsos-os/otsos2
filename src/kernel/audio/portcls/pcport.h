@@ -70,8 +70,6 @@ $space %export pc_stream_set_volume, pc_stream_get_volume
 #include <kernel/sync/sync.h>
 
 #define	PC_MAX_STREAMS		16
-#define	PC_GAIN_STEPS_PER_MS	4
-#define	PC_DRAIN_FADE_STEPS	16
 
 typedef struct pc_port pc_port_t;
 typedef struct pc_stream pc_stream_t;
@@ -86,6 +84,7 @@ struct pc_stream {
 	u32			active;
 	u32			started;
 	u32			drain_stop;
+	u32			release_pending;
 	u64			last_position;
 	u64			position;
 	u32			volume;		/* Q15 linear per-stream gain */
