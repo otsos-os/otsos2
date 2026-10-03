@@ -31,7 +31,7 @@ $define %type audio_pcm_t as decoded PCM header for one WAV stream
 $define %type audio_endpoint_t as one enumerable audio endpoint
 $define %type size_t as native object size
 
-$define %func wavplay_file as function with args const char *, const char *
+$define %func wavplay_file as function with args const char *, const char *, uint
 $define %func main as start with args int, char **, char **
 
 */
@@ -52,7 +52,7 @@ $space %export main
 #include "yabox.h"
 
 static int
-wavplay_file(const char *path, const char *epname)
+wavplay_file(const char *path, const char *epname, uint32_t vol_percent)
 {
 	audio_endpoint_t	eps[4];
 	uint8_t		*data;
@@ -68,6 +68,7 @@ wavplay_file(const char *path, const char *epname)
 	int		i;
 	int		code;
 	int		ret;
+	uint32_t	volume;
 
 	fp = fopen(path, "rb");
 	if (fp == NULL) {
@@ -151,9 +152,18 @@ wavplay_file(const char *path, const char *epname)
 		return (1);
 	}
 
+	volume = audioPercentToVolume(vol_percent);
+	if (audioSetVolume(h, volume) != 0) {
+		code = errno;
+		ybx_error("wavplay", "audioSetVolume", code);
+		audioClose(h);
+		free(data);
+		return (1);
+	}
+
 	pcm = data + pcm_hdr.data_offset;
-	fprintf(stderr, "wavplay: %s %uHz %uc %ubit -> %s\n", path,
-	    fmt.rate, fmt.channels, fmt.valid_bits, epname);
+	fprintf(stderr, "wavplay: %s %uHz %uc %ubit -> %s vol=%u%%\n", path,
+	    fmt.rate, fmt.channels, fmt.valid_bits, epname, vol_percent);
 
 	if (audioStart(h) != 0) {
 		code = errno;
@@ -181,13 +191,60 @@ main(int argc, char **argv, char **envp)
 {
 	const char	*path;
 	const char	*epname;
+	uint32_t	vol_percent;
+	int		argi;
 
 	(void)envp;
-	if (argc < 2) {
-		fprintf(stderr, "usage: wavplay file.wav [endpoint]\n");
+	path = NULL;
+	epname = NULL;
+	vol_percent = 100;
+	argi = 1;
+	while (argi < argc) {
+		const char	*arg;
+
+		arg = argv[argi];
+		if (arg[0] == '-' && arg[1] == 'v' && arg[2] == 'o' &&
+		    arg[3] == 'l' && arg[4] == '\0') {
+			unsigned long	v;
+			const char	*s;
+			int		digit;
+
+			if (argi + 1 >= argc) {
+				fprintf(stderr, "wavplay: -vol needs a value\n");
+				return (1);
+			}
+			argi++;
+			s = argv[argi];
+			v = 0;
+			digit = 0;
+			while (*s >= '0' && *s <= '9') {
+				if (v > 100) {
+					break;
+				}
+				v = v * 10 + (unsigned long)(*s - '0');
+				digit = 1;
+				s++;
+			}
+			if (!digit || *s != '\0' || v == 0 || v > 100) {
+				fprintf(stderr, "wavplay: bad volume (1-100)\n");
+				return (1);
+			}
+			vol_percent = (uint32_t)v;
+		} else if (path == NULL) {
+			path = arg;
+		} else if (epname == NULL) {
+			epname = arg;
+		} else {
+			fprintf(stderr, "usage: wavplay [-vol 1-100] file.wav "
+			    "[endpoint]\n");
+			return (1);
+		}
+		argi++;
+	}
+	if (path == NULL) {
+		fprintf(stderr, "usage: wavplay [-vol 1-100] file.wav "
+		    "[endpoint]\n");
 		return (1);
 	}
-	path = argv[1];
-	epname = (argc >= 3) ? argv[2] : NULL;
-	return (wavplay_file(path, epname));
+	return (wavplay_file(path, epname, vol_percent));
 }

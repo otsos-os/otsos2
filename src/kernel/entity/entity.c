@@ -299,6 +299,8 @@ entity_init(void)
 	entity_arch_names[ENTITY_ARCH_DRM] = "drm";
 	entity_arch_names[ENTITY_ARCH_PTY] = "pty";
 	entity_arch_names[ENTITY_ARCH_NB_DEVICE] = "nb_device";
+	entity_arch_names[ENTITY_ARCH_AUDIO] = "audio";
+	entity_arch_names[ENTITY_ARCH_AUDIO_STREAM] = "audio_stream";
 	entity_initialized = 1;
 	drivers_log("[ENTITY] initialized: %d slots (%d blocks x %d), "
 	    "%d handles, %d namespace nodes\n", ENTITY_MAX_ENTITIES,

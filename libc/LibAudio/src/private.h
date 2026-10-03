@@ -60,6 +60,9 @@ $space %internal audioPacedWait
 #define	AUDIO_IOCTL_GET_STATE		0x4103
 #define	AUDIO_IOCTL_SET_STATE		0x4104
 #define	AUDIO_IOCTL_GET_POSITION		0x4105
+#define	AUDIO_IOCTL_GET_VOLUME		0x4106
+#define	AUDIO_IOCTL_SET_VOLUME		0x4107
+#define	AUDIO_IOCTL_OPEN_STREAM		0x4108
 #define	AUDIO_STAGING_BYTES		16384
 
 int	audioPacedWait(uint32_t ms);

@@ -104,7 +104,7 @@ hive BOOT @access(read=user, add=kusr, edit=kusr) {
 	}
 
 	key Modules.wavplay {
-		string Dest = "/bin/eavplay"
+		string Dest = "/bin/wavplay"
 	}
 
 	key Modules.oven {

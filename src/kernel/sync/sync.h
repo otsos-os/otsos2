@@ -89,6 +89,7 @@ $const LO_ENTITY_NS as lock order level of the entity namespace lock
 $const LO_NVME as lock order level of an NVMe submission queue lock
 $const LO_VM_MAP as lock order level of an address space lock
 $const LO_DMA as lock order level of the DMA tag registry and bounce pool
+$const LO_AUDIO as lock order level of an audio port stream-set lock
 $const LO_UMA as lock order level of the UMA zone registry lock
 $const LO_UMA_ZONE as lock order level of a single UMA zone lock
 $const LO_KMEM as lock order level of the kernel heap lock
@@ -138,6 +139,7 @@ $space %export sync_init, sync_configure
 #define	LO_NVME		74
 #define	LO_VM_MAP	76
 #define	LO_DMA		78
+#define	LO_AUDIO	79
 #define	LO_KMEM		80
 #define	LO_UMA		84
 #define	LO_UMA_ZONE	88

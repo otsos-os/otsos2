@@ -38,10 +38,15 @@ $define %func pc_port_close_stream as function with args pc_port_t *, pc_stream_
 $define %func pc_port_process as procedure with args pc_port_t *
 $define %func pc_port_start as function with args pc_port_t *, pc_stream_t *
 $define %func pc_port_stop as function with args pc_port_t *, pc_stream_t *
-$define %func pc_stream_write as function with args pc_stream_t *, const u8 *, u64
-$define %func pc_stream_read as function with args pc_stream_t *, u8 *, u64
-$define %func pc_stream_bytes_free as function with args pc_stream_t *
-$define %func pc_stream_bytes_available as function with args pc_stream_t *
+$define %func pc_port_abort as function with args pc_port_t *, pc_stream_t *
+$define %func pc_port_process as procedure with args pc_port_t *
+$define %func pc_port_mix_render as procedure with args pc_port_t *, pc_stream_t *, u64
+$define %func pc_stream_apply_volume as function with args pc_stream_t *, const u8 *, u64
+$define %func pc_stream_capture_pass as procedure with args pc_port_t *, pc_stream_t *, u64
+$define %func pc_port_set_master_volume as function with args pc_port_t *, uint
+$define %func pc_port_get_master_volume as function with args const pc_port_t *
+$define %func pc_stream_set_volume as function with args pc_stream_t *, uint
+$define %func pc_stream_get_volume as function with args const pc_stream_t *
 */
 
 /* !SPACE!
@@ -49,12 +54,24 @@ $define %func pc_stream_bytes_available as function with args pc_stream_t *
 $space %export pc_port_create, pc_port_destroy
 $space %export pc_port_open_stream, pc_port_close_stream
 $space %export pc_port_process, pc_port_start, pc_port_stop
-$space %export pc_stream_write, pc_stream_read
-$space %export pc_stream_bytes_free, pc_stream_bytes_available
+$space %export pc_port_abort
+$space %export pc_port_set_master_volume, pc_port_get_master_volume
+$space %export pc_stream_set_volume, pc_stream_get_volume
+$space %internal pc_port_mix_render, pc_stream_apply_volume
+$space %internal pc_stream_capture_pass
 
 */
 
 #include <kernel/audio/portcls/pcport.h>
+#include <kernel/audio/mix/mix.h>
+
+static void	pc_port_mix_render(pc_port_t *port, pc_stream_t *stream,
+		    u64 delta);
+static void	pc_stream_capture_pass(pc_port_t *port, pc_stream_t *stream,
+		    u64 delta);
+static u64	pc_stream_apply_volume(pc_stream_t *stream, const u8 *src,
+		    u64 count);
+static int	pc_port_abort_locked(pc_port_t *port, pc_stream_t *stream);
 
 pc_port_t *
 pc_port_create(const pc_miniport_t *mp, const char *name)
@@ -72,6 +89,8 @@ pc_port_create(const pc_miniport_t *mp, const char *name)
 		return (NULL);
 	}
 	port->mp = *mp;
+	port->master_volume = PC_VOLUME_UNITY;
+	spin_init(&port->lock, "pcport", LO_AUDIO);
 	if (name != NULL) {
 		len = strlen(name);
 		if (len >= KS_DEVICE_NAME_MAX) {
@@ -148,23 +167,74 @@ pc_port_open_stream(pc_port_t *port, const ks_format_t *fmt, u32 flags)
 	stream->state = KS_STATE_STOP;
 	stream->active = 0;
 	stream->started = 0;
+	stream->volume = PC_VOLUME_UNITY;
+	stream->parent = port;
 	stream->position = 0;
 	stream->last_position = 0;
+	spin_lock(&port->lock);
 	port->stream_count++;
 	for (i = 0; i < port->stream_count; i++) {
 		port->enable_mask |= (1u << i);
 	}
+	spin_unlock(&port->lock);
 	return (stream);
+}
+
+static int
+pc_port_abort_locked(pc_port_t *port, pc_stream_t *stream)
+{
+	u32	i;
+
+	if (port == NULL || stream == NULL ||
+	    stream->handle == NULL) {
+		return (-1);
+	}
+	if (stream->active || stream->state != KS_STATE_STOP) {
+		if (port->mp.set_state(&port->mp, stream->handle,
+		    KS_STATE_STOP) != 0) {
+			return (-1);
+		}
+	}
+	stream->state = KS_STATE_STOP;
+	stream->active = 0;
+	stream->started = 0;
+	stream->drain_stop = 0;
+	for (i = 0; i < port->stream_count; i++) {
+		if (&port->streams[i] == stream) {
+			port->enable_mask &= ~(1u << i);
+			break;
+		}
+	}
+	return (0);
+}
+
+int
+pc_port_abort(pc_port_t *port, pc_stream_t *stream)
+{
+	int	ret;
+
+	if (port == NULL || stream == NULL ||
+	    stream->handle == NULL) {
+		return (-1);
+	}
+	spin_lock(&port->lock);
+	ret = pc_port_abort_locked(port, stream);
+	spin_unlock(&port->lock);
+	return (ret);
 }
 
 int
 pc_port_close_stream(pc_port_t *port, pc_stream_t *stream)
 {
 	u32	i;
+	int	ret;
 
 	if (port == NULL || stream == NULL) {
 		return (-1);
 	}
+	spin_lock(&port->lock);
+	(void)pc_port_abort_locked(port, stream);
+	ret = -1;
 	for (i = 0; i < port->stream_count; i++) {
 		if (&port->streams[i] != stream) {
 			continue;
@@ -180,9 +250,11 @@ pc_port_close_stream(pc_port_t *port, pc_stream_t *stream)
 		memset(&port->streams[port->stream_count - 1], 0,
 		    sizeof(port->streams[0]));
 		port->stream_count--;
-		return (0);
+		ret = 0;
+		break;
 	}
-	return (-1);
+	spin_unlock(&port->lock);
+	return (ret);
 }
 
 int
@@ -195,12 +267,14 @@ pc_port_start(pc_port_t *port, pc_stream_t *stream)
 	    stream->handle == NULL) {
 		return (-1);
 	}
+	spin_lock(&port->lock);
 	next = KS_STATE_RUN;
 	ks_ring_reset(&stream->ring);
 	if (stream->ring.base != NULL) {
 		memset(stream->ring.base, 0, (size_t)stream->ring.length);
 	}
 	if (port->mp.set_state(&port->mp, stream->handle, next) != 0) {
+		spin_unlock(&port->lock);
 		return (-1);
 	}
 	stream->state = next;
@@ -213,6 +287,7 @@ pc_port_start(pc_port_t *port, pc_stream_t *stream)
 			break;
 		}
 	}
+	spin_unlock(&port->lock);
 	return (0);
 }
 
@@ -220,11 +295,13 @@ int
 pc_port_stop(pc_port_t *port, pc_stream_t *stream)
 {
 	u32		i;
+	int		ret;
 
 	if (port == NULL || stream == NULL ||
 	    stream->handle == NULL) {
 		return (-1);
 	}
+	spin_lock(&port->lock);
 	if ((stream->flags & PC_STREAM_RENDER) && stream->active) {
 		if (stream->ring.base != NULL && stream->ring.length != 0) {
 			u64	tail;
@@ -237,10 +314,13 @@ pc_port_stop(pc_port_t *port, pc_stream_t *stream)
 		}
 		stream->drain_stop = 1;
 		stream->state = KS_STATE_STOP;
+		spin_unlock(&port->lock);
 		return (0);
 	}
-	if (port->mp.set_state(&port->mp, stream->handle,
-	    KS_STATE_STOP) != 0) {
+	ret = port->mp.set_state(&port->mp, stream->handle,
+	    KS_STATE_STOP);
+	if (ret != 0) {
+		spin_unlock(&port->lock);
 		return (-1);
 	}
 	stream->state = KS_STATE_STOP;
@@ -252,6 +332,7 @@ pc_port_stop(pc_port_t *port, pc_stream_t *stream)
 			break;
 		}
 	}
+	spin_unlock(&port->lock);
 	return (0);
 }
 
@@ -266,6 +347,7 @@ pc_port_process(pc_port_t *port)
 	if (port == NULL) {
 		return;
 	}
+	spin_lock(&port->lock);
 	for (i = 0; i < port->stream_count; i++) {
 		stream = &port->streams[i];
 		if (stream->handle == NULL || !stream->active) {
@@ -295,12 +377,9 @@ pc_port_process(pc_port_t *port)
 			continue;
 		}
 		if (stream->flags & PC_STREAM_RENDER) {
-			if (delta > ks_ring_bytes_available(&stream->ring)) {
-				delta = ks_ring_bytes_available(&stream->ring);
-			}
-			stream->ring.read_cursor += delta;
+			pc_port_mix_render(port, stream, delta);
 		} else {
-			stream->ring.write_cursor += delta;
+			pc_stream_capture_pass(port, stream, delta);
 		}
 		if ((stream->flags & PC_STREAM_RENDER) &&
 		    stream->drain_stop &&
@@ -315,14 +394,133 @@ pc_port_process(pc_port_t *port)
 		(void)avail;
 		(void)buffered;
 	}
+	spin_unlock(&port->lock);
 }
+
+static void
+pc_port_mix_render(pc_port_t *port, pc_stream_t *stream, u64 delta)
+{
+	(void)port;
+	if (delta > ks_ring_bytes_available(&stream->ring)) {
+		delta = ks_ring_bytes_available(&stream->ring);
+	}
+	stream->ring.read_cursor += delta;
+}
+
+static void
+pc_stream_capture_pass(pc_port_t *port, pc_stream_t *stream, u64 delta)
+{
+	(void)port;
+	if (delta > stream->ring.length -
+	    (stream->ring.write_cursor - stream->ring.read_cursor)) {
+		delta = stream->ring.length -
+		    (stream->ring.write_cursor - stream->ring.read_cursor);
+	}
+	stream->ring.write_cursor += delta;
+}
+
+static u64
+pc_stream_apply_volume(pc_stream_t *stream, const u8 *src, u64 count)
+{
+	u64		free_count;
+	u64		base;
+	u64		n;
+	mix_gain_t	g;
+	u32		w;
+
+	if (stream == NULL || stream->ring.base == NULL || count == 0) {
+		return (0);
+	}
+	free_count = ks_ring_bytes_free(&stream->ring);
+	if (count > free_count) {
+		count = free_count;
+	}
+	if (count == 0) {
+		return (0);
+	}
+	w = mix_sample_bytes(stream->format.container);
+	if (w == 0) {
+		w = 1;
+	}
+	g = mix_gain_scale(stream->volume,
+	    stream->parent != NULL ? stream->parent->master_volume :
+	    PC_VOLUME_UNITY);
+	if (g == MIX_GAIN_UNITY) {
+		return (ks_ring_write(&stream->ring, src, count));
+	}
+	count -= count % w;
+	if (count == 0) {
+		return (0);
+	}
+	base = stream->ring.write_cursor;
+	n = ks_ring_write(&stream->ring, src, count);
+	if (n != 0) {
+		u64	span;
+		u64	chunk;
+		u64	pos;
+
+		span = n;
+		pos = base % stream->ring.length;
+		while (span != 0) {
+			chunk = span;
+			if (chunk > stream->ring.length - pos) {
+				chunk = stream->ring.length - pos;
+			}
+			mix_apply_gain_c(stream->format.container,
+			    stream->ring.base + pos,
+			    stream->ring.base + pos, chunk / w, g);
+			span -= chunk;
+			pos = 0;
+		}
+	}
+	return (n);
+}
+
+int
+pc_port_set_master_volume(pc_port_t *port, u32 volume)
+{
+	if (port == NULL) {
+		return (-1);
+	}
+	if (volume > PC_VOLUME_MAX) {
+		volume = PC_VOLUME_MAX;
+	}
+	port->master_volume = volume;
+	return (0);
+}
+
+u32
+pc_port_get_master_volume(const pc_port_t *port)
+{
+	return (port == NULL ? PC_VOLUME_UNITY : port->master_volume);
+}
+
+int
+pc_stream_set_volume(pc_stream_t *stream, u32 volume)
+{
+	if (stream == NULL) {
+		return (-1);
+	}
+	if (volume > PC_VOLUME_MAX) {
+		volume = PC_VOLUME_MAX;
+	}
+	stream->volume = volume;
+	return (0);
+}
+
+u32
+pc_stream_get_volume(const pc_stream_t *stream)
+{
+	return (stream == NULL ? PC_VOLUME_UNITY : stream->volume);
+}
+
 u64
 pc_stream_write(pc_stream_t *stream, const u8 *src, u64 count)
 {
 	if (stream == NULL) {
 		return (0);
 	}
-	return (ks_ring_write(&stream->ring, src, count));
+	return (pc_stream_apply_volume(stream, src, count));
 }
 
 u64

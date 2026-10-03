@@ -37,6 +37,7 @@ $const AUDIO_FLOW_* as data-flow directions
 $const AUDIO_STATE_* as stream states
 $const AUDIO_FMT_* as sample container encodings
 $const AUDIO_NAME_MAX as longest endpoint name
+$const AUDIO_VOLUME_* as Q15 linear volume anchors
 
 $define %func audioEnumerate as function with args audio_endpoint_t *, uint32_t
 $define %func audioOpen as function with args const char *
@@ -50,6 +51,8 @@ $define %func audioRead as function with args audio_t, void *, size_t
 $define %func audioStart as function with args audio_t
 $define %func audioStop as function with args audio_t
 $define %func audioPause as function with args audio_t
+$define %func audioSetVolume as function with args audio_t, uint32_t
+$define %func audioGetVolume as function with args audio_t, uint32_t *
 $define %func audioBytesFree as function with args audio_t
 $define %func audioBytesAvailable as function with args audio_t
 $define %func audioFormatToS16 as function with args void *, const void *, uint, uint
@@ -63,6 +66,7 @@ $space %export audioEnumerate, audioOpen, audioClose
 $space %export audioGetInfo, audioSetFormat, audioGetPosition
 $space %export audioSetState, audioWrite, audioRead
 $space %export audioStart, audioStop, audioPause
+$space %export audioSetVolume, audioGetVolume
 $space %export audioBytesFree, audioBytesAvailable
 $space %export audioFormatToS16, audioFormatFromS16
 
@@ -92,6 +96,9 @@ typedef int	audio_t;
 #define	AUDIO_FMT_FLOAT32	0x0010
 #define	AUDIO_FMT_FLOAT64	0x0011
 #define	AUDIO_NAME_MAX		64
+#define	AUDIO_VOLUME_ZERO	0x00000000U
+#define	AUDIO_VOLUME_UNITY	0x00008000U
+#define	AUDIO_VOLUME_MAX	0x00028000U
 
 typedef struct audio_info {
 	uint32_t	id;
@@ -145,6 +152,10 @@ int	audioRead(audio_t h, void *buf, size_t count);
 int	audioStart(audio_t h);
 int	audioStop(audio_t h);
 int	audioPause(audio_t h);
+int	audioSetVolume(audio_t h, uint32_t volume);
+int	audioGetVolume(audio_t h, uint32_t *volume);
+uint32_t	audioPercentToVolume(uint32_t percent);
+uint32_t	audioVolumeToPercent(uint32_t volume);
 int	audioBytesFree(audio_t h);
 int	audioBytesAvailable(audio_t h);
 uint32_t	audioFormatToS16(void *dst, const void *src, uint32_t frames,

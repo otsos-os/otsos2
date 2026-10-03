@@ -36,6 +36,8 @@ $define %func pc_miniport_create_stream as function with args const pc_miniport_
 $define %func pc_miniport_destroy_stream as function with args const pc_miniport_t *, mp_stream_t *
 $define %func pc_miniport_set_state as function with args const pc_miniport_t *, mp_stream_t *, ks_state_t
 $define %func pc_miniport_position as function with args const pc_miniport_t *, mp_stream_t *, ks_position_t *
+$define %func pc_miniport_set_volume as function with args const pc_miniport_t *, mp_stream_t *, uint
+$define %func pc_miniport_get_volume as function with args const pc_miniport_t *, mp_stream_t *, uint
 */
 
 /* !SPACE!
@@ -43,6 +45,7 @@ $define %func pc_miniport_position as function with args const pc_miniport_t *, 
 $space %export pc_miniport_probe_format, pc_miniport_create_stream
 $space %export pc_miniport_destroy_stream, pc_miniport_set_state
 $space %export pc_miniport_position
+$space %export pc_miniport_set_volume, pc_miniport_get_volume
 
 */
 
@@ -102,4 +105,29 @@ pc_miniport_position(const pc_miniport_t *mp, mp_stream_t *stream,
 		return (PC_FAILURE_NOT_SUPPORTED);
 	}
 	return (mp->position(mp, stream, pos));
+}
+
+int
+pc_miniport_set_volume(const pc_miniport_t *mp, mp_stream_t *stream,
+    u32 volume)
+{
+	if (mp == NULL || stream == NULL) {
+		return (PC_FAILURE_NOT_SUPPORTED);
+	}
+	if (volume > PC_VOLUME_MAX) {
+		volume = PC_VOLUME_MAX;
+	}
+	if (mp->set_volume == NULL) {
+		return (PC_FAILURE_NOT_SUPPORTED);
+	}
+	return (mp->set_volume(mp, stream, volume));
+}
+
+u32
+pc_miniport_get_volume(const pc_miniport_t *mp, mp_stream_t *stream)
+{
+	if (mp == NULL || stream == NULL || mp->get_volume == NULL) {
+		return (PC_VOLUME_UNITY);
+	}
+	return (mp->get_volume(mp, stream));
 }

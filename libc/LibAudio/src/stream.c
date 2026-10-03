@@ -63,21 +63,32 @@ audioOpen(const char *name)
 {
 	char	path[AUDIO_NAME_MAX + 32];
 	size_t	len;
+	int	ep;
+	int	stream;
 
 	if (name == NULL || name[0] == '\0') {
 		return (-1);
 	}
 	if (name[0] == '/') {
-		return (entityOpen(name, ENTITY_ACCESS_READ |
-		    ENTITY_ACCESS_WRITE));
+		ep = entityOpen(name, ENTITY_ACCESS_READ |
+		    ENTITY_ACCESS_WRITE);
+	} else {
+		len = strlen(name);
+		if (len >= sizeof(path) - 24) {
+			return (-1);
+		}
+		memcpy(path, "/Entity/Interface/Audio/", 24);
+		memcpy(path + 24, name, len + 1);
+		ep = entityOpen(path, ENTITY_ACCESS_READ |
+		    ENTITY_ACCESS_WRITE);
 	}
-	len = strlen(name);
-	if (len >= sizeof(path) - 24) {
-		return (-1);
+	if (ep < 0) {
+		return (ep);
 	}
-	memcpy(path, "/Entity/Interface/Audio/", 24);
-	memcpy(path + 24, name, len + 1);
-	return (entityOpen(path, ENTITY_ACCESS_READ | ENTITY_ACCESS_WRITE));
+
+	stream = entityIoctl(ep, AUDIO_IOCTL_OPEN_STREAM, NULL);
+	entityClose(ep);
+	return (stream);
 }
 
 void

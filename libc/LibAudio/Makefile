@@ -10,7 +10,7 @@ CFLAGS ?= $(TARGET_CFLAGS) -ffreestanding -fPIE -fno-stack-protector \
 	-Iinclude -I$(NATIVE_DIR)/include
 
 LIB = lib/libaudio.a
-SRC = src/enumerate.c src/stream.c src/buffer.c src/format.c
+SRC = src/enumerate.c src/stream.c src/buffer.c src/format.c src/volume.c
 OBJ = $(SRC:src/%.c=build/%.o)
 HDR = include/libaudio.h src/private.h
 

@@ -45,6 +45,9 @@ $define %func hda_miniport_create_stream as function with args const pc_miniport
 $define %func hda_miniport_destroy_stream as function with args const pc_miniport_t *, pc_stream_t *
 $define %func hda_miniport_set_state as function with args const pc_miniport_t *, pc_stream_t *, ks_state_t
 $define %func hda_miniport_position as function with args const pc_miniport_t *, pc_stream_t *, ks_position_t *
+$define %func hda_miniport_set_volume as function with args const pc_miniport_t *, pc_stream_t *, uint
+$define %func hda_miniport_get_volume as function with args const pc_miniport_t *, pc_stream_t *
+$define %func hda_amp_step_for_volume as function with args const hda_stream_t *, uint
 $define %func hda_stream_setup as function with args hda_softc_t *, hda_stream_t *
 $define %func hda_stream_teardown as procedure with args hda_softc_t *, hda_stream_t *
 $define %func hda_reset_stream as procedure with args hda_softc_t *, hda_stream_t *
@@ -63,6 +66,8 @@ $space %internal hda_poll
 $space %internal hda_miniport_probe_format, hda_miniport_create_stream
 $space %internal hda_miniport_destroy_stream, hda_miniport_set_state
 $space %internal hda_miniport_position, hda_codec_route_render
+$space %internal hda_miniport_set_volume, hda_miniport_get_volume
+$space %internal hda_amp_step_for_volume
 $space %internal hda_codec_format_from_ks, hda_lookup_quirks, hda_stream_tag
 $space %export hda_attach, hda_detach, hda_miniport
 $space %export hda_reg_read32, hda_reg_write32
@@ -446,6 +451,7 @@ hda_miniport_create_stream(const pc_miniport_t *mp,
 	stream->desc = i;
 	stream->direction = (flags & PC_STREAM_CAPTURE) != 0;
 	stream->format = *fmt;
+	stream->volume = PC_VOLUME_UNITY;
 
 	stream->frag_bytes = HDA_DEFAULT_BUFFER_BYTES / HDA_BDL_ENTRIES;
 	stream->frag_bytes -= stream->frag_bytes % framesz;
@@ -529,7 +535,8 @@ hda_codec_format_from_ks(const ks_format_t *fmt)
 
 
 static void
-hda_codec_route_render(hda_softc_t *sc, u32 stream_id, const ks_format_t *fmt)
+hda_codec_route_render(hda_softc_t *sc, u32 stream_id, const ks_format_t *fmt,
+    hda_stream_t *stream)
 {
 	hda_codec_graph_t	*codec;
 	hda_widget_t		*pin;
@@ -595,6 +602,13 @@ hda_codec_route_render(hda_softc_t *sc, u32 stream_id, const ks_format_t *fmt)
 		drivers_log("[HDA] converter format stream %u conv=%u "
 		    "payload=0x%04x\n", stream_id, conv->nid, conv_fmt);
 
+		if (stream != NULL) {
+			stream->amp_nid = conv->nid;
+			stream->amp_num_steps = conv->amp_out.num_steps;
+			stream->amp_step_size = conv->amp_out.step_size;
+			stream->amp_offset = conv->amp_out.offset;
+			stream->amp_mute_cap = conv->amp_out.mute_cap;
+		}
 
 		(void)hda_codec_verb(codec->bus, codec->addr,
 		    conv->nid,
@@ -643,7 +657,8 @@ hda_miniport_set_state(const pc_miniport_t *mp, mp_stream_t *handle,
 		}
 		if (stream->direction == 0) {
 			hda_codec_route_render(sc,
-			    hda_stream_tag(sc, stream), &stream->format);
+			    hda_stream_tag(sc, stream), &stream->format,
+			    stream);
 		}
 		hda_run_stream(sc, stream, 1);
 	} else if (state == KS_STATE_STOP ||
@@ -724,6 +739,95 @@ hda_miniport_map_buffer(const pc_miniport_t *mp, mp_stream_t *handle,
 	return (0);
 }
 
+static u32
+hda_amp_step_for_volume(const hda_stream_t *stream, u32 volume)
+{
+	u32	n;
+	u32	step;
+
+	if (stream->amp_num_steps == 0) {
+		return (0);
+	}
+	n = stream->amp_num_steps;
+	if (n > 0x7F) {
+		n = 0x7F;
+	}
+	if (volume == 0) {
+		step = 0;
+	} else {
+		u32	idx;
+
+		idx = (u32)(((u64)volume * (u64)(n - stream->amp_offset))
+		    / 0x8000U);
+		step = stream->amp_offset + idx;
+		if (step > n) {
+			step = n;
+		}
+	}
+	return (step);
+}
+
+static int
+hda_miniport_set_volume(const pc_miniport_t *mp, mp_stream_t *handle,
+    u32 volume)
+{
+	hda_softc_t	*sc;
+	hda_stream_t	*stream;
+	u32		step;
+	u32		payload;
+	u32		resp;
+
+	if (mp == NULL || handle == NULL) {
+		return (PC_FAILURE_NOT_SUPPORTED);
+	}
+	sc = (hda_softc_t *)mp->device_ctx;
+	stream = (hda_stream_t *)handle;
+	if (sc == NULL || stream < &sc->streams[0] ||
+	    stream >= &sc->streams[HDA_MAX_STREAM_INSTANCES]) {
+		return (PC_FAILURE_NOT_SUPPORTED);
+	}
+	if (volume > PC_VOLUME_MAX) {
+		volume = PC_VOLUME_MAX;
+	}
+	stream->volume = volume;
+
+	if (stream->amp_nid == 0 || stream->amp_num_steps == 0 ||
+	    sc->codec == NULL) {
+		return (PC_FAILURE_NOT_SUPPORTED);
+	}
+
+	step = hda_amp_step_for_volume(stream, volume);
+	payload = HDAC_AMP_SET_OUTPUT | HDAC_AMP_SET_LEFT |
+	    HDAC_AMP_SET_RIGHT | ((step & 0x7F) << 8);
+	if (volume == 0 && stream->amp_mute_cap) {
+		payload |= HDA_AMP_SET_MUTE;
+	}
+	if (hda_codec_verb(sc->codec->bus, sc->codec->addr,
+	    stream->amp_nid,
+	    (HDAC_VERB_SET_AMP_GAIN_MUTE << 8) | payload, &resp) != 0) {
+		return (PC_FAILURE_NO_RESOURCE);
+	}
+	return (0);
+}
+
+static u32
+hda_miniport_get_volume(const pc_miniport_t *mp, mp_stream_t *handle)
+{
+	hda_softc_t	*sc;
+	hda_stream_t	*stream;
+
+	if (mp == NULL || handle == NULL) {
+		return (PC_VOLUME_UNITY);
+	}
+	sc = (hda_softc_t *)mp->device_ctx;
+	stream = (hda_stream_t *)handle;
+	if (sc == NULL || stream < &sc->streams[0] ||
+	    stream >= &sc->streams[HDA_MAX_STREAM_INSTANCES]) {
+		return (PC_VOLUME_UNITY);
+	}
+	return (stream->volume);
+}
+
 const pc_miniport_t *
 hda_miniport(void)
 {
@@ -735,6 +839,9 @@ hda_miniport(void)
 		.position = hda_miniport_position,
 		.map_buffer = hda_miniport_map_buffer,
 		.get_buffer = hda_miniport_get_buffer,
+		.set_volume = hda_miniport_set_volume,
+		.get_volume = hda_miniport_get_volume,
+		.capabilities = PC_CAP_HW_AMP | PC_CAP_SOFTVOL,
 		.device_ctx = NULL,
 	};
 	return (&miniport);

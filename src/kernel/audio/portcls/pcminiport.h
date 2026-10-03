@@ -33,10 +33,14 @@ $define %type dma_seg_t as one scatter/gather segment
 
 $const PC_FAILURE_* as port-class request failure codes
 $const PC_STREAM_* as miniport stream creation flags
+$const PC_CAP_* as device amplifier/capability flags
+$const PC_VOLUME_* as volume scale anchors (Q15 linear)
 
 $define %func pc_miniport_probe_format as function with args const pc_miniport_t *, const ks_format_t *
 $define %func pc_miniport_create_stream as function with args const pc_miniport_t *, const ks_format_t *, uint, pc_stream_handle_t **
 $define %func pc_miniport_destroy_stream as procedure with args const pc_miniport_t *, pc_stream_handle_t *
+$define %func pc_miniport_set_volume as function with args const pc_miniport_t *, pc_stream_handle_t *, uint
+$define %func pc_miniport_volume as function with args const pc_miniport_t *, pc_stream_handle_t *, uint
 */
 
 /* !SPACE!
@@ -65,6 +69,11 @@ typedef struct mp_stream mp_stream_t;
 
 #define	PC_STREAM_RENDER	0x00000001
 #define	PC_STREAM_CAPTURE	0x00000002
+#define	PC_CAP_HW_AMP		0x00000001
+#define	PC_CAP_SOFTVOL		0x00000002
+#define	PC_VOLUME_ZERO		0x00000000U
+#define	PC_VOLUME_UNITY		0x00008000U
+#define	PC_VOLUME_MAX		0x00028000U
 
 struct pc_miniport {
 	int	(*probe_format)(const pc_miniport_t *mp,
@@ -79,12 +88,18 @@ struct pc_miniport {
 		    ks_state_t state);
 	int	(*position)(const pc_miniport_t *mp, mp_stream_t *stream,
 		    ks_position_t *pos);
-		    
-		    int	(*map_buffer)(const pc_miniport_t *mp, mp_stream_t *stream,
+
+	int	(*map_buffer)(const pc_miniport_t *mp, mp_stream_t *stream,
 		    dma_seg_t *segs, u32 maxsegs, u32 *nsegs);
 
 	int	(*get_buffer)(const pc_miniport_t *mp, mp_stream_t *stream,
 		    u8 **virt, u64 *len);
+
+	int	(*set_volume)(const pc_miniport_t *mp, mp_stream_t *stream,
+		    u32 volume);
+	u32	(*get_volume)(const pc_miniport_t *mp, mp_stream_t *stream);
+
+	u32	capabilities;
 	void	*device_ctx;
 };
 
@@ -106,4 +121,11 @@ pc_miniport_set_state(const pc_miniport_t *mp, mp_stream_t *stream,
 int
 pc_miniport_position(const pc_miniport_t *mp, mp_stream_t *stream,
     ks_position_t *pos);
+
+int
+pc_miniport_set_volume(const pc_miniport_t *mp, mp_stream_t *stream,
+    u32 volume);
+
+u32
+pc_miniport_get_volume(const pc_miniport_t *mp, mp_stream_t *stream);
 #endif

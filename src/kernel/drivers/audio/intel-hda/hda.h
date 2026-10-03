@@ -99,6 +99,12 @@ typedef struct hda_stream {
 	u32		total_bytes;
 	u32		active;
 	u64		position;
+	u32		amp_nid;
+	u32		amp_num_steps;
+	u32		amp_step_size;
+	u32		amp_offset;
+	u32		amp_mute_cap;
+	u32		volume;
 } hda_stream_t;
 
 struct hda_codec_graph;
