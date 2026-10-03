@@ -33,6 +33,7 @@ $define %type net_endpoint_addr_t as endpoint IPv4 address tuple
 $define %type net_iface_t as struct with logical network interface state
 
 $define %func net_endpoint_tcp_init as procedure with args void
+$define %func net_endpoint_tcp_active as function with args void
 $define %func net_endpoint_tcp_connect as function with args net_endpoint_t *, const net_endpoint_addr_t *
 $define %func net_endpoint_tcp_listen as function with args net_endpoint_t *, int
 $define %func net_endpoint_tcp_accept as function with args net_endpoint_t *, net_endpoint_t **, net_endpoint_addr_t *, u32
@@ -53,7 +54,8 @@ $define %func net_endpoint_tcp_release as procedure with args net_endpoint_t *
 
 /* !SPACE!
 
-$space %export net_endpoint_tcp_init, net_endpoint_tcp_connect
+$space %export net_endpoint_tcp_init, net_endpoint_tcp_active
+$space %export net_endpoint_tcp_connect
 $space %export net_endpoint_tcp_listen, net_endpoint_tcp_accept
 $space %export net_endpoint_tcp_send_user, net_endpoint_tcp_recv_user
 $space %export net_endpoint_tcp_readable, net_endpoint_tcp_writable
@@ -73,6 +75,7 @@ $space %export net_endpoint_tcp_alloc_buffers, net_endpoint_tcp_release
 #include <mlibc/mlibc.h>
 
 void	net_endpoint_tcp_init(void);
+int	net_endpoint_tcp_active(void);
 int	net_endpoint_tcp_connect(net_endpoint_t *ep,
     const net_endpoint_addr_t *addr);
 int	net_endpoint_tcp_listen(net_endpoint_t *ep, int backlog);

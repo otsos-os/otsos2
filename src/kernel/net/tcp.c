@@ -37,13 +37,14 @@ $define %func tcp_output as function with args net_iface_t *, u32, u16, u16, u32
 $define %func tcp_output_opt as function with args net_iface_t *, u32, u16, u16, u32, u32, u16, u16, const u8 *, u16, const u8 *, u16
 $define %func tcp_checksum as function with args u32, u32, const u8 *, u16
 $define %func tcp_opt_get_mss as function with args const u8 *, u16, u16 *
+$define %func tcp_opt_get_wscale as function with args const u8 *, u16, u8 *
 
 */
 
 /* !SPACE!
 
 $space %export tcp_input, tcp_output, tcp_output_opt, tcp_checksum
-$space %export tcp_opt_get_mss
+$space %export tcp_opt_get_mss, tcp_opt_get_wscale
 
 */
 
@@ -121,6 +122,50 @@ tcp_opt_get_mss(const u8 *opts, u16 opt_len, u16 *out_mss)
 				mss = TCP_MSS_MIN;
 			}
 			*out_mss = mss;
+			return (1);
+		}
+		pos = (u16)(pos + len);
+	}
+	return (0);
+}
+
+
+int
+tcp_opt_get_wscale(const u8 *opts, u16 opt_len, u8 *out_shift)
+{
+	u16	pos;
+	u8	kind, len, shift;
+
+	if (!opts || !out_shift || opt_len == 0) {
+		return (0);
+	}
+	if (opt_len > TCP_OPT_MAX_LEN) {
+		opt_len = TCP_OPT_MAX_LEN;
+	}
+
+	pos = 0;
+	while (pos < opt_len) {
+		kind = opts[pos];
+		if (kind == TCP_OPT_END) {
+			return (0);
+		}
+		if (kind == TCP_OPT_NOP) {
+			pos++;
+			continue;
+		}
+		if (pos + 1 >= opt_len) {
+			return (0);
+		}
+		len = opts[pos + 1];
+		if (len < 2 || pos + len > opt_len) {
+			return (0);
+		}
+		if (kind == TCP_OPT_WSCALE && len == TCP_OPT_WSCALE_LEN) {
+			shift = opts[pos + 2];
+			if (shift > 14) {
+				return (0);
+			}
+			*out_shift = shift;
 			return (1);
 		}
 		pos = (u16)(pos + len);

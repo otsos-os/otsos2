@@ -390,6 +390,8 @@ NET_UDP_O = ../bin/net_udp.o
 NET_TCP_O = ../bin/net_tcp.o
 NET_TCP_ENDPOINT_O = ../bin/net_tcp_endpoint.o
 NET_ENDPOINT_O = ../bin/net_endpoint.o
+NET_ENDPOINT_HASH_O = ../bin/net_endpoint_hash.o
+NET_REASSEMBLY_O = ../bin/net_reassembly.o
 NET_LOOPBACK_O = ../bin/net_loopback.o
 
 EVENT_O = ../bin/event.o
@@ -465,7 +467,7 @@ OBJ_NO_KSYMTAB = $(BOOT_O) $(KERNEL_O) $(STRING_O) $(ITOA_O) $(HARDWARE_O) $(UAR
       $(KUSR_O) $(KUSR_AUTH_O) $(CM_O) $(DRM_API_O) $(RESTRICT_O) \
       $(CRYPTO_UTIL_O) $(CRYPTO_SHA256_O) $(CRYPTO_HMAC_O) $(CRYPTO_PBKDF2_O) $(CRYPTO_RNG_O) $(CRYPTO_CHACHA20_O) \
        $(VIRTIO_HW_O) $(VIRTIO_QUEUE_O) $(VIRTIO_PCI_O) $(VIRTIO_GPU_CMDS_O) $(VIRTIO_GPU_O) $(VIRTIO_NET_O) \
-      $(NETDEV_O) $(NET_O) $(NET_ETHERNET_O) $(NET_ARP_O) $(NET_IPV4_O) $(NET_ICMP_O) $(NET_UDP_O) $(NET_TCP_O) $(NET_TCP_ENDPOINT_O) $(NET_ENDPOINT_O) $(NET_LOOPBACK_O) $(UNIX_SOCK_O) \
+      $(NETDEV_O) $(NET_O) $(NET_ETHERNET_O) $(NET_ARP_O) $(NET_IPV4_O) $(NET_ICMP_O) $(NET_UDP_O) $(NET_TCP_O) $(NET_TCP_ENDPOINT_O) $(NET_ENDPOINT_O) $(NET_ENDPOINT_HASH_O) $(NET_REASSEMBLY_O) $(NET_LOOPBACK_O) $(UNIX_SOCK_O) \
       $(EVENT_O) $(EVENT_READ_O) $(EVENT_WRITE_O) $(EVENT_TIMER_O) \
       $(EVENT_PROC_O) $(EVENT_SIGNAL_O) $(EVENT_USER_O) \
       $(EVENT_KBD_O) $(EVENT_IPC_O) $(EVENT_INPUT_O) \
@@ -1747,6 +1749,14 @@ $(NET_TCP_ENDPOINT_O): kernel/net/tcp_endpoint.c kernel/net/tcp_endpoint.h kerne
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(NET_ENDPOINT_O): kernel/net/endpoint.c kernel/net/endpoint.h kernel/net/endpoint_internal.h kernel/net/tcp_endpoint.h kernel/net/udp.h kernel/net/ipv4.h kernel/event/event.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(NET_ENDPOINT_HASH_O): kernel/net/endpoint_hash.c kernel/net/endpoint_hash.h kernel/net/endpoint_internal.h kernel/net/endpoint.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(NET_REASSEMBLY_O): kernel/net/reassembly.c kernel/net/reassembly.h kernel/net/ipv4.h kernel/net/icmp.h kernel/drivers/timer.h kernel/time.h
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 

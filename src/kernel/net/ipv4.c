@@ -56,9 +56,12 @@ $space %export ipv4_get_icmp_unreach_sent, ipv4_get_frag_dropped
 #include <kernel/net/tcp.h>
 #include <kernel/net/arp.h>
 #include <kernel/net/ethernet.h>
+#include <kernel/net/reassembly.h>
+#include <mm/kmem.h>
 #include <mlibc/stdio.h>
 #include <mlibc/mlibc.h>
 #define	IPV4_BOOTPC_PORT	68
+#define	IPV4_MF			(1u << 13)
 
 static int	g_ipv4_frag_dropped;
 
@@ -95,15 +98,64 @@ ipv4_checksum(const void *buf, int len)
 	return ((u16)(~sum & 0xFFFF));
 }
 
+
+static int
+ipv4_options_valid(const ipv4_header_t *ip, u16 header_len)
+{
+	const u8	*opts;
+	u16		pos, opt_len;
+	u8		kind;
+
+	opts = (const u8 *)ip + sizeof(ipv4_header_t);
+	opt_len = header_len - sizeof(ipv4_header_t);
+	if (opt_len == 0) {
+		return (0);
+	}
+	if ((opt_len & 3) != 0) {
+		return (0);
+	}
+
+	pos = 0;
+	while (pos < opt_len) {
+		kind = opts[pos];
+		if (kind == 0) {
+			while (pos < opt_len) {
+				if (opts[pos] != 0) {
+					return (0);
+				}
+				pos++;
+			}
+			return (1);
+		}
+		if (kind == 1) {
+			pos++;
+			continue;
+		}
+		if (pos + 1 >= opt_len) {
+			return (0);
+		}
+		if (opts[pos + 1] < 2 || pos + opts[pos + 1] > opt_len) {
+			return (0);
+		}
+		pos += opts[pos + 1];
+	}
+
+	return (pos == opt_len) ? 1 : 0;
+}
+
 int
 ipv4_input(net_iface_t *iface, const u8 *src_mac,
     const u8 *data, u16 len)
 {
 	const ipv4_header_t	*ip;
-	u16			header_len, total_len;
+	const u8		*payload;
+	u8			*reasm_buf;
+	u16			header_len, total_len, payload_len;
 	u16			expected_checksum;
-	u16			flags_frag;
+	u16			flags_frag, frag_off;
 	u32			src_ip, dst_ip;
+	u32			frag_id;
+	int			reasm_rc;
 	int			ret;
 
 	(void)src_mac;
@@ -126,50 +178,78 @@ ipv4_input(net_iface_t *iface, const u8 *src_mac,
 	if (total_len < header_len || total_len > len) {
 		return (-1);
 	}
+	if (total_len < len) {
+		len = total_len;
+	}
 
 	expected_checksum = ipv4_checksum(ip, header_len);
 	if (expected_checksum != 0) {
 		return (0);
 	}
 
+
+	if (header_len > sizeof(ipv4_header_t) &&
+	    !ipv4_options_valid(ip, header_len)) {
+		return (-1);
+	}
+
 	src_ip = __builtin_bswap32(ip->src);
 	dst_ip = __builtin_bswap32(ip->dst);
-
-	if (dst_ip != 0xFFFFFFFF) {
-		if (iface->ip_addr != 0 && dst_ip != iface->ip_addr) {
-			return (0);
-		}
-		if (iface->ip_addr == 0 &&
-		    (ip->protocol != IPV4_PROTO_UDP ||
-		    !ipv4_unconfigured_udp_bootstrap(data + header_len,
-		    (u16)(total_len - header_len)))) {
-			return (0);
-		}
-	}
+	flags_frag = __builtin_bswap16(ip->flags_frag);
+	frag_off = (u16)(flags_frag & 0x1FFF);
+	frag_id = __builtin_bswap16(ip->id);
 
 	if (ip->ttl == 0) {
 		return (0);
 	}
-	flags_frag = __builtin_bswap16(ip->flags_frag);
-	if ((flags_frag & 0x3FFF) != 0) {
-		g_ipv4_frag_dropped++;
-		return (0);
+
+	payload = data + header_len;
+	payload_len = (u16)(total_len - header_len);
+	reasm_buf = NULL;
+	reasm_rc = 1;
+
+
+	if (frag_off != 0 || (flags_frag & IPV4_MF)) {
+		reasm_rc = ipv4_reasm_input(iface, data, header_len,
+		    payload_len, frag_id, src_ip, dst_ip, ip->protocol,
+		    flags_frag, frag_off, &payload, &payload_len, &reasm_buf);
+		if (reasm_rc <= 0) {
+			if (reasm_rc < 0) {
+				g_ipv4_frag_dropped++;
+			}
+			return (0);
+		}
+	}
+
+	if (dst_ip != 0xFFFFFFFF) {
+		if (iface->ip_addr != 0 && dst_ip != iface->ip_addr) {
+			if (reasm_buf) {
+				kmem_free(reasm_buf);
+			}
+			return (0);
+		}
+		if (iface->ip_addr == 0 &&
+		    (ip->protocol != IPV4_PROTO_UDP ||
+		    !ipv4_unconfigured_udp_bootstrap(payload, payload_len))) {
+			if (reasm_buf) {
+				kmem_free(reasm_buf);
+			}
+			return (0);
+		}
 	}
 
 	switch (ip->protocol) {
 	case IPV4_PROTO_ICMP:
-		ret = icmp_input(iface, src_ip, data + header_len,
-		    (u16)(total_len - header_len));
+		ret = icmp_input(iface, src_ip, payload, payload_len);
 		break;
 
 	case IPV4_PROTO_UDP:
-		ret = udp_input(iface, src_ip, dst_ip, data + header_len,
-		    (u16)(total_len - header_len), data, total_len);
+		ret = udp_input(iface, src_ip, dst_ip, payload, payload_len,
+		    data, total_len);
 		break;
 
 	case IPV4_PROTO_TCP:
-		ret = tcp_input(iface, src_ip, dst_ip, data + header_len,
-		    (u16)(total_len - header_len));
+		ret = tcp_input(iface, src_ip, dst_ip, payload, payload_len);
 		break;
 
 	default:
@@ -181,6 +261,9 @@ ipv4_input(net_iface_t *iface, const u8 *src_mac,
 		break;
 	}
 
+	if (reasm_buf) {
+		kmem_free(reasm_buf);
+	}
 	return (ret);
 }
 

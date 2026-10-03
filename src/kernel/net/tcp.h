@@ -37,13 +37,14 @@ $define %func tcp_output as function with args net_iface_t *, u32, u16, u16, u32
 $define %func tcp_output_opt as function with args net_iface_t *, u32, u16, u16, u32, u32, u16, u16, const u8 *, u16, const u8 *, u16
 $define %func tcp_checksum as function with args u32, u32, const u8 *, u16
 $define %func tcp_opt_get_mss as function with args const u8 *, u16, u16 *
+$define %func tcp_opt_get_wscale as function with args const u8 *, u16, u8 *
 
 */
 
 /* !SPACE!
 
 $space %export tcp_input, tcp_output, tcp_output_opt, tcp_checksum
-$space %export tcp_opt_get_mss
+$space %export tcp_opt_get_mss, tcp_opt_get_wscale
 
 */
 
@@ -67,6 +68,10 @@ $space %export tcp_opt_get_mss
 #define	TCP_OPT_NOP		1
 #define	TCP_OPT_MSS		2
 #define	TCP_OPT_MSS_LEN		4
+#define	TCP_OPT_WSCALE		3
+#define	TCP_OPT_WSCALE_LEN	3
+#define	TCP_OPT_SACK_PERMITTED	4
+#define	TCP_OPT_SACK_PERMITTED_LEN 2
 
 /*
  * RFC 1122 4.2.2.6: a peer that sends no MSS option must be assumed to
@@ -105,5 +110,6 @@ int	tcp_output_opt(net_iface_t *iface, u32 dst_ip, u16 src_port,
 u16	tcp_checksum(u32 src_ip, u32 dst_ip, const u8 *segment,
     u16 len);
 int	tcp_opt_get_mss(const u8 *opts, u16 opt_len, u16 *out_mss);
+int	tcp_opt_get_wscale(const u8 *opts, u16 opt_len, u8 *out_shift);
 
 #endif

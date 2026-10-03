@@ -96,10 +96,12 @@ $space %export net_endpoint_tick
 #include <kernel/event/event.h>
 #include <kernel/net/endpoint.h>
 #include <kernel/net/endpoint_internal.h>
+#include <kernel/net/endpoint_hash.h>
 #include <kernel/net/ethernet.h>
 #include <kernel/net/ipv4.h>
 #include <kernel/net/tcp_endpoint.h>
 #include <kernel/net/udp.h>
+#include <kernel/process.h>
 #include <mlibc/mlibc.h>
 
 net_endpoint_t		g_endpoints[NET_ENDPOINT_MAX];
@@ -322,6 +324,22 @@ net_endpoint_valid_addr(const net_endpoint_addr_t *addr, int peer)
 	return (0);
 }
 
+
+int
+net_endpoint_bind_privileged(u16 port)
+{
+	process_t	*proc;
+
+	if (port >= NET_ENDPOINT_PRIV_PORT_MIN &&
+	    port <= NET_ENDPOINT_PRIV_PORT_MAX) {
+		proc = process_current();
+		if (!proc_has_privilege(proc) && proc->euid != 0) {
+			return (0);
+		}
+	}
+	return (1);
+}
+
 static int
 net_endpoint_match(net_endpoint_t *ep, net_iface_t *iface, u32 src_ip,
     u32 dst_ip, u16 src_port, u16 dst_port)
@@ -391,6 +409,7 @@ net_endpoint_free(net_endpoint_t *ep)
 	if (!ep || !ep->used) {
 		return;
 	}
+	net_endpoint_hash_remove(ep);
 	proc_wakeup((void *)ep);
 	event_notify_net_change(ep);
 	/*
@@ -505,6 +524,9 @@ net_endpoint_bind(net_endpoint_t *ep, const net_endpoint_addr_t *addr)
 		if (port < 0) {
 			return (port);
 		}
+	}
+	if (!net_endpoint_bind_privileged((u16)port)) {
+		return (-API_ERR_PERM);
 	}
 	if (net_endpoint_bind_conflict(ep, addr->ip, (u16)port)) {
 		return (-API_ERR_BUSY);

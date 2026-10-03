@@ -76,6 +76,10 @@ $space %export net_iface_set_ip, net_iface_set_netmask, net_iface_set_gw
 #include <kernel/net/ipv4.h>
 #include <kernel/net/udp.h>
 #include <kernel/net/endpoint.h>
+#include <kernel/net/endpoint_internal.h>
+#include <kernel/net/endpoint_hash.h>
+#include <kernel/net/reassembly.h>
+#include <kernel/net/tcp_endpoint.h>
 #include <kernel/drivers/newbus/newbus.h>
 #include <kernel/drivers/timer.h>
 #include <kernel/cm/cm.h>
@@ -93,6 +97,7 @@ static int		g_stack_enabled = 1;
 static u32		g_poll_hz = NET_POLL_HZ_DEFAULT;
 static u8		g_default_ttl = IPV4_TTL_DEFAULT;
 static volatile int	g_cm_apply_pending;
+static u64		g_rx_snapshot;
 
 #define	NET_POLL_HZ_MIN	1
 #define	NET_POLL_HZ_MAX	1000
@@ -222,10 +227,13 @@ net_init(void)
 	g_stack_enabled = 1;
 	g_poll_hz = NET_POLL_HZ_DEFAULT;
 	g_default_ttl = IPV4_TTL_DEFAULT;
+	g_rx_snapshot = 0;
 
 	arp_cache_init();
 	udp_init();
 	net_endpoint_init();
+	net_endpoint_hash_init();
+	ipv4_reasm_init();
 	cm_register_consumer(CM_CONSUMER_NET, "net", net_cm_update);
 	g_initialized = 1;
 
@@ -406,6 +414,7 @@ net_poll_all(void)
 	}
 	g_polling = 1;
 	arp_tick();
+	ipv4_reasm_tick();
 	net_endpoint_tick();
 	for (i = 0; i < g_iface_count; i++) {
 		netdev_t	*ndev;
@@ -423,8 +432,13 @@ net_poll_all(void)
 void
 net_tick(void)
 {
-	u32	freq;
-	u64	now, interval;
+	netdev_t	*ndev;
+	u32		freq;
+	u32		interval;
+	u64		now;
+	u64		rx_delta;
+	u64		rx_total;
+	int		i;
 
 	if (!g_initialized || !g_stack_enabled) {
 		return;
@@ -455,6 +469,20 @@ net_tick(void)
 	g_poll_requested = 0;
 	g_last_poll_tick = now;
 	net_poll_all();
+
+	rx_total = 0;
+	for (i = 0; i < g_iface_count; i++) {
+		ndev = g_ifaces[i]->ndev;
+		if (ndev) {
+			rx_total += ndev->rx_completed;
+		}
+	}
+	rx_delta = rx_total - g_rx_snapshot;
+	g_rx_snapshot = rx_total;
+	if (net_endpoint_tcp_active() || rx_delta != 0) {
+
+		g_poll_requested = 1;
+	}
 }
 
 void
